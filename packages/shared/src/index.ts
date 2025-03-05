@@ -2,7 +2,8 @@
  * Shared types and utilities for Nostr cache project
  */
 
-export * from './types/nostr';
-export * from './types/cache';
-export * from './types/relay';
+// Re-export all types from the types package
+export * from '@nostr-cache/types';
+
+// Export constants
 export * from './constants/relays';

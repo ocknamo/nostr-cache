@@ -2,7 +2,7 @@
  * Utility functions for working with Nostr filters
  */
 
-import { Filter } from '@nostr-cache/shared';
+import { Filter, NostrEvent } from '@nostr-cache/types';
 
 // Extended filter type with index signature for string keys
 interface ExtendedFilter extends Filter {
@@ -53,7 +53,7 @@ export function normalizeFilter(filter: Filter): Filter {
  * @param filter Nostr filter
  * @returns True if the event matches the filter
  */
-export function eventMatchesFilter(event: any, filter: Filter): boolean {
+export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
   // This is a simplified implementation
   // A complete implementation would check all filter criteria
   

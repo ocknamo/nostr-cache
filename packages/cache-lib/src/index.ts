@@ -4,10 +4,11 @@
  * Provides caching functionality for Nostr relay interactions.
  */
 
-import { CacheOptions } from './cache/types';
 import { NostrCache } from './cache/NostrCache';
+import { CacheOptions, CacheLibOptions } from '@nostr-cache/types';
 
 export {
   NostrCache,
-  CacheOptions
+  CacheOptions,
+  CacheLibOptions
 };

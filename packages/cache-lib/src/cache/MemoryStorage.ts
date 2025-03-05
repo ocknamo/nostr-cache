@@ -2,8 +2,7 @@
  * In-memory cache storage implementation
  */
 
-import { CacheOptions } from '@nostr-cache/shared';
-import { CacheStorage, CacheEntry } from './types';
+import { CacheOptions, CacheStorage, CacheEntry } from '@nostr-cache/types';
 
 /**
  * In-memory implementation of CacheStorage

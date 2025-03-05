@@ -2,8 +2,7 @@
  * NostrCache implementation
  */
 
-import { NostrEvent, Filter } from '@nostr-cache/shared';
-import { CacheOptions, CacheStorage, CacheEntry, CacheKeyGenerator } from './types';
+import { NostrEvent, Filter, CacheOptions, CacheStorage, CacheEntry, CacheKeyGenerator } from '@nostr-cache/types';
 import { MemoryStorage } from './MemoryStorage';
 import { createFilterKey } from '../utils/filterUtils';
 

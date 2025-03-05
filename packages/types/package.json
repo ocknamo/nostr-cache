@@ -1,17 +1,13 @@
 {
-  "name": "@nostr-cache/cache-lib",
+  "name": "@nostr-cache/types",
   "version": "0.1.0",
-  "description": "Cache library for Nostr relay interactions",
+  "description": "Type definitions for Nostr cache project",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "jest",
     "lint": "eslint src --ext .ts"
-  },
-  "dependencies": {
-    "@nostr-cache/shared": "^0.1.0",
-    "@nostr-cache/types": "^0.1.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
