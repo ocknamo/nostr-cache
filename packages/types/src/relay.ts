@@ -2,8 +2,13 @@
  * Relay-related type definitions
  */
 
+import {
+  RelayConnectHandler,
+  RelayDisconnectHandler,
+  RelayErrorHandler,
+  RelayEventHandler,
+} from './message';
 import { Filter, NostrEvent, Subscription } from './nostr';
-import { RelayConnectHandler, RelayDisconnectHandler, RelayErrorHandler, RelayEventHandler } from './message';
 
 /**
  * Relay connection status

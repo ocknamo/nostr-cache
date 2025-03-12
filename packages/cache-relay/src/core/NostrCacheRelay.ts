@@ -4,7 +4,16 @@
  * Main implementation of the Nostr Cache Relay
  */
 
-import { Filter, NostrEvent, NostrMessage, RelayConnectHandler, RelayDisconnectHandler, RelayErrorHandler, RelayEventHandler, RelayEoseHandler } from '@nostr-cache/types';
+import {
+  Filter,
+  NostrEvent,
+  NostrMessage,
+  RelayConnectHandler,
+  RelayDisconnectHandler,
+  RelayEoseHandler,
+  RelayErrorHandler,
+  RelayEventHandler,
+} from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 import { StorageAdapter } from '../storage/StorageAdapter';
 import { TransportAdapter } from '../transport/TransportAdapter';
@@ -80,7 +89,16 @@ export class NostrCacheRelay {
   private storage: StorageAdapter;
   private transport: TransportAdapter;
   private validator: EventValidator;
-  private eventListeners: Map<string, Array<RelayConnectHandler | RelayDisconnectHandler | RelayErrorHandler | RelayEventHandler | RelayEoseHandler>> = new Map();
+  private eventListeners: Map<
+    string,
+    Array<
+      | RelayConnectHandler
+      | RelayDisconnectHandler
+      | RelayErrorHandler
+      | RelayEventHandler
+      | RelayEoseHandler
+    >
+  > = new Map();
 
   /**
    * Create a new NostrCacheRelay instance
@@ -219,7 +237,15 @@ export class NostrCacheRelay {
   on(event: 'error', callback: RelayErrorHandler): void;
   on(event: 'event', callback: RelayEventHandler): void;
   on(event: 'eose', callback: RelayEoseHandler): void;
-  on(event: string, callback: RelayConnectHandler | RelayDisconnectHandler | RelayErrorHandler | RelayEventHandler | RelayEoseHandler): void {
+  on(
+    event: string,
+    callback:
+      | RelayConnectHandler
+      | RelayDisconnectHandler
+      | RelayErrorHandler
+      | RelayEventHandler
+      | RelayEoseHandler
+  ): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
     }
@@ -238,7 +264,15 @@ export class NostrCacheRelay {
   off(event: 'error', callback: RelayErrorHandler): void;
   off(event: 'event', callback: RelayEventHandler): void;
   off(event: 'eose', callback: RelayEoseHandler): void;
-  off(event: string, callback: RelayConnectHandler | RelayDisconnectHandler | RelayErrorHandler | RelayEventHandler | RelayEoseHandler): void {
+  off(
+    event: string,
+    callback:
+      | RelayConnectHandler
+      | RelayDisconnectHandler
+      | RelayErrorHandler
+      | RelayEventHandler
+      | RelayEoseHandler
+  ): void {
     const listeners = this.eventListeners.get(event);
 
     if (listeners) {

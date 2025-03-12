@@ -4,7 +4,17 @@
  * Handles incoming messages from clients
  */
 
-import { CloseMessage, EoseMessage, EventMessage, Filter, NostrEvent, NostrMessage, NoticeMessage, OkMessage, ReqMessage } from '@nostr-cache/types';
+import {
+  CloseMessage,
+  EoseMessage,
+  EventMessage,
+  Filter,
+  NostrEvent,
+  NostrMessage,
+  NoticeMessage,
+  OkMessage,
+  ReqMessage,
+} from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 
 /**

@@ -41,15 +41,11 @@ class CacheService {
     };
 
     // Initialize the relay
-    this.relay = new NostrCacheRelay(
-      this.storage,
-      transport,
-      {
-        storage: 'memory',
-        maxSubscriptions: 100,
-        maxEventsPerRequest: 1000,
-      }
-    );
+    this.relay = new NostrCacheRelay(this.storage, transport, {
+      storage: 'memory',
+      maxSubscriptions: 100,
+      maxEventsPerRequest: 1000,
+    });
   }
 
   /**

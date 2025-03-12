@@ -56,15 +56,11 @@ describe('NostrCacheRelay', () => {
     });
 
     it('should create a relay with custom options', () => {
-      const customRelay = new NostrCacheRelay(
-        mockStorage,
-        mockTransport,
-        {
-          validateEvents: false,
-          maxSubscriptions: 50,
-          maxEventsPerRequest: 200,
-        }
-      );
+      const customRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEvents: false,
+        maxSubscriptions: 50,
+        maxEventsPerRequest: 200,
+      });
 
       expect(customRelay).toBeDefined();
     });

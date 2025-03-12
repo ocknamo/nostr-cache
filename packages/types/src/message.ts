@@ -12,7 +12,14 @@ export type NostrMessageType = 'EVENT' | 'REQ' | 'CLOSE' | 'NOTICE' | 'OK' | 'EO
 /**
  * Base Nostr message
  */
-export type NostrMessage = EventMessage | ReqMessage | CloseMessage | NoticeMessage | OkMessage | EoseMessage | ClosedMessage;
+export type NostrMessage =
+  | EventMessage
+  | ReqMessage
+  | CloseMessage
+  | NoticeMessage
+  | OkMessage
+  | EoseMessage
+  | ClosedMessage;
 
 /**
  * EVENT message: Client to relay to publish an event
