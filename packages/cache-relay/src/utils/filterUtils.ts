@@ -1,10 +1,14 @@
 /**
- * Utility functions for working with Nostr filters
+ * Filter utilities for Nostr Cache Relay
+ * 
+ * Utilities for working with Nostr filters
  */
 
 import { Filter, NostrEvent } from '@nostr-cache/types';
 
-// Extended filter type with index signature for string keys
+/**
+ * Extended filter type with index signature for string keys
+ */
 interface ExtendedFilter extends Filter {
   [key: string]: any;
 }
@@ -17,10 +21,19 @@ interface ExtendedFilter extends Filter {
  */
 export function createFilterKey(filter: Filter): string {
   // Sort all arrays to ensure consistent keys
-  const normalizedFilter = normalizeFilter(filter);
+  const normalizedFilter = normalizeFilter(filter) as ExtendedFilter;
+  
+  // Sort the keys of the normalized filter
+  const sortedKeys = Object.keys(normalizedFilter).sort();
+  const sortedFilter: ExtendedFilter = {};
+  
+  // Create a new object with sorted keys
+  for (const key of sortedKeys) {
+    sortedFilter[key] = normalizedFilter[key];
+  }
   
   // Convert to JSON string for use as a cache key
-  return JSON.stringify(normalizedFilter);
+  return JSON.stringify(sortedFilter);
 }
 
 /**
@@ -31,7 +44,7 @@ export function createFilterKey(filter: Filter): string {
  */
 export function normalizeFilter(filter: Filter): Filter {
   const normalized: ExtendedFilter = {};
-
+  
   // Process each property in the filter
   for (const [key, value] of Object.entries(filter)) {
     if (Array.isArray(value)) {
@@ -42,7 +55,7 @@ export function normalizeFilter(filter: Filter): Filter {
       normalized[key] = value;
     }
   }
-
+  
   return normalized;
 }
 
@@ -54,40 +67,37 @@ export function normalizeFilter(filter: Filter): Filter {
  * @returns True if the event matches the filter
  */
 export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
-  // This is a simplified implementation
-  // A complete implementation would check all filter criteria
-  
   // Check ids
   if (filter.ids && !filter.ids.includes(event.id)) {
     return false;
   }
-
+  
   // Check authors
   if (filter.authors && !filter.authors.includes(event.pubkey)) {
     return false;
   }
-
+  
   // Check kinds
   if (filter.kinds && !filter.kinds.includes(event.kind)) {
     return false;
   }
-
+  
   // Check since
   if (filter.since && event.created_at < filter.since) {
     return false;
   }
-
+  
   // Check until
   if (filter.until && event.created_at > filter.until) {
     return false;
   }
-
+  
   // Check tag filters (e.g. #e, #p)
   for (const [key, values] of Object.entries(filter)) {
     if (key.startsWith('#') && Array.isArray(values)) {
       const tagName = key.slice(1);
-      const eventTags = event.tags.filter((tag: string[]) => tag[0] === tagName);
-      const eventTagValues = eventTags.map((tag: string[]) => tag[1]);
+      const eventTags = event.tags.filter(tag => tag[0] === tagName);
+      const eventTagValues = eventTags.map(tag => tag[1]);
       
       // Check if any of the filter values match any of the event tag values
       const hasMatch = (values as string[]).some(value => 
@@ -99,7 +109,7 @@ export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
       }
     }
   }
-
+  
   // If we got here, the event matches the filter
   return true;
 }
@@ -114,15 +124,12 @@ export function mergeFilters(filters: Filter[]): Filter {
   if (filters.length === 0) {
     return {};
   }
-
+  
   if (filters.length === 1) {
     return filters[0];
   }
-
-  // This is a simplified implementation
-  // A complete implementation would need to handle complex merging logic
   
-  const merged: Filter = {};
+  const merged: ExtendedFilter = {};
   
   // Merge ids (union)
   const ids = filters.flatMap(f => f.ids || []);
@@ -161,20 +168,18 @@ export function mergeFilters(filters: Filter[]): Filter {
   }
   
   // Merge tag filters (union)
-  const mergedExtended = merged as ExtendedFilter;
-  
   for (const filter of filters) {
     for (const [key, values] of Object.entries(filter)) {
       if (key.startsWith('#') && Array.isArray(values)) {
-        if (!mergedExtended[key]) {
-          mergedExtended[key] = [];
+        if (!merged[key]) {
+          merged[key] = [];
         }
         
         // Add values to the merged filter
-        mergedExtended[key].push(...(values as string[]));
+        merged[key].push(...(values as string[]));
         
         // Remove duplicates
-        mergedExtended[key] = [...new Set(mergedExtended[key])];
+        merged[key] = [...new Set(merged[key])];
       }
     }
   }

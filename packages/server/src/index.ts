@@ -5,22 +5,51 @@
  * The actual implementation will be developed in a later phase.
  */
 
-import { NostrCache } from '@nostr-cache/cache-relay';
+import { NostrCacheRelay, StorageAdapter } from '@nostr-cache/cache-relay';
 import { Filter, NostrEvent } from '@nostr-cache/shared';
 
 /**
  * Server-side cache service (placeholder)
  */
 class CacheService {
-  private cache: NostrCache;
+  private relay: NostrCacheRelay;
+  private storage: StorageAdapter;
   
   constructor() {
-    this.cache = new NostrCache({
-      maxSize: 10000,
-      ttl: 3600000, // 1 hour
-      persist: true,
-      persistPath: './cache-data'
-    });
+    // This is a placeholder implementation
+    // In a real implementation, we would:
+    // 1. Create a proper storage adapter
+    // 2. Create a proper transport adapter
+    // 3. Initialize the relay with these adapters
+    
+    // For now, we'll just create a placeholder relay
+    this.storage = {
+      saveEvent: async (event: NostrEvent) => true,
+      getEvents: async (filters: Filter[]) => [],
+      deleteEvent: async (id: string) => true,
+      clear: async () => {}
+    };
+    
+    // Create a placeholder transport adapter
+    const transport = {
+      start: async () => {},
+      stop: async () => {},
+      send: (clientId: string, message: any[]) => {},
+      onMessage: (callback: (clientId: string, message: any[]) => void) => {},
+      onConnect: (callback: (clientId: string) => void) => {},
+      onDisconnect: (callback: (clientId: string) => void) => {}
+    };
+    
+    // Initialize the relay
+    this.relay = new NostrCacheRelay(
+      {
+        storage: 'memory',
+        maxSubscriptions: 100,
+        maxEventsPerRequest: 1000
+      },
+      this.storage,
+      transport
+    );
   }
   
   /**
@@ -30,7 +59,7 @@ class CacheService {
    * @returns Promise resolving to matching events
    */
   async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
-    return this.cache.getEvents(filters);
+    return this.storage.getEvents(filters);
   }
   
   /**
@@ -38,15 +67,15 @@ class CacheService {
    * 
    * @param event Nostr event
    */
-  addEvent(event: NostrEvent): void {
-    this.cache.addEvent(event);
+  async addEvent(event: NostrEvent): Promise<boolean> {
+    return await this.relay.publishEvent(event);
   }
   
   /**
    * Clear the cache
    */
-  clearCache(): void {
-    this.cache.clearCache();
+  async clearCache(): Promise<void> {
+    await this.storage.clear();
   }
   
   /**
@@ -55,7 +84,11 @@ class CacheService {
    * @returns Object with cache statistics
    */
   getStats(): { size: number; keys: string[] } {
-    return this.cache.getStats();
+    // This is a placeholder implementation
+    return {
+      size: 0,
+      keys: []
+    };
   }
 }
 
