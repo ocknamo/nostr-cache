@@ -298,3 +298,215 @@ export class AppComponent {}
 1. **WebSocket接続管理**: 接続の安定性確保と再接続ロジック
 2. **パフォーマンス**: 大量のイベント処理時のパフォーマンス最適化
 3. **エラーハンドリング**: 接続エラーや不正なデータの処理
+
+## フォロワーのタイムライン表示機能の拡張
+
+### 機能概要
+
+特定のユーザーがフォローしている他のユーザーの投稿（タイムライン）を表示する機能を追加します。
+この機能はNIP-02（Follow List）の仕様に基づいて実装します。
+
+### 設計変更点
+
+#### アーキテクチャ変更
+
+現在の設計を拡張し、フォローリスト取得とフォロワータイムライン表示の機能を追加します：
+
+```
+App Component
+├── Timeline Component
+│   └── Post Component
+└── Nostr Service
+    ├── WebSocket Connection
+    ├── Follow List Fetcher
+    └── Timeline Subscriber
+```
+
+#### データフロー（拡張版）
+
+1. アプリケーション起動時にNostrServiceがWebSocketでリレーに接続
+2. 特定ユーザーのフォローリスト（kind 3）を取得するREQメッセージを送信
+3. リレーからフォローリストを受信し、フォロー中のユーザーのpubkeyを抽出
+4. 抽出したpubkeyリストを使用して、フォロー中のユーザーの投稿（kind 1）を購読
+5. リレーからEVENTメッセージで投稿データを受信
+6. 受信したデータをTimelineComponentに通知
+7. 新規投稿があれば自動的にTimelineComponentに追加
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant NostrService
+    participant Relay
+    
+    Client->>NostrService: connect()
+    NostrService->>Relay: REQ [kind:3, authors:[targetPubkey]]
+    Relay-->>NostrService: EVENT [フォローリスト]
+    Note over NostrService: フォローリストから<br/>pubkeyを抽出
+    NostrService->>Relay: REQ [kinds:[1], authors:[フォロー中のpubkeys]]
+    Relay-->>NostrService: EVENT [タイムラインイベント]
+    NostrService-->>Client: タイムラインイベント
+```
+
+### 実装詳細
+
+#### 1. NostrService の拡張
+
+```typescript
+@Injectable({
+  providedIn: 'root'
+})
+export class NostrService {
+  private ws: WebSocket | null = null;
+  private timelineSubscriptionId = 'timeline-sub';
+  private followListSubscriptionId = 'follow-list-sub';
+  private events$ = new Subject<NostrEvent>();
+  private followedPubkeys: string[] = [];
+  private targetPubkey = '26bb2ebed6c552d670c804b0d655267b3c662b21e026d6e48ac93a6070530958';
+  
+  constructor() {}
+  
+  // リレーに接続してフォローリストを取得し、その後タイムラインを購読
+  connect(): Observable<NostrEvent> {
+    this.ws = new WebSocket('wss://nos.lol/');
+    
+    this.ws.onopen = () => {
+      console.log('Connected to relay');
+      this.fetchFollowList();
+    };
+    
+    this.ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      if (data[0] === 'EVENT') {
+        if (data[1] === this.followListSubscriptionId) {
+          // フォローリストイベントの処理
+          if (data[2].kind === 3) {
+            this.processFollowList(data[2]);
+          }
+        } else if (data[1] === this.timelineSubscriptionId) {
+          // タイムラインイベントの処理
+          this.events$.next(data[2]);
+        }
+      } else if (data[0] === 'EOSE') {
+        if (data[1] === this.followListSubscriptionId) {
+          console.log('End of stored follow list events');
+          // フォローリストの取得が完了したら、タイムラインを購読
+          this.subscribeToTimeline();
+        } else if (data[1] === this.timelineSubscriptionId) {
+          console.log('End of stored timeline events');
+        }
+      }
+    };
+    
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    this.ws.onclose = () => {
+      console.log('Disconnected from relay');
+    };
+    
+    return this.events$.asObservable();
+  }
+  
+  // 特定ユーザーのフォローリストを取得
+  private fetchFollowList() {
+    if (!this.ws) return;
+    
+    const req = [
+      'REQ',
+      this.followListSubscriptionId,
+      {
+        authors: [this.targetPubkey],
+        kinds: [3], // フォローリスト
+        limit: 1    // 最新のフォローリストのみ
+      }
+    ];
+    
+    this.ws.send(JSON.stringify(req));
+  }
+  
+  // フォローリストからpubkeyを抽出
+  private processFollowList(event: NostrEvent) {
+    // フォローリストからpタグを抽出
+    this.followedPubkeys = event.tags
+      .filter(tag => tag[0] === 'p')
+      .map(tag => tag[1]);
+    
+    console.log(`Extracted ${this.followedPubkeys.length} followed pubkeys`);
+    
+    // フォローしているユーザーがいない場合は、ターゲットユーザー自身を追加
+    if (this.followedPubkeys.length === 0) {
+      this.followedPubkeys.push(this.targetPubkey);
+    }
+  }
+  
+  // フォロー中のユーザーのタイムラインを購読
+  private subscribeToTimeline() {
+    if (!this.ws || this.followedPubkeys.length === 0) return;
+    
+    // フォローリストの購読を閉じる
+    const closeMsg = ['CLOSE', this.followListSubscriptionId];
+    this.ws.send(JSON.stringify(closeMsg));
+    
+    // タイムラインの購読を開始
+    const req = [
+      'REQ',
+      this.timelineSubscriptionId,
+      {
+        authors: this.followedPubkeys,
+        kinds: [1], // テキスト投稿
+        limit: 50
+      }
+    ];
+    
+    this.ws.send(JSON.stringify(req));
+  }
+  
+  // 接続を閉じる
+  disconnect() {
+    if (this.ws) {
+      // サブスクリプションを閉じる
+      if (this.followListSubscriptionId) {
+        const closeFollowListMsg = ['CLOSE', this.followListSubscriptionId];
+        this.ws.send(JSON.stringify(closeFollowListMsg));
+      }
+      
+      if (this.timelineSubscriptionId) {
+        const closeTimelineMsg = ['CLOSE', this.timelineSubscriptionId];
+        this.ws.send(JSON.stringify(closeTimelineMsg));
+      }
+      
+      // WebSocket接続を閉じる
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+}
+```
+
+### 実装ステップ
+
+1. **NostrServiceの拡張**:
+   - フォローリスト取得機能の追加
+   - フォロー中のユーザーのpubkey抽出機能の追加
+   - タイムライン購読機能の修正
+   - **commit**: "Add follow list fetching and follower timeline subscription"
+
+2. **テスト**:
+   - フォローリスト取得のテスト
+   - フォロワータイムライン表示のテスト
+   - エラー処理のテスト
+   - **commit**: "Add tests for follower timeline functionality"
+
+3. **UI調整**:
+   - タイムラインコンポーネントの表示調整
+   - ローディング状態の改善
+   - **commit**: "Adjust UI for follower timeline display"
+
+### 技術的考慮事項
+
+1. **フォローリストの更新**: 定期的にフォローリストを更新するか検討
+2. **エラーハンドリング**: フォローリストが取得できない場合のフォールバック処理
+3. **パフォーマンス**: 多数のフォロー中ユーザーがいる場合の処理最適化
+4. **ユーザーエクスペリエンス**: フォローリスト取得中のローディング表示
