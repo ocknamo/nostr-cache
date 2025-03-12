@@ -9,6 +9,8 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces",
+    "format": "npm run format --workspace=packages/web-client",
+    "format:check": "npm run format:check --workspace=packages/web-client",
     "build:cache-relay": "npm run build --workspace=packages/cache-relay",
     "build:web-client": "npm run build --workspace=packages/web-client",
     "dev:web-client": "npm run start --workspace=packages/web-client"

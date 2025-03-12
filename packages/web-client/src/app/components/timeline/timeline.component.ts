@@ -1,8 +1,8 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { Subscription } from 'rxjs';
-import { NostrService } from '../../services/nostr.service';
-import { NostrEvent } from '../../models/nostr.model';
 import { PostComponent } from '../../components/post/post.component';
+import { NostrEvent } from '../../models/nostr.model';
+import { NostrService } from '../../services/nostr.service';
 
 /**
  * Timeline component that displays a list of Nostr events
@@ -13,7 +13,7 @@ import { PostComponent } from '../../components/post/post.component';
   imports: [PostComponent],
   providers: [NostrService],
   templateUrl: './timeline.component.html',
-  styleUrls: ['./timeline.component.scss']
+  styleUrls: ['./timeline.component.scss'],
 })
 export class TimelineComponent implements OnInit, OnDestroy {
   events: NostrEvent[] = [];
@@ -33,7 +33,7 @@ export class TimelineComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.isLoading = true;
     this.error = null;
-    
+
     try {
       this.subscription = this.nostrService.connect().subscribe({
         next: (event) => {
@@ -45,7 +45,7 @@ export class TimelineComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.error = `Error connecting to relay: ${err.message}`;
           this.isLoading = false;
-        }
+        },
       });
     } catch (err: any) {
       this.error = `Error initializing timeline: ${err.message}`;

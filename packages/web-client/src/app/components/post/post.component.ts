@@ -1,5 +1,5 @@
-import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Component, Input } from '@angular/core';
 import { NostrEvent } from '../../models/nostr.model';
 
 /**
@@ -10,11 +10,11 @@ import { NostrEvent } from '../../models/nostr.model';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './post.component.html',
-  styleUrls: ['./post.component.scss']
+  styleUrls: ['./post.component.scss'],
 })
 export class PostComponent {
   @Input() event!: NostrEvent;
-  
+
   /**
    * Returns a formatted date string from a Unix timestamp
    * @param timestamp Unix timestamp in seconds
@@ -24,7 +24,7 @@ export class PostComponent {
     const date = new Date(timestamp * 1000);
     return date.toLocaleString();
   }
-  
+
   /**
    * Returns a shortened version of a pubkey for display
    * @param pubkey Nostr public key
