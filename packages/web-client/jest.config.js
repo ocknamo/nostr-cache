@@ -5,12 +5,6 @@ module.exports = {
     '<rootDir>/node_modules/',
     '<rootDir>/dist/'
   ],
-  globals: {
-    'ts-jest': {
-      tsconfig: '<rootDir>/tsconfig.spec.json',
-      stringifyContentPathRegex: '\\.(html|svg)$',
-    },
-  },
   moduleNameMapper: {
     '^src/(.*)$': '<rootDir>/src/$1',
     '^app/(.*)$': '<rootDir>/src/app/$1',
@@ -18,7 +12,10 @@ module.exports = {
     '^environments/(.*)$': '<rootDir>/src/environments/$1',
   },
   transform: {
-    '^.+\\.(ts|js|mjs|html|svg)$': 'jest-preset-angular',
+    '^.+\\.(ts|js|mjs|html|svg)$': ['jest-preset-angular', {
+      tsconfig: '<rootDir>/tsconfig.spec.json',
+      stringifyContentPathRegex: '\\.(html|svg)$',
+    }],
   },
   transformIgnorePatterns: [
     'node_modules/(?!.*\\.mjs$)',
