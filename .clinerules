@@ -4,6 +4,23 @@
 
 - Please COMMIT even relatively minor changes.
 
+### commit message
+
+以下のルールに従ってコミットメッセージにプレフィックスを追加してください
+
+- "feat:"
+  - 機能追加
+- "fix: "
+  - バグ修正
+- "refactor: "
+  - 機能に変更がない改善。リファクタリング。
+- "doc: "
+  - ドキュメントやコメントのみの修正
+- "chore: "
+  - 雑用。アプリバージョンアップなどのその他の作業
+- "ci: "
+  - CI/CDの修正
+
 ## Documentation Requirements
 
 - Please comment each function.
