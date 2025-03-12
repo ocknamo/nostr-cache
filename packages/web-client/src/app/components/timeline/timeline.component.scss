@@ -1,0 +1,43 @@
+.timeline-container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  
+  h2 {
+    text-align: center;
+    margin-bottom: 20px;
+    color: #333;
+  }
+  
+  .loading, .error, .empty {
+    text-align: center;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    margin-bottom: 20px;
+  }
+  
+  .error {
+    color: #d9534f;
+    background-color: #f9e2e2;
+  }
+  
+  .events-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .post-item {
+    display: block;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: transform 0.2s ease;
+    
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+  }
+}

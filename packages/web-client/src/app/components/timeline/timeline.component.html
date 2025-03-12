@@ -1,0 +1,23 @@
+<div class="timeline-container">
+  <h2>Nostr Timeline</h2>
+  
+  <div *ngIf="isLoading" class="loading">
+    <p>Loading events...</p>
+  </div>
+  
+  <div *ngIf="error" class="error">
+    <p>{{ error }}</p>
+  </div>
+  
+  <div *ngIf="!isLoading && !error && events.length === 0" class="empty">
+    <p>No events found.</p>
+  </div>
+  
+  <div class="events-list">
+    <app-post 
+      *ngFor="let event of events" 
+      [event]="event"
+      class="post-item">
+    </app-post>
+  </div>
+</div>

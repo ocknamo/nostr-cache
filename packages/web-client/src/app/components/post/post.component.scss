@@ -1,0 +1,43 @@
+.post-container {
+  background-color: white;
+  padding: 16px;
+  border-radius: 8px;
+  
+  .post-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    
+    .post-author {
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .post-date {
+      font-size: 0.85rem;
+      color: #666;
+    }
+  }
+  
+  .post-content {
+    margin-bottom: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  
+  .post-footer {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #888;
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+    
+    .post-kind, .post-id {
+      max-width: 45%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+}
