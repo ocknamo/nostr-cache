@@ -2,6 +2,8 @@
  * Transport adapter interface for Nostr Cache Relay
  */
 
+import { NostrMessage } from '@nostr-cache/types';
+
 /**
  * Transport adapter interface
  * Defines the contract for transport implementations (WebSocket, etc.)
@@ -27,14 +29,14 @@ export interface TransportAdapter {
    * @param clientId ID of the client to send the message to
    * @param message Message to send (will be JSON stringified)
    */
-  send(clientId: string, message: any[]): void;
+  send(clientId: string, message: NostrMessage): void;
 
   /**
    * Register a callback for incoming messages
    *
    * @param callback Function to call when a message is received
    */
-  onMessage(callback: (clientId: string, message: any[]) => void): void;
+  onMessage(callback: (clientId: string, message: NostrMessage) => void): void;
 
   /**
    * Register a callback for client connections

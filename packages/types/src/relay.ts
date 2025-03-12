@@ -3,6 +3,7 @@
  */
 
 import { Filter, NostrEvent, Subscription } from './nostr';
+import { RelayConnectHandler, RelayDisconnectHandler, RelayErrorHandler, RelayEventHandler } from './message';
 
 /**
  * Relay connection status
@@ -61,12 +62,18 @@ export interface RelayConnection {
   /**
    * Add event handler
    */
-  on(event: 'connect' | 'disconnect' | 'error' | 'event', callback: Function): void;
+  on(event: 'connect', callback: RelayConnectHandler): void;
+  on(event: 'disconnect', callback: RelayDisconnectHandler): void;
+  on(event: 'error', callback: RelayErrorHandler): void;
+  on(event: 'event', callback: RelayEventHandler): void;
 
   /**
    * Remove event handler
    */
-  off(event: 'connect' | 'disconnect' | 'error' | 'event', callback: Function): void;
+  off(event: 'connect', callback: RelayConnectHandler): void;
+  off(event: 'disconnect', callback: RelayDisconnectHandler): void;
+  off(event: 'error', callback: RelayErrorHandler): void;
+  off(event: 'event', callback: RelayEventHandler): void;
 }
 
 /**

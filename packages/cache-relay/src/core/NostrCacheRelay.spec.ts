@@ -47,7 +47,7 @@ describe('NostrCacheRelay', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    relay = new NostrCacheRelay({}, mockStorage, mockTransport);
+    relay = new NostrCacheRelay(mockStorage, mockTransport, {});
   });
 
   describe('constructor', () => {
@@ -57,13 +57,13 @@ describe('NostrCacheRelay', () => {
 
     it('should create a relay with custom options', () => {
       const customRelay = new NostrCacheRelay(
+        mockStorage,
+        mockTransport,
         {
           validateEvents: false,
           maxSubscriptions: 50,
           maxEventsPerRequest: 200,
-        },
-        mockStorage,
-        mockTransport
+        }
       );
 
       expect(customRelay).toBeDefined();

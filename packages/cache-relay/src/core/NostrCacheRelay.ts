@@ -4,7 +4,7 @@
  * Main implementation of the Nostr Cache Relay
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
+import { Filter, NostrEvent, NostrMessage, RelayConnectHandler, RelayDisconnectHandler, RelayErrorHandler, RelayEventHandler, RelayEoseHandler } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 import { StorageAdapter } from '../storage/StorageAdapter';
 import { TransportAdapter } from '../transport/TransportAdapter';
@@ -80,19 +80,19 @@ export class NostrCacheRelay {
   private storage: StorageAdapter;
   private transport: TransportAdapter;
   private validator: EventValidator;
-  private eventListeners: Map<string, Function[]> = new Map();
+  private eventListeners: Map<string, Array<RelayConnectHandler | RelayDisconnectHandler | RelayErrorHandler | RelayEventHandler | RelayEoseHandler>> = new Map();
 
   /**
    * Create a new NostrCacheRelay instance
    *
-   * @param options Relay configuration options
    * @param storage Storage adapter
    * @param transport Transport adapter
+   * @param options Relay configuration options
    */
   constructor(
-    options: NostrRelayOptions = {},
     storage: StorageAdapter,
-    transport: TransportAdapter
+    transport: TransportAdapter,
+    options: NostrRelayOptions = {}
   ) {
     this.options = {
       validateEvents: true,
@@ -122,7 +122,7 @@ export class NostrCacheRelay {
       console.log(`Client disconnected: ${clientId}`);
     });
 
-    this.transport.onMessage((clientId: string, message: any[]) => {
+    this.transport.onMessage((clientId: string, message: NostrMessage) => {
       this.handleMessage(clientId, message);
     });
   }
@@ -134,7 +134,7 @@ export class NostrCacheRelay {
    * @param message Message received
    * @private
    */
-  private handleMessage(clientId: string, message: any[]): void {
+  private handleMessage(clientId: string, message: NostrMessage): void {
     // This is a placeholder implementation
     // In a real implementation, this would:
     // 1. Parse the message type (EVENT, REQ, CLOSE)
@@ -214,12 +214,17 @@ export class NostrCacheRelay {
    * @param event Event type to listen for
    * @param callback Function to call when the event occurs
    */
-  on(event: 'connect' | 'disconnect' | 'event' | 'eose', callback: Function): void {
+  on(event: 'connect', callback: RelayConnectHandler): void;
+  on(event: 'disconnect', callback: RelayDisconnectHandler): void;
+  on(event: 'error', callback: RelayErrorHandler): void;
+  on(event: 'event', callback: RelayEventHandler): void;
+  on(event: 'eose', callback: RelayEoseHandler): void;
+  on(event: string, callback: RelayConnectHandler | RelayDisconnectHandler | RelayErrorHandler | RelayEventHandler | RelayEoseHandler): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
     }
 
-    this.eventListeners.get(event)?.push(callback);
+    this.eventListeners.get(event)?.push(callback as any);
   }
 
   /**
@@ -228,11 +233,16 @@ export class NostrCacheRelay {
    * @param event Event type to remove listener for
    * @param callback Function to remove
    */
-  off(event: 'connect' | 'disconnect' | 'event' | 'eose', callback: Function): void {
+  off(event: 'connect', callback: RelayConnectHandler): void;
+  off(event: 'disconnect', callback: RelayDisconnectHandler): void;
+  off(event: 'error', callback: RelayErrorHandler): void;
+  off(event: 'event', callback: RelayEventHandler): void;
+  off(event: 'eose', callback: RelayEoseHandler): void;
+  off(event: string, callback: RelayConnectHandler | RelayDisconnectHandler | RelayErrorHandler | RelayEventHandler | RelayEoseHandler): void {
     const listeners = this.eventListeners.get(event);
 
     if (listeners) {
-      const index = listeners.indexOf(callback);
+      const index = listeners.indexOf(callback as any);
 
       if (index !== -1) {
         listeners.splice(index, 1);
@@ -247,12 +257,22 @@ export class NostrCacheRelay {
    * @param args Arguments to pass to listeners
    * @private
    */
-  private emit(event: string, ...args: any[]): void {
+  private emit(event: string): void {
     const listeners = this.eventListeners.get(event);
 
     if (listeners) {
       for (const listener of listeners) {
-        listener(...args);
+        if (event === 'connect' || event === 'disconnect') {
+          (listener as RelayConnectHandler | RelayDisconnectHandler)();
+        } else if (event === 'error') {
+          (listener as RelayErrorHandler)(new Error('Unknown error'));
+        } else if (event === 'event') {
+          // This is a placeholder, in a real implementation we would pass the actual event
+          (listener as RelayEventHandler)({} as NostrEvent);
+        } else if (event === 'eose') {
+          // This is a placeholder, in a real implementation we would pass the actual subscription ID
+          (listener as RelayEoseHandler)('');
+        }
       }
     }
   }

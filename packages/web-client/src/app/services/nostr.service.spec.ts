@@ -27,7 +27,9 @@ describe('NostrService', () => {
     };
 
     // Mock the WebSocket constructor
-    global.WebSocket = jest.fn().mockImplementation(() => mockWebSocket) as unknown as typeof WebSocket;
+    global.WebSocket = jest
+      .fn()
+      .mockImplementation(() => mockWebSocket) as unknown as typeof WebSocket;
 
     TestBed.configureTestingModule({
       providers: [NostrService],

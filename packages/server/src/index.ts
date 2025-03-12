@@ -6,7 +6,7 @@
  */
 
 import { NostrCacheRelay, StorageAdapter } from '@nostr-cache/cache-relay';
-import { Filter, NostrEvent } from '@nostr-cache/shared';
+import { Filter, NostrEvent, NostrMessage } from '@nostr-cache/shared';
 
 /**
  * Server-side cache service (placeholder)
@@ -34,21 +34,21 @@ class CacheService {
     const transport = {
       start: async () => {},
       stop: async () => {},
-      send: (clientId: string, message: any[]) => {},
-      onMessage: (callback: (clientId: string, message: any[]) => void) => {},
+      send: (clientId: string, message: NostrMessage) => {},
+      onMessage: (callback: (clientId: string, message: NostrMessage) => void) => {},
       onConnect: (callback: (clientId: string) => void) => {},
       onDisconnect: (callback: (clientId: string) => void) => {},
     };
 
     // Initialize the relay
     this.relay = new NostrCacheRelay(
+      this.storage,
+      transport,
       {
         storage: 'memory',
         maxSubscriptions: 100,
         maxEventsPerRequest: 1000,
-      },
-      this.storage,
-      transport
+      }
     );
   }
 

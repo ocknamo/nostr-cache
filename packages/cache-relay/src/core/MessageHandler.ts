@@ -4,7 +4,7 @@
  * Handles incoming messages from clients
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
+import { CloseMessage, EoseMessage, EventMessage, Filter, NostrEvent, NostrMessage, NoticeMessage, OkMessage, ReqMessage } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 
 /**
@@ -13,7 +13,7 @@ import { EventValidator } from '../event/EventValidator';
  */
 export class MessageHandler {
   private eventValidator: EventValidator;
-  private responseCallbacks: ((clientId: string, message: any[]) => void)[] = [];
+  private responseCallbacks: ((clientId: string, message: NostrMessage) => void)[] = [];
 
   /**
    * Create a new MessageHandler instance
@@ -30,7 +30,7 @@ export class MessageHandler {
    * @param clientId ID of the client that sent the message
    * @param message Message received
    */
-  handleMessage(clientId: string, message: any[]): void {
+  handleMessage(clientId: string, message: NostrMessage): void {
     if (!Array.isArray(message) || message.length === 0) {
       this.sendNotice(clientId, 'Invalid message format');
       return;
@@ -40,13 +40,13 @@ export class MessageHandler {
 
     switch (messageType) {
       case 'EVENT':
-        this.handleEventMessage(clientId, message);
+        this.handleEventMessage(clientId, message as EventMessage);
         break;
       case 'REQ':
-        this.handleReqMessage(clientId, message);
+        this.handleReqMessage(clientId, message as ReqMessage);
         break;
       case 'CLOSE':
-        this.handleCloseMessage(clientId, message);
+        this.handleCloseMessage(clientId, message as CloseMessage);
         break;
       default:
         this.sendNotice(clientId, `Unknown message type: ${messageType}`);
@@ -60,7 +60,7 @@ export class MessageHandler {
    * @param message Message received
    * @private
    */
-  private handleEventMessage(clientId: string, message: any[]): void {
+  private handleEventMessage(clientId: string, message: EventMessage): void {
     // This is a placeholder implementation
     // In a real implementation, this would:
     // 1. Validate the event
@@ -73,7 +73,7 @@ export class MessageHandler {
       return;
     }
 
-    const event = message[1] as NostrEvent;
+    const event = message[1];
 
     // Validate the event
     if (!this.eventValidator.validate(event)) {
@@ -92,7 +92,7 @@ export class MessageHandler {
    * @param message Message received
    * @private
    */
-  private handleReqMessage(clientId: string, message: any[]): void {
+  private handleReqMessage(clientId: string, message: ReqMessage): void {
     // This is a placeholder implementation
     // In a real implementation, this would:
     // 1. Parse the subscription ID and filters
@@ -105,8 +105,8 @@ export class MessageHandler {
       return;
     }
 
-    const subscriptionId = message[1] as string;
-    const filters = message.slice(2) as Filter[];
+    const subscriptionId = message[1];
+    const filters = message.slice(2);
 
     // For now, just acknowledge the subscription
     this.sendEOSE(clientId, subscriptionId);
@@ -119,7 +119,7 @@ export class MessageHandler {
    * @param message Message received
    * @private
    */
-  private handleCloseMessage(clientId: string, message: any[]): void {
+  private handleCloseMessage(clientId: string, message: CloseMessage): void {
     // This is a placeholder implementation
     // In a real implementation, this would:
     // 1. Parse the subscription ID
@@ -130,7 +130,7 @@ export class MessageHandler {
       return;
     }
 
-    const subscriptionId = message[1] as string;
+    const subscriptionId = message[1];
 
     // For now, just log the close
     console.log(`Client ${clientId} closed subscription ${subscriptionId}`);
@@ -199,7 +199,7 @@ export class MessageHandler {
    */
   private sendResponse(clientId: string, message: any[]): void {
     for (const callback of this.responseCallbacks) {
-      callback(clientId, message);
+      callback(clientId, message as NostrMessage);
     }
   }
 
@@ -208,7 +208,7 @@ export class MessageHandler {
    *
    * @param callback Function to call when a response is sent
    */
-  onResponse(callback: (clientId: string, message: any[]) => void): void {
+  onResponse(callback: (clientId: string, message: NostrMessage) => void): void {
     this.responseCallbacks.push(callback);
   }
 }
