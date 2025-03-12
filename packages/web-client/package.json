@@ -11,7 +11,7 @@
     "test:watch": "jest --watch",
     "lint": "ng lint",
     "lint:fix": "ng lint --fix",
-    "lint:check": "ng lint --fix-dry-run",
+    "lint:check": "ng lint",
     "format": "biome format --write ./src && biome check --apply ./src",
     "format:check": "biome check ./src",
     "fix": "npm run lint:fix; npm run format"

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Observable, Subject } from 'rxjs';
-import { Filter, NostrEvent } from '../models/nostr.model';
+import { NostrEvent } from '../models/nostr.model';
 
 /**
  * Service for interacting with Nostr relays
@@ -18,10 +18,7 @@ export class NostrService {
   private followedPubkeys: string[] = [];
   private targetPubkey = '26bb2ebed6c552d670c804b0d655267b3c662b21e026d6e48ac93a6070530958';
 
-  /**
-   * Creates an instance of NostrService
-   */
-  constructor() {}
+  // コンストラクタは依存性注入のために必要ですが、現在は特に初期化処理は不要です
 
   /**
    * Connects to a Nostr relay and fetches follow list, then subscribes to events

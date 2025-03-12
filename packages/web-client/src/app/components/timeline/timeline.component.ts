@@ -47,8 +47,9 @@ export class TimelineComponent implements OnInit, OnDestroy {
           this.isLoading = false;
         },
       });
-    } catch (err: any) {
-      this.error = `Error initializing timeline: ${err.message}`;
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.error = `Error initializing timeline: ${error.message}`;
       this.isLoading = false;
     }
   }

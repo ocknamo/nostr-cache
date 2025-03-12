@@ -4,21 +4,30 @@ import { NostrService } from './nostr.service';
 
 describe('NostrService', () => {
   let service: NostrService;
-  let mockWebSocket: any;
+  interface MockWebSocket {
+    onopen: () => void;
+    onmessage: (event: { data: string }) => void;
+    onerror: (error: unknown) => void;
+    onclose: () => void;
+    send: jest.Mock;
+    close: jest.Mock;
+  }
+
+  let mockWebSocket: MockWebSocket;
 
   beforeEach(() => {
     // Create a new mock WebSocket instance for each test
     mockWebSocket = {
-      onopen: null,
-      onmessage: null,
-      onerror: null,
-      onclose: null,
+      onopen: jest.fn(),
+      onmessage: jest.fn(),
+      onerror: jest.fn(),
+      onclose: jest.fn(),
       send: jest.fn(),
       close: jest.fn(),
     };
 
     // Mock the WebSocket constructor
-    (global.WebSocket as any) = jest.fn().mockImplementation(() => mockWebSocket);
+    global.WebSocket = jest.fn().mockImplementation(() => mockWebSocket) as unknown as typeof WebSocket;
 
     TestBed.configureTestingModule({
       providers: [NostrService],
