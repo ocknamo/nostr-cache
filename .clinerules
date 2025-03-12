@@ -1,12 +1,27 @@
 # Project Guidelines
 
-## Git
+## コミットメッセージ規約
 
-- Please COMMIT even relatively minor changes.
+### 1. 基本構造
 
-### commit message
+<type>(<scope>): <subject>
 
-以下のルールに従ってコミットメッセージにプレフィックスを追加してください
+<body>
+
+<footer>
+
+# プロンプト履歴
+<prompt_history>
+
+--- 途中省略 ---
+
+#### Prompt History
+- ユーザーが指示したプロンプトの履歴を記載
+- プロンプトに関連する追加のコンテキスト情報も含める
+
+#### Type
+
+以下のルールに従ってコミットメッセージに<type>を追加してください
 
 - "feat:"
   - 機能追加
