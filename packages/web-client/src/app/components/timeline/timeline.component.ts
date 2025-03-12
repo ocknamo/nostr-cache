@@ -1,5 +1,4 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { NostrService } from '../../services/nostr.service';
 import { NostrEvent } from '../../models/nostr.model';
@@ -11,7 +10,7 @@ import { PostComponent } from '../../components/post/post.component';
 @Component({
   selector: 'app-timeline',
   standalone: true,
-  imports: [CommonModule, PostComponent],
+  imports: [PostComponent],
   providers: [NostrService],
   templateUrl: './timeline.component.html',
   styleUrls: ['./timeline.component.scss']
