@@ -1,13 +1,10 @@
-"use strict";
 /**
  * In-memory cache storage implementation
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryStorage = void 0;
 /**
  * In-memory implementation of CacheStorage
  */
-class MemoryStorage {
+export class MemoryStorage {
     /**
      * Create a new MemoryStorage instance
      *
@@ -180,5 +177,4 @@ class MemoryStorage {
         }
     }
 }
-exports.MemoryStorage = MemoryStorage;
 //# sourceMappingURL=MemoryStorage.js.map

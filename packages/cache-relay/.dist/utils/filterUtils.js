@@ -1,19 +1,13 @@
-"use strict";
 /**
  * Utility functions for working with Nostr filters
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createFilterKey = createFilterKey;
-exports.normalizeFilter = normalizeFilter;
-exports.eventMatchesFilter = eventMatchesFilter;
-exports.mergeFilters = mergeFilters;
 /**
  * Create a cache key from a Nostr filter
  *
  * @param filter Nostr filter
  * @returns String key representing the filter
  */
-function createFilterKey(filter) {
+export function createFilterKey(filter) {
     // Sort all arrays to ensure consistent keys
     const normalizedFilter = normalizeFilter(filter);
     // Convert to JSON string for use as a cache key
@@ -25,7 +19,7 @@ function createFilterKey(filter) {
  * @param filter Nostr filter to normalize
  * @returns Normalized filter with sorted arrays
  */
-function normalizeFilter(filter) {
+export function normalizeFilter(filter) {
     const normalized = {};
     // Process each property in the filter
     for (const [key, value] of Object.entries(filter)) {
@@ -47,7 +41,7 @@ function normalizeFilter(filter) {
  * @param filter Nostr filter
  * @returns True if the event matches the filter
  */
-function eventMatchesFilter(event, filter) {
+export function eventMatchesFilter(event, filter) {
     // This is a simplified implementation
     // A complete implementation would check all filter criteria
     // Check ids
@@ -92,7 +86,7 @@ function eventMatchesFilter(event, filter) {
  * @param filters Array of filters to merge
  * @returns Merged filter
  */
-function mergeFilters(filters) {
+export function mergeFilters(filters) {
     if (filters.length === 0) {
         return {};
     }

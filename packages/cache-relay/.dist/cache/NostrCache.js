@@ -1,11 +1,8 @@
-"use strict";
 /**
  * NostrCache implementation
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.NostrCache = void 0;
-const MemoryStorage_1 = require("./MemoryStorage");
-const filterUtils_1 = require("../utils/filterUtils");
+import { MemoryStorage } from './MemoryStorage';
+import { createFilterKey } from '../utils/filterUtils';
 /**
  * Default cache options
  */
@@ -18,7 +15,7 @@ const DEFAULT_OPTIONS = {
 /**
  * NostrCache class for caching Nostr relay interactions
  */
-class NostrCache {
+export class NostrCache {
     /**
      * Create a new NostrCache instance
      *
@@ -26,8 +23,8 @@ class NostrCache {
      */
     constructor(options = {}) {
         this.options = { ...DEFAULT_OPTIONS, ...options };
-        this.storage = new MemoryStorage_1.MemoryStorage(this.options);
-        this.keyGenerator = filterUtils_1.createFilterKey;
+        this.storage = new MemoryStorage(this.options);
+        this.keyGenerator = createFilterKey;
     }
     /**
      * Get events from cache or fetch from relays if not cached
@@ -106,5 +103,4 @@ class NostrCache {
         };
     }
 }
-exports.NostrCache = NostrCache;
 //# sourceMappingURL=NostrCache.js.map
