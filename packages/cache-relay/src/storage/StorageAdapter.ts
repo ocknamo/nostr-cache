@@ -2,7 +2,7 @@
  * Storage adapter interface for Nostr Cache Relay
  */
 
-import { NostrEvent, Filter } from '@nostr-cache/types';
+import { Filter, NostrEvent } from '@nostr-cache/types';
 
 /**
  * Storage adapter interface
@@ -11,7 +11,7 @@ import { NostrEvent, Filter } from '@nostr-cache/types';
 export interface StorageAdapter {
   /**
    * Save an event to storage
-   * 
+   *
    * @param event Nostr event to save
    * @returns Promise resolving to true if successful, false otherwise
    */
@@ -19,7 +19,7 @@ export interface StorageAdapter {
 
   /**
    * Get events matching the given filters
-   * 
+   *
    * @param filters Array of filters to match events against
    * @returns Promise resolving to array of matching events
    */
@@ -27,7 +27,7 @@ export interface StorageAdapter {
 
   /**
    * Delete an event from storage
-   * 
+   *
    * @param id ID of the event to delete
    * @returns Promise resolving to true if successful, false otherwise
    */
@@ -35,7 +35,7 @@ export interface StorageAdapter {
 
   /**
    * Clear all events from storage
-   * 
+   *
    * @returns Promise resolving when operation is complete
    */
   clear(): Promise<void>;

@@ -1,12 +1,12 @@
 /**
  * Nostr Cache Relay
- * 
+ *
  * Provides a Nostr relay implementation with caching functionality.
  */
 
+import { MessageHandler } from './core/MessageHandler';
 // Core components
 import { NostrCacheRelay, NostrRelayOptions } from './core/NostrCacheRelay';
-import { MessageHandler } from './core/MessageHandler';
 import { SubscriptionManager } from './core/SubscriptionManager';
 
 // Event handling
@@ -28,17 +28,13 @@ export {
   NostrRelayOptions,
   MessageHandler,
   SubscriptionManager,
-  
   // Event
   EventHandler,
   EventValidator,
-  
   // Storage
   StorageAdapter,
-  
   // Transport
   TransportAdapter,
-  
   // Utils
-  filterUtils
+  filterUtils,
 };

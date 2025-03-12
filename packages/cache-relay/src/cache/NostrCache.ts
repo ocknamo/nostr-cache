@@ -2,9 +2,16 @@
  * NostrCache implementation
  */
 
-import { NostrEvent, Filter, CacheOptions, CacheStorage, CacheEntry, CacheKeyGenerator } from '@nostr-cache/types';
-import { MemoryStorage } from './MemoryStorage';
+import {
+  CacheEntry,
+  CacheKeyGenerator,
+  CacheOptions,
+  CacheStorage,
+  Filter,
+  NostrEvent,
+} from '@nostr-cache/types';
 import { createFilterKey } from '../utils/filterUtils';
+import { MemoryStorage } from './MemoryStorage';
 
 /**
  * Default cache options
@@ -13,7 +20,7 @@ const DEFAULT_OPTIONS: CacheOptions = {
   maxSize: 1000,
   ttl: 3600000, // 1 hour
   strategy: 'LRU',
-  persist: false
+  persist: false,
 };
 
 /**
@@ -26,7 +33,7 @@ export class NostrCache {
 
   /**
    * Create a new NostrCache instance
-   * 
+   *
    * @param options Cache configuration options
    */
   constructor(options: CacheOptions = {}) {
@@ -37,7 +44,7 @@ export class NostrCache {
 
   /**
    * Get events from cache or fetch from relays if not cached
-   * 
+   *
    * @param filters Nostr filters to match events
    * @returns Promise resolving to matching events
    */
@@ -63,7 +70,7 @@ export class NostrCache {
         entry.accessCount++;
         entry.lastAccessed = Date.now();
         this.storage.set(key, entry);
-        
+
         // Add cached events to result
         cachedEvents.push(...entry.events);
       } else {
@@ -79,7 +86,7 @@ export class NostrCache {
 
   /**
    * Add an event to the cache
-   * 
+   *
    * @param event Nostr event to cache
    */
   addEvent(event: NostrEvent): void {
@@ -87,7 +94,7 @@ export class NostrCache {
     // In a real implementation, this would:
     // 1. Determine which cached filters this event matches
     // 2. Add the event to the matching cache entries
-    
+
     // For demonstration purposes only
     console.log(`Added event ${event.id} to cache`);
   }
@@ -101,7 +108,7 @@ export class NostrCache {
 
   /**
    * Invalidate cache entries matching the given filter
-   * 
+   *
    * @param filter Filter to match cache entries to invalidate
    */
   invalidate(filter: Filter): void {
@@ -111,13 +118,13 @@ export class NostrCache {
 
   /**
    * Get cache statistics
-   * 
+   *
    * @returns Object with cache statistics
    */
   getStats(): { size: number; keys: string[] } {
     return {
       size: this.storage.size(),
-      keys: this.storage.keys()
+      keys: this.storage.keys(),
     };
   }
 }

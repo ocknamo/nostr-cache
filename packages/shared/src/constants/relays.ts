@@ -10,7 +10,7 @@ export const DEFAULT_RELAY_URLS = [
   'wss://relay.nostr.info',
   'wss://nostr-pub.wellorder.net',
   'wss://relay.current.fyi',
-  'wss://nos.lol'
+  'wss://nos.lol',
 ];
 
 /**

@@ -2,7 +2,7 @@
  * In-memory cache storage implementation
  */
 
-import { CacheOptions, CacheStorage, CacheEntry } from '@nostr-cache/types';
+import { CacheEntry, CacheOptions, CacheStorage } from '@nostr-cache/types';
 
 /**
  * In-memory implementation of CacheStorage
@@ -13,7 +13,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Create a new MemoryStorage instance
-   * 
+   *
    * @param options Cache configuration options
    */
   constructor(options: CacheOptions) {
@@ -23,13 +23,13 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Get an entry from the cache
-   * 
+   *
    * @param key Cache key
    * @returns Cache entry or undefined if not found
    */
   get(key: string): CacheEntry | undefined {
     const entry = this.cache.get(key);
-    
+
     if (!entry) {
       return undefined;
     }
@@ -45,7 +45,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Set an entry in the cache
-   * 
+   *
    * @param key Cache key
    * @param entry Cache entry
    */
@@ -65,7 +65,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Delete an entry from the cache
-   * 
+   *
    * @param key Cache key
    * @returns True if the entry was deleted, false if it didn't exist
    */
@@ -82,13 +82,13 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Check if the cache has an entry for the given key
-   * 
+   *
    * @param key Cache key
    * @returns True if the entry exists and has not expired
    */
   has(key: string): boolean {
     const entry = this.cache.get(key);
-    
+
     if (!entry) {
       return false;
     }
@@ -104,7 +104,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Get all keys in the cache
-   * 
+   *
    * @returns Array of cache keys
    */
   keys(): string[] {
@@ -113,7 +113,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Get the number of entries in the cache
-   * 
+   *
    * @returns Number of cache entries
    */
   size(): number {
@@ -122,7 +122,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Evict entries based on the configured strategy
-   * 
+   *
    * @private
    */
   private evict(): void {
@@ -131,7 +131,7 @@ export class MemoryStorage implements CacheStorage {
     }
 
     const strategy = this.options.strategy || 'LRU';
-    
+
     switch (strategy) {
       case 'LRU':
         this.evictLRU();
@@ -149,7 +149,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Evict the least recently used entry
-   * 
+   *
    * @private
    */
   private evictLRU(): void {
@@ -170,7 +170,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Evict the oldest entry (first in)
-   * 
+   *
    * @private
    */
   private evictFIFO(): void {
@@ -191,7 +191,7 @@ export class MemoryStorage implements CacheStorage {
 
   /**
    * Evict the least frequently used entry
-   * 
+   *
    * @private
    */
   private evictLFU(): void {

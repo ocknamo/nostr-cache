@@ -7,5 +7,5 @@ export {
   CacheRelayOptions,
   CacheKeyGenerator,
   CacheEntry,
-  CacheStorage
+  CacheStorage,
 } from '@nostr-cache/types';
