@@ -1,5 +1,5 @@
 /**
- * Cache-specific type definitions for cache-lib
+ * Cache-specific type definitions for cache-relay
  */
 
 import { NostrEvent, Filter } from './nostr';
@@ -9,8 +9,8 @@ import { CacheOptions } from './cache';
  * Cache library specific options
  * Extends the base CacheOptions
  */
-export interface CacheLibOptions extends CacheOptions {
-  // Additional cache-lib specific options can be added here
+export interface CacheRelayOptions extends CacheOptions {
+  // Additional cache-relay specific options can be added here
 }
 
 /**

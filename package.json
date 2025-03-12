@@ -9,7 +9,7 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces",
-    "build:cache-lib": "npm run build --workspace=packages/cache-lib",
+    "build:cache-relay": "npm run build --workspace=packages/cache-relay",
     "build:web-client": "npm run build --workspace=packages/web-client",
     "dev:web-client": "npm run start --workspace=packages/web-client"
   },

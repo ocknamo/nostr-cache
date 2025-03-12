@@ -4,7 +4,7 @@
 
 export {
   CacheOptions,
-  CacheLibOptions,
+  CacheRelayOptions,
   CacheKeyGenerator,
   CacheEntry,
   CacheStorage

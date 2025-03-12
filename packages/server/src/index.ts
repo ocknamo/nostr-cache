@@ -5,7 +5,7 @@
  * The actual implementation will be developed in a later phase.
  */
 
-import { NostrCache } from '@nostr-cache/cache-lib';
+import { NostrCache } from '@nostr-cache/cache-relay';
 import { Filter, NostrEvent } from '@nostr-cache/shared';
 
 /**

@@ -12,6 +12,6 @@
   "references": [
     { "path": "../types" },
     { "path": "../shared" },
-    { "path": "../cache-lib" }
+    { "path": "../cache-relay" }
   ]
 }

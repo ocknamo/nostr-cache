@@ -1,7 +1,7 @@
 {
-  "name": "@nostr-cache/cache-lib",
+  "name": "@nostr-cache/cache-relay",
   "version": "0.1.0",
-  "description": "Cache library for Nostr relay interactions",
+  "description": "Cache relay for Nostr relay interactions",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

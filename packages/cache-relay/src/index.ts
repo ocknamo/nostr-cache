@@ -1,14 +1,14 @@
 /**
- * Nostr Cache Library
+ * Nostr Cache Relay
  * 
  * Provides caching functionality for Nostr relay interactions.
  */
 
 import { NostrCache } from './cache/NostrCache';
-import { CacheOptions, CacheLibOptions } from '@nostr-cache/types';
+import { CacheOptions, CacheRelayOptions } from '@nostr-cache/types';
 
 export {
   NostrCache,
   CacheOptions,
-  CacheLibOptions
+  CacheRelayOptions
 };

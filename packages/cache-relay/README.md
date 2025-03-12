@@ -1,6 +1,6 @@
-# Nostr Cache Library
+# Nostr Cache Relay
 
-Nostrリレーとのやり取りをキャッシュするためのライブラリです。
+Nostrリレーとのやり取りをキャッシュするためのリレーパッケージです。
 
 ## 機能
 
@@ -11,13 +11,13 @@ Nostrリレーとのやり取りをキャッシュするためのライブラリ
 ## インストール
 
 ```bash
-npm install @nostr-cache/cache-lib
+npm install @nostr-cache/cache-relay
 ```
 
 ## 使用方法
 
 ```typescript
-import { NostrCache } from '@nostr-cache/cache-lib';
+import { NostrCache } from '@nostr-cache/cache-relay';
 
 const cache = new NostrCache({
   // 設定オプション
