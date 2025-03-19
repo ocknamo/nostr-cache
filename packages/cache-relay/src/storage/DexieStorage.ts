@@ -1,5 +1,6 @@
 import { Filter, NostrEvent } from '@nostr-cache/types';
 import Dexie from 'dexie';
+import { eventMatchesFilter } from '../utils/filterUtils';
 import { StorageAdapter } from './StorageAdapter';
 
 /**
@@ -210,26 +211,19 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         filters.map(async (filter) => {
           let collection = this.buildOptimizedQuery(filter);
 
-          // Apply tag filters using indexed_tags when possible
-          for (const [key, values] of Object.entries(filter)) {
-            if (key.startsWith('#') && Array.isArray(values) && values.length > 0) {
-              const tagName = key.slice(1);
-              if (tagName.length === 1 && /^[a-zA-Z]$/.test(tagName)) {
-                // Use indexed_tags for single-letter tags
-                const indexedValues = (values as string[]).map((value) => `${tagName}:${value}`);
-                collection = collection.filter((event) =>
-                  indexedValues.some((indexedValue: string) =>
-                    event.indexed_tags.includes(indexedValue)
-                  )
-                );
-              } else {
-                // Fallback to regular tag filtering for non-single-letter tags
-                collection = collection.filter((event) => {
-                  return event.tags.some((tag) => tag[0] === tagName && values.includes(tag[1]));
-                });
-              }
-            }
-          }
+          // Apply final filter validation
+          collection = collection.filter((event) => {
+            const nostrEvent: NostrEvent = {
+              id: event.id,
+              pubkey: event.pubkey,
+              created_at: event.created_at,
+              kind: event.kind,
+              tags: event.tags,
+              content: event.content,
+              sig: event.sig,
+            };
+            return eventMatchesFilter(nostrEvent, filter);
+          });
 
           // Apply limit before converting to array
           if (filter.limit !== undefined) {
