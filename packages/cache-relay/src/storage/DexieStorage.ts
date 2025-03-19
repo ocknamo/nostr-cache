@@ -63,6 +63,53 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
+   * Build an optimized query based on filter conditions
+   * @param filter Filter conditions
+   * @returns Dexie.Collection
+   */
+  private buildOptimizedQuery(filter: Filter): Dexie.Collection<NostrEventTable, string> {
+    const { ids, authors, kinds, since, until } = filter;
+    let collection: Dexie.Collection<NostrEventTable, string>;
+
+    // Use specific index based on filter combination
+    if (ids?.length) {
+      // Use primary key index for id lookups
+      collection = this.events.where('id').anyOf(ids);
+    } else if (authors?.length && kinds?.length) {
+      // Use compound index for author+kind combinations
+      const combinations = authors.flatMap((author) => kinds.map((kind) => [author, kind]));
+      collection = this.events.where('[pubkey+kind]').anyOf(combinations);
+    } else if (kinds?.length) {
+      if (since !== undefined || until !== undefined) {
+        // Use compound index for kind+time range
+        collection = this.events
+          .where('[kind+created_at]')
+          .between([kinds[0], since || 0], [kinds[0], until || Infinity], true, true);
+        // Filter additional kinds if multiple kinds specified
+        if (kinds.length > 1) {
+          collection = collection.filter((event) => kinds.includes(event.kind));
+        }
+      } else {
+        // Use kind index
+        collection = this.events.where('kind').anyOf(kinds);
+      }
+    } else if (authors?.length) {
+      // Use pubkey index
+      collection = this.events.where('pubkey').anyOf(authors);
+    } else {
+      // Fallback to time range if no other filters
+      if (since !== undefined || until !== undefined) {
+        collection = this.events.where('created_at').between(since || 0, until || Infinity);
+      } else {
+        // Last resort: full collection
+        collection = this.events.toCollection();
+      }
+    }
+
+    return collection;
+  }
+
+  /**
    * Get events matching the given filters
    *
    * @param filters Array of filters to match events against
@@ -73,52 +120,29 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       // Process each filter independently and combine results
       const eventSets = await Promise.all(
         filters.map(async (filter) => {
-          let collection = this.events.toCollection();
+          let collection = this.buildOptimizedQuery(filter);
 
-          // Apply basic filters
-          const { ids, authors, kinds } = filter;
-          if (ids?.length) {
-            collection = collection.filter((event) => ids.includes(event.id));
-          }
-          if (authors?.length) {
-            collection = collection.filter((event) => authors.includes(event.pubkey));
-          }
-          if (kinds?.length) {
-            collection = collection.filter((event) => kinds.includes(event.kind));
-          }
-
-          // Apply tag filters
+          // Apply tag filters after index-based filtering
           for (const [key, values] of Object.entries(filter)) {
             if (key.startsWith('#') && values?.length) {
-              const tagName = key.slice(1); // Remove '#' prefix
+              const tagName = key.slice(1);
               collection = collection.filter((event) => {
                 return event.tags.some((tag) => tag[0] === tagName && values.includes(tag[1]));
               });
             }
           }
 
-          // Apply time range filters
-          const { since, until } = filter;
-          if (since !== undefined) {
-            collection = collection.filter((event) => event.created_at >= since);
-          }
-          if (until !== undefined) {
-            collection = collection.filter((event) => event.created_at <= until);
+          // Apply limit before converting to array
+          if (filter.limit !== undefined) {
+            collection = collection.limit(filter.limit);
           }
 
-          // Apply limit at the end
-          const results = await collection.toArray();
-          return filter.limit !== undefined ? results.slice(0, filter.limit) : results;
+          return await collection.toArray();
         })
       );
 
       // Combine and deduplicate results
-      const allEvents = eventSets.flat();
-      const uniqueEvents = Array.from(
-        new Map(allEvents.map((event) => [event.id, event])).values()
-      );
-
-      return uniqueEvents;
+      return Array.from(new Map(eventSets.flat().map((event) => [event.id, event])).values());
     } catch (error) {
       console.error('Failed to get events:', error);
       return [];
