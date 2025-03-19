@@ -219,6 +219,145 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('Additional getEvents Patterns', () => {
+    const events = [
+      {
+        id: 'event1',
+        pubkey: 'author1',
+        created_at: 1000,
+        kind: 1,
+        tags: [
+          ['p', 'user1'],
+          ['e', 'event1'],
+        ],
+        content: 'test1',
+        sig: 'sig1',
+      },
+      {
+        id: 'event2',
+        pubkey: 'author2',
+        created_at: 2000,
+        kind: 2,
+        tags: [
+          ['p', 'user2'],
+          ['e', 'event2'],
+        ],
+        content: 'test2',
+        sig: 'sig2',
+      },
+      {
+        id: 'event3',
+        pubkey: 'author3',
+        created_at: 3000,
+        kind: 3,
+        tags: [
+          ['p', 'user1'],
+          ['e', 'event1'],
+        ],
+        content: 'test3',
+        sig: 'sig3',
+      },
+      {
+        id: 'event4',
+        pubkey: 'author4',
+        created_at: 4000,
+        kind: 4,
+        tags: [
+          ['p', 'user2'],
+          ['e', 'event2'],
+        ],
+        content: 'test4',
+        sig: 'sig4',
+      },
+      {
+        id: 'event5',
+        pubkey: 'author5',
+        created_at: 5000,
+        kind: 5,
+        tags: [
+          ['p', 'user1'],
+          ['e', 'event1'],
+        ],
+        content: 'test5',
+        sig: 'sig5',
+      },
+    ];
+
+    beforeEach(async () => {
+      for (const event of events) {
+        await storage.saveEvent(event);
+      }
+    });
+
+    it('should respect limit parameter', async () => {
+      const result = await storage.getEvents([{ limit: 3 }]);
+      expect(result).toHaveLength(3);
+    });
+
+    it('should respect limit parameter with other filters', async () => {
+      const result = await storage.getEvents([
+        {
+          authors: ['author1', 'author2', 'author3', 'author4', 'author5'],
+          limit: 2,
+        },
+      ]);
+      expect(result).toHaveLength(2);
+    });
+
+    it('should filter by time range only', async () => {
+      const result = await storage.getEvents([
+        {
+          since: 2000,
+          until: 4000,
+        },
+      ]);
+      expect(result).toHaveLength(3);
+      expect(result.map((e) => e.id).sort()).toEqual(['event2', 'event3', 'event4']);
+    });
+
+    it('should handle complex tag combinations', async () => {
+      // 特定のpタグとeタグの組み合わせを持つイベントを検索
+      const result = await storage.getEvents([
+        {
+          '#p': ['user1'],
+          '#e': ['event1'],
+        },
+      ]);
+      expect(result).toHaveLength(3);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3', 'event5']);
+    });
+
+    it('should handle multiple tag filters with time range', async () => {
+      const result = await storage.getEvents([
+        {
+          '#p': ['user2'],
+          '#e': ['event2'],
+          since: 3000,
+          until: 5000,
+        },
+      ]);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('event4');
+    });
+
+    it('should handle multiple filters with different tag combinations', async () => {
+      const result = await storage.getEvents([
+        {
+          '#p': ['user1'],
+          since: 1000,
+          until: 2000,
+        },
+        {
+          '#e': ['event2'],
+          since: 3000,
+          until: 5000,
+        },
+      ]);
+      expect(result).toHaveLength(2);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event4']);
+    });
+  });
+
   describe('Tag Indexing', () => {
     it('should limit indexed tags to MAX_INDEXED_TAGS', async () => {
       // 150個のタグを持つイベントを作成（MAX_INDEXED_TAGS = 100を超える）

@@ -197,7 +197,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     } else if (authors?.length) {
       collection = this.events.where('pubkey').anyOf(authors);
     } else if (since !== undefined || until !== undefined) {
-      collection = this.events.where('created_at').between(since || 0, until || Infinity);
+      // untilは指定された時刻を含むように+1する
+      const timeRange = [since || 0, (until || Infinity) + (until === Infinity ? 0 : 1)];
+      collection = this.events.where('created_at').between(timeRange[0], timeRange[1], true, false);
     } else {
       collection = this.events.toCollection();
     }
