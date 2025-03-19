@@ -250,7 +250,7 @@ export class NostrCacheRelay {
       this.eventListeners.set(event, []);
     }
 
-    this.eventListeners.get(event)?.push(callback as any);
+    this.eventListeners.get(event)?.push(callback);
   }
 
   /**
@@ -276,7 +276,7 @@ export class NostrCacheRelay {
     const listeners = this.eventListeners.get(event);
 
     if (listeners) {
-      const index = listeners.indexOf(callback as any);
+      const index = listeners.indexOf(callback);
 
       if (index !== -1) {
         listeners.splice(index, 1);

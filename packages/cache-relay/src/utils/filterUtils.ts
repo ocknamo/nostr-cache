@@ -10,7 +10,7 @@ import { Filter, NostrEvent } from '@nostr-cache/types';
  * Extended filter type with index signature for string keys
  */
 interface ExtendedFilter extends Filter {
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -174,10 +174,10 @@ export function mergeFilters(filters: Filter[]): Filter {
         }
 
         // Add values to the merged filter
-        merged[key].push(...(values as string[]));
+        (merged[key] as unknown[]).push(...(values as string[]));
 
         // Remove duplicates
-        merged[key] = [...new Set(merged[key])];
+        merged[key] = [...new Set((merged[key] as unknown[]))];
       }
     }
   }

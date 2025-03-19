@@ -207,7 +207,7 @@ export class MessageHandler {
    * @param message Message to send
    * @private
    */
-  private sendResponse(clientId: string, message: any[]): void {
+  private sendResponse(clientId: string, message: unknown[]): void {
     for (const callback of this.responseCallbacks) {
       callback(clientId, message as NostrMessage);
     }

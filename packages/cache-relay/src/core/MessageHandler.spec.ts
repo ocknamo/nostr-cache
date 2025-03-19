@@ -2,7 +2,7 @@
  * Tests for MessageHandler
  */
 
-import { NostrEvent } from '@nostr-cache/types';
+import { NostrEvent, NostrMessage } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 import { MessageHandler } from './MessageHandler';
 
@@ -35,7 +35,7 @@ describe('MessageHandler', () => {
 
   describe('handleMessage', () => {
     it('should handle invalid message format', () => {
-      messageHandler.handleMessage('client1', 'not-an-array' as any);
+      messageHandler.handleMessage('client1', 'not-an-array' as unknown as NostrMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -44,7 +44,7 @@ describe('MessageHandler', () => {
     });
 
     it('should handle unknown message type', () => {
-      messageHandler.handleMessage('client1', ['UNKNOWN']);
+      messageHandler.handleMessage('client1', ['UNKNOWN'] as unknown as NostrMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -55,7 +55,7 @@ describe('MessageHandler', () => {
 
   describe('handleEventMessage', () => {
     it('should handle invalid EVENT message format', () => {
-      messageHandler.handleMessage('client1', ['EVENT']);
+      messageHandler.handleMessage('client1', ['EVENT'] as unknown as NostrMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -93,7 +93,7 @@ describe('MessageHandler', () => {
 
   describe('handleReqMessage', () => {
     it('should handle invalid REQ message format', () => {
-      messageHandler.handleMessage('client1', ['REQ']);
+      messageHandler.handleMessage('client1', ['REQ'] as unknown as NostrMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -110,7 +110,7 @@ describe('MessageHandler', () => {
 
   describe('handleCloseMessage', () => {
     it('should handle invalid CLOSE message format', () => {
-      messageHandler.handleMessage('client1', ['CLOSE']);
+      messageHandler.handleMessage('client1', ['CLOSE'] as unknown as NostrMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',

@@ -61,12 +61,12 @@ export interface RelayConnection {
   /**
    * Add event handler
    */
-  on(event: 'connect' | 'disconnect' | 'error' | 'event', callback: Function): void;
+  on(event: 'connect' | 'disconnect' | 'error' | 'event', callback: () => void): void;
 
   /**
    * Remove event handler
    */
-  off(event: 'connect' | 'disconnect' | 'error' | 'event', callback: Function): void;
+  off(event: 'connect' | 'disconnect' | 'error' | 'event', callback: () => void): void;
 }
 
 /**
