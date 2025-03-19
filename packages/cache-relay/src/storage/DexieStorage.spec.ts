@@ -75,6 +75,17 @@ describe('DexieStorage', () => {
       expect(events).toHaveLength(1);
       expect(events[0]).toEqual(mockEvent);
     });
+
+    it('should get events by tags', async () => {
+      const events = await storage.getEvents([{ '#p': ['test-pubkey'] }]);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual(mockEvent);
+    });
+
+    it('should return empty array when tag value does not match', async () => {
+      const events = await storage.getEvents([{ '#p': ['non-existent'] }]);
+      expect(events).toHaveLength(0);
+    });
   });
 
   describe('deleteEvent', () => {
