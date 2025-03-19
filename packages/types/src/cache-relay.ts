@@ -14,18 +14,13 @@ export interface CacheRelayOptions extends CacheOptions {
 }
 
 /**
- * Cache key generator function
- */
-export type CacheKeyGenerator = (filter: Filter) => string;
-
-/**
  * Cache entry
  */
 export interface CacheEntry {
   /**
    * Events matching the filter
    */
-  events: NostrEvent[];
+  eventsId: NostrEvent['id'];
 
   /**
    * When the entry was created
