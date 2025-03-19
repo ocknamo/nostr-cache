@@ -4,9 +4,8 @@
 
 - **cache-relay**はブラウザ内で動作するNostrリレーの実装
 - NIP-01とNIP-02に準拠したリレーインターフェースを提供
-- バックエンドストレージとして環境に応じて適切なものを使用:
-  - ブラウザ環境: IndexedDB (Dexie.js使用)
-  - Node.js環境: メモリストレージ
+- バックエンドストレージとしてIndexedDB (Dexie.js使用)を使用
+- テスト環境ではfake-indexeddbを使用してIndexedDBをエミュレート
 
 ## 2. アーキテクチャ
 
@@ -46,13 +45,13 @@
       v
 +-----+----------------+
 |   ストレージアダプタ    |
-+-----+--------+-------+
-      |        |
-      v        v
-+-----+----+ +-+------+
-|IndexedDB | |メモリ   |
-|(ブラウザ) | |ストレージ|
-+---------+ +--------+
++-----+----------------+
+      |
+      v
++-----+----------------+
+|     IndexedDB        |
+|     (Dexie.js)       |
++-----+----------------+
 ```
 
 ## 3. 主要コンポーネント
@@ -83,8 +82,8 @@
 - イベントの種類に応じた保存戦略の実装
 
 ### ストレージアダプタ
-- 環境に応じたストレージの抽象化
-- IndexedDBとメモリストレージの実装
+- IndexedDBの抽象化
+- Dexie.jsを使用したIndexedDBの実装
 
 ## 4. ディレクトリ構造
 
@@ -107,9 +106,7 @@ packages/cache-relay/
 │   ├── storage/                 # ストレージ
 │   │   ├── StorageAdapter.ts    # ストレージアダプタインターフェース
 │   │   ├── DexieStorage.ts      # Dexie.jsを使用したIndexedDBアダプタ
-│   │   ├── DexieStorage.spec.ts # IndexedDBアダプタの単体テスト
-│   │   ├── MemoryStorage.ts     # メモリストレージアダプタ
-│   │   └── MemoryStorage.spec.ts # メモリストレージの単体テスト
+│   │   └── DexieStorage.spec.ts # IndexedDBアダプタの単体テスト
 │   ├── transport/               # 通信層
 │   │   ├── TransportAdapter.ts  # トランスポートアダプタインターフェース
 │   │   ├── WebSocketServer.ts   # WebSocketサーバー（Node.js用）
@@ -139,7 +136,7 @@ packages/cache-relay/
 2. **ストレージレイヤーの実装** (2日)
    - Dexie.jsの導入
    - DexieStorageの実装
-   - MemoryStorageの実装
+   - fake-indexeddbのセットアップ
    - 単体テストの作成と実行
 
 3. **トランスポートレイヤーの実装** (2日)
@@ -199,7 +196,7 @@ interface NostrRelay {
 // リレーオプション
 interface NostrRelayOptions {
   // ストレージ設定
-  storage: 'indexeddb' | 'memory';
+  storage: 'indexeddb';
   storageOptions?: {
     dbName?: string;
     maxSize?: number;
@@ -221,6 +218,7 @@ interface NostrRelayOptions {
 1. **IndexedDBの実装**
    - 直接使用せずDexie.jsをラッパーライブラリとして使用
    - https://github.com/dexie/Dexie.js を使用
+   - テスト環境ではfake-indexeddbを使用
 
 2. **イベント検証**
    - 空の関数で仮実装
@@ -228,9 +226,9 @@ interface NostrRelayOptions {
 
 3. **テスト戦略**
    - 各実装ステップごとに単体テストを作成・実行
-   - Node.js環境とブラウザ環境の両方でテスト
+   - fake-indexeddbを使用してブラウザ環境をエミュレート
    - E2Eテストを実装
 
 4. **環境対応**
-   - ブラウザ: IndexedDB (Dexie.js)、WebSocketエミュレーション
-   - Node.js: メモリストレージ、WebSocketサーバー
+   - 開発環境: IndexedDB (Dexie.js)、WebSocketエミュレーション
+   - テスト環境: fake-indexeddb、WebSocketエミュレーション
