@@ -36,7 +36,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         kind,
         *indexed_tags,
         [pubkey+kind],
-        [kind+created_at]
+        [kind+created_at],
+        [pubkey+created_at],
+        [pubkey+kind+created_at]
       `,
     });
   }
@@ -150,35 +152,46 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     else if (ids?.length) {
       // Use primary key index for id lookups
       collection = this.events.where('id').anyOf(ids);
-    } else if (authors?.length && kinds?.length) {
+    }
+    // authors + kinds + 時間範囲の組み合わせ
+    else if (authors?.length && kinds?.length && (since !== undefined || until !== undefined)) {
+      const timeRange = [since || 0, until || Infinity];
+      // 時間範囲でフィルタリング
+      collection = this.events.where('created_at').between(timeRange[0], timeRange[1]);
+      // authorsとkindsでフィルタリング
+      collection = collection.filter(
+        (event) => authors.includes(event.pubkey) && kinds.includes(event.kind)
+      );
+    }
+    // authors + 時間範囲の組み合わせ
+    else if (authors?.length && (since !== undefined || until !== undefined)) {
+      // 時間範囲でフィルタリング
+      collection = this.events.where('created_at').between(since || 0, until || Infinity);
+      // authorsでフィルタリング
+      collection = collection.filter((event) => authors.includes(event.pubkey));
+    }
+    // authors + kinds の組み合わせ
+    else if (authors?.length && kinds?.length) {
       // Use compound index for author+kind combinations
       const combinations = authors.flatMap((author) => kinds.map((kind) => [author, kind]));
       collection = this.events.where('[pubkey+kind]').anyOf(combinations);
-    } else if (kinds?.length) {
-      if (since !== undefined || until !== undefined) {
-        // Use compound index for kind+time range
-        collection = this.events
-          .where('[kind+created_at]')
-          .between([kinds[0], since || 0], [kinds[0], until || Infinity], true, true);
-        // Filter additional kinds if multiple kinds specified
-        if (kinds.length > 1) {
-          collection = collection.filter((event) => kinds.includes(event.kind));
-        }
-      } else {
-        // Use kind index
-        collection = this.events.where('kind').anyOf(kinds);
-      }
+    }
+    // kinds + 時間範囲の組み合わせ
+    else if (kinds?.length && (since !== undefined || until !== undefined)) {
+      // 時間範囲でフィルタリング
+      collection = this.events.where('created_at').between(since || 0, until || Infinity);
+      // kindsでフィルタリング
+      collection = collection.filter((event) => kinds.includes(event.kind));
+    }
+    // 単一条件の場合
+    else if (kinds?.length) {
+      collection = this.events.where('kind').anyOf(kinds);
     } else if (authors?.length) {
-      // Use pubkey index
       collection = this.events.where('pubkey').anyOf(authors);
+    } else if (since !== undefined || until !== undefined) {
+      collection = this.events.where('created_at').between(since || 0, until || Infinity);
     } else {
-      // Fallback to time range if no other filters
-      if (since !== undefined || until !== undefined) {
-        collection = this.events.where('created_at').between(since || 0, until || Infinity);
-      } else {
-        // Last resort: full collection
-        collection = this.events.toCollection();
-      }
+      collection = this.events.toCollection();
     }
 
     return collection;

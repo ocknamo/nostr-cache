@@ -88,6 +88,106 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('getEvents with multiple conditions', () => {
+    const events = [
+      {
+        id: 'event1',
+        pubkey: 'author1',
+        created_at: 1000,
+        kind: 1,
+        tags: [],
+        content: 'test1',
+        sig: 'sig1',
+      },
+      {
+        id: 'event2',
+        pubkey: 'author1',
+        created_at: 2000,
+        kind: 1,
+        tags: [],
+        content: 'test2',
+        sig: 'sig2',
+      },
+      {
+        id: 'event3',
+        pubkey: 'author2',
+        created_at: 1500,
+        kind: 2,
+        tags: [],
+        content: 'test3',
+        sig: 'sig3',
+      },
+    ];
+
+    beforeEach(async () => {
+      for (const event of events) {
+        await storage.saveEvent(event);
+      }
+    });
+
+    it('should filter by authors and time range', async () => {
+      const result = await storage.getEvents([
+        {
+          authors: ['author1'],
+          since: 1500,
+          until: 2500,
+        },
+      ]);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('event2');
+    });
+
+    it('should filter by authors, kinds and time range', async () => {
+      const result = await storage.getEvents([
+        {
+          authors: ['author1'],
+          kinds: [1],
+          since: 500,
+          until: 1500,
+        },
+      ]);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('event1');
+    });
+
+    it('should handle multiple authors with time range', async () => {
+      const result = await storage.getEvents([
+        {
+          authors: ['author1', 'author2'],
+          since: 1000,
+          until: 2000,
+        },
+      ]);
+      expect(result).toHaveLength(2);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+    });
+
+    it('should handle multiple kinds with time range', async () => {
+      const result = await storage.getEvents([
+        {
+          kinds: [1, 2],
+          since: 1000,
+          until: 2000,
+        },
+      ]);
+      expect(result).toHaveLength(2);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+    });
+
+    it('should handle multiple authors and kinds with time range', async () => {
+      const result = await storage.getEvents([
+        {
+          authors: ['author1', 'author2'],
+          kinds: [1, 2],
+          since: 1000,
+          until: 2000,
+        },
+      ]);
+      expect(result).toHaveLength(2);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+    });
+  });
+
   describe('deleteEvent', () => {
     beforeEach(async () => {
       await storage.saveEvent(mockEvent);
