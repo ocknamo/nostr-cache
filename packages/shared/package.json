@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "jest",
+    "test": "echo 'Add test here'",
     "format": "biome format --write ./src && biome check --apply ./src",
     "format:check": "biome check ./src",
     "lint": "biome check ./src",

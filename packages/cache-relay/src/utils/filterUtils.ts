@@ -177,7 +177,7 @@ export function mergeFilters(filters: Filter[]): Filter {
         (merged[key] as unknown[]).push(...(values as string[]));
 
         // Remove duplicates
-        merged[key] = [...new Set((merged[key] as unknown[]))];
+        merged[key] = [...new Set(merged[key] as unknown[])];
       }
     }
   }
