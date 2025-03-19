@@ -50,7 +50,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * @returns Formatted tag string or null if not indexable
    */
   private formatTagForIndex(tag: string[]): string | null {
+    if (tag.length < 2) return null;
     const [key, value] = tag;
+    if (!key || !value) return null;
     if (key.length === 1 && /^[a-zA-Z]$/.test(key)) {
       return `${key}:${value}`;
     }
@@ -119,7 +121,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    */
   private getIndexedTagValues(tagName: string, values: string[]): string[] {
     if (tagName.length === 1 && /^[a-zA-Z]$/.test(tagName)) {
-      return values.map((value) => `${tagName}:${value}`);
+      return values
+        .filter((value) => value && typeof value === 'string')
+        .map((value) => `${tagName}:${value}`);
     }
     return [];
   }
@@ -138,9 +142,12 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     for (const [key, values] of Object.entries(tagFilters)) {
       if (key.startsWith('#') && Array.isArray(values) && values.length > 0) {
         const tagName = key.slice(1);
-        const indexedValues = this.getIndexedTagValues(tagName, values as string[]);
-        if (indexedValues.length > 0) {
-          indexedTagValues.push(...indexedValues);
+        // タグ名が単一のアルファベットであることを確認
+        if (tagName.length === 1 && /^[a-zA-Z]$/.test(tagName)) {
+          const indexedValues = this.getIndexedTagValues(tagName, values as string[]);
+          if (indexedValues.length > 0) {
+            indexedTagValues.push(...indexedValues);
+          }
         }
       }
     }
@@ -222,6 +229,22 @@ export class DexieStorage extends Dexie implements StorageAdapter {
               content: event.content,
               sig: event.sig,
             };
+
+            // タグフィルターの追加検証
+            for (const [key, values] of Object.entries(filter)) {
+              if (key.startsWith('#')) {
+                const tagName = key.slice(1);
+                // タグ名が無効な場合は結果に含めない
+                if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
+                  return false;
+                }
+                // タグ値が無効な場合は結果に含めない
+                if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
+                  return false;
+                }
+              }
+            }
+
             return eventMatchesFilter(nostrEvent, filter);
           });
 

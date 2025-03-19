@@ -218,4 +218,95 @@ describe('DexieStorage', () => {
       expect(events).toHaveLength(0);
     });
   });
+
+  describe('Tag Indexing', () => {
+    it('should limit indexed tags to MAX_INDEXED_TAGS', async () => {
+      // 150個のタグを持つイベントを作成（MAX_INDEXED_TAGS = 100を超える）
+      const manyTags = Array.from({ length: 150 }, (_, i) => ['p', `pubkey${i}`]);
+      const event = { ...mockEvent, id: 'many-tags-event', tags: manyTags };
+      await storage.saveEvent(event);
+
+      // 保存されたイベントを取得して検証
+      const result = await storage.getEvents([{ ids: ['many-tags-event'] }]);
+      // 元のタグは全て保持されているべき
+      expect(result[0].tags.length).toBe(150);
+
+      // indexed_tagsは100に制限されているべき
+      // 100番目のタグは検索可能
+      const tagSearchResult1 = await storage.getEvents([{ '#p': ['pubkey99'] }]);
+      expect(tagSearchResult1).toHaveLength(1);
+
+      // 101番目以降のタグは検索できないはず
+      const tagSearchResult2 = await storage.getEvents([{ '#p': ['pubkey120'] }]);
+      expect(tagSearchResult2).toHaveLength(0);
+    });
+
+    it('should prioritize specific tag types', async () => {
+      const mixedTags = [
+        ['x', 'value1'], // 非優先タグ
+        ['e', 'event1'], // 優先タグ
+        ['y', 'value2'], // 非優先タグ
+        ['p', 'pubkey1'], // 優先タグ
+        ['z', 'value3'], // 非優先タグ
+        ['a', 'value4'], // 優先タグ
+      ];
+      const event = { ...mockEvent, id: 'mixed-tags-event', tags: mixedTags };
+      await storage.saveEvent(event);
+
+      // 優先タグによる検索が機能することを確認
+      const priorityTagResults = await Promise.all([
+        storage.getEvents([{ '#e': ['event1'] }]),
+        storage.getEvents([{ '#p': ['pubkey1'] }]),
+        storage.getEvents([{ '#a': ['value4'] }]),
+      ]);
+
+      for (const result of priorityTagResults) {
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('mixed-tags-event');
+      }
+
+      // 非優先タグでも検索可能なことを確認
+      const nonPriorityResults = await Promise.all([
+        storage.getEvents([{ '#x': ['value1'] }]),
+        storage.getEvents([{ '#y': ['value2'] }]),
+        storage.getEvents([{ '#z': ['value3'] }]),
+      ]);
+
+      for (const result of nonPriorityResults) {
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('mixed-tags-event');
+      }
+    });
+
+    it('should handle invalid tag formats', async () => {
+      const invalidTags = [
+        [], // 空配列
+        [''], // 空文字列
+        ['abc', 'value'], // 2文字以上のキー
+        ['1', 'value'], // 数字のキー
+        ['@', 'value'], // 特殊文字のキー
+        ['p'], // 値なし
+      ];
+      const event = { ...mockEvent, id: 'invalid-tags-event', tags: invalidTags };
+      await storage.saveEvent(event);
+
+      // イベントは保存されるべき
+      const result = await storage.getEvents([{ ids: ['invalid-tags-event'] }]);
+      expect(result).toHaveLength(1);
+      expect(result[0].tags).toEqual(invalidTags);
+
+      // 無効なタグで検索しても結果が返ってこないことを確認
+      const invalidTagSearches = await Promise.all([
+        storage.getEvents([{ '#': [''] }]),
+        storage.getEvents([{ '#abc': ['value'] }]),
+        storage.getEvents([{ '#1': ['value'] }]),
+        storage.getEvents([{ '#@': ['value'] }]),
+        storage.getEvents([{ '#p': [''] }]),
+      ]);
+
+      for (const result of invalidTagSearches) {
+        expect(result).toHaveLength(0);
+      }
+    });
+  });
 });
