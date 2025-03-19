@@ -67,6 +67,11 @@
 - "ci: "
   - CI/CDの修正
 
+
+#### git push
+
+pushはユーザは行うので実行しない
+
 ## Documentation Requirements
 
 - Please comment each function.
