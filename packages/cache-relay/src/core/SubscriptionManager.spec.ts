@@ -174,32 +174,129 @@ describe('SubscriptionManager', () => {
     });
   });
 
-  describe('findMatchingSubscriptions', () => {
-    it('should find subscriptions that match an event', () => {
-      subscriptionManager.createSubscription('client1', 'sub1', [sampleFilter1]);
-      subscriptionManager.createSubscription('client2', 'sub2', [sampleFilter2]);
-
-      const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
-
-      expect(matches.size).toBe(2);
-      expect(matches.get('client1')).toBeDefined();
-      expect(matches.get('client2')).toBeDefined();
-    });
-
-    it('should return an empty map if no subscriptions match', () => {
-      subscriptionManager.createSubscription('client1', 'sub1', [
-        {
-          kinds: [2], // Different kind
-          authors: ['def'], // Different author
-        },
-      ]);
-
-      const matches = subscriptionManager.findMatchingSubscriptions({
-        ...sampleEvent,
-        kind: 3, // Different kind
+  describe('filter matching', () => {
+    describe('basic filters', () => {
+      it('should match on kinds', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [{ kinds: [1, 2] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
       });
 
-      expect(matches.size).toBe(0);
+      it('should match on authors', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [{ authors: ['abc', 'def'] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should match on ids', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [{ ids: ['123'] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+    });
+
+    describe('time-based filters', () => {
+      it('should match events after since', () => {
+        const since = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+        subscriptionManager.createSubscription('client1', 'sub1', [{ since }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should match events before until', () => {
+        const until = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+        subscriptionManager.createSubscription('client1', 'sub1', [{ until }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should not match events outside time range', () => {
+        const since = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+        subscriptionManager.createSubscription('client1', 'sub1', [{ since }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.size).toBe(0);
+      });
+    });
+
+    describe('tag filters', () => {
+      it('should match on #e tags', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [{ '#e': ['456'] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should match on #p tags', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [{ '#p': ['def'] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should handle multiple tag values', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [
+          { '#e': ['456', '789'], '#p': ['def', 'ghi'] },
+        ]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+    });
+
+    describe('complex filters', () => {
+      it('should match on multiple filter criteria', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [
+          {
+            kinds: [1],
+            authors: ['abc'],
+            '#e': ['456'],
+            since: Math.floor(Date.now() / 1000) - 3600,
+          },
+        ]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should match if any filter matches', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [
+          { kinds: [2] }, // Doesn't match
+          { authors: ['abc'] }, // Matches
+        ]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+
+      it('should handle empty filters', () => {
+        subscriptionManager.createSubscription('client1', 'sub1', [{}]);
+        const matches = subscriptionManager.findMatchingSubscriptions(sampleEvent);
+        expect(matches.get('client1')).toBeDefined();
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should handle events with no tags', () => {
+        const eventWithNoTags = { ...sampleEvent, tags: [] };
+        subscriptionManager.createSubscription('client1', 'sub1', [{ '#e': ['456'] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(eventWithNoTags);
+        expect(matches.size).toBe(0);
+      });
+
+      it('should handle events with invalid timestamps', () => {
+        const now = Math.floor(Date.now() / 1000);
+        const eventWithInvalidTimestamp = { ...sampleEvent, created_at: now + 3600 }; // 1時間後
+        subscriptionManager.createSubscription('client1', 'sub1', [
+          { until: now }, // 現在時刻までのイベントのみ
+        ]);
+        const matches = subscriptionManager.findMatchingSubscriptions(eventWithInvalidTimestamp);
+        expect(matches.size).toBe(0);
+      });
+
+      it('should handle malformed tag values', () => {
+        const eventWithMalformedTags: NostrEvent = {
+          ...sampleEvent,
+          tags: [['e'], ['p', ''], ['x', '']], // 空文字列を使用
+        };
+        subscriptionManager.createSubscription('client1', 'sub1', [{ '#e': [''], '#p': [''] }]);
+        const matches = subscriptionManager.findMatchingSubscriptions(eventWithMalformedTags);
+        expect(matches.size).toBe(0);
+      });
     });
   });
 });
