@@ -18,23 +18,31 @@ import {
   messageToWire,
   wireToMessage,
 } from '@nostr-cache/types';
+import { EventHandler } from '../event/EventHandler';
 import { EventValidator } from '../event/EventValidator';
+import { StorageAdapter } from '../storage/StorageAdapter';
+import { SubscriptionManager } from './SubscriptionManager';
 
 /**
  * Message handler class
  * Handles incoming messages from clients
  */
 export class MessageHandler {
-  private eventValidator: EventValidator;
+  private eventHandler: EventHandler;
+  private storage: StorageAdapter;
+  private subscriptionManager: SubscriptionManager;
   private responseCallbacks: ((clientId: string, message: NostrWireMessage) => void)[] = [];
 
   /**
    * Create a new MessageHandler instance
    *
-   * @param eventValidator Event validator
+   * @param storage Storage adapter
+   * @param subscriptionManager Subscription manager
    */
-  constructor(eventValidator: EventValidator) {
-    this.eventValidator = eventValidator;
+  constructor(storage: StorageAdapter, subscriptionManager: SubscriptionManager) {
+    this.storage = storage;
+    this.subscriptionManager = subscriptionManager;
+    this.eventHandler = new EventHandler(storage, subscriptionManager);
   }
 
   /**
@@ -89,24 +97,28 @@ export class MessageHandler {
    * @param message Message received
    * @private
    */
-  private handleEventMessage(clientId: string, message: EventMessage): void {
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Validate the event
-    // 2. Store the event
-    // 3. Send OK message
-    // 4. Broadcast the event to subscribers
-
+  private async handleEventMessage(clientId: string, message: EventMessage): Promise<void> {
     const event = message.event;
 
-    // Validate the event
-    if (!this.eventValidator.validate(event)) {
+    // イベントの処理
+    const { success, matches } = await this.eventHandler.handleEvent(event);
+
+    if (!success) {
       this.sendOK(clientId, event.id, false, 'invalid: event validation failed');
       return;
     }
 
-    // For now, just acknowledge the event
+    // OK レスポンスの送信
     this.sendOK(clientId, event.id, true);
+
+    // マッチするサブスクリプションへのブロードキャスト
+    if (matches) {
+      for (const [targetClientId, subscriptions] of matches.entries()) {
+        for (const subscription of subscriptions) {
+          this.sendEvent(targetClientId, subscription.id, event);
+        }
+      }
+    }
   }
 
   /**
@@ -116,14 +128,7 @@ export class MessageHandler {
    * @param message Message received
    * @private
    */
-  private handleReqMessage(clientId: string, message: ReqMessage): void {
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Parse the subscription ID and filters
-    // 2. Create a subscription
-    // 3. Send matching events
-    // 4. Send EOSE message
-
+  private async handleReqMessage(clientId: string, message: ReqMessage): Promise<void> {
     if (!message.subscriptionId || !Array.isArray(message.filters)) {
       this.sendNotice(clientId, 'Invalid REQ message format');
       return;
@@ -131,7 +136,24 @@ export class MessageHandler {
 
     const { subscriptionId, filters } = message;
 
-    // For now, just acknowledge the subscription
+    // サブスクリプションの作成
+    const subscription = this.subscriptionManager.createSubscription(
+      clientId,
+      subscriptionId,
+      filters
+    );
+
+    // 既存のイベントの取得と送信
+    try {
+      const events = await this.storage.getEvents(filters);
+      for (const event of events) {
+        this.sendEvent(clientId, subscriptionId, event);
+      }
+    } catch (error) {
+      console.error('Failed to get events:', error);
+    }
+
+    // EOSEの送信
     this.sendEOSE(clientId, subscriptionId);
   }
 
@@ -143,11 +165,6 @@ export class MessageHandler {
    * @private
    */
   private handleCloseMessage(clientId: string, message: CloseMessage): void {
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Parse the subscription ID
-    // 2. Close the subscription
-
     if (!message.subscriptionId) {
       this.sendNotice(clientId, 'Invalid CLOSE message format');
       return;
@@ -155,8 +172,11 @@ export class MessageHandler {
 
     const { subscriptionId } = message;
 
-    // For now, just log the close
-    console.log(`Client ${clientId} closed subscription ${subscriptionId}`);
+    // サブスクリプションの削除
+    const removed = this.subscriptionManager.removeSubscription(clientId, subscriptionId);
+    if (removed) {
+      this.sendClosed(clientId, subscriptionId, 'subscription closed');
+    }
   }
 
   /**

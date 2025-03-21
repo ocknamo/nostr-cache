@@ -4,25 +4,35 @@
  * Handles event processing and storage
  */
 
-import { NostrEvent } from '@nostr-cache/types';
+import { Filter, NostrEvent } from '@nostr-cache/types';
+import { SubscriptionManager } from '../core/SubscriptionManager';
 import { StorageAdapter } from '../storage/StorageAdapter';
 import { EventValidator } from './EventValidator';
+
+interface Subscription {
+  clientId: string;
+  id: string;
+  filters: Filter[];
+  createdAt: number;
+}
 
 /**
  * Event handler class
  * Handles event processing and storage
  */
 export class EventHandler {
-  private storage: StorageAdapter;
   private validator: EventValidator;
 
   /**
    * Create a new EventHandler instance
    *
    * @param storage Storage adapter
+   * @param subscriptionManager Subscription manager
    */
-  constructor(storage: StorageAdapter) {
-    this.storage = storage;
+  constructor(
+    private storage: StorageAdapter,
+    private subscriptionManager: SubscriptionManager
+  ) {
     this.validator = new EventValidator();
   }
 
@@ -30,16 +40,33 @@ export class EventHandler {
    * Handle an event
    *
    * @param event Event to handle
-   * @returns Promise resolving to true if the event was handled successfully
+   * @returns Promise resolving to object containing success status and matching subscriptions
    */
-  async handleEvent(event: NostrEvent): Promise<boolean> {
+  async handleEvent(event: NostrEvent): Promise<{
+    success: boolean;
+    matches?: Map<string, Subscription[]>;
+  }> {
     // Validate the event
     if (!this.validator.validate(event)) {
-      return false;
+      return { success: false };
+    }
+
+    // イベントの種類に応じた処理
+    if (this.isEphemeralEvent(event)) {
+      // 永続化せずにサブスクリプションマッチングのみ
+      const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+      return { success: true, matches };
     }
 
     // Store the event
-    return await this.storage.saveEvent(event);
+    const saved = await this.storage.saveEvent(event);
+    if (!saved) {
+      return { success: false };
+    }
+
+    // Find matching subscriptions
+    const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+    return { success: true, matches };
   }
 
   /**
