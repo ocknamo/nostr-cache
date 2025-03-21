@@ -1,4 +1,4 @@
-import { NostrMessage } from '@nostr-cache/types';
+import { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
 import { WebSocketEmulator } from './WebSocketEmulator';
 
 describe('WebSocketEmulator', () => {
@@ -69,10 +69,16 @@ describe('WebSocketEmulator', () => {
     });
 
     it('should handle valid Nostr messages', (done) => {
-      const message: NostrMessage = [
-        'EVENT',
-        { id: '123', kind: 1, content: 'test', created_at: 0, pubkey: '', sig: '', tags: [] },
-      ];
+      const event: NostrEvent = {
+        id: '123',
+        kind: 1,
+        content: 'test',
+        created_at: 0,
+        pubkey: '',
+        sig: '',
+        tags: [],
+      };
+      const message: NostrWireMessage = ['EVENT', event];
 
       emulator.onMessage((clientId, receivedMessage) => {
         expect(clientId).toBe('cache-relay');
@@ -135,7 +141,7 @@ describe('WebSocketEmulator', () => {
 
   describe('send()', () => {
     it('should send messages to connected client', (done) => {
-      const message: NostrMessage = ['NOTICE', 'test message'];
+      const message: NostrWireMessage = ['NOTICE', 'test message'];
 
       emulator.start().then(() => {
         const ws = new WebSocket(defaultUrl);
@@ -152,7 +158,8 @@ describe('WebSocketEmulator', () => {
 
     it('should not throw when sending to non-existent client', () => {
       expect(() => {
-        emulator.send('non-existent-client', ['NOTICE', 'test']);
+        const message: NostrWireMessage = ['NOTICE', 'test'];
+        emulator.send('non-existent-client', message);
       }).not.toThrow();
     });
   });

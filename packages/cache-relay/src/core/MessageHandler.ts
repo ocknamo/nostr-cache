@@ -6,14 +6,17 @@
 
 import {
   CloseMessage,
-  EoseMessage,
+  ClosedResponse,
+  EoseResponse,
   EventMessage,
-  Filter,
   NostrEvent,
-  NostrMessage,
-  NoticeMessage,
-  OkMessage,
+  NostrMessageType,
+  NostrWireMessage,
+  NoticeResponse,
+  OkResponse,
   ReqMessage,
+  messageToWire,
+  wireToMessage,
 } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 
@@ -23,7 +26,7 @@ import { EventValidator } from '../event/EventValidator';
  */
 export class MessageHandler {
   private eventValidator: EventValidator;
-  private responseCallbacks: ((clientId: string, message: NostrMessage) => void)[] = [];
+  private responseCallbacks: ((clientId: string, message: NostrWireMessage) => void)[] = [];
 
   /**
    * Create a new MessageHandler instance
@@ -38,28 +41,44 @@ export class MessageHandler {
    * Handle an incoming message
    *
    * @param clientId ID of the client that sent the message
-   * @param message Message received
+   * @param wireMessage Message received in wire format
    */
-  handleMessage(clientId: string, message: NostrMessage): void {
-    if (!Array.isArray(message) || message.length === 0) {
+  handleMessage(clientId: string, wireMessage: NostrWireMessage): void {
+    if (!Array.isArray(wireMessage)) {
       this.sendNotice(clientId, 'Invalid message format');
       return;
     }
 
-    const messageType = message[0];
+    const [type] = wireMessage;
 
-    switch (messageType) {
-      case 'EVENT':
-        this.handleEventMessage(clientId, message as EventMessage);
+    switch (type) {
+      case NostrMessageType.EVENT:
+        if (wireMessage.length < 2) {
+          this.sendNotice(clientId, 'Invalid EVENT message format');
+          return;
+        }
+        this.handleEventMessage(clientId, { type, event: wireMessage[1] } as EventMessage);
         break;
-      case 'REQ':
-        this.handleReqMessage(clientId, message as ReqMessage);
+      case NostrMessageType.REQ:
+        if (wireMessage.length < 2) {
+          this.sendNotice(clientId, 'Invalid REQ message format');
+          return;
+        }
+        this.handleReqMessage(clientId, {
+          type,
+          subscriptionId: wireMessage[1],
+          filters: wireMessage.slice(2),
+        } as ReqMessage);
         break;
-      case 'CLOSE':
-        this.handleCloseMessage(clientId, message as CloseMessage);
+      case NostrMessageType.CLOSE:
+        if (wireMessage.length < 2) {
+          this.sendNotice(clientId, 'Invalid CLOSE message format');
+          return;
+        }
+        this.handleCloseMessage(clientId, { type, subscriptionId: wireMessage[1] } as CloseMessage);
         break;
       default:
-        this.sendNotice(clientId, `Unknown message type: ${messageType}`);
+        this.sendNotice(clientId, 'Unknown message type: UNKNOWN');
     }
   }
 
@@ -78,12 +97,7 @@ export class MessageHandler {
     // 3. Send OK message
     // 4. Broadcast the event to subscribers
 
-    if (message.length < 2) {
-      this.sendNotice(clientId, 'Invalid EVENT message format');
-      return;
-    }
-
-    const event = message[1];
+    const event = message.event;
 
     // Validate the event
     if (!this.eventValidator.validate(event)) {
@@ -92,7 +106,7 @@ export class MessageHandler {
     }
 
     // For now, just acknowledge the event
-    this.sendOK(clientId, event.id, true, '');
+    this.sendOK(clientId, event.id, true);
   }
 
   /**
@@ -110,13 +124,12 @@ export class MessageHandler {
     // 3. Send matching events
     // 4. Send EOSE message
 
-    if (message.length < 3) {
+    if (!message.subscriptionId || !Array.isArray(message.filters)) {
       this.sendNotice(clientId, 'Invalid REQ message format');
       return;
     }
 
-    const subscriptionId = message[1];
-    const filters = message.slice(2);
+    const { subscriptionId, filters } = message;
 
     // For now, just acknowledge the subscription
     this.sendEOSE(clientId, subscriptionId);
@@ -135,12 +148,12 @@ export class MessageHandler {
     // 1. Parse the subscription ID
     // 2. Close the subscription
 
-    if (message.length < 2) {
+    if (!message.subscriptionId) {
       this.sendNotice(clientId, 'Invalid CLOSE message format');
       return;
     }
 
-    const subscriptionId = message[1];
+    const { subscriptionId } = message;
 
     // For now, just log the close
     console.log(`Client ${clientId} closed subscription ${subscriptionId}`);
@@ -154,7 +167,12 @@ export class MessageHandler {
    * @param event Event to send
    */
   sendEvent(clientId: string, subscriptionId: string, event: NostrEvent): void {
-    this.sendResponse(clientId, ['EVENT', subscriptionId, event]);
+    const message: EventMessage = {
+      type: NostrMessageType.EVENT,
+      event,
+      subscriptionId,
+    };
+    this.sendResponse(clientId, message);
   }
 
   /**
@@ -162,11 +180,17 @@ export class MessageHandler {
    *
    * @param clientId ID of the client to send to
    * @param eventId ID of the event
-   * @param accepted Whether the event was accepted
+   * @param success Whether the event was accepted
    * @param message Message to include
    */
-  sendOK(clientId: string, eventId: string, accepted: boolean, message: string): void {
-    this.sendResponse(clientId, ['OK', eventId, accepted, message]);
+  sendOK(clientId: string, eventId: string, success: boolean, message = ''): void {
+    const response: OkResponse = {
+      type: NostrMessageType.OK,
+      eventId,
+      success,
+      message,
+    };
+    this.sendResponse(clientId, response);
   }
 
   /**
@@ -176,7 +200,11 @@ export class MessageHandler {
    * @param subscriptionId Subscription ID
    */
   sendEOSE(clientId: string, subscriptionId: string): void {
-    this.sendResponse(clientId, ['EOSE', subscriptionId]);
+    const response: EoseResponse = {
+      type: NostrMessageType.EOSE,
+      subscriptionId,
+    };
+    this.sendResponse(clientId, response);
   }
 
   /**
@@ -187,7 +215,12 @@ export class MessageHandler {
    * @param message Message to include
    */
   sendClosed(clientId: string, subscriptionId: string, message: string): void {
-    this.sendResponse(clientId, ['CLOSED', subscriptionId, message]);
+    const response: ClosedResponse = {
+      type: NostrMessageType.CLOSED,
+      subscriptionId,
+      message,
+    };
+    this.sendResponse(clientId, response);
   }
 
   /**
@@ -197,7 +230,11 @@ export class MessageHandler {
    * @param message Message to include
    */
   sendNotice(clientId: string, message: string): void {
-    this.sendResponse(clientId, ['NOTICE', message]);
+    const response: NoticeResponse = {
+      type: NostrMessageType.NOTICE,
+      message,
+    };
+    this.sendResponse(clientId, response);
   }
 
   /**
@@ -207,9 +244,13 @@ export class MessageHandler {
    * @param message Message to send
    * @private
    */
-  private sendResponse(clientId: string, message: unknown[]): void {
+  private sendResponse(
+    clientId: string,
+    message: EventMessage | OkResponse | EoseResponse | ClosedResponse | NoticeResponse
+  ): void {
+    const wireMessage = messageToWire(message);
     for (const callback of this.responseCallbacks) {
-      callback(clientId, message as NostrMessage);
+      callback(clientId, wireMessage);
     }
   }
 
@@ -218,7 +259,7 @@ export class MessageHandler {
    *
    * @param callback Function to call when a response is sent
    */
-  onResponse(callback: (clientId: string, message: NostrMessage) => void): void {
+  onResponse(callback: (clientId: string, message: NostrWireMessage) => void): void {
     this.responseCallbacks.push(callback);
   }
 }

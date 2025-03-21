@@ -7,12 +7,14 @@
 import {
   Filter,
   NostrEvent,
-  NostrMessage,
+  NostrWireMessage,
   RelayConnectHandler,
   RelayDisconnectHandler,
   RelayEoseHandler,
   RelayErrorHandler,
   RelayEventHandler,
+  messageToWire,
+  wireToMessage,
 } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 import { StorageAdapter } from '../storage/StorageAdapter';
@@ -140,7 +142,7 @@ export class NostrCacheRelay {
       console.log(`Client disconnected: ${clientId}`);
     });
 
-    this.transport.onMessage((clientId: string, message: NostrMessage) => {
+    this.transport.onMessage((clientId: string, message: NostrWireMessage) => {
       this.handleMessage(clientId, message);
     });
   }
@@ -152,13 +154,13 @@ export class NostrCacheRelay {
    * @param message Message received
    * @private
    */
-  private handleMessage(clientId: string, message: NostrMessage): void {
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Parse the message type (EVENT, REQ, CLOSE)
-    // 2. Handle each message type appropriately
-
-    console.log(`Received message from ${clientId}:`, message);
+  private handleMessage(clientId: string, wireMessage: NostrWireMessage): void {
+    try {
+      const message = wireToMessage(wireMessage);
+      console.log(`Received message from ${clientId}:`, message);
+    } catch (error) {
+      console.error(`Error processing message from ${clientId}:`, error);
+    }
   }
 
   /**

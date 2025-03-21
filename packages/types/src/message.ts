@@ -1,89 +1,252 @@
-/**
- * Nostr message type definitions
- */
-
 import { Filter, NostrEvent } from './nostr';
 
 /**
- * Nostr message types
+ * Nostr message types as defined in NIP-01
  */
-export type NostrMessageType = 'EVENT' | 'REQ' | 'CLOSE' | 'NOTICE' | 'OK' | 'EOSE' | 'CLOSED';
+export const NostrMessageType = {
+  EVENT: 'EVENT',
+  REQ: 'REQ',
+  CLOSE: 'CLOSE',
+  OK: 'OK',
+  EOSE: 'EOSE',
+  CLOSED: 'CLOSED',
+  NOTICE: 'NOTICE',
+} as const;
+
+export type NostrMessageType = (typeof NostrMessageType)[keyof typeof NostrMessageType];
 
 /**
- * Base Nostr message
+ * Nostr wire format message types (array format used in WebSocket communication)
  */
-export type NostrMessage =
-  | EventMessage
-  | ReqMessage
-  | CloseMessage
-  | NoticeMessage
-  | OkMessage
-  | EoseMessage
-  | ClosedMessage;
+export type NostrWireMessage =
+  | ['EVENT', NostrEvent]
+  | ['EVENT', string, NostrEvent]
+  | ['REQ', string, ...Filter[]]
+  | ['CLOSE', string]
+  | ['OK', string, boolean, string?]
+  | ['EOSE', string]
+  | ['CLOSED', string, string?]
+  | ['NOTICE', string];
 
 /**
- * EVENT message: Client to relay to publish an event
- * ["EVENT", <event JSON>]
+ * Base interface for all Nostr messages
  */
-export type EventMessage = [type: 'EVENT', event: NostrEvent];
+export interface NostrMessage {
+  type: NostrMessageType;
+}
 
 /**
- * REQ message: Client to relay to request events and subscribe
- * ["REQ", <subscription_id>, <filter JSON>, <filter JSON>...]
+ * EVENT message for publishing new events
  */
-export type ReqMessage = [type: 'REQ', subscriptionId: string, ...filters: Filter[]];
+export interface EventMessage extends NostrMessage {
+  type: typeof NostrMessageType.EVENT;
+  event: NostrEvent;
+  subscriptionId?: string;
+}
 
 /**
- * CLOSE message: Client to relay to stop a subscription
- * ["CLOSE", <subscription_id>]
+ * REQ message for requesting events with filters
  */
-export type CloseMessage = [type: 'CLOSE', subscriptionId: string];
+export interface ReqMessage extends NostrMessage {
+  type: typeof NostrMessageType.REQ;
+  subscriptionId: string;
+  filters: Filter[];
+}
 
 /**
- * NOTICE message: Relay to client to send human-readable messages
- * ["NOTICE", <message>]
+ * CLOSE message for closing a subscription
  */
-export type NoticeMessage = [type: 'NOTICE', message: string];
+export interface CloseMessage extends NostrMessage {
+  type: typeof NostrMessageType.CLOSE;
+  subscriptionId: string;
+}
 
 /**
- * OK message: Relay to client to acknowledge an EVENT
- * ["OK", <event_id>, <success>, <message>]
+ * OK response for event publication
  */
-export type OkMessage = [type: 'OK', eventId: string, success: boolean, message: string];
+export interface OkResponse extends NostrMessage {
+  type: typeof NostrMessageType.OK;
+  eventId: string;
+  success: boolean;
+  message?: string;
+}
 
 /**
- * EOSE message: Relay to client to indicate end of stored events
- * ["EOSE", <subscription_id>]
+ * EOSE (End of Stored Events) response
  */
-export type EoseMessage = [type: 'EOSE', subscriptionId: string];
+export interface EoseResponse extends NostrMessage {
+  type: typeof NostrMessageType.EOSE;
+  subscriptionId: string;
+}
 
 /**
- * CLOSED message: Relay to client to indicate a subscription was closed
- * ["CLOSED", <subscription_id>, <message>]
+ * CLOSED response for subscription termination
  */
-export type ClosedMessage = [type: 'CLOSED', subscriptionId: string, message: string];
+export interface ClosedResponse extends NostrMessage {
+  type: typeof NostrMessageType.CLOSED;
+  subscriptionId: string;
+  message?: string;
+}
 
 /**
- * Event handler type for relay events
+ * NOTICE response for general notifications
  */
-export type RelayEventHandler = (event: NostrEvent) => void;
+export interface NoticeResponse extends NostrMessage {
+  type: typeof NostrMessageType.NOTICE;
+  message: string;
+}
 
 /**
- * Connect handler type for relay connections
+ * Union type of all possible Nostr messages
+ */
+export type NostrMessageUnion = EventMessage | ReqMessage | CloseMessage;
+
+/**
+ * Union type of all possible Nostr responses
+ */
+export type NostrResponseUnion = OkResponse | EoseResponse | ClosedResponse | NoticeResponse;
+
+/**
+ * Relay event handlers
  */
 export type RelayConnectHandler = () => void;
-
-/**
- * Disconnect handler type for relay disconnections
- */
 export type RelayDisconnectHandler = () => void;
-
-/**
- * Error handler type for relay errors
- */
 export type RelayErrorHandler = (error: Error) => void;
+export type RelayEventHandler = (event: NostrEvent) => void;
+export type RelayEoseHandler = (subscriptionId: string) => void;
 
 /**
- * EOSE handler type for relay end of stored events
+ * Type guards for message types
  */
-export type RelayEoseHandler = (subscriptionId: string) => void;
+export function isEventMessage(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is EventMessage {
+  return message.type === NostrMessageType.EVENT;
+}
+
+export function isReqMessage(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is ReqMessage {
+  return message.type === NostrMessageType.REQ;
+}
+
+export function isCloseMessage(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is CloseMessage {
+  return message.type === NostrMessageType.CLOSE;
+}
+
+export function isOkResponse(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is OkResponse {
+  return message.type === NostrMessageType.OK;
+}
+
+export function isEoseResponse(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is EoseResponse {
+  return message.type === NostrMessageType.EOSE;
+}
+
+export function isClosedResponse(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is ClosedResponse {
+  return message.type === NostrMessageType.CLOSED;
+}
+
+export function isNoticeResponse(
+  message: NostrMessageUnion | NostrResponseUnion
+): message is NoticeResponse {
+  return message.type === NostrMessageType.NOTICE;
+}
+
+/**
+ * Convert wire format message to internal message format
+ */
+export function wireToMessage(wire: NostrWireMessage): NostrMessageUnion | NostrResponseUnion {
+  const [type, ...params] = wire;
+
+  switch (type) {
+    case NostrMessageType.EVENT: {
+      if (params.length === 1) {
+        return {
+          type: NostrMessageType.EVENT,
+          event: params[0] as NostrEvent,
+        };
+      }
+      return {
+        type: NostrMessageType.EVENT,
+        subscriptionId: params[0] as string,
+        event: params[1] as NostrEvent,
+      };
+    }
+    case NostrMessageType.REQ:
+      return {
+        type: NostrMessageType.REQ,
+        subscriptionId: params[0] as string,
+        filters: params.slice(1) as Filter[],
+      };
+    case NostrMessageType.CLOSE:
+      return {
+        type: NostrMessageType.CLOSE,
+        subscriptionId: params[0] as string,
+      };
+    case NostrMessageType.OK:
+      return {
+        type: NostrMessageType.OK,
+        eventId: params[0] as string,
+        success: params[1] as boolean,
+        message: params[2] as string | undefined,
+      };
+    case NostrMessageType.EOSE:
+      return {
+        type: NostrMessageType.EOSE,
+        subscriptionId: params[0] as string,
+      };
+    case NostrMessageType.CLOSED:
+      return {
+        type: NostrMessageType.CLOSED,
+        subscriptionId: params[0] as string,
+        message: params[1] as string | undefined,
+      };
+    case NostrMessageType.NOTICE:
+      return {
+        type: NostrMessageType.NOTICE,
+        message: params[0] as string,
+      };
+    default:
+      throw new Error(`Unknown message type: ${type}`);
+  }
+}
+
+/**
+ * Convert internal message format to wire format
+ */
+export function messageToWire(message: NostrMessageUnion | NostrResponseUnion): NostrWireMessage {
+  if (isEventMessage(message)) {
+    return message.subscriptionId
+      ? [NostrMessageType.EVENT, message.subscriptionId, message.event]
+      : [NostrMessageType.EVENT, message.event];
+  }
+  if (isReqMessage(message)) {
+    return [NostrMessageType.REQ, message.subscriptionId, ...message.filters];
+  }
+  if (isCloseMessage(message)) {
+    return [NostrMessageType.CLOSE, message.subscriptionId];
+  }
+  if (isOkResponse(message)) {
+    return [NostrMessageType.OK, message.eventId, message.success, message.message || ''];
+  }
+  if (isEoseResponse(message)) {
+    return [NostrMessageType.EOSE, message.subscriptionId];
+  }
+  if (isClosedResponse(message)) {
+    return message.message
+      ? [NostrMessageType.CLOSED, message.subscriptionId, message.message]
+      : [NostrMessageType.CLOSED, message.subscriptionId];
+  }
+  if (isNoticeResponse(message)) {
+    return [NostrMessageType.NOTICE, message.message];
+  }
+  throw new Error('Unknown message type');
+}

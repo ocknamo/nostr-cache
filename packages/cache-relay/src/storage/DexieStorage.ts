@@ -108,7 +108,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       });
       return true;
     } catch (error) {
-      console.error('Failed to save event:', error);
+      console.error(
+        `Failed to save event: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
       return false;
     }
   }
@@ -277,7 +279,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         ).values()
       );
     } catch (error) {
-      console.error('Failed to get events:', error);
+      console.error(
+        `Failed to get events: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
       return [];
     }
   }
@@ -293,7 +297,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       const count = await this.events.where('id').equals(id).delete();
       return count > 0;
     } catch (error) {
-      console.error('Failed to delete event:', error);
+      console.error(
+        `Failed to delete event: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
       return false;
     }
   }
@@ -305,7 +311,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       await this.events.clear();
     } catch (error) {
-      console.error('Failed to clear events:', error);
+      console.error(
+        `Failed to clear events: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 }

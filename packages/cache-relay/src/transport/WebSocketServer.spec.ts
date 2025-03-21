@@ -1,4 +1,4 @@
-import { NostrMessage } from '@nostr-cache/types';
+import { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
 import { WebSocket } from 'ws';
 import { WebSocketServer } from './WebSocketServer';
 
@@ -49,10 +49,16 @@ describe('WebSocketServer', () => {
     });
 
     it('should handle valid Nostr messages', async () => {
-      const message: NostrMessage = [
-        'EVENT',
-        { id: '123', kind: 1, content: 'test', created_at: 0, pubkey: '', sig: '', tags: [] },
-      ];
+      const event: NostrEvent = {
+        id: '123',
+        kind: 1,
+        content: 'test',
+        created_at: 0,
+        pubkey: '',
+        sig: '',
+        tags: [],
+      };
+      const message: NostrWireMessage = ['EVENT', event];
 
       const messagePromise = new Promise<void>((resolve) => {
         server.onMessage((clientId, receivedMessage) => {
@@ -116,7 +122,7 @@ describe('WebSocketServer', () => {
 
   describe('send()', () => {
     it('should send messages to connected client', async () => {
-      const message: NostrMessage = ['NOTICE', 'test message'];
+      const message: NostrWireMessage = ['NOTICE', 'test message'];
       const messagePromise = new Promise<void>((resolve) => {
         client = new WebSocket('ws://localhost:3000');
         client.on('message', (data) => {
@@ -142,7 +148,8 @@ describe('WebSocketServer', () => {
 
     it('should not throw when sending to non-existent client', () => {
       expect(() => {
-        server.send('non-existent-client', ['NOTICE', 'test']);
+        const message: NostrWireMessage = ['NOTICE', 'test'];
+        server.send('non-existent-client', message);
       }).not.toThrow();
     });
   });

@@ -2,7 +2,7 @@
  * Tests for MessageHandler
  */
 
-import { NostrEvent, NostrMessage } from '@nostr-cache/types';
+import { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
 import { MessageHandler } from './MessageHandler';
 
@@ -35,7 +35,7 @@ describe('MessageHandler', () => {
 
   describe('handleMessage', () => {
     it('should handle invalid message format', () => {
-      messageHandler.handleMessage('client1', 'not-an-array' as unknown as NostrMessage);
+      messageHandler.handleMessage('client1', 'not-an-array' as unknown as NostrWireMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -44,7 +44,7 @@ describe('MessageHandler', () => {
     });
 
     it('should handle unknown message type', () => {
-      messageHandler.handleMessage('client1', ['UNKNOWN'] as unknown as NostrMessage);
+      messageHandler.handleMessage('client1', ['UNKNOWN'] as unknown as NostrWireMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -55,7 +55,7 @@ describe('MessageHandler', () => {
 
   describe('handleEventMessage', () => {
     it('should handle invalid EVENT message format', () => {
-      messageHandler.handleMessage('client1', ['EVENT'] as unknown as NostrMessage);
+      messageHandler.handleMessage('client1', ['EVENT'] as unknown as NostrWireMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -64,7 +64,8 @@ describe('MessageHandler', () => {
     });
 
     it('should validate the event', () => {
-      messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+      const message: NostrWireMessage = ['EVENT', sampleEvent];
+      messageHandler.handleMessage('client1', message);
 
       expect(mockEventValidator.validate).toHaveBeenCalledWith(sampleEvent);
     });
@@ -72,7 +73,8 @@ describe('MessageHandler', () => {
     it('should send OK message if event is valid', () => {
       (mockEventValidator.validate as jest.Mock).mockReturnValueOnce(true);
 
-      messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+      const message: NostrWireMessage = ['EVENT', sampleEvent];
+      messageHandler.handleMessage('client1', message);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', ['OK', sampleEvent.id, true, '']);
     });
@@ -80,7 +82,8 @@ describe('MessageHandler', () => {
     it('should send OK message with error if event is invalid', () => {
       (mockEventValidator.validate as jest.Mock).mockReturnValueOnce(false);
 
-      messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+      const message: NostrWireMessage = ['EVENT', sampleEvent];
+      messageHandler.handleMessage('client1', message);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'OK',
@@ -93,7 +96,7 @@ describe('MessageHandler', () => {
 
   describe('handleReqMessage', () => {
     it('should handle invalid REQ message format', () => {
-      messageHandler.handleMessage('client1', ['REQ'] as unknown as NostrMessage);
+      messageHandler.handleMessage('client1', ['REQ'] as unknown as NostrWireMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -102,7 +105,8 @@ describe('MessageHandler', () => {
     });
 
     it('should send EOSE message', () => {
-      messageHandler.handleMessage('client1', ['REQ', 'sub1', { kinds: [1] }]);
+      const message: NostrWireMessage = ['REQ', 'sub1', { kinds: [1] }];
+      messageHandler.handleMessage('client1', message);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
     });
@@ -110,7 +114,7 @@ describe('MessageHandler', () => {
 
   describe('handleCloseMessage', () => {
     it('should handle invalid CLOSE message format', () => {
-      messageHandler.handleMessage('client1', ['CLOSE'] as unknown as NostrMessage);
+      messageHandler.handleMessage('client1', ['CLOSE'] as unknown as NostrWireMessage);
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
@@ -121,7 +125,8 @@ describe('MessageHandler', () => {
     it('should log the close', () => {
       const consoleSpy = jest.spyOn(console, 'log');
 
-      messageHandler.handleMessage('client1', ['CLOSE', 'sub1']);
+      const message: NostrWireMessage = ['CLOSE', 'sub1'];
+      messageHandler.handleMessage('client1', message);
 
       expect(consoleSpy).toHaveBeenCalledWith('Client client1 closed subscription sub1');
     });

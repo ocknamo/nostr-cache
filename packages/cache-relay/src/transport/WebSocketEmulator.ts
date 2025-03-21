@@ -1,4 +1,4 @@
-import { NostrMessage } from '@nostr-cache/types';
+import { NostrWireMessage } from '@nostr-cache/types';
 import { TransportAdapter } from './TransportAdapter';
 
 /**
@@ -8,7 +8,7 @@ import { TransportAdapter } from './TransportAdapter';
 export class WebSocketEmulator implements TransportAdapter {
   private originalWebSocket: typeof WebSocket;
   private emulatedSocket: WebSocket | null = null;
-  private messageCallback?: (clientId: string, message: NostrMessage) => void;
+  private messageCallback?: (clientId: string, message: NostrWireMessage) => void;
   private connectCallback?: (clientId: string) => void;
   private disconnectCallback?: (clientId: string) => void;
   private relayUrl?: string;
@@ -53,7 +53,7 @@ export class WebSocketEmulator implements TransportAdapter {
           const originalSend = this.send.bind(this);
           this.send = (data: string) => {
             try {
-              const message = JSON.parse(data) as NostrMessage;
+              const message = JSON.parse(data) as NostrWireMessage;
               emulator.messageCallback?.('cache-relay', message);
             } catch (error) {
               if (this.onerror) {
@@ -96,7 +96,7 @@ export class WebSocketEmulator implements TransportAdapter {
   /**
    * Send a message to a client
    */
-  send(clientId: string, message: NostrMessage): void {
+  send(clientId: string, message: NostrWireMessage): void {
     if (this.emulatedSocket?.onmessage) {
       const event = new MessageEvent('message', {
         data: JSON.stringify(message),
@@ -108,7 +108,7 @@ export class WebSocketEmulator implements TransportAdapter {
   /**
    * Register message handler
    */
-  onMessage(callback: (clientId: string, message: NostrMessage) => void): void {
+  onMessage(callback: (clientId: string, message: NostrWireMessage) => void): void {
     this.messageCallback = callback;
   }
 

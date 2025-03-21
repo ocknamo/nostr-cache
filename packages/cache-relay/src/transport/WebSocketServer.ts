@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { NostrMessage } from '@nostr-cache/types';
+import { NostrWireMessage } from '@nostr-cache/types';
 import { WebSocket, WebSocketServer as WS } from 'ws';
 import { TransportAdapter } from './TransportAdapter';
 
@@ -9,7 +9,7 @@ import { TransportAdapter } from './TransportAdapter';
 export class WebSocketServer implements TransportAdapter {
   private server: WS | null = null;
   private clients: Map<string, WebSocket> = new Map();
-  private messageCallback?: (clientId: string, message: NostrMessage) => void;
+  private messageCallback?: (clientId: string, message: NostrWireMessage) => void;
   private connectCallback?: (clientId: string) => void;
   private disconnectCallback?: (clientId: string) => void;
 
@@ -26,7 +26,7 @@ export class WebSocketServer implements TransportAdapter {
 
       socket.on('message', (data) => {
         try {
-          const message = JSON.parse(data.toString()) as NostrMessage;
+          const message = JSON.parse(data.toString()) as NostrWireMessage;
           this.messageCallback?.(clientId, message);
         } catch (error) {
           console.error('Invalid message format:', error);
@@ -94,7 +94,7 @@ export class WebSocketServer implements TransportAdapter {
   /**
    * Send a message to a client
    */
-  send(clientId: string, message: NostrMessage): void {
+  send(clientId: string, message: NostrWireMessage): void {
     const socket = this.clients.get(clientId);
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(message));
@@ -104,7 +104,7 @@ export class WebSocketServer implements TransportAdapter {
   /**
    * Register message handler
    */
-  onMessage(callback: (clientId: string, message: NostrMessage) => void): void {
+  onMessage(callback: (clientId: string, message: NostrWireMessage) => void): void {
     this.messageCallback = callback;
   }
 
