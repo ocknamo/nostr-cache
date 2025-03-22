@@ -91,7 +91,7 @@ describe('EventHandler', () => {
 
   describe('core event processing', () => {
     beforeEach(() => {
-      mockEventValidator.validate.mockReturnValue(true);
+      mockEventValidator.validate.mockResolvedValue(true);
     });
 
     it('should process regular events correctly', async () => {
@@ -152,7 +152,7 @@ describe('EventHandler', () => {
     });
 
     it('should reject invalid events', async () => {
-      mockEventValidator.validate.mockReturnValueOnce(false);
+      mockEventValidator.validate.mockResolvedValueOnce(false);
       const result = await eventHandler.handleEvent(regularEvent);
       expect(result.success).toBe(false);
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
@@ -163,7 +163,7 @@ describe('EventHandler', () => {
         ...regularEvent,
         created_at: Math.floor(Date.now() / 1000) + 1000, // 1000 seconds in the future
       };
-      mockEventValidator.validate.mockReturnValueOnce(false);
+      mockEventValidator.validate.mockResolvedValueOnce(false);
       const result = await eventHandler.handleEvent(futureEvent);
       expect(result.success).toBe(false);
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
@@ -172,8 +172,8 @@ describe('EventHandler', () => {
 
   describe('error handling', () => {
     it('should handle storage errors', async () => {
-      mockEventValidator.validate.mockReturnValue(true);
-      mockStorage.saveEvent.mockRejectedValue(new Error('Storage error'));
+      mockEventValidator.validate.mockResolvedValue(true);
+      mockStorage.saveEvent.mockRejectedValueOnce(new Error('Storage error'));
 
       const result = await eventHandler.handleEvent(regularEvent);
 
@@ -193,7 +193,7 @@ describe('EventHandler', () => {
     });
 
     it('should handle subscription matching errors', async () => {
-      mockEventValidator.validate.mockReturnValue(true);
+      mockEventValidator.validate.mockResolvedValue(true);
       mockStorage.saveEvent.mockResolvedValue(true);
       mockSubscriptionManager.findMatchingSubscriptions.mockImplementation(() => {
         throw new Error('Subscription error');

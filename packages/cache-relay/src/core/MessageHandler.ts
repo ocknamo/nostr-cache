@@ -110,17 +110,8 @@ export class MessageHandler {
    * @param event Event to validate
    * @returns Whether the event is valid
    */
-  private validateEvent(event: NostrEvent): boolean {
-    if (!event) return false;
-    if (!event.id || typeof event.id !== 'string' || event.id.length === 0) return false;
-    if (!event.pubkey || typeof event.pubkey !== 'string' || event.pubkey.length === 0)
-      return false;
-    if (typeof event.created_at !== 'number') return false;
-    if (typeof event.kind !== 'number') return false;
-    if (!Array.isArray(event.tags)) return false;
-    if (typeof event.content !== 'string') return false;
-    if (!event.sig || typeof event.sig !== 'string' || event.sig.length === 0) return false;
-    return true;
+  private validateEvent(event: NostrEvent): Promise<boolean> {
+    return this.eventValidator.validate(event);
   }
 
   /**
@@ -157,45 +148,12 @@ export class MessageHandler {
     const event = message.event;
 
     // Validate event format
-    if (!this.validateEvent(event)) {
-      this.sendNotice(clientId, 'Invalid event format');
+    if (!(await this.validateEvent(event))) {
+      this.sendOK(clientId, event.id, false, 'invalid: event validation failed');
       return;
     }
 
     try {
-      // テスト対応のため、mockEventValidator.validateが例外をスローするケースを処理
-      try {
-        if (this.eventValidator) {
-          this.eventValidator.validate(event);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('Validation error')) {
-          this.sendOK(clientId, event.id, false, 'error: validation failed');
-          return;
-        }
-      }
-
-      // mockStorage.saveEventが例外をスローするケースもテスト対応のため処理
-      if (message.event.id === '123' && mockStorage) {
-        // テスト用のsubscriptionsをチェック
-        const subscriptions = {
-          client2: [{ id: 'sub1', filters: [{ kinds: [1], authors: ['abc'] }] }],
-        };
-
-        // これはテストケース用の特別な処理
-        // テストケースが期待しているレスポンスを返す
-        if (subscriptions && subscriptions.client2) {
-          for (const subscription of subscriptions.client2) {
-            this.sendEvent('client2', subscription.id, event);
-          }
-        }
-
-        // OK レスポンスの送信
-        this.sendOK(clientId, event.id, true, '');
-        return;
-      }
-
-      // 通常の処理
       const { success, matches } = await this.eventHandler.handleEvent(event);
 
       if (!success) {
@@ -221,24 +179,30 @@ export class MessageHandler {
   }
 
   /**
-   * Handle REQ message
+   * Handle REQ message - creates a new subscription and sends matching events
    *
    * @param clientId ID of the client that sent the message
    * @param message Message received
    * @private
    */
   private async handleReqMessage(clientId: string, message: ReqMessage): Promise<void> {
-    if (!message.subscriptionId || !Array.isArray(message.filters)) {
-      this.sendNotice(clientId, 'Invalid REQ message format');
+    // 入力メッセージの検証
+    if (!message.subscriptionId || typeof message.subscriptionId !== 'string') {
+      this.sendNotice(clientId, 'Invalid REQ message: missing or invalid subscriptionId');
+      return;
+    }
+
+    if (!Array.isArray(message.filters) || message.filters.length === 0) {
+      this.sendNotice(clientId, 'Invalid REQ message: filters must be a non-empty array');
       return;
     }
 
     const { subscriptionId, filters } = message;
 
-    // Validate all filters
+    // フィルタの検証
     for (const filter of filters) {
       if (!this.validateFilter(filter)) {
-        this.sendNotice(clientId, 'Invalid filter format');
+        this.sendNotice(clientId, `Invalid filter format in subscription ${subscriptionId}`);
         return;
       }
     }
@@ -251,24 +215,47 @@ export class MessageHandler {
         filters
       );
 
-      // 既存のイベントの取得と送信
+      // ローカルログ
+      console.log(
+        `Created subscription ${subscriptionId} for client ${clientId} with ${filters.length} filters`
+      );
+
+      // 既存の一致するイベントの取得と送信
       try {
+        // 各フィルタに一致するイベントを取得
         const events = await this.storage.getEvents(filters);
+
+        // イベントをクライアントに送信
+        let eventCount = 0;
         for (const event of events) {
           this.sendEvent(clientId, subscriptionId, event);
+          eventCount++;
         }
+
+        console.log(`Sent ${eventCount} events for subscription ${subscriptionId}`);
       } catch (error) {
-        console.error('Failed to get events:', error);
-        this.sendNotice(clientId, 'Failed to get events: Error: Storage error');
-        // エラー発生時もEOSEを送信しない（テスト対応のため）
+        // ストレージエラーの処理
+        console.error(`Failed to get events for subscription ${subscriptionId}:`, error);
+        this.sendNotice(
+          clientId,
+          `Failed to get events: Error: ${error instanceof Error ? error.message : 'Storage error'}`
+        );
+        // エラー発生時はEOSEを送信しない
         return;
       }
 
-      // EOSEの送信
+      // EOSE（End of Stored Events）の送信
+      // すべての保存されたイベントが送信されたことをクライアントに通知
       this.sendEOSE(clientId, subscriptionId);
     } catch (error) {
-      console.error('Failed to create subscription:', error);
-      this.sendNotice(clientId, 'Failed to create subscription: Error: Subscription error');
+      // サブスクリプション作成エラーの処理
+      console.error(`Failed to create subscription ${subscriptionId}:`, error);
+      this.sendNotice(
+        clientId,
+        `Failed to create subscription: Error: ${
+          error instanceof Error ? error.message : 'Subscription error'
+        }`
+      );
     }
   }
 
@@ -288,11 +275,9 @@ export class MessageHandler {
     const { subscriptionId } = message;
 
     try {
+      this.sendClosed(clientId, subscriptionId, 'subscription closed');
       // サブスクリプションの削除
       const removed = this.subscriptionManager.removeSubscription(clientId, subscriptionId);
-
-      // テスト対応のため、サブスクリプション削除の結果に関わらずCLOSEDレスポンスを送信
-      this.sendClosed(clientId, subscriptionId, 'subscription closed');
 
       if (!removed) {
         // 存在しないサブスクリプションの場合はログだけ残す
@@ -411,6 +396,3 @@ export class MessageHandler {
     this.responseCallbacks.push(callback);
   }
 }
-
-// テスト用変数（テスト環境でのみ使用される）
-const mockStorage = null;

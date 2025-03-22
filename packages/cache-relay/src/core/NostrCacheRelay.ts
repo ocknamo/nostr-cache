@@ -191,7 +191,7 @@ export class NostrCacheRelay {
    */
   async publishEvent(event: NostrEvent): Promise<boolean> {
     // Validate the event if enabled
-    if (this.options.validateEvents && !this.validator.validate(event)) {
+    if (this.options.validateEvents && !(await this.validator.validate(event))) {
       return false;
     }
 

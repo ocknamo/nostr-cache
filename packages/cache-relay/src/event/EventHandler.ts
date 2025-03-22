@@ -47,7 +47,7 @@ export class EventHandler {
     matches?: Map<string, Subscription[]>;
   }> {
     // Validate the event
-    if (!this.validator.validate(event)) {
+    if (!(await this.validator.validate(event))) {
       return { success: false };
     }
 
