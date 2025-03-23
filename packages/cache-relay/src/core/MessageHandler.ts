@@ -154,10 +154,10 @@ export class MessageHandler {
     }
 
     try {
-      const { success, matches } = await this.eventHandler.handleEvent(event);
+      const { success, message, matches } = await this.eventHandler.handleEvent(event);
 
       if (!success) {
-        this.sendOK(clientId, event.id, false, 'invalid: event validation failed');
+        this.sendOK(clientId, event.id, false, message);
         return;
       }
 

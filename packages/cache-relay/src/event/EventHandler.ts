@@ -44,17 +44,21 @@ export class EventHandler {
    */
   async handleEvent(event: NostrEvent): Promise<{
     success: boolean;
+    message: string;
     matches?: Map<string, Subscription[]>;
   }> {
     // Validate the event
     try {
       if (!(await this.validator.validate(event))) {
         console.info('Event validation failed');
-        return { success: false };
+        return { success: false, message: 'invalid: event validation failed' };
       }
     } catch (error) {
       console.info('Validation error:', error);
-      return { success: false };
+      return {
+        success: false,
+        message: 'invalid: validation error',
+      };
     }
 
     // イベントの種類に応じた処理
@@ -62,10 +66,13 @@ export class EventHandler {
       try {
         // 永続化せずにサブスクリプションマッチングのみ
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-        return { success: true, matches };
+        return { success: true, message: 'success', matches };
       } catch (error) {
         console.info('Subscription matching error:', error);
-        return { success: false };
+        return {
+          success: false,
+          message: 'error: subscription matching failed',
+        };
       }
     }
 
@@ -74,20 +81,26 @@ export class EventHandler {
       const saved = await this.storage.saveEvent(event);
       if (!saved) {
         console.info('Event storage failed');
-        return { success: false };
+        return { success: false, message: 'error: failed to save event' };
       }
     } catch (error) {
       console.info('Storage error:', error);
-      return { success: false };
+      return {
+        success: false,
+        message: 'error: storage operation failed',
+      };
     }
 
     // Find matching subscriptions
     try {
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-      return { success: true, matches };
+      return { success: true, message: 'success', matches };
     } catch (error) {
       console.info('Subscription matching error:', error);
-      return { success: false };
+      return {
+        success: false,
+        message: 'error: subscription matching failed',
+      };
     }
   }
 

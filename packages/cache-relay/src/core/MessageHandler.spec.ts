@@ -152,7 +152,7 @@ describe('MessageHandler', () => {
           'OK',
           sampleEvent.id,
           false,
-          'error: failed to save event',
+          'error: storage operation failed',
         ]);
         expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent);
       });
