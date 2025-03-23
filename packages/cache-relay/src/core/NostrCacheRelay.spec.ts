@@ -28,13 +28,13 @@ describe('NostrCacheRelay', () => {
 
   // Sample event
   const sampleEvent: NostrEvent = {
-    id: '123',
-    pubkey: 'abc',
-    created_at: Math.floor(Date.now() / 1000),
-    kind: 1,
+    content: 'sample',
+    created_at: 1742660714,
     tags: [],
-    content: 'Hello, world!',
-    sig: 'xyz',
+    kind: 1,
+    pubkey: '26bb2ebed6c552d670c804b0d655267b3c662b21e026d6e48ac93a6070530958',
+    id: '76c5977733a360c46c0e28548e2d06feb28292cdf53d0f0df0b8ad352ba3b654',
+    sig: '5057c68f57d829758af5090beb86738bdd09679f0997995b6d7f2b012c3698ff0519f79f01d5b44704c393a145caea1f415908b486ba0d34359134386b9a4650',
   };
 
   // Sample filter
