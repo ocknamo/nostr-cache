@@ -1,95 +1,60 @@
 ## 前提
+ユーザーはプログラミングが得意。
+時短のためにClineにコーディングを依頼。
 
-ユーザーは Cline よりプログラミングが得意です。
-時短のために Cline にコーディングを依頼している。
+テスト2回連続失敗時は作業停止。
+状況を整理報告し、指示を待つ。
 
-2回以上連続でテストを失敗した時は、一度作業を止めよ。
-現在の状況を整理して報告せよ。そして解決するための指示を待て。
-
-コンテキストが不明瞭な時は、ユーザーに確認せよ。
+不明点はユーザーに確認。
 
 ## 作業方法
 
-### 作業開始前
+### 開始前
+1. `git status`でコンテキスト確認。無関係な変更が多い場合は別タスク提案。
 
-作業を開始する前に、以下を確認せよ。
+### 実行中
+1. `npm run test`で検証。失敗時は修正。
 
-1. `git status` で現在のコンテキストを確認する。もし指示された内容と無関係な変更が多い場合はユーザーに別のタスクとして開始するように提案する。
-
-### 作業実行中
-
-プログラムを実装をしたら、以下を確認せよ
-
-1. `npm run test` を実行し、テストが成功すること。失敗したら修正すること。
-
-### 作業完了後
-
-作業が完了したら、以下を確認せよ。
-
-1. ユーザに変更内容のレビューを要求する
-2. ユーザーに変更内容を git commit するか確認する。
-
-## Project Guidelines
+### 完了後
+1. 変更内容のレビュー要求。
+2. git commitの確認。
 
 ## コミットメッセージ規約
 
-### 1. 基本構造
-
+### 基本構造
 <type>(<scope>): <subject> (cline)
 
 <body>
 
 <footer>
 
-# プロンプト履歴
-<prompt_history>
+### タイプ
+- "feat:" - 機能追加
+- "fix:" - バグ修正
+- "refactor:" - リファクタリング
+- "doc:" - ドキュメント修正
+- "chore:" - 雑用・その他作業
 
---- 途中省略 ---
+※pushはユーザーが実行
 
-#### Prompt History
-- ユーザーが指示したプロンプトの履歴を記載
-- プロンプトに関連する追加のコンテキスト情報も含める
+## ドキュメント要件
+- 各関数にコメントを付ける
+- ドキュメントは英語で記述（サポートは日本語可）
 
-#### Type
+## テスト
+- 特殊回避実装を追加しない
+- 原因不明時はユーザーに確認
 
-以下のルールに従ってコミットメッセージに<type>を追加してください
+## セキュリティ
 
-- "feat:"
-  - 機能追加
-- "fix: "
-  - バグ修正
-- "refactor: "
-  - 機能に変更がない改善。リファクタリング。
-- "doc: "
-  - ドキュメントやコメントのみの修正
-- "chore: "
-  - 雑用。アプリバージョンアップなどのその他の作業
-- "ci: "
-  - CI/CDの修正
+### 機密ファイル
+以下は読み書き禁止:
+- .env
+- */config/secrets.*
+- *.pem
+- APIキー・認証情報を含むファイル
 
-
-#### git push
-
-pushはユーザは行うので実行しない
-
-## Documentation Requirements
-
-- Please comment each function.
-- Documentation should be in English, even if support is provided in Japanese.
-
-# Security
-
-## Sensitive Files
-
-DO NOT read or modify:
-
--   .env files
--   \*_/config/secrets._
--   \*_/_.pem
--   Any file containing API keys, tokens, or credentials
-
-## Security Practices
-
--   Never commit sensitive files
--   Use environment variables for secrets
--   Keep credentials out of logs and output
+### セキュリティ対策
+- 機密ファイルはコミット禁止
+- 秘密情報は環境変数使用
+- ログに認証情報を含めない
