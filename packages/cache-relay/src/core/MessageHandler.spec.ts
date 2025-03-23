@@ -272,17 +272,69 @@ describe('MessageHandler', () => {
   });
 
   describe('error handling', () => {
-    it('should handle subscription manager errors', () => {
+    it('should handle global errors', async () => {
+      // グローバルエラーハンドリングのテスト
+      (mockStorage.saveEvent as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('System internal error with sensitive details');
+      });
+
+      const message: NostrWireMessage = ['EVENT', sampleEvent];
+      await messageHandler.handleMessage('client1', message);
+
+      // 安全なエラーメッセージが返されることを確認
+      expect(responseCallback).toHaveBeenCalledWith('client1', [
+        'OK',
+        sampleEvent.id,
+        false,
+        'error: storage operation failed',
+      ]);
+    });
+
+    it('should handle storage errors with safe error message', async () => {
+      // ストレージエラー処理のテスト
+      (mockStorage.getEvents as jest.Mock).mockRejectedValueOnce(
+        new Error('Database connection details exposed')
+      );
+
+      const message: NostrWireMessage = ['REQ', 'sub1', sampleFilter];
+      await messageHandler.handleMessage('client1', message);
+
+      // 安全なエラーメッセージが返されることを確認
+      expect(responseCallback).toHaveBeenCalledWith('client1', [
+        'NOTICE',
+        'Failed to get events: storage error',
+      ]);
+    });
+
+    it('should handle subscription manager errors with safe error message', () => {
+      // サブスクリプション作成エラー処理のテスト
       (mockSubscriptionManager.createSubscription as jest.Mock).mockImplementationOnce(() => {
-        throw new Error('Subscription error');
+        throw new Error('Subscription error with stack trace and internal details');
       });
 
       const message: NostrWireMessage = ['REQ', 'sub1', sampleFilter];
       messageHandler.handleMessage('client1', message);
 
+      // 安全なエラーメッセージが返されることを確認
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
         'Failed to create subscription: subscription error',
+      ]);
+    });
+
+    it('should handle subscription close errors with safe error message', () => {
+      // サブスクリプション削除エラー処理のテスト
+      (mockSubscriptionManager.removeSubscription as jest.Mock).mockImplementationOnce(() => {
+        throw new Error('Database connection failure with credentials');
+      });
+
+      const message: NostrWireMessage = ['CLOSE', 'sub1'];
+      messageHandler.handleMessage('client1', message);
+
+      // 安全なエラーメッセージが返されることを確認
+      expect(responseCallback).toHaveBeenCalledWith('client1', [
+        'NOTICE',
+        'Failed to close subscription: Unknown error',
       ]);
     });
 
