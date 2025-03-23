@@ -47,26 +47,48 @@ export class EventHandler {
     matches?: Map<string, Subscription[]>;
   }> {
     // Validate the event
-    if (!(await this.validator.validate(event))) {
+    try {
+      if (!(await this.validator.validate(event))) {
+        console.info('Event validation failed');
+        return { success: false };
+      }
+    } catch (error) {
+      console.info('Validation error:', error);
       return { success: false };
     }
 
     // イベントの種類に応じた処理
     if (this.isEphemeralEvent(event)) {
-      // 永続化せずにサブスクリプションマッチングのみ
-      const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-      return { success: true, matches };
+      try {
+        // 永続化せずにサブスクリプションマッチングのみ
+        const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+        return { success: true, matches };
+      } catch (error) {
+        console.info('Subscription matching error:', error);
+        return { success: false };
+      }
     }
 
     // Store the event
-    const saved = await this.storage.saveEvent(event);
-    if (!saved) {
+    try {
+      const saved = await this.storage.saveEvent(event);
+      if (!saved) {
+        console.info('Event storage failed');
+        return { success: false };
+      }
+    } catch (error) {
+      console.info('Storage error:', error);
       return { success: false };
     }
 
     // Find matching subscriptions
-    const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-    return { success: true, matches };
+    try {
+      const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+      return { success: true, matches };
+    } catch (error) {
+      console.info('Subscription matching error:', error);
+      return { success: false };
+    }
   }
 
   /**
