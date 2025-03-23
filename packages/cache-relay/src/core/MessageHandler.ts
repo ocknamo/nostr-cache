@@ -97,10 +97,7 @@ export class MessageHandler {
       }
     } catch (error) {
       console.error('Error handling message:', error);
-      this.sendNotice(
-        clientId,
-        `Internal error: ${error instanceof Error ? error.message : 'unknown error'}`
-      );
+      this.sendNotice(clientId, 'Internal error: server error');
     }
   }
 
@@ -236,10 +233,7 @@ export class MessageHandler {
       } catch (error) {
         // ストレージエラーの処理
         console.error(`Failed to get events for subscription ${subscriptionId}:`, error);
-        this.sendNotice(
-          clientId,
-          `Failed to get events: Error: ${error instanceof Error ? error.message : 'Storage error'}`
-        );
+        this.sendNotice(clientId, 'Failed to get events: storage error');
         // エラー発生時はEOSEを送信しない
         return;
       }
@@ -250,12 +244,7 @@ export class MessageHandler {
     } catch (error) {
       // サブスクリプション作成エラーの処理
       console.error(`Failed to create subscription ${subscriptionId}:`, error);
-      this.sendNotice(
-        clientId,
-        `Failed to create subscription: Error: ${
-          error instanceof Error ? error.message : 'Subscription error'
-        }`
-      );
+      this.sendNotice(clientId, 'Failed to create subscription: subscription error');
     }
   }
 
@@ -285,10 +274,7 @@ export class MessageHandler {
       }
     } catch (error) {
       console.error('Failed to remove subscription:', error);
-      this.sendNotice(
-        clientId,
-        `Failed to close subscription: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      this.sendNotice(clientId, 'Failed to close subscription: Unknown error');
     }
   }
 

@@ -201,7 +201,7 @@ describe('MessageHandler', () => {
 
         expect(responseCallback).toHaveBeenCalledWith('client1', [
           'NOTICE',
-          'Failed to get events: Error: Storage error',
+          'Failed to get events: storage error',
         ]);
       });
     });
@@ -282,7 +282,7 @@ describe('MessageHandler', () => {
 
       expect(responseCallback).toHaveBeenCalledWith('client1', [
         'NOTICE',
-        'Failed to create subscription: Error: Subscription error',
+        'Failed to create subscription: subscription error',
       ]);
     });
 
