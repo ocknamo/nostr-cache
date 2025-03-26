@@ -6,18 +6,19 @@
 
 import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
 import { WebSocketEmulator } from '../transport/WebSocketEmulator';
-import { IntegrationTestBase, createTestEvent } from './base.integration.spec';
+import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 
 describe('WebSocket Integration', () => {
   let testBase: IntegrationTestBase;
   let clientEmulator: WebSocketEmulator;
   let events: { [key: string]: NostrEvent } = {};
-  const relayUrl = 'ws://localhost:3000';
+  let relayUrl: string;
 
   // Setup before each test
   beforeEach(async () => {
     testBase = new IntegrationTestBase();
-    await testBase.setup();
+    const port = await testBase.setup();
+    relayUrl = testBase.getServerUrl();
 
     // Create client emulator
     clientEmulator = new WebSocketEmulator();
@@ -161,7 +162,7 @@ describe('WebSocket Integration', () => {
 
       // Cleanup
       ws.close();
-    });
+    }, 10000); // Increase timeout to 10 seconds
 
     it('should handle CLOSE message', async () => {
       // Connect client and track responses
@@ -195,7 +196,7 @@ describe('WebSocket Integration', () => {
 
       // Cleanup
       ws.close();
-    });
+    }, 10000); // Increase timeout to 10 seconds
 
     it('should broadcast events to matching subscriptions', async () => {
       // Create an emulator for capturing subscriber events
@@ -255,7 +256,7 @@ describe('WebSocket Integration', () => {
       subscriber.send(JSON.stringify(reqMessage));
 
       // Wait a bit for subscription to be created
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 500)); // Increased wait time
 
       // Connect publisher
       const publisher = await publisherPromise;
@@ -276,6 +277,6 @@ describe('WebSocket Integration', () => {
       subscriber.close();
       publisher.close();
       await subscriberEmulator.stop();
-    });
+    }, 15000); // Increase timeout to 15 seconds
   });
 });

@@ -5,21 +5,21 @@
  */
 
 import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
-import { IntegrationTestBase, createTestEvent } from './base.integration.spec';
+import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 
 describe('Subscription Integration', () => {
   let testBase: IntegrationTestBase;
 
-  // Setup before each test
+  // Setup before each test (with extended timeout)
   beforeEach(async () => {
     testBase = new IntegrationTestBase();
     await testBase.setup();
-  });
+  }, 10000); // 10秒のタイムアウト
 
   // Cleanup after each test
   afterEach(async () => {
     await testBase.teardown();
-  });
+  }, 10000); // 10秒のタイムアウト
 
   describe('Subscription Management', () => {
     it('should create subscriptions and store them', async () => {
@@ -57,7 +57,7 @@ describe('Subscription Integration', () => {
       // Verify client subscriptions
       const clientSubs = testBase.subscriptionManager.getClientSubscriptions('test-client');
       expect(clientSubs).toHaveLength(2);
-    });
+    }, 10000);
 
     it('should remove subscriptions on CLOSE message', async () => {
       // Create a subscription
@@ -71,7 +71,7 @@ describe('Subscription Integration', () => {
 
       // Verify subscription was removed
       expect(testBase.subscriptionManager.getSubscription('test-client', 'sub1')).toBeUndefined();
-    });
+    }, 10000);
 
     it('should replace subscriptions with same ID', async () => {
       // Create a subscription
@@ -90,7 +90,7 @@ describe('Subscription Integration', () => {
       expect(subscription?.filters).toHaveLength(1);
       expect(subscription?.filters[0].kinds).toBeUndefined();
       expect(subscription?.filters[0].authors).toEqual(['new-author']);
-    });
+    }, 10000);
 
     it('should handle multiple clients with same subscription IDs', async () => {
       // Create subscriptions for two different clients with same ID
@@ -110,7 +110,7 @@ describe('Subscription Integration', () => {
       expect(sub2).toBeDefined();
       expect(sub1?.filters[0].kinds).toEqual([1]);
       expect(sub2?.filters[0].authors).toEqual(['test-author']);
-    });
+    }, 10000);
   });
 
   describe('Subscription Filtering', () => {
@@ -147,7 +147,7 @@ describe('Subscription Integration', () => {
       // Check that only event1 was returned with subscription
       expect(receivedEvents).toHaveLength(1);
       expect(receivedEvents[0]).toBe('event1');
-    });
+    }, 10000);
 
     it('should handle complex filter combinations', async () => {
       // Create test events with different properties

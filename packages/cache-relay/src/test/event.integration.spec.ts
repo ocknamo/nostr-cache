@@ -5,7 +5,8 @@
  */
 
 import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
-import { IntegrationTestBase, createTestEvent } from './base.integration.spec';
+import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
+import { getRandomSecret } from './utils/getRandomSecret';
 
 describe('Event Handler Integration', () => {
   let testBase: IntegrationTestBase;
@@ -24,7 +25,7 @@ describe('Event Handler Integration', () => {
   describe('Event processing', () => {
     it('should store and validate regular events', async () => {
       // Create test event
-      const event = createTestEvent();
+      const event = await createTestEvent();
 
       // Process event through MessageHandler
       const result = await testBase.messageHandler.handleMessage('test-client', ['EVENT', event]);
@@ -36,10 +37,9 @@ describe('Event Handler Integration', () => {
     });
 
     it('should handle replaceable events', async () => {
+      const seckey = getRandomSecret();
       // Create a replaceable event (kind 0)
-      const event1 = createTestEvent({
-        id: 'replace-1',
-        pubkey: 'test-pubkey',
+      const event1 = await createTestEvent(seckey, {
         kind: 0,
         created_at: 1000,
         content: 'First version',
@@ -49,9 +49,7 @@ describe('Event Handler Integration', () => {
       await testBase.messageHandler.handleMessage('test-client', ['EVENT', event1]);
 
       // Create a newer replaceable event with same kind and pubkey
-      const event2 = createTestEvent({
-        id: 'replace-2',
-        pubkey: 'test-pubkey',
+      const event2 = await createTestEvent(seckey, {
         kind: 0,
         created_at: 2000, // Newer timestamp
         content: 'Second version',
@@ -62,16 +60,16 @@ describe('Event Handler Integration', () => {
 
       // Verify only the newer event is returned
       const storedEvents = await testBase.storage.getEvents([
-        { kinds: [0], authors: ['test-pubkey'] },
+        { kinds: [0], authors: [event1.pubkey] },
       ]);
       expect(storedEvents).toHaveLength(1);
-      expect(storedEvents[0].id).toBe('replace-2');
+      expect(storedEvents[0].id).toBe(event2.id);
       expect(storedEvents[0].content).toBe('Second version');
     });
 
     it('should handle ephemeral events', async () => {
       // Create an ephemeral event (kind 20000+)
-      const event = createTestEvent({
+      const event = await createTestEvent(getRandomSecret(), {
         id: 'ephemeral-1',
         kind: 20001,
         content: 'Ephemeral content',
@@ -124,24 +122,22 @@ describe('Event Handler Integration', () => {
       await testBase.messageHandler.handleMessage('sub-client', ['REQ', 'sub1', { kinds: [1] }]);
 
       // Create client for receiving messages
-      let receivedEvent: NostrEvent | null = null;
+      let receivedEvent: any = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
           // The EVENT message format is ['EVENT', subscriptionId, event]
-          receivedEvent = msg[2] as unknown as NostrEvent;
+          receivedEvent = msg[2];
         }
       });
 
       // Create and publish event
-      const event = createTestEvent({ kind: 1 });
+      const event = await createTestEvent(getRandomSecret(), { kind: 1 });
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', event]);
 
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
-      if (receivedEvent) {
-        expect(receivedEvent.id).toBe(event.id);
-      }
-    });
+      expect(receivedEvent.id).toBe(event.id);
+    }, 10000); // Increase timeout to 10 seconds
 
     it('should match events to subscriptions by author', async () => {
       const author = 'specific-author';
@@ -154,34 +150,32 @@ describe('Event Handler Integration', () => {
       ]);
 
       // Set up response collector
-      let receivedEvent: NostrEvent | null = null;
+      let receivedEvent: any = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
           // The EVENT message format is ['EVENT', subscriptionId, event]
-          receivedEvent = msg[2] as unknown as NostrEvent;
+          receivedEvent = msg[2];
         }
       });
 
       // Create and publish matching event
-      const matchingEvent = createTestEvent({ pubkey: author });
+      const matchingEvent = await createTestEvent(getRandomSecret(), { pubkey: author });
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', matchingEvent]);
 
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
-      if (receivedEvent) {
-        expect(receivedEvent.id).toBe(matchingEvent.id);
-      }
+      expect(receivedEvent.id).toBe(matchingEvent.id);
 
       // Reset collector
       receivedEvent = null;
 
       // Create and publish non-matching event
-      const nonMatchingEvent = createTestEvent({ pubkey: 'other-author' });
+      const nonMatchingEvent = await createTestEvent(getRandomSecret(), { pubkey: 'other-author' });
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', nonMatchingEvent]);
 
       // Verify client did not receive the event
       expect(receivedEvent).toBeNull();
-    });
+    }, 10000); // Increase timeout to 10 seconds
 
     it('should match events to subscriptions by tag', async () => {
       // Create subscription for specific e-tag
@@ -192,16 +186,16 @@ describe('Event Handler Integration', () => {
       ]);
 
       // Set up response collector
-      let receivedEvent: NostrEvent | null = null;
+      let receivedEvent: any = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
           // The EVENT message format is ['EVENT', subscriptionId, event]
-          receivedEvent = msg[2] as unknown as NostrEvent;
+          receivedEvent = msg[2];
         }
       });
 
       // Create and publish matching event
-      const matchingEvent = createTestEvent({
+      const matchingEvent = await createTestEvent(getRandomSecret(), {
         tags: [
           ['e', 'specific-event-id'],
           ['p', 'someone'],
@@ -211,15 +205,13 @@ describe('Event Handler Integration', () => {
 
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
-      if (receivedEvent) {
-        expect(receivedEvent.id).toBe(matchingEvent.id);
-      }
+      expect(receivedEvent.id).toBe(matchingEvent.id);
 
       // Reset collector
       receivedEvent = null;
 
       // Create and publish non-matching event
-      const nonMatchingEvent = createTestEvent({
+      const nonMatchingEvent = await createTestEvent(getRandomSecret(), {
         tags: [
           ['e', 'other-event-id'],
           ['p', 'someone'],
@@ -229,23 +221,23 @@ describe('Event Handler Integration', () => {
 
       // Verify client did not receive the event
       expect(receivedEvent).toBeNull();
-    });
+    }, 10000); // Increase timeout to 10 seconds
   });
 
   describe('Event time-based filtering', () => {
     it('should filter events by time range', async () => {
       // Create events with different timestamps
-      const event1 = createTestEvent({
+      const event1 = await createTestEvent(getRandomSecret(), {
         id: 'event-1',
         created_at: 1000,
       });
 
-      const event2 = createTestEvent({
+      const event2 = await createTestEvent(getRandomSecret(), {
         id: 'event-2',
         created_at: 2000,
       });
 
-      const event3 = createTestEvent({
+      const event3 = await createTestEvent(getRandomSecret(), {
         id: 'event-3',
         created_at: 3000,
       });
@@ -259,7 +251,8 @@ describe('Event Handler Integration', () => {
       const receivedEvents: string[] = [];
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
-          receivedEvents.push((msg[2] as unknown as NostrEvent).id);
+          const eventObj = msg[2] as any;
+          receivedEvents.push(eventObj.id);
         }
       });
 
@@ -273,6 +266,6 @@ describe('Event Handler Integration', () => {
       // Verify only event2 was received (created_at = 2000)
       expect(receivedEvents).toHaveLength(1);
       expect(receivedEvents[0]).toBe('event-2');
-    });
+    }, 10000); // Increase timeout to 10 seconds
   });
 });

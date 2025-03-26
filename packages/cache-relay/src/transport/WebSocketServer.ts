@@ -12,12 +12,22 @@ export class WebSocketServer implements TransportAdapter {
   private messageCallback?: (clientId: string, message: NostrWireMessage) => void;
   private connectCallback?: (clientId: string) => void;
   private disconnectCallback?: (clientId: string) => void;
+  private port = 0;
+
+  /**
+   * Create a new WebSocket server
+   * @param port Optional port number (default: dynamically assigned)
+   */
+  constructor(port?: number) {
+    this.port = port || 0; // 0 = dynamically assigned port
+  }
 
   /**
    * Start the WebSocket server
+   * @returns Promise resolving when transport is started
    */
   async start(): Promise<void> {
-    this.server = new WS({ port: 3000 });
+    this.server = new WS({ port: this.port });
 
     this.server.on('connection', (socket) => {
       const clientId = randomUUID();
@@ -49,16 +59,31 @@ export class WebSocketServer implements TransportAdapter {
     });
 
     // Wait for server to start
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       if (!this.server) {
         resolve();
         return;
       }
+
+      this.server.once('error', (error) => {
+        reject(error);
+      });
+
       this.server.once('listening', () => {
-        console.log('WebSocket server started on port 3000');
+        // Get the actual port number (in case we used 0 for dynamic assignment)
+        const address = this.server?.address();
+        this.port = typeof address === 'object' && address ? address.port : this.port;
+        console.log(`WebSocket server started on port ${this.port}`);
         resolve();
       });
     });
+  }
+
+  /**
+   * Get the port the server is listening on
+   */
+  getPort(): number {
+    return this.port;
   }
 
   /**
