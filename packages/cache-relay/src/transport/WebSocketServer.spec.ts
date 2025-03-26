@@ -5,9 +5,10 @@ import { WebSocketServer } from './WebSocketServer';
 describe('WebSocketServer', () => {
   let server: WebSocketServer;
   let client: WebSocket;
+  const port = 3000;
 
   beforeEach(() => {
-    server = new WebSocketServer();
+    server = new WebSocketServer(port);
   });
 
   afterEach(async () => {
@@ -23,7 +24,7 @@ describe('WebSocketServer', () => {
 
       // Try to connect
       await new Promise<void>((resolve, reject) => {
-        client = new WebSocket('ws://localhost:3000');
+        client = new WebSocket(`ws://localhost:${port}`);
         client.on('open', () => resolve());
         client.on('error', reject);
       });
@@ -38,7 +39,7 @@ describe('WebSocketServer', () => {
       });
 
       await server.start();
-      client = new WebSocket('ws://localhost:3000');
+      client = new WebSocket(`ws://localhost:${port}`);
       await connectPromise;
     });
   });
@@ -68,7 +69,7 @@ describe('WebSocketServer', () => {
         });
       });
 
-      client = new WebSocket('ws://localhost:3000');
+      client = new WebSocket(`ws://localhost:${port}`);
       await new Promise<void>((resolve) => client.on('open', () => resolve()));
       client.send(JSON.stringify(message));
       await messagePromise;
@@ -77,7 +78,7 @@ describe('WebSocketServer', () => {
     it('should handle invalid messages', async () => {
       const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
 
-      client = new WebSocket('ws://localhost:3000');
+      client = new WebSocket(`ws://localhost:${port}`);
       await new Promise<void>((resolve) => client.on('open', () => resolve()));
       client.send('invalid json');
 
@@ -92,7 +93,7 @@ describe('WebSocketServer', () => {
       await server.start();
 
       const clientClosedPromise = new Promise<void>((resolve) => {
-        client = new WebSocket('ws://localhost:3000');
+        client = new WebSocket(`ws://localhost:${port}`);
         client.on('close', () => resolve());
       });
 
@@ -113,7 +114,7 @@ describe('WebSocketServer', () => {
       });
 
       await server.start();
-      client = new WebSocket('ws://localhost:3000');
+      client = new WebSocket(`ws://localhost:${port}`);
       await new Promise<void>((resolve) => client.on('open', () => resolve()));
       await server.stop();
       await disconnectPromise;
@@ -124,7 +125,7 @@ describe('WebSocketServer', () => {
     it('should send messages to connected client', async () => {
       const message: NostrWireMessage = ['NOTICE', 'test message'];
       const messagePromise = new Promise<void>((resolve) => {
-        client = new WebSocket('ws://localhost:3000');
+        client = new WebSocket(`ws://localhost:${port}`);
         client.on('message', (data) => {
           const receivedMessage = JSON.parse(data.toString());
           expect(receivedMessage).toEqual(message);
