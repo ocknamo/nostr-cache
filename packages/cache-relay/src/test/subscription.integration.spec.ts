@@ -14,12 +14,12 @@ describe('Subscription Integration', () => {
   beforeEach(async () => {
     testBase = new IntegrationTestBase();
     await testBase.setup();
-  }, 10000); // 10秒のタイムアウト
+  });
 
   // Cleanup after each test
   afterEach(async () => {
     await testBase.teardown();
-  }, 10000); // 10秒のタイムアウト
+  });
 
   describe('Subscription Management', () => {
     it('should create subscriptions and store them', async () => {
@@ -57,7 +57,7 @@ describe('Subscription Integration', () => {
       // Verify client subscriptions
       const clientSubs = testBase.subscriptionManager.getClientSubscriptions('test-client');
       expect(clientSubs).toHaveLength(2);
-    }, 10000);
+    });
 
     it('should remove subscriptions on CLOSE message', async () => {
       // Create a subscription
@@ -71,7 +71,7 @@ describe('Subscription Integration', () => {
 
       // Verify subscription was removed
       expect(testBase.subscriptionManager.getSubscription('test-client', 'sub1')).toBeUndefined();
-    }, 10000);
+    });
 
     it('should replace subscriptions with same ID', async () => {
       // Create a subscription
@@ -90,7 +90,7 @@ describe('Subscription Integration', () => {
       expect(subscription?.filters).toHaveLength(1);
       expect(subscription?.filters[0].kinds).toBeUndefined();
       expect(subscription?.filters[0].authors).toEqual(['new-author']);
-    }, 10000);
+    });
 
     it('should handle multiple clients with same subscription IDs', async () => {
       // Create subscriptions for two different clients with same ID
@@ -110,7 +110,7 @@ describe('Subscription Integration', () => {
       expect(sub2).toBeDefined();
       expect(sub1?.filters[0].kinds).toEqual([1]);
       expect(sub2?.filters[0].authors).toEqual(['test-author']);
-    }, 10000);
+    });
   });
 
   describe('Subscription Filtering', () => {
@@ -121,7 +121,7 @@ describe('Subscription Integration', () => {
       });
 
       const event2 = await createTestEvent(undefined, {
-        kind: 1,
+        kind: 1000,
       });
 
       // Store events
@@ -143,7 +143,7 @@ describe('Subscription Integration', () => {
       // Check that only event1 was returned with subscription
       expect(receivedEvents).toHaveLength(1);
       expect(receivedEvents[0]).toBe(event1.id);
-    }, 10000);
+    });
 
     it('should handle complex filter combinations', async () => {
       // Create test events with different properties
@@ -248,27 +248,33 @@ describe('Subscription Integration', () => {
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
       // Count received events
-      let eventCount = 0;
+      let eventCount1 = 0;
+      let eventCount2 = 0;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'test-client' && msg[0] === NostrMessageType.EVENT && msg[1] === 'sub1') {
-          eventCount++;
+          eventCount1++;
+        }
+        if (clientId === 'test-client' && msg[0] === NostrMessageType.EVENT && msg[1] === 'sub2') {
+          eventCount2++;
         }
       });
 
-      // Generate and save many events
+      // Generate and publish many events via MessageHandler
       const numEvents = 50;
       for (let i = 0; i < numEvents; i++) {
         const event = await createTestEvent(undefined, {
           kind: 1,
         });
-        await testBase.storage.saveEvent(event);
+        // MessageHandlerを通してイベントを送信（保存と通知が行われる）
+        await testBase.messageHandler.handleMessage('publisher', ['EVENT', event]);
       }
 
       // Create a new subscription that should match all those events
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub2', { kinds: [1] }]);
 
       // Verify events were delivered
-      expect(eventCount).toBeGreaterThanOrEqual(numEvents);
+      expect(eventCount1).toBeGreaterThanOrEqual(numEvents);
+      expect(eventCount2).toBeGreaterThanOrEqual(numEvents);
     });
   });
 });
