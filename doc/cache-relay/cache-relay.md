@@ -111,8 +111,8 @@ packages/cache-relay/
 │   │   ├── TransportAdapter.ts  # トランスポートアダプタインターフェース
 │   │   ├── WebSocketServer.ts   # WebSocketサーバー（Node.js用）
 │   │   ├── WebSocketServer.spec.ts # WebSocketサーバーの単体テスト
-│   │   ├── WebSocketEmulator.ts # WebSocketエミュレーション（ブラウザ用）
-│   │   └── WebSocketEmulator.spec.ts # WebSocketエミュレーションの単体テスト
+│   │   ├── WebSocketServerEmulator.ts # WebSocketエミュレーション（ブラウザ用）
+│   │   └── WebSocketServerEmulator.spec.ts # WebSocketエミュレーションの単体テスト
 │   └── utils/                   # ユーティリティ
 │       ├── filterUtils.ts       # フィルタ処理ユーティリティ
 │       ├── filterUtils.spec.ts  # フィルタ処理の単体テスト
@@ -142,7 +142,7 @@ packages/cache-relay/
 3. **トランスポートレイヤーの実装** (2日)
    - TransportAdapterインターフェースの実装
    - WebSocketServerの実装（Node.js用）
-   - WebSocketEmulatorの実装（ブラウザ用）
+   - WebSocketServerEmulatorの実装（ブラウザ用）
    - 単体テストの作成と実行
 
 4. **メッセージハンドリングの実装** (2日)

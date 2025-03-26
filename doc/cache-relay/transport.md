@@ -22,7 +22,7 @@ interface TransportAdapter {
 }
 ```
 
-### 2.2 WebSocketEmulator（ブラウザ環境用）
+### 2.2 WebSocketServerEmulator（ブラウザ環境用）
 
 #### 設計方針
 - 標準のWebSocket APIとの互換性を維持
@@ -66,7 +66,7 @@ interface TransportAdapter {
 
 ## 3. エラーハンドリング
 
-### 3.1 WebSocketEmulator
+### 3.1 WebSocketServerEmulator
 - 無効なメッセージフォーマット
 - 未サポートのURL
 - 接続エラー
@@ -79,7 +79,7 @@ interface TransportAdapter {
 
 ## 4. テスト
 
-### 4.1 WebSocketEmulator
+### 4.1 WebSocketServerEmulator
 - 接続テスト
   - デフォルトURL
   - カスタムURL
@@ -109,7 +109,7 @@ interface TransportAdapter {
 ## 5. 実装の注意点
 
 - イベントの非同期処理
-  - WebSocketEmulatorでのsetTimeoutの使用
+  - WebSocketServerEmulatorでのsetTimeoutの使用
   - イベントの順序の保証
 - メモリリーク防止
   - クライアント切断時のクリーンアップ

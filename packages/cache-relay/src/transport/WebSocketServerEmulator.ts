@@ -5,7 +5,7 @@ import { TransportAdapter } from './TransportAdapter';
  * WebSocket emulator for browser environment
  * Emulates WebSocket server functionality in the browser
  */
-export class WebSocketEmulator implements TransportAdapter {
+export class WebSocketServerEmulator implements TransportAdapter {
   private originalWebSocket: typeof WebSocket;
   private emulatedSocket: WebSocket | null = null;
   private messageCallback?: (clientId: string, message: NostrWireMessage) => void;

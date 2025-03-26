@@ -1,15 +1,15 @@
 import { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
-import { WebSocketEmulator } from './WebSocketEmulator';
+import { WebSocketServerEmulator } from './WebSocketServerEmulator';
 
-describe('WebSocketEmulator', () => {
-  let emulator: WebSocketEmulator;
+describe('WebSocketServerEmulator', () => {
+  let emulator: WebSocketServerEmulator;
   let originalWebSocket: typeof WebSocket;
   const defaultUrl = 'ws://localhost:3000';
   const customUrl = 'ws://localhost:3001';
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket;
-    emulator = new WebSocketEmulator();
+    emulator = new WebSocketServerEmulator();
   });
 
   afterEach(async () => {
