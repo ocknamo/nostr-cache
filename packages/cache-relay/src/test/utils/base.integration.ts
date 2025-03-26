@@ -13,16 +13,18 @@ import { getRandomSecret } from './getRandomSecret';
 
 /**
  * Create a test event
- * @param overrides Properties to override
+ * @param seckey 秘密鍵（オプション）
+ * @param overrides イベントのプロパティをオーバーライド
  * @returns NostrEvent object
  */
 export async function createTestEvent(
   seckey?: string,
-  overrides: Partial<NostrEvent> = {}
+  overrides: Omit<Partial<NostrEvent>, 'id' | 'pubkey' | 'sig'> = {}
 ): Promise<NostrEvent> {
   const hexSecKey = seckey || getRandomSecret();
   const signer = seckeySigner(hexSecKey);
   const pubkey = await signer.getPublicKey();
+
   const event = {
     pubkey,
     created_at: 1234567890,

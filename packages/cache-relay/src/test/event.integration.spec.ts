@@ -70,7 +70,6 @@ describe('Event Handler Integration', () => {
     it('should handle ephemeral events', async () => {
       // Create an ephemeral event (kind 20000+)
       const event = await createTestEvent(getRandomSecret(), {
-        id: 'ephemeral-1',
         kind: 20001,
         content: 'Ephemeral content',
       });
@@ -228,17 +227,14 @@ describe('Event Handler Integration', () => {
     it('should filter events by time range', async () => {
       // Create events with different timestamps
       const event1 = await createTestEvent(getRandomSecret(), {
-        id: 'event-1',
         created_at: 1000,
       });
 
       const event2 = await createTestEvent(getRandomSecret(), {
-        id: 'event-2',
         created_at: 2000,
       });
 
       const event3 = await createTestEvent(getRandomSecret(), {
-        id: 'event-3',
         created_at: 3000,
       });
 
@@ -251,7 +247,7 @@ describe('Event Handler Integration', () => {
       const receivedEvents: string[] = [];
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
-          const eventObj = msg[2] as any;
+          const eventObj = msg[2] as NostrEvent;
           receivedEvents.push(eventObj.id);
         }
       });
@@ -265,7 +261,7 @@ describe('Event Handler Integration', () => {
 
       // Verify only event2 was received (created_at = 2000)
       expect(receivedEvents).toHaveLength(1);
-      expect(receivedEvents[0]).toBe('event-2');
+      expect(receivedEvents[0]).toBe(event2.id);
     }, 10000); // Increase timeout to 10 seconds
   });
 });

@@ -116,16 +116,12 @@ describe('Subscription Integration', () => {
   describe('Subscription Filtering', () => {
     it('should filter events based on subscription criteria', async () => {
       // Create test events
-      const event1 = createTestEvent({
-        id: 'event1',
+      const event1 = await createTestEvent(undefined, {
         kind: 1,
-        pubkey: 'author1',
       });
 
-      const event2 = createTestEvent({
-        id: 'event2',
-        kind: 2,
-        pubkey: 'author2',
+      const event2 = await createTestEvent(undefined, {
+        kind: 1,
       });
 
       // Store events
@@ -146,39 +142,33 @@ describe('Subscription Integration', () => {
 
       // Check that only event1 was returned with subscription
       expect(receivedEvents).toHaveLength(1);
-      expect(receivedEvents[0]).toBe('event1');
+      expect(receivedEvents[0]).toBe(event1.id);
     }, 10000);
 
     it('should handle complex filter combinations', async () => {
       // Create test events with different properties
-      const events = [
-        createTestEvent({
-          id: 'event1',
-          kind: 1,
-          pubkey: 'author1',
-          created_at: 1000,
-          tags: [['e', 'ref1']],
-        }),
-        createTestEvent({
-          id: 'event2',
-          kind: 1,
-          pubkey: 'author2',
-          created_at: 2000,
-          tags: [['e', 'ref1']],
-        }),
-        createTestEvent({
-          id: 'event3',
-          kind: 2,
-          pubkey: 'author1',
-          created_at: 3000,
-          tags: [['e', 'ref2']],
-        }),
-      ];
+      const event1 = await createTestEvent(undefined, {
+        kind: 1,
+        created_at: 1000,
+        tags: [['e', 'ref1']],
+      });
+
+      const event2 = await createTestEvent(undefined, {
+        kind: 1,
+        created_at: 2000,
+        tags: [['e', 'ref1']],
+      });
+
+      const event3 = await createTestEvent(undefined, {
+        kind: 2,
+        created_at: 3000,
+        tags: [['e', 'ref2']],
+      });
 
       // Store all events
-      for (const event of events) {
-        await testBase.storage.saveEvent(event);
-      }
+      await testBase.storage.saveEvent(event1);
+      await testBase.storage.saveEvent(event2);
+      await testBase.storage.saveEvent(event3);
 
       // Create subscription with complex filter
       const receivedEvents: string[] = [];
@@ -199,14 +189,14 @@ describe('Subscription Integration', () => {
 
       // Should match event1 (kind=1, author1) and event2 (has #e=ref1)
       expect(receivedEvents).toHaveLength(2);
-      expect(receivedEvents).toContain('event1');
-      expect(receivedEvents).toContain('event2');
-      expect(receivedEvents).not.toContain('event3');
+      expect(receivedEvents).toContain(event1.id);
+      expect(receivedEvents).toContain(event2.id);
+      expect(receivedEvents).not.toContain(event3.id);
     });
 
     it('should send EOSE after delivering initial events', async () => {
       // Store a test event
-      const event = createTestEvent();
+      const event = await createTestEvent();
       await testBase.storage.saveEvent(event);
 
       // Track EOSE messages
@@ -241,15 +231,14 @@ describe('Subscription Integration', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // Now publish a matching event
-      const event = createTestEvent({
-        id: 'new-event',
+      const event = await createTestEvent(undefined, {
         kind: 1,
       });
       await testBase.messageHandler.handleMessage('publisher', ['EVENT', event]);
 
       // Verify the event was delivered to subscription
       expect(receivedEvents).toHaveLength(1);
-      expect(receivedEvents[0]).toBe('new-event');
+      expect(receivedEvents[0]).toBe(event.id);
     });
   });
 
@@ -269,8 +258,7 @@ describe('Subscription Integration', () => {
       // Generate and save many events
       const numEvents = 50;
       for (let i = 0; i < numEvents; i++) {
-        const event = createTestEvent({
-          id: `batch-event-${i}`,
+        const event = await createTestEvent(undefined, {
           kind: 1,
         });
         await testBase.storage.saveEvent(event);

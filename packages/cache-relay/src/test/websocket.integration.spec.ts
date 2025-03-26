@@ -26,16 +26,12 @@ describe('WebSocket Integration', () => {
 
     // Create test events
     events = {
-      basic: createTestEvent(),
-      replaceable: createTestEvent({
-        id: 'replaceable-id',
+      basic: await createTestEvent(),
+      replaceable: await createTestEvent(undefined, {
         kind: 0, // Replaceable event
-        pubkey: 'replaceable-pubkey',
       }),
-      ephemeral: createTestEvent({
-        id: 'ephemeral-id',
+      ephemeral: await createTestEvent(undefined, {
         kind: 20000, // Ephemeral event
-        pubkey: 'ephemeral-pubkey',
       }),
     };
   });
