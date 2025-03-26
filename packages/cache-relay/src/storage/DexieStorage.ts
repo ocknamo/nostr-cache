@@ -1,3 +1,4 @@
+import { logger } from '@nostr-cache/shared';
 import { Filter, NostrEvent } from '@nostr-cache/types';
 import Dexie from 'dexie';
 import { eventMatchesFilter } from '../utils/filterUtils';
@@ -108,7 +109,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       });
       return true;
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to save event: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return false;
@@ -279,7 +280,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         ).values()
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to get events: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return [];
@@ -297,7 +298,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       const count = await this.events.where('id').equals(id).delete();
       return count > 0;
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to delete event: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return false;
@@ -311,7 +312,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       await this.events.clear();
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to clear events: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
@@ -331,7 +332,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       const count = await this.events.where('[pubkey+kind]').equals([pubkey, kind]).delete();
       return count > 0;
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to delete events by pubkey and kind: ${
           error instanceof Error ? error.message : 'Unknown error'
         }`
@@ -374,7 +375,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       await this.events.bulkDelete(idsToDelete);
       return true;
     } catch (error) {
-      console.error(
+      logger.error(
         `Failed to delete events by pubkey, kind, and d tag: ${
           error instanceof Error ? error.message : 'Unknown error'
         }`

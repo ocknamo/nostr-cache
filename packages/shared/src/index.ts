@@ -7,3 +7,6 @@ export * from '@nostr-cache/types';
 
 // Export constants
 export * from './constants/relays';
+
+// Export utilities
+export { logger, LogLevel } from './utils/logger';

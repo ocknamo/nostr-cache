@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { logger } from '@nostr-cache/shared';
 import { NostrWireMessage } from '@nostr-cache/types';
 import { WebSocket, WebSocketServer as WS } from 'ws';
 import { TransportAdapter } from './TransportAdapter';
@@ -39,7 +40,7 @@ export class WebSocketServer implements TransportAdapter {
           const message = JSON.parse(data.toString()) as NostrWireMessage;
           this.messageCallback?.(clientId, message);
         } catch (error) {
-          console.error('Invalid message format:', error);
+          logger.error('Invalid message format:', error);
         }
       });
 
@@ -49,13 +50,13 @@ export class WebSocketServer implements TransportAdapter {
       });
 
       socket.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        logger.error('WebSocket error:', error);
       });
     });
 
     // Handle server errors
     this.server.on('error', (error) => {
-      console.error('WebSocket server error:', error);
+      logger.error('WebSocket server error:', error);
     });
 
     // Wait for server to start
@@ -73,7 +74,7 @@ export class WebSocketServer implements TransportAdapter {
         // Get the actual port number (in case we used 0 for dynamic assignment)
         const address = this.server?.address();
         this.port = typeof address === 'object' && address ? address.port : this.port;
-        console.log(`WebSocket server started on port ${this.port}`);
+        logger.info(`WebSocket server started on port ${this.port}`);
         resolve();
       });
     });

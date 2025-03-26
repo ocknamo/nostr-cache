@@ -4,6 +4,7 @@
  * Handles incoming messages from clients
  */
 
+import { logger } from '@nostr-cache/shared';
 import {
   CloseMessage,
   ClosedResponse,
@@ -96,7 +97,7 @@ export class MessageHandler {
           this.sendNotice(clientId, `Unknown message type: ${type}`);
       }
     } catch (error) {
-      console.error('Error handling message:', error);
+      logger.error('Error handling message:', error);
       this.sendNotice(clientId, 'Internal error: server error');
     }
   }
@@ -170,7 +171,7 @@ export class MessageHandler {
         }
       }
     } catch (error) {
-      console.error('Error handling event:', error);
+      logger.error('Error handling event:', error);
       this.sendOK(clientId, event.id, false, 'error: failed to save event');
     }
   }
@@ -213,7 +214,7 @@ export class MessageHandler {
       );
 
       // ローカルログ
-      console.log(
+      logger.info(
         `Created subscription ${subscriptionId} for client ${clientId} with ${filters.length} filters`
       );
 
@@ -229,10 +230,10 @@ export class MessageHandler {
           eventCount++;
         }
 
-        console.log(`Sent ${eventCount} events for subscription ${subscriptionId}`);
+        logger.info(`Sent ${eventCount} events for subscription ${subscriptionId}`);
       } catch (error) {
         // ストレージエラーの処理
-        console.error(`Failed to get events for subscription ${subscriptionId}:`, error);
+        logger.error(`Failed to get events for subscription ${subscriptionId}:`, error);
         this.sendNotice(clientId, 'Failed to get events: storage error');
         // エラー発生時はEOSEを送信しない
         return;
@@ -243,7 +244,7 @@ export class MessageHandler {
       this.sendEOSE(clientId, subscriptionId);
     } catch (error) {
       // サブスクリプション作成エラーの処理
-      console.error(`Failed to create subscription ${subscriptionId}:`, error);
+      logger.error(`Failed to create subscription ${subscriptionId}:`, error);
       this.sendNotice(clientId, 'Failed to create subscription: subscription error');
     }
   }
@@ -270,10 +271,10 @@ export class MessageHandler {
 
       if (!removed) {
         // 存在しないサブスクリプションの場合はログだけ残す
-        console.log(`Subscription ${subscriptionId} not found for client ${clientId}`);
+        logger.debug(`Subscription ${subscriptionId} not found for client ${clientId}`);
       }
     } catch (error) {
-      console.error('Failed to remove subscription:', error);
+      logger.error('Failed to remove subscription:', error);
       this.sendNotice(clientId, 'Failed to close subscription: Unknown error');
     }
   }

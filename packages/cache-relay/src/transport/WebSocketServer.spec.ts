@@ -90,7 +90,10 @@ describe('WebSocketServer', () => {
       client.send('invalid json');
 
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Invalid message format:', expect.any(Error));
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[ERROR] Invalid message format:',
+        expect.any(Error)
+      );
       consoleErrorSpy.mockRestore();
     });
   });

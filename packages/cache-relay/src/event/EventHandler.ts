@@ -4,6 +4,7 @@
  * Handles event processing and storage
  */
 
+import { logger } from '@nostr-cache/shared';
 import { Filter, NostrEvent } from '@nostr-cache/types';
 import { SubscriptionManager } from '../core/SubscriptionManager';
 import { StorageAdapter } from '../storage/StorageAdapter';
@@ -50,11 +51,11 @@ export class EventHandler {
     // Validate the event
     try {
       if (!(await this.validator.validate(event))) {
-        console.info('Event validation failed');
+        logger.info('Event validation failed');
         return { success: false, message: 'invalid: event validation failed' };
       }
     } catch (error) {
-      console.info('Validation error:', error);
+      logger.info('Validation error:', error);
       return {
         success: false,
         message: 'invalid: validation error',
@@ -68,7 +69,7 @@ export class EventHandler {
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, message: 'success', matches };
       } catch (error) {
-        console.info('Subscription matching error:', error);
+        logger.info('Subscription matching error:', error);
         return {
           success: false,
           message: 'error: subscription matching failed',
@@ -82,7 +83,7 @@ export class EventHandler {
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, message: 'success', matches };
       } catch (error) {
-        console.info('Replaceable event handling error:', error);
+        logger.info('Replaceable event handling error:', error);
         return {
           success: false,
           message: 'error: replaceable event handling failed',
@@ -96,7 +97,7 @@ export class EventHandler {
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, message: 'success', matches };
       } catch (error) {
-        console.info('Addressable event handling error:', error);
+        logger.info('Addressable event handling error:', error);
         return {
           success: false,
           message: 'error: addressable event handling failed',
@@ -108,11 +109,11 @@ export class EventHandler {
     try {
       const saved = await this.storage.saveEvent(event);
       if (!saved) {
-        console.info('Event storage failed');
+        logger.info('Event storage failed');
         return { success: false, message: 'error: failed to save event' };
       }
     } catch (error) {
-      console.info('Storage error:', error);
+      logger.info('Storage error:', error);
       return {
         success: false,
         message: 'error: storage operation failed',
@@ -124,7 +125,7 @@ export class EventHandler {
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
       return { success: true, message: 'success', matches };
     } catch (error) {
-      console.info('Subscription matching error:', error);
+      logger.info('Subscription matching error:', error);
       return {
         success: false,
         message: 'error: subscription matching failed',
@@ -196,7 +197,7 @@ export class EventHandler {
       // 新しいイベントを保存
       return await this.storage.saveEvent(event);
     } catch (error) {
-      console.info('Error handling replaceable event:', error);
+      logger.info('Error handling replaceable event:', error);
       throw error;
     }
   }
@@ -214,7 +215,7 @@ export class EventHandler {
       const dTagValue = this.getDTagValue(event);
 
       if (dTagValue === undefined) {
-        console.info('Addressable event missing d tag');
+        logger.info('Addressable event missing d tag');
         return false;
       }
 
@@ -224,7 +225,7 @@ export class EventHandler {
       // 新しいイベントを保存
       return await this.storage.saveEvent(event);
     } catch (error) {
-      console.info('Error handling addressable event:', error);
+      logger.info('Error handling addressable event:', error);
       throw error;
     }
   }

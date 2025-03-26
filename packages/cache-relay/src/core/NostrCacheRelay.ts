@@ -4,6 +4,7 @@
  * Main implementation of the Nostr Cache Relay
  */
 
+import { logger } from '@nostr-cache/shared';
 import {
   Filter,
   NostrEvent,
@@ -135,11 +136,11 @@ export class NostrCacheRelay {
    */
   private setupTransportHandlers(): void {
     this.transport.onConnect((clientId: string) => {
-      console.log(`Client connected: ${clientId}`);
+      logger.info(`Client connected: ${clientId}`);
     });
 
     this.transport.onDisconnect((clientId: string) => {
-      console.log(`Client disconnected: ${clientId}`);
+      logger.info(`Client disconnected: ${clientId}`);
     });
 
     this.transport.onMessage((clientId: string, message: NostrWireMessage) => {
@@ -157,9 +158,9 @@ export class NostrCacheRelay {
   private handleMessage(clientId: string, wireMessage: NostrWireMessage): void {
     try {
       const message = wireToMessage(wireMessage);
-      console.log(`Received message from ${clientId}:`, message);
+      logger.debug(`Received message from ${clientId}:`, message);
     } catch (error) {
-      console.error(`Error processing message from ${clientId}:`, error);
+      logger.error(`Error processing message from ${clientId}:`, error);
     }
   }
 
@@ -212,7 +213,7 @@ export class NostrCacheRelay {
     // 2. Send matching events to the client
     // 3. Send EOSE message
 
-    console.log(`Created subscription ${subscriptionId} with filters:`, filters);
+    logger.info(`Created subscription ${subscriptionId} with filters:`, filters);
   }
 
   /**
@@ -225,7 +226,7 @@ export class NostrCacheRelay {
     // In a real implementation, this would:
     // 1. Remove the subscription
 
-    console.log(`Removed subscription ${subscriptionId}`);
+    logger.info(`Removed subscription ${subscriptionId}`);
   }
 
   /**

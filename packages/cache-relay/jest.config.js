@@ -6,6 +6,7 @@ module.exports = {
   moduleFileExtensions: ['ts', 'js', 'json'],
   transformIgnorePatterns: ['/node_modules/(?!@nostr-cache/.*)'],
   extensionsToTreatAsEsm: ['.ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/test/setup-jest.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
     '^@nostr-cache/(.*)$': '<rootDir>/../$1/src',
