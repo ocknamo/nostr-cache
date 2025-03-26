@@ -5,24 +5,36 @@
  */
 
 import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
-import { WebSocketEmulator } from '../transport/WebSocketEmulator';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 
 describe('WebSocket Integration', () => {
   let testBase: IntegrationTestBase;
-  let clientEmulator: WebSocketEmulator;
   let events: { [key: string]: NostrEvent } = {};
   let relayUrl: string;
+  const port = 3000;
+
+  // メッセージ応答を待つヘルパー関数
+  const waitForMessage = (
+    ws: WebSocket,
+    messageType: NostrMessageType
+  ): Promise<NostrWireMessage> => {
+    return new Promise((resolve) => {
+      const messageHandler = (event: MessageEvent) => {
+        const message = JSON.parse(event.data) as NostrWireMessage;
+        if (message[0] === messageType) {
+          ws.removeEventListener('message', messageHandler);
+          resolve(message);
+        }
+      };
+      ws.addEventListener('message', messageHandler);
+    });
+  };
 
   // Setup before each test
   beforeEach(async () => {
-    testBase = new IntegrationTestBase();
-    const port = await testBase.setup();
+    testBase = new IntegrationTestBase(port);
+    await testBase.setup();
     relayUrl = testBase.getServerUrl();
-
-    // Create client emulator
-    clientEmulator = new WebSocketEmulator();
-    await clientEmulator.start(relayUrl);
 
     // Create test events
     events = {
@@ -39,7 +51,6 @@ describe('WebSocket Integration', () => {
   // Cleanup after each test
   afterEach(async () => {
     await testBase.teardown();
-    await clientEmulator.stop();
   });
 
   describe('WebSocketServer and MessageHandler', () => {
@@ -52,14 +63,17 @@ describe('WebSocket Integration', () => {
         });
       });
 
-      // Create client connection
+      // Create client and test onopen event is fired
       const ws = new WebSocket(relayUrl);
-      ws.onopen = () => {
-        // Connection established
-      };
+      const openPromise = new Promise<void>((resolve) => {
+        ws.onopen = () => {
+          // Connection established from client side
+          resolve();
+        };
+      });
 
-      // Wait for connection to be registered
-      await connectPromise;
+      // Wait for both client and server to acknowledge connection
+      await Promise.all([connectPromise, openPromise]);
 
       // Cleanup
       ws.close();
@@ -73,15 +87,6 @@ describe('WebSocket Integration', () => {
         clientId = id;
       });
 
-      // Track responses from server
-      const responsePromise = new Promise<NostrWireMessage>((resolve) => {
-        clientEmulator.onMessage((_, message) => {
-          if (message[0] === NostrMessageType.OK) {
-            resolve(message);
-          }
-        });
-      });
-
       // Create client connection
       const ws = new WebSocket(relayUrl);
 
@@ -91,6 +96,9 @@ describe('WebSocket Integration', () => {
       });
 
       expect(clientId).toBeTruthy();
+
+      // Set up response waiting
+      const responsePromise = waitForMessage(ws, NostrMessageType.OK);
 
       // Send EVENT message
       const eventMessage: NostrWireMessage = ['EVENT', events.basic];
@@ -115,29 +123,35 @@ describe('WebSocket Integration', () => {
       // First save an event
       await testBase.storage.saveEvent(events.basic);
 
-      // Connect client and track responses
-      const eosePromise = new Promise<boolean>((resolve) => {
-        clientEmulator.onMessage((_, message) => {
-          if (message[0] === NostrMessageType.EOSE) {
-            resolve(true);
-          }
-        });
-      });
-
-      const eventPromise = new Promise<NostrEvent>((resolve) => {
-        clientEmulator.onMessage((_, message) => {
-          if (message[0] === NostrMessageType.EVENT) {
-            resolve(message[2] as NostrEvent);
-          }
-        });
-      });
-
       // Create client connection
       const ws = new WebSocket(relayUrl);
 
       // Wait for connection to be established
       await new Promise<void>((resolve) => {
         ws.onopen = () => resolve();
+      });
+
+      // Set up event and EOSE response waiting
+      const eventPromise = new Promise<NostrEvent>((resolve) => {
+        const messageHandler = (event: MessageEvent) => {
+          const message = JSON.parse(event.data) as NostrWireMessage;
+          if (message[0] === NostrMessageType.EVENT) {
+            ws.removeEventListener('message', messageHandler);
+            resolve(message[2] as NostrEvent);
+          }
+        };
+        ws.addEventListener('message', messageHandler);
+      });
+
+      const eosePromise = new Promise<boolean>((resolve) => {
+        const messageHandler = (event: MessageEvent) => {
+          const message = JSON.parse(event.data) as NostrWireMessage;
+          if (message[0] === NostrMessageType.EOSE) {
+            ws.removeEventListener('message', messageHandler);
+            resolve(true);
+          }
+        };
+        ws.addEventListener('message', messageHandler);
       });
 
       // Send REQ message with filter matching the saved event
@@ -158,18 +172,9 @@ describe('WebSocket Integration', () => {
 
       // Cleanup
       ws.close();
-    }, 10000); // Increase timeout to 10 seconds
+    });
 
     it('should handle CLOSE message', async () => {
-      // Connect client and track responses
-      const closedPromise = new Promise<string>((resolve) => {
-        clientEmulator.onMessage((_, message) => {
-          if (message[0] === NostrMessageType.CLOSED) {
-            resolve(message[1] as string);
-          }
-        });
-      });
-
       // Create client connection
       const ws = new WebSocket(relayUrl);
 
@@ -177,6 +182,9 @@ describe('WebSocket Integration', () => {
       await new Promise<void>((resolve) => {
         ws.onopen = () => resolve();
       });
+
+      // Set up CLOSED response waiting
+      const closedPromise = waitForMessage(ws, NostrMessageType.CLOSED);
 
       // First create a subscription
       const reqMessage: NostrWireMessage = ['REQ', 'sub1', { kinds: [1] }];
@@ -187,63 +195,35 @@ describe('WebSocket Integration', () => {
       ws.send(JSON.stringify(closeMessage));
 
       // Check that we get CLOSED response
-      const subscriptionId = await closedPromise;
-      expect(subscriptionId).toBe('sub1');
+      const response = await closedPromise;
+      expect(response[1]).toBe('sub1');
 
       // Cleanup
       ws.close();
-    }, 10000); // Increase timeout to 10 seconds
+    });
 
     it('should broadcast events to matching subscriptions', async () => {
-      // Create an emulator for capturing subscriber events
-      const subscriberEmulator = new WebSocketEmulator();
-      await subscriberEmulator.start(relayUrl);
-
       // Create two WebSocket clients
-      const subscriberPromise = new Promise<WebSocket>((resolve) => {
-        const ws = new WebSocket(relayUrl);
-        ws.onopen = () => resolve(ws);
-        return ws;
+      const subscriber = new WebSocket(relayUrl);
+
+      // Wait for subscriber connection
+      await new Promise<void>((resolve) => {
+        subscriber.onopen = () => resolve();
       });
 
-      const publisherPromise = new Promise<WebSocket>((resolve) => {
-        const ws = new WebSocket(relayUrl);
-        ws.onopen = () => resolve(ws);
-        return ws;
-      });
-
-      let subscriberClientId: string | null = null;
-      let publisherClientId: string | null = null;
-
-      // Track the client IDs
-      testBase.server.onConnect((clientId) => {
-        if (!subscriberClientId) {
-          subscriberClientId = clientId;
-        } else {
-          publisherClientId = clientId;
-        }
-      });
-
-      // Track events received by subscriber
-      const receivedEventPromise = new Promise<NostrEvent>((resolve) => {
-        subscriberEmulator.onMessage((_, message) => {
+      // Set up waiting for EVENT message on subscriber
+      const receivedEventPromise = new Promise<NostrWireMessage>((resolve) => {
+        const messageHandler = (event: MessageEvent) => {
+          const message = JSON.parse(event.data) as NostrWireMessage;
           if (message[0] === NostrMessageType.EVENT && message[1] === 'sub1') {
-            resolve(message[2] as NostrEvent);
+            subscriber.removeEventListener('message', messageHandler);
+            resolve(message);
           }
-        });
+        };
+        subscriber.addEventListener('message', messageHandler);
       });
 
-      // Track publisher's OK response
-      const publisherResponsePromise = new Promise<boolean>((resolve) => {
-        clientEmulator.onMessage((_, message) => {
-          if (message[0] === NostrMessageType.OK && message[1] === events.basic.id) {
-            resolve(message[2] as boolean);
-          }
-        });
-      });
-
-      // Connect subscriber and create subscription
-      const subscriber = await subscriberPromise;
+      // Create subscription
       const reqMessage: NostrWireMessage = [
         'REQ',
         'sub1',
@@ -252,27 +232,36 @@ describe('WebSocket Integration', () => {
       subscriber.send(JSON.stringify(reqMessage));
 
       // Wait a bit for subscription to be created
-      await new Promise((r) => setTimeout(r, 500)); // Increased wait time
+      await new Promise((r) => setTimeout(r, 500));
 
       // Connect publisher
-      const publisher = await publisherPromise;
+      const publisher = new WebSocket(relayUrl);
+      await new Promise<void>((resolve) => {
+        publisher.onopen = () => resolve();
+      });
+
+      // Set up waiting for OK message on publisher
+      const publisherResponsePromise = waitForMessage(publisher, NostrMessageType.OK);
 
       // Publish event
       const eventMessage: NostrWireMessage = ['EVENT', events.basic];
       publisher.send(JSON.stringify(eventMessage));
 
       // Verify publisher gets OK
-      const publishSuccess = await publisherResponsePromise;
-      expect(publishSuccess).toBeTruthy();
+      const publisherResponse = await publisherResponsePromise;
+      expect(publisherResponse[0]).toBe(NostrMessageType.OK);
+      expect(publisherResponse[1]).toBe(events.basic.id);
+      expect(publisherResponse[2]).toBeTruthy();
 
       // Verify subscriber receives event
       const receivedEvent = await receivedEventPromise;
-      expect(receivedEvent.id).toBe(events.basic.id);
+      expect(receivedEvent[0]).toBe(NostrMessageType.EVENT);
+      expect(receivedEvent[1]).toBe('sub1');
+      expect((receivedEvent[2] as NostrEvent).id).toBe(events.basic.id);
 
       // Cleanup
       subscriber.close();
       publisher.close();
-      await subscriberEmulator.stop();
-    }, 15000); // Increase timeout to 15 seconds
+    });
   });
 });

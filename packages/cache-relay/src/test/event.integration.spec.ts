@@ -5,6 +5,7 @@
  */
 
 import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
+import { seckeySigner } from 'rx-nostr-crypto';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 import { getRandomSecret } from './utils/getRandomSecret';
 
@@ -136,10 +137,14 @@ describe('Event Handler Integration', () => {
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
       expect(receivedEvent.id).toBe(event.id);
-    }, 10000); // Increase timeout to 10 seconds
+    });
 
     it('should match events to subscriptions by author', async () => {
-      const author = 'specific-author';
+      const hexSecKey1 = getRandomSecret();
+      const signer1 = seckeySigner(hexSecKey1);
+      const author = await signer1.getPublicKey();
+
+      const hexSecKey2 = getRandomSecret();
 
       // Create subscription for specific author
       await testBase.messageHandler.handleMessage('sub-client', [
@@ -149,32 +154,32 @@ describe('Event Handler Integration', () => {
       ]);
 
       // Set up response collector
-      let receivedEvent: any = null;
+      let receivedEvent: unknown = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
           // The EVENT message format is ['EVENT', subscriptionId, event]
-          receivedEvent = msg[2];
+          receivedEvent = msg[2] ?? null;
         }
       });
 
       // Create and publish matching event
-      const matchingEvent = await createTestEvent(getRandomSecret(), { pubkey: author });
+      const matchingEvent = await createTestEvent(hexSecKey1);
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', matchingEvent]);
 
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
-      expect(receivedEvent.id).toBe(matchingEvent.id);
+      expect((receivedEvent as NostrEvent).id).toBe(matchingEvent.id);
 
       // Reset collector
       receivedEvent = null;
 
       // Create and publish non-matching event
-      const nonMatchingEvent = await createTestEvent(getRandomSecret(), { pubkey: 'other-author' });
+      const nonMatchingEvent = await createTestEvent(hexSecKey2);
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', nonMatchingEvent]);
 
       // Verify client did not receive the event
       expect(receivedEvent).toBeNull();
-    }, 10000); // Increase timeout to 10 seconds
+    });
 
     it('should match events to subscriptions by tag', async () => {
       // Create subscription for specific e-tag
@@ -185,11 +190,11 @@ describe('Event Handler Integration', () => {
       ]);
 
       // Set up response collector
-      let receivedEvent: any = null;
+      let receivedEvent: unknown = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
           // The EVENT message format is ['EVENT', subscriptionId, event]
-          receivedEvent = msg[2];
+          receivedEvent = msg[2] ?? null;
         }
       });
 
@@ -204,7 +209,7 @@ describe('Event Handler Integration', () => {
 
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
-      expect(receivedEvent.id).toBe(matchingEvent.id);
+      expect((receivedEvent as NostrEvent).id).toBe(matchingEvent.id);
 
       // Reset collector
       receivedEvent = null;
@@ -220,7 +225,7 @@ describe('Event Handler Integration', () => {
 
       // Verify client did not receive the event
       expect(receivedEvent).toBeNull();
-    }, 10000); // Increase timeout to 10 seconds
+    });
   });
 
   describe('Event time-based filtering', () => {
@@ -262,6 +267,6 @@ describe('Event Handler Integration', () => {
       // Verify only event2 was received (created_at = 2000)
       expect(receivedEvents).toHaveLength(1);
       expect(receivedEvents[0]).toBe(event2.id);
-    }, 10000); // Increase timeout to 10 seconds
+    });
   });
 });
