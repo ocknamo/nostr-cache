@@ -1,4 +1,4 @@
-import { Filter, NostrEvent } from './nostr';
+import type { Filter, NostrEvent } from './nostr';
 
 /**
  * Nostr message types as defined in NIP-01

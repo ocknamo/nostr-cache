@@ -4,7 +4,7 @@
  * Tests the interaction between WebSocketServer and MessageHandler
  */
 
-import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
+import { type NostrEvent, NostrMessageType, type NostrWireMessage } from '@nostr-cache/types';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 
 describe('WebSocket Integration', () => {

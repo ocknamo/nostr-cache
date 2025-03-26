@@ -4,7 +4,7 @@
  * Utilities for working with Nostr filters
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
 
 /**
  * Extended filter type with index signature for string keys

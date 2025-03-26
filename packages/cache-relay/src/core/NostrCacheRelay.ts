@@ -6,20 +6,19 @@
 
 import { logger } from '@nostr-cache/shared';
 import {
-  Filter,
-  NostrEvent,
-  NostrWireMessage,
-  RelayConnectHandler,
-  RelayDisconnectHandler,
-  RelayEoseHandler,
-  RelayErrorHandler,
-  RelayEventHandler,
-  messageToWire,
+  type Filter,
+  type NostrEvent,
+  type NostrWireMessage,
+  type RelayConnectHandler,
+  type RelayDisconnectHandler,
+  type RelayEoseHandler,
+  type RelayErrorHandler,
+  type RelayEventHandler,
   wireToMessage,
 } from '@nostr-cache/types';
 import { EventValidator } from '../event/EventValidator';
-import { StorageAdapter } from '../storage/StorageAdapter';
-import { TransportAdapter } from '../transport/TransportAdapter';
+import type { StorageAdapter } from '../storage/StorageAdapter';
+import type { TransportAdapter } from '../transport/TransportAdapter';
 
 /**
  * Nostr Cache Relay options

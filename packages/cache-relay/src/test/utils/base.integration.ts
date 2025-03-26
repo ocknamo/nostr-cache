@@ -2,7 +2,7 @@
  * Base setup for integration tests
  */
 
-import { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/types';
 import 'fake-indexeddb/auto';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { MessageHandler } from '../../core/MessageHandler';
@@ -94,6 +94,7 @@ export class IntegrationTestBase {
     await this.storage.delete();
     // Reset indexedDB for next test
     // @ts-ignore - fake-indexeddb types
+    // biome-ignore lint/suspicious/noGlobalAssign: for indexedDB mock
     indexedDB = new IDBFactory();
   }
 }

@@ -6,24 +6,23 @@
 
 import { logger } from '@nostr-cache/shared';
 import {
-  CloseMessage,
-  ClosedResponse,
-  EoseResponse,
-  EventMessage,
-  Filter,
-  NostrEvent,
+  type CloseMessage,
+  type ClosedResponse,
+  type EoseResponse,
+  type EventMessage,
+  type Filter,
+  type NostrEvent,
   NostrMessageType,
-  NostrWireMessage,
-  NoticeResponse,
-  OkResponse,
-  ReqMessage,
+  type NostrWireMessage,
+  type NoticeResponse,
+  type OkResponse,
+  type ReqMessage,
   messageToWire,
-  wireToMessage,
 } from '@nostr-cache/types';
 import { EventHandler } from '../event/EventHandler';
 import { EventValidator } from '../event/EventValidator';
-import { StorageAdapter } from '../storage/StorageAdapter';
-import { SubscriptionManager } from './SubscriptionManager';
+import type { StorageAdapter } from '../storage/StorageAdapter';
+import type { SubscriptionManager } from './SubscriptionManager';
 
 /**
  * Message handler class

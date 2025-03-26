@@ -2,7 +2,7 @@
  * Tests for filterUtils
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
 import { createFilterKey, eventMatchesFilter, mergeFilters, normalizeFilter } from './filterUtils';
 
 describe('filterUtils', () => {

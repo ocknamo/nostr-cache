@@ -1,4 +1,4 @@
-import { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/types';
 import 'fake-indexeddb/auto';
 import { DexieStorage } from './DexieStorage';
 
@@ -16,6 +16,7 @@ describe('DexieStorage', () => {
     await storage.delete();
     // Reset indexedDB for next test
     // @ts-ignore - fake-indexeddb types
+    // biome-ignore lint/suspicious/noGlobalAssign: for indexedDB mock
     indexedDB = new IDBFactory();
   });
 

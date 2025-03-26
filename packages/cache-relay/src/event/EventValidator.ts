@@ -1,4 +1,4 @@
-import { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/types';
 import { verifier } from 'rx-nostr-crypto';
 
 /**

@@ -2,7 +2,7 @@
  * Transport adapter interface for Nostr Cache Relay
  */
 
-import { NostrWireMessage } from '@nostr-cache/types';
+import type { NostrWireMessage } from '@nostr-cache/types';
 
 /**
  * Transport adapter interface

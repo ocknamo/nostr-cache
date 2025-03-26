@@ -7,17 +7,16 @@
   "scripts": {
     "build": "tsc",
     "test": "echo 'Add test here'",
-    "format": "biome format --write ./src && biome check --apply ./src",
+    "format": "biome format --write ./src && biome check --write ./src",
     "format:check": "biome check ./src",
     "lint": "biome check ./src",
-    "lint:fix": "biome check --apply ./src",
+    "lint:fix": "biome check --write ./src",
     "fix": "npm run lint:fix && npm run format"
   },
   "dependencies": {
     "@nostr-cache/types": "^0.1.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.5.3",
     "@types/jest": "^29.5.0",
     "@types/node": "^18.15.0",
     "jest": "^29.5.0",

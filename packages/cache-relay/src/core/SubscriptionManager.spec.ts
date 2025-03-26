@@ -2,8 +2,8 @@
  * Tests for SubscriptionManager
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
-import { StorageAdapter } from '../storage/StorageAdapter';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { StorageAdapter } from '../storage/StorageAdapter';
 import { SubscriptionManager } from './SubscriptionManager';
 
 describe('SubscriptionManager', () => {

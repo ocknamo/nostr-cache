@@ -2,11 +2,11 @@
  * Tests for EventHandler
  */
 
-import { NostrEvent } from '@nostr-cache/types';
-import { SubscriptionManager } from '../core/SubscriptionManager';
-import { StorageAdapter } from '../storage/StorageAdapter';
+import type { NostrEvent } from '@nostr-cache/types';
+import type { SubscriptionManager } from '../core/SubscriptionManager';
+import type { StorageAdapter } from '../storage/StorageAdapter';
 import { EventHandler } from './EventHandler';
-import { EventValidator } from './EventValidator';
+import type { EventValidator } from './EventValidator';
 
 describe('EventHandler', () => {
   // Mock storage adapter

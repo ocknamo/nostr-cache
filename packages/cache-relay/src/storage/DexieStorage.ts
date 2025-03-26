@@ -1,8 +1,8 @@
 import { logger } from '@nostr-cache/shared';
-import { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
 import Dexie from 'dexie';
 import { eventMatchesFilter } from '../utils/filterUtils';
-import { StorageAdapter } from './StorageAdapter';
+import type { StorageAdapter } from './StorageAdapter';
 
 /**
  * NostrEvent table schema
@@ -166,7 +166,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
     // authors + kinds + 時間範囲の組み合わせ
     else if (authors?.length && kinds?.length && (since !== undefined || until !== undefined)) {
-      const timeRange = [since || 0, until || Infinity];
+      const timeRange = [since || 0, until || Number.POSITIVE_INFINITY];
       // 時間範囲でフィルタリング
       collection = this.events.where('created_at').between(timeRange[0], timeRange[1]);
       // authorsとkindsでフィルタリング
@@ -177,7 +177,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     // authors + 時間範囲の組み合わせ
     else if (authors?.length && (since !== undefined || until !== undefined)) {
       // 時間範囲でフィルタリング
-      collection = this.events.where('created_at').between(since || 0, until || Infinity);
+      collection = this.events
+        .where('created_at')
+        .between(since || 0, until || Number.POSITIVE_INFINITY);
       // authorsでフィルタリング
       collection = collection.filter((event) => authors.includes(event.pubkey));
     }
@@ -190,7 +192,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     // kinds + 時間範囲の組み合わせ
     else if (kinds?.length && (since !== undefined || until !== undefined)) {
       // 時間範囲でフィルタリング
-      collection = this.events.where('created_at').between(since || 0, until || Infinity);
+      collection = this.events
+        .where('created_at')
+        .between(since || 0, until || Number.POSITIVE_INFINITY);
       // kindsでフィルタリング
       collection = collection.filter((event) => kinds.includes(event.kind));
     }
@@ -201,7 +205,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       collection = this.events.where('pubkey').anyOf(authors);
     } else if (since !== undefined || until !== undefined) {
       // untilは指定された時刻を含むように+1する
-      const timeRange = [since || 0, (until || Infinity) + (until === Infinity ? 0 : 1)];
+      const timeRange = [
+        since || 0,
+        (until || Number.POSITIVE_INFINITY) + (until === Number.POSITIVE_INFINITY ? 0 : 1),
+      ];
       collection = this.events.where('created_at').between(timeRange[0], timeRange[1], true, false);
     } else {
       collection = this.events.toCollection();

@@ -5,9 +5,9 @@
  */
 
 import { logger } from '@nostr-cache/shared';
-import { Filter, NostrEvent } from '@nostr-cache/types';
-import { SubscriptionManager } from '../core/SubscriptionManager';
-import { StorageAdapter } from '../storage/StorageAdapter';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { SubscriptionManager } from '../core/SubscriptionManager';
+import type { StorageAdapter } from '../storage/StorageAdapter';
 import { EventValidator } from './EventValidator';
 
 interface Subscription {

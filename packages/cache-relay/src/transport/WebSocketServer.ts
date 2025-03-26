@@ -1,8 +1,8 @@
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { logger } from '@nostr-cache/shared';
-import { NostrWireMessage } from '@nostr-cache/types';
-import { WebSocket, WebSocketServer as WS } from 'ws';
-import { TransportAdapter } from './TransportAdapter';
+import type { NostrWireMessage } from '@nostr-cache/types';
+import { WebSocketServer as WS, WebSocket } from 'ws';
+import type { TransportAdapter } from './TransportAdapter';
 
 /**
  * WebSocket server implementation for Node.js environment

@@ -5,8 +5,8 @@
  * The actual implementation will be developed in a later phase.
  */
 
-import { NostrCacheRelay, StorageAdapter } from '@nostr-cache/cache-relay';
-import { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
+import { NostrCacheRelay, type StorageAdapter } from '@nostr-cache/cache-relay';
+import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 
 /**
  * Server-side cache service (placeholder)
@@ -28,6 +28,8 @@ class CacheService {
       getEvents: async (filters: Filter[]) => [],
       deleteEvent: async (id: string) => true,
       clear: async () => {},
+      deleteEventsByPubkeyAndKind: async () => true,
+      deleteEventsByPubkeyKindAndDTag: async () => true,
     };
 
     // Create a placeholder transport adapter

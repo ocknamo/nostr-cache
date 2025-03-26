@@ -4,7 +4,7 @@
  * Tests the interaction between MessageHandler and EventHandler
  */
 
-import { NostrEvent, NostrMessageType, NostrWireMessage } from '@nostr-cache/types';
+import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 import { getRandomSecret } from './utils/getRandomSecret';
@@ -122,7 +122,7 @@ describe('Event Handler Integration', () => {
       await testBase.messageHandler.handleMessage('sub-client', ['REQ', 'sub1', { kinds: [1] }]);
 
       // Create client for receiving messages
-      let receivedEvent: any = null;
+      let receivedEvent: unknown = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
           // The EVENT message format is ['EVENT', subscriptionId, event]
@@ -136,7 +136,7 @@ describe('Event Handler Integration', () => {
 
       // Verify client received the event
       expect(receivedEvent).not.toBeNull();
-      expect(receivedEvent.id).toBe(event.id);
+      expect((receivedEvent as NostrEvent).id).toBe(event.id);
     });
 
     it('should match events to subscriptions by author', async () => {

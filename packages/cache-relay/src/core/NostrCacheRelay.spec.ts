@@ -2,9 +2,9 @@
  * Tests for NostrCacheRelay
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
-import { StorageAdapter } from '../storage/StorageAdapter';
-import { TransportAdapter } from '../transport/TransportAdapter';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { StorageAdapter } from '../storage/StorageAdapter';
+import type { TransportAdapter } from '../transport/TransportAdapter';
 import { NostrCacheRelay } from './NostrCacheRelay';
 
 describe('NostrCacheRelay', () => {

@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/types",
+    "packages/shared",
+    "packages/cache-lib",
+    "packages/cache-relay",
+    "packages/server",
+    "packages/web-client"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
@@ -17,6 +22,7 @@
   },
   "devDependencies": {
     "typescript": "^5.0.0",
-    "eslint": "^8.0.0"
+    "eslint": "^8.0.0",
+    "@biomejs/biome": "^1.9.4"
   }
 }

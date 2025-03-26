@@ -2,7 +2,7 @@
  * Storage adapter interface for Nostr Cache Relay
  */
 
-import { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/types';
 
 /**
  * Storage adapter interface

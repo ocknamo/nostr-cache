@@ -2,11 +2,10 @@
  * Tests for MessageHandler
  */
 
-import { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/types';
-import { EventValidator } from '../event/EventValidator';
-import { StorageAdapter } from '../storage/StorageAdapter';
+import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import type { StorageAdapter } from '../storage/StorageAdapter';
 import { MessageHandler } from './MessageHandler';
-import { SubscriptionManager } from './SubscriptionManager';
+import type { SubscriptionManager } from './SubscriptionManager';
 
 describe('MessageHandler', () => {
   // Mock storage adapter
