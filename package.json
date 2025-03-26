@@ -10,6 +10,9 @@
     "packages/server",
     "packages/web-client"
   ],
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
