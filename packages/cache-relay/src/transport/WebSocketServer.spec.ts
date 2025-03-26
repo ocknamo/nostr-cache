@@ -5,10 +5,10 @@ import { WebSocketServer } from './WebSocketServer';
 describe('WebSocketServer', () => {
   let server: WebSocketServer;
   let client: WebSocket;
-  const port = 3000;
+  let port: number;
 
   beforeEach(() => {
-    server = new WebSocketServer(port);
+    server = new WebSocketServer();
   });
 
   afterEach(async () => {
@@ -21,6 +21,8 @@ describe('WebSocketServer', () => {
   describe('start()', () => {
     it('should start WebSocket server', async () => {
       await server.start();
+      port = server.getPort();
+      expect(port).toBeGreaterThan(0);
 
       // Try to connect
       await new Promise<void>((resolve, reject) => {
@@ -39,6 +41,9 @@ describe('WebSocketServer', () => {
       });
 
       await server.start();
+      port = server.getPort();
+      expect(port).toBeGreaterThan(0);
+
       client = new WebSocket(`ws://localhost:${port}`);
       await connectPromise;
     });
@@ -47,6 +52,8 @@ describe('WebSocketServer', () => {
   describe('message handling', () => {
     beforeEach(async () => {
       await server.start();
+      port = server.getPort();
+      expect(port).toBeGreaterThan(0);
     });
 
     it('should handle valid Nostr messages', async () => {
@@ -91,6 +98,8 @@ describe('WebSocketServer', () => {
   describe('stop()', () => {
     it('should close all client connections', async () => {
       await server.start();
+      port = server.getPort();
+      expect(port).toBeGreaterThan(0);
 
       const clientClosedPromise = new Promise<void>((resolve) => {
         client = new WebSocket(`ws://localhost:${port}`);
@@ -114,6 +123,9 @@ describe('WebSocketServer', () => {
       });
 
       await server.start();
+      port = server.getPort();
+      expect(port).toBeGreaterThan(0);
+
       client = new WebSocket(`ws://localhost:${port}`);
       await new Promise<void>((resolve) => client.on('open', () => resolve()));
       await server.stop();
@@ -124,6 +136,11 @@ describe('WebSocketServer', () => {
   describe('send()', () => {
     it('should send messages to connected client', async () => {
       const message: NostrWireMessage = ['NOTICE', 'test message'];
+
+      await server.start();
+      port = server.getPort();
+      expect(port).toBeGreaterThan(0);
+
       const messagePromise = new Promise<void>((resolve) => {
         client = new WebSocket(`ws://localhost:${port}`);
         client.on('message', (data) => {
@@ -132,8 +149,6 @@ describe('WebSocketServer', () => {
           resolve();
         });
       });
-
-      await server.start();
 
       // Wait for client to connect and get its ID
       const clientId = await new Promise<string>((resolve) => {
