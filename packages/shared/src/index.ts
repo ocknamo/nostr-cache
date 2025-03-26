@@ -10,3 +10,4 @@ export * from './constants/relays';
 
 // Export utilities
 export { logger, LogLevel } from './utils/logger';
+export { getRandomSecret } from './utils/crypto';

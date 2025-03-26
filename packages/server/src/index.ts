@@ -1,99 +1,158 @@
 /**
- * Nostr Cache Server
+ * Nostr Relay Server
  *
- * This is a placeholder for the future server-side implementation.
- * The actual implementation will be developed in a later phase.
+ * NIP-01準拠のNostrリレーサーバー実装
  */
 
-import { NostrCacheRelay, type StorageAdapter } from '@nostr-cache/cache-relay';
-import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
+// fake-indexeddbの自動セットアップ
+import 'fake-indexeddb/auto';
+import { NostrCacheRelay } from '@nostr-cache/cache-relay';
+import { DexieStorage } from '@nostr-cache/cache-relay/dist/storage/DexieStorage';
+import { WebSocketServer } from '@nostr-cache/cache-relay/dist/transport/WebSocketServer';
+import { logger } from '@nostr-cache/shared';
 
 /**
- * Server-side cache service (placeholder)
+ * Nostrリレーサーバーの設定オプション
  */
-class CacheService {
+interface NostrRelayServerOptions {
+  // サーバー設定
+  port: number;
+  host?: string;
+
+  // ストレージ設定
+  storageOptions?: {
+    dbName?: string;
+    maxSize?: number;
+  };
+
+  // リレー設定（NostrCacheRelayに渡すオプション）
+  relay?: {
+    maxSubscriptions?: number;
+    maxEventsPerRequest?: number;
+    validateEvents?: boolean;
+  };
+}
+
+/**
+ * Nostrリレーサーバークラス
+ * NIP-01準拠のNostrリレーサーバーを実装
+ */
+class NostrRelayServer {
+  private server: WebSocketServer;
   private relay: NostrCacheRelay;
-  private storage: StorageAdapter;
+  private storage: DexieStorage;
+  private options: NostrRelayServerOptions;
 
-  constructor() {
-    // This is a placeholder implementation
-    // In a real implementation, we would:
-    // 1. Create a proper storage adapter
-    // 2. Create a proper transport adapter
-    // 3. Initialize the relay with these adapters
-
-    // For now, we'll just create a placeholder relay
-    this.storage = {
-      saveEvent: async (event: NostrEvent) => true,
-      getEvents: async (filters: Filter[]) => [],
-      deleteEvent: async (id: string) => true,
-      clear: async () => {},
-      deleteEventsByPubkeyAndKind: async () => true,
-      deleteEventsByPubkeyKindAndDTag: async () => true,
+  /**
+   * NostrRelayServerのインスタンスを作成
+   *
+   * @param options 設定オプション
+   */
+  constructor(options: Partial<NostrRelayServerOptions> = {}) {
+    // デフォルト設定とマージ
+    this.options = {
+      port: 8008,
+      ...options,
     };
 
-    // Create a placeholder transport adapter
-    const transport = {
-      start: async () => {},
-      stop: async () => {},
-      send: (clientId: string, message: NostrWireMessage) => {},
-      onMessage: (callback: (clientId: string, message: NostrWireMessage) => void) => {},
-      onConnect: (callback: (clientId: string) => void) => {},
-      onDisconnect: (callback: (clientId: string) => void) => {},
-    };
+    // fake-indexeddbを使用したDexieStorageの初期化
+    this.storage = new DexieStorage(this.options.storageOptions?.dbName || 'NostrRelay');
 
-    // Initialize the relay
-    this.relay = new NostrCacheRelay(this.storage, transport, {
-      storage: 'memory',
-      maxSubscriptions: 100,
-      maxEventsPerRequest: 1000,
+    // WebSocketサーバーの作成
+    this.server = new WebSocketServer(this.options.port);
+
+    // リレーの初期化
+    this.relay = new NostrCacheRelay(this.storage, this.server, {
+      storage: 'indexeddb', // fake-indexeddbを使用
+      storageOptions: {
+        dbName: this.options.storageOptions?.dbName,
+        maxSize: this.options.storageOptions?.maxSize,
+      },
+      maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
+      maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
+      validateEvents: this.options.relay?.validateEvents !== false,
     });
   }
 
   /**
-   * Get events matching the given filters
+   * サーバーを起動
    *
-   * @param filters Nostr filters
-   * @returns Promise resolving to matching events
+   * @returns Promise resolving when the server is started
    */
-  async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
-    return this.storage.getEvents(filters);
+  async start(): Promise<void> {
+    await this.relay.connect();
+    logger.info(`Nostr relay server started on port ${this.options.port}`);
   }
 
   /**
-   * Add an event to the cache
+   * サーバーを停止
    *
-   * @param event Nostr event
+   * @returns Promise resolving when the server is stopped
    */
-  async addEvent(event: NostrEvent): Promise<boolean> {
-    return await this.relay.publishEvent(event);
-  }
-
-  /**
-   * Clear the cache
-   */
-  async clearCache(): Promise<void> {
+  async stop(): Promise<void> {
+    await this.relay.disconnect();
+    // ストレージのクリーンアップ
     await this.storage.clear();
+
+    // fake-indexeddbのリセット - グローバル変数の再代入を避ける
+    try {
+      const resetMethod = require('fake-indexeddb/lib/FDBFactory').reset;
+      if (typeof resetMethod === 'function') {
+        resetMethod();
+        logger.debug('IndexedDB reset successful');
+      }
+    } catch (error) {
+      logger.warn('Failed to reset IndexedDB:', error);
+    }
+
+    logger.info('Nostr relay server stopped');
   }
 
   /**
-   * Get cache statistics
+   * 接続数を取得
    *
-   * @returns Object with cache statistics
+   * @returns 現在の接続数
    */
-  getStats(): { size: number; keys: string[] } {
-    // This is a placeholder implementation
-    return {
-      size: 0,
-      keys: [],
-    };
+  getConnectionCount(): number {
+    // 実装が必要
+    return 0;
+  }
+
+  /**
+   * イベント数を取得
+   *
+   * @returns Promise resolving to the number of events
+   */
+  async getEventCount(): Promise<number> {
+    // 実装が必要
+    return 0;
+  }
+
+  /**
+   * サーバーが使用しているポート番号を取得
+   *
+   * @returns ポート番号
+   */
+  getPort(): number {
+    return this.options.port;
   }
 }
 
-// This is just a placeholder to demonstrate the planned functionality
-console.log('Nostr Cache Server - Future Implementation');
-console.log('This package is currently a placeholder for the planned server-side implementation.');
-console.log('The actual implementation will be developed in a later phase.');
+// CLIインターフェース
+if (require.main === module) {
+  const server = new NostrRelayServer();
 
-// Export the CacheService for future use
-export { CacheService };
+  // シグナルハンドリング
+  process.on('SIGINT', async () => {
+    await server.stop();
+    process.exit(0);
+  });
+
+  // サーバー起動
+  server.start().catch((error) => {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+  });
+}
+
+export { NostrRelayServer };

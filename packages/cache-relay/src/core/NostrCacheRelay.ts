@@ -22,6 +22,9 @@ import type { TransportAdapter } from '../transport/TransportAdapter';
 
 /**
  * Nostr Cache Relay options
+ *
+ * 注意: 一部のオプションは現在実装中のため、完全にはサポートされていません。
+ * 将来のバージョンで全機能が利用可能になる予定です。
  */
 export interface NostrRelayOptions {
   /**
