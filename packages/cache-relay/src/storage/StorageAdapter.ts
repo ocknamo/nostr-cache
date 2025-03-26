@@ -39,4 +39,29 @@ export interface StorageAdapter {
    * @returns Promise resolving when operation is complete
    */
   clear(): Promise<void>;
+
+  /**
+   * Delete events with the same pubkey and kind
+   * Used for handling replaceable events
+   *
+   * @param pubkey Public key of the event author
+   * @param kind Event kind
+   * @returns Promise resolving to true if successful, false otherwise
+   */
+  deleteEventsByPubkeyAndKind(pubkey: string, kind: number): Promise<boolean>;
+
+  /**
+   * Delete events with the same pubkey, kind, and d tag value
+   * Used for handling addressable events
+   *
+   * @param pubkey Public key of the event author
+   * @param kind Event kind
+   * @param dTagValue Value of the d tag
+   * @returns Promise resolving to true if successful, false otherwise
+   */
+  deleteEventsByPubkeyKindAndDTag(
+    pubkey: string,
+    kind: number,
+    dTagValue: string
+  ): Promise<boolean>;
 }

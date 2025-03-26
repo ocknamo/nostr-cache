@@ -219,6 +219,217 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('deleteEventsByPubkeyAndKind', () => {
+    const replaceableEvents = [
+      {
+        id: 'event1',
+        pubkey: 'author1',
+        created_at: 1000,
+        kind: 0, // Replaceable kind
+        tags: [],
+        content: 'test1',
+        sig: 'sig1',
+      },
+      {
+        id: 'event2',
+        pubkey: 'author1',
+        created_at: 2000,
+        kind: 0, // Same author and kind
+        tags: [],
+        content: 'test2',
+        sig: 'sig2',
+      },
+      {
+        id: 'event3',
+        pubkey: 'author2',
+        created_at: 1500,
+        kind: 0, // Different author, same kind
+        tags: [],
+        content: 'test3',
+        sig: 'sig3',
+      },
+      {
+        id: 'event4',
+        pubkey: 'author1',
+        created_at: 3000,
+        kind: 1, // Same author, different kind
+        tags: [],
+        content: 'test4',
+        sig: 'sig4',
+      },
+    ];
+
+    beforeEach(async () => {
+      for (const event of replaceableEvents) {
+        await storage.saveEvent(event);
+      }
+    });
+
+    it('should delete events with matching pubkey and kind', async () => {
+      const result = await storage.deleteEventsByPubkeyAndKind('author1', 0);
+      expect(result).toBe(true);
+
+      // 特定のpubkeyとkindのイベントが削除されていることを確認
+      const events = await storage.getEvents([{ authors: ['author1'], kinds: [0] }]);
+      expect(events).toHaveLength(0);
+
+      // 他のイベントは残っていることを確認
+      const otherEvents = await storage.getEvents([{}]);
+      expect(otherEvents).toHaveLength(2);
+      expect(otherEvents.map((e) => e.id).sort()).toEqual(['event3', 'event4']);
+    });
+
+    it('should return false when no events match', async () => {
+      const result = await storage.deleteEventsByPubkeyAndKind('non-existent', 999);
+      expect(result).toBe(false);
+
+      // すべてのイベントが残っていることを確認
+      const events = await storage.getEvents([{}]);
+      expect(events).toHaveLength(4);
+    });
+
+    it('should handle error gracefully', async () => {
+      // IndexedDBがロックされていることをシミュレート
+      // @ts-ignore - private field access for testing
+      jest.spyOn(storage.events, 'where').mockImplementationOnce(() => {
+        throw new Error('Database is locked');
+      });
+
+      const result = await storage.deleteEventsByPubkeyAndKind('author1', 0);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('deleteEventsByPubkeyKindAndDTag', () => {
+    const addressableEvents = [
+      {
+        id: 'addr1',
+        pubkey: 'author1',
+        created_at: 1000,
+        kind: 30001, // Addressable kind
+        tags: [['d', 'test1']],
+        content: 'addr content 1',
+        sig: 'sig1',
+      },
+      {
+        id: 'addr2',
+        pubkey: 'author1',
+        created_at: 2000,
+        kind: 30001, // Same author and kind
+        tags: [['d', 'test1']], // Same d tag
+        content: 'addr content 2',
+        sig: 'sig2',
+      },
+      {
+        id: 'addr3',
+        pubkey: 'author1',
+        created_at: 3000,
+        kind: 30001, // Same author and kind
+        tags: [['d', 'test2']], // Different d tag
+        content: 'addr content 3',
+        sig: 'sig3',
+      },
+      {
+        id: 'addr4',
+        pubkey: 'author2',
+        created_at: 4000,
+        kind: 30001, // Different author, same kind
+        tags: [['d', 'test1']], // Same d tag
+        content: 'addr content 4',
+        sig: 'sig4',
+      },
+      {
+        id: 'addr5',
+        pubkey: 'author1',
+        created_at: 5000,
+        kind: 30002, // Same author, different kind
+        tags: [['d', 'test1']], // Same d tag
+        content: 'addr content 5',
+        sig: 'sig5',
+      },
+      {
+        id: 'addr6',
+        pubkey: 'author1',
+        created_at: 6000,
+        kind: 30001, // Same author and kind
+        tags: [
+          ['d', 'test1'],
+          ['e', 'event1'],
+        ], // Same d tag with additional tags
+        content: 'addr content 6',
+        sig: 'sig6',
+      },
+      {
+        id: 'addr7',
+        pubkey: 'author1',
+        created_at: 7000,
+        kind: 30001, // Same author and kind
+        tags: [
+          ['e', 'event1'],
+          ['d', 'test1'],
+        ], // Same d tag but different order
+        content: 'addr content 7',
+        sig: 'sig7',
+      },
+    ];
+
+    beforeEach(async () => {
+      for (const event of addressableEvents) {
+        await storage.saveEvent(event);
+      }
+    });
+
+    it('should delete events with matching pubkey, kind and d tag', async () => {
+      const result = await storage.deleteEventsByPubkeyKindAndDTag('author1', 30001, 'test1');
+      expect(result).toBe(true);
+
+      // pubkey, kind, d tagが一致するイベントが削除されていることを確認
+      const remainingEvents = await storage.getEvents([{}]);
+      expect(remainingEvents).toHaveLength(3);
+      expect(remainingEvents.map((e) => e.id).sort()).toEqual(['addr3', 'addr4', 'addr5']);
+    });
+
+    it('should delete events regardless of tag position', async () => {
+      // addr7はdタグの位置が異なるが、削除されるべき
+      await storage.deleteEventsByPubkeyKindAndDTag('author1', 30001, 'test1');
+
+      const event = await storage.getEvents([{ ids: ['addr7'] }]);
+      expect(event).toHaveLength(0);
+    });
+
+    it('should not delete events with different d tag values', async () => {
+      await storage.deleteEventsByPubkeyKindAndDTag('author1', 30001, 'test1');
+
+      const events = await storage.getEvents([{ kinds: [30001], '#d': ['test2'] }]);
+      expect(events).toHaveLength(1);
+      expect(events[0].id).toBe('addr3');
+    });
+
+    it('should return false when no events match', async () => {
+      const result = await storage.deleteEventsByPubkeyKindAndDTag(
+        'non-existent',
+        999,
+        'non-existent'
+      );
+      expect(result).toBe(false);
+
+      // すべてのイベントが残っていることを確認
+      const events = await storage.getEvents([{}]);
+      expect(events).toHaveLength(7);
+    });
+
+    it('should handle error gracefully', async () => {
+      // IndexedDBがロックされていることをシミュレート
+      // @ts-ignore - private field access for testing
+      jest.spyOn(storage.events, 'where').mockImplementationOnce(() => {
+        throw new Error('Database is locked');
+      });
+
+      const result = await storage.deleteEventsByPubkeyKindAndDTag('author1', 30001, 'test1');
+      expect(result).toBe(false);
+    });
+  });
+
   describe('Additional getEvents Patterns', () => {
     const events = [
       {

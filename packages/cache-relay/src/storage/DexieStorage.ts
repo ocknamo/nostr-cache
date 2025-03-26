@@ -316,4 +316,70 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       );
     }
   }
+
+  /**
+   * Delete events with the same pubkey and kind
+   * Used for handling replaceable events
+   *
+   * @param pubkey Public key of the event author
+   * @param kind Event kind
+   * @returns Promise resolving to true if successful, false otherwise
+   */
+  async deleteEventsByPubkeyAndKind(pubkey: string, kind: number): Promise<boolean> {
+    try {
+      // 複合インデックスを使用してイベントを削除
+      const count = await this.events.where('[pubkey+kind]').equals([pubkey, kind]).delete();
+      return count > 0;
+    } catch (error) {
+      console.error(
+        `Failed to delete events by pubkey and kind: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Delete events with the same pubkey, kind, and d tag value
+   * Used for handling addressable events
+   *
+   * @param pubkey Public key of the event author
+   * @param kind Event kind
+   * @param dTagValue Value of the d tag
+   * @returns Promise resolving to true if successful, false otherwise
+   */
+  async deleteEventsByPubkeyKindAndDTag(
+    pubkey: string,
+    kind: number,
+    dTagValue: string
+  ): Promise<boolean> {
+    try {
+      // pubkeyとkindで一致するイベントをフィルタリング
+      const events = await this.events.where('[pubkey+kind]').equals([pubkey, kind]).toArray();
+
+      // dタグが一致するイベントのIDを収集
+      const idsToDelete = events
+        .filter((event) => {
+          const dTag = event.tags.find((tag) => tag[0] === 'd');
+          return dTag && dTag[1] === dTagValue;
+        })
+        .map((event) => event.id);
+
+      if (idsToDelete.length === 0) {
+        return false;
+      }
+
+      // 収集したIDでイベントを削除
+      await this.events.bulkDelete(idsToDelete);
+      return true;
+    } catch (error) {
+      console.error(
+        `Failed to delete events by pubkey, kind, and d tag: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return false;
+    }
+  }
 }

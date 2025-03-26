@@ -15,6 +15,8 @@ describe('EventHandler', () => {
     getEvents: jest.fn().mockResolvedValue([]),
     deleteEvent: jest.fn().mockResolvedValue(true),
     clear: jest.fn().mockResolvedValue(undefined),
+    deleteEventsByPubkeyAndKind: jest.fn().mockResolvedValue(true),
+    deleteEventsByPubkeyKindAndDTag: jest.fn().mockResolvedValue(true),
   } as jest.Mocked<StorageAdapter>;
 
   // Mock subscription manager
@@ -106,6 +108,10 @@ describe('EventHandler', () => {
       const result = await eventHandler.handleEvent(replaceableEvent);
 
       expect(result.success).toBe(true);
+      expect(mockStorage.deleteEventsByPubkeyAndKind).toHaveBeenCalledWith(
+        replaceableEvent.pubkey,
+        replaceableEvent.kind
+      );
       expect(mockStorage.saveEvent).toHaveBeenCalledWith(replaceableEvent);
       expect(mockSubscriptionManager.findMatchingSubscriptions).toHaveBeenCalledWith(
         replaceableEvent
@@ -126,6 +132,11 @@ describe('EventHandler', () => {
       const result = await eventHandler.handleEvent(addressableEvent);
 
       expect(result.success).toBe(true);
+      expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalledWith(
+        addressableEvent.pubkey,
+        addressableEvent.kind,
+        'address-value'
+      );
       expect(mockStorage.saveEvent).toHaveBeenCalledWith(addressableEvent);
       expect(mockSubscriptionManager.findMatchingSubscriptions).toHaveBeenCalledWith(
         addressableEvent
@@ -259,6 +270,72 @@ describe('EventHandler', () => {
       };
       const result = eventHandler['getDTagValue'](multiTagEvent);
       expect(result).toBe('first-value');
+    });
+  });
+
+  describe('handleReplaceableEvent', () => {
+    it('should delete old events and save new event', async () => {
+      await eventHandler['handleReplaceableEvent'](replaceableEvent);
+
+      expect(mockStorage.deleteEventsByPubkeyAndKind).toHaveBeenCalledWith(
+        replaceableEvent.pubkey,
+        replaceableEvent.kind
+      );
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(replaceableEvent);
+    });
+
+    it('should handle errors during old event deletion', async () => {
+      mockStorage.deleteEventsByPubkeyAndKind.mockRejectedValueOnce(new Error('Delete error'));
+
+      await expect(eventHandler['handleReplaceableEvent'](replaceableEvent)).rejects.toThrow();
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('should handle errors during new event saving', async () => {
+      mockStorage.saveEvent.mockRejectedValueOnce(new Error('Save error'));
+
+      await expect(eventHandler['handleReplaceableEvent'](replaceableEvent)).rejects.toThrow();
+      expect(mockStorage.deleteEventsByPubkeyAndKind).toHaveBeenCalled();
+    });
+  });
+
+  describe('handleAddressableEvent', () => {
+    it('should delete old events and save new event', async () => {
+      await eventHandler['handleAddressableEvent'](addressableEvent);
+
+      expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalledWith(
+        addressableEvent.pubkey,
+        addressableEvent.kind,
+        'address-value'
+      );
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(addressableEvent);
+    });
+
+    it('should fail when d tag is missing', async () => {
+      const eventWithoutDTag = {
+        ...addressableEvent,
+        tags: [],
+      };
+
+      const result = await eventHandler['handleAddressableEvent'](eventWithoutDTag);
+
+      expect(result).toBe(false);
+      expect(mockStorage.deleteEventsByPubkeyKindAndDTag).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('should handle errors during old event deletion', async () => {
+      mockStorage.deleteEventsByPubkeyKindAndDTag.mockRejectedValueOnce(new Error('Delete error'));
+
+      await expect(eventHandler['handleAddressableEvent'](addressableEvent)).rejects.toThrow();
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('should handle errors during new event saving', async () => {
+      mockStorage.saveEvent.mockRejectedValueOnce(new Error('Save error'));
+
+      await expect(eventHandler['handleAddressableEvent'](addressableEvent)).rejects.toThrow();
+      expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalled();
     });
   });
 });

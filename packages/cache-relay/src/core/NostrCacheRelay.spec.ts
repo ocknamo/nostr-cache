@@ -14,6 +14,8 @@ describe('NostrCacheRelay', () => {
     getEvents: jest.fn().mockResolvedValue([]),
     deleteEvent: jest.fn().mockResolvedValue(true),
     clear: jest.fn().mockResolvedValue(undefined),
+    deleteEventsByPubkeyAndKind: jest.fn().mockResolvedValue(true),
+    deleteEventsByPubkeyKindAndDTag: jest.fn().mockResolvedValue(true),
   };
 
   // Mock transport adapter

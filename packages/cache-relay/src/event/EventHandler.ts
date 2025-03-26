@@ -74,6 +74,34 @@ export class EventHandler {
           message: 'error: subscription matching failed',
         };
       }
+    } else if (this.isReplaceableEvent(event)) {
+      try {
+        // Replaceableイベントの処理
+        // 同じpubkeyとkindの組み合わせに対して最新のものだけ保存
+        await this.handleReplaceableEvent(event);
+        const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+        return { success: true, message: 'success', matches };
+      } catch (error) {
+        console.info('Replaceable event handling error:', error);
+        return {
+          success: false,
+          message: 'error: replaceable event handling failed',
+        };
+      }
+    } else if (this.isAddressableEvent(event)) {
+      try {
+        // Addressableイベントの処理
+        // 同じpubkey、kind、dタグ値の組み合わせに対して最新のものだけ保存
+        await this.handleAddressableEvent(event);
+        const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+        return { success: true, message: 'success', matches };
+      } catch (error) {
+        console.info('Addressable event handling error:', error);
+        return {
+          success: false,
+          message: 'error: addressable event handling failed',
+        };
+      }
     }
 
     // Store the event
@@ -150,5 +178,54 @@ export class EventHandler {
   private getDTagValue(event: NostrEvent): string | undefined {
     const dTag = event.tags.find((tag) => tag[0] === 'd');
     return dTag ? dTag[1] : undefined;
+  }
+
+  /**
+   * Handle a replaceable event
+   * Deletes older events with the same pubkey and kind
+   *
+   * @param event Event to handle
+   * @returns Promise resolving to boolean indicating success
+   * @private
+   */
+  private async handleReplaceableEvent(event: NostrEvent): Promise<boolean> {
+    try {
+      // 同じpubkeyとkindの古いイベントを削除
+      await this.storage.deleteEventsByPubkeyAndKind(event.pubkey, event.kind);
+
+      // 新しいイベントを保存
+      return await this.storage.saveEvent(event);
+    } catch (error) {
+      console.info('Error handling replaceable event:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle an addressable event
+   * Deletes older events with the same pubkey, kind, and d tag value
+   *
+   * @param event Event to handle
+   * @returns Promise resolving to boolean indicating success
+   * @private
+   */
+  private async handleAddressableEvent(event: NostrEvent): Promise<boolean> {
+    try {
+      const dTagValue = this.getDTagValue(event);
+
+      if (dTagValue === undefined) {
+        console.info('Addressable event missing d tag');
+        return false;
+      }
+
+      // 同じpubkey、kind、dタグ値の古いイベントを削除
+      await this.storage.deleteEventsByPubkeyKindAndDTag(event.pubkey, event.kind, dTagValue);
+
+      // 新しいイベントを保存
+      return await this.storage.saveEvent(event);
+    } catch (error) {
+      console.info('Error handling addressable event:', error);
+      throw error;
+    }
   }
 }
