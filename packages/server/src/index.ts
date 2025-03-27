@@ -6,9 +6,7 @@
 
 // fake-indexeddbの自動セットアップ
 import 'fake-indexeddb/auto';
-import { NostrCacheRelay } from '@nostr-cache/cache-relay';
-import { DexieStorage } from '@nostr-cache/cache-relay/dist/storage/DexieStorage';
-import { WebSocketServer } from '@nostr-cache/cache-relay/dist/transport/WebSocketServer';
+import { DexieStorage, NostrCacheRelay, WebSocketServer } from '@nostr-cache/cache-relay';
 import { logger } from '@nostr-cache/shared';
 
 /**
@@ -93,18 +91,6 @@ class NostrRelayServer {
     await this.relay.disconnect();
     // ストレージのクリーンアップ
     await this.storage.clear();
-
-    // fake-indexeddbのリセット - グローバル変数の再代入を避ける
-    try {
-      const resetMethod = require('fake-indexeddb/lib/FDBFactory').reset;
-      if (typeof resetMethod === 'function') {
-        resetMethod();
-        logger.debug('IndexedDB reset successful');
-      }
-    } catch (error) {
-      logger.warn('Failed to reset IndexedDB:', error);
-    }
-
     logger.info('Nostr relay server stopped');
   }
 
@@ -139,7 +125,7 @@ class NostrRelayServer {
 }
 
 // CLIインターフェース
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   const server = new NostrRelayServer();
 
   // シグナルハンドリング

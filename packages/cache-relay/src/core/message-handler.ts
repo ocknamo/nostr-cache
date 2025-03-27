@@ -19,10 +19,10 @@ import {
   type ReqMessage,
   messageToWire,
 } from '@nostr-cache/types';
-import { EventHandler } from '../event/EventHandler';
-import { EventValidator } from '../event/EventValidator';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import type { SubscriptionManager } from './SubscriptionManager';
+import { EventHandler } from '../event/event-handler.js';
+import { EventValidator } from '../event/event-validator.js';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { SubscriptionManager } from './subscription-manager.js';
 
 /**
  * Message handler class

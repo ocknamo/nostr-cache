@@ -6,8 +6,8 @@
 export * from '@nostr-cache/types';
 
 // Export constants
-export * from './constants/relays';
+export * from './constants/relays.js';
 
 // Export utilities
-export { logger, LogLevel } from './utils/logger';
-export { getRandomSecret } from './utils/crypto';
+export { logger, LogLevel } from './utils/logger.js';
+export { getRandomSecret } from './utils/crypto.js';

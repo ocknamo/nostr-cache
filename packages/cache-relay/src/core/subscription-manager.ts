@@ -5,7 +5,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import type { StorageAdapter } from '../storage/StorageAdapter';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
 
 /**
  * Subscription information

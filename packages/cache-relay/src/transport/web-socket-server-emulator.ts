@@ -1,5 +1,5 @@
 import type { NostrWireMessage } from '@nostr-cache/types';
-import type { TransportAdapter } from './TransportAdapter';
+import type { TransportAdapter } from './transport-adapter.js';
 
 /**
  * WebSocket emulator for browser environment

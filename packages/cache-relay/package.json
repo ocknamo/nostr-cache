@@ -4,6 +4,7 @@
   "description": "Cache relay for Nostr relay interactions",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "test": "jest",
@@ -11,7 +12,8 @@
     "format:check": "biome check ./src",
     "lint": "biome check ./src",
     "lint:fix": "biome check --write ./src",
-    "fix": "npm run lint:fix && npm run format"
+    "fix": "npm run lint:fix && npm run format",
+    "fix:unsafe": "biome check --fix --unsafe"
   },
   "dependencies": {
     "@nostr-cache/shared": "^0.1.0",

@@ -5,11 +5,11 @@
 import type { NostrEvent } from '@nostr-cache/types';
 import 'fake-indexeddb/auto';
 import { seckeySigner } from 'rx-nostr-crypto';
-import { MessageHandler } from '../../core/MessageHandler';
-import { SubscriptionManager } from '../../core/SubscriptionManager';
-import { DexieStorage } from '../../storage/DexieStorage';
-import { WebSocketServer } from '../../transport/WebSocketServer';
-import { getRandomSecret } from './getRandomSecret';
+import { MessageHandler } from '../../core/message-handler.js';
+import { SubscriptionManager } from '../../core/subscription-manager.js';
+import { DexieStorage } from '../../storage/dexie-storage.js';
+import { WebSocketServer } from '../../transport/web-socket-server.js';
+import { getRandomSecret } from './getRandomSecret.js';
 
 /**
  * Create a test event

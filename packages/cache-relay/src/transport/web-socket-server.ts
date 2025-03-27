@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { logger } from '@nostr-cache/shared';
 import type { NostrWireMessage } from '@nostr-cache/types';
 import { WebSocketServer as WS, WebSocket } from 'ws';
-import type { TransportAdapter } from './TransportAdapter';
+import type { TransportAdapter } from './transport-adapter.js';
 
 /**
  * WebSocket server implementation for Node.js environment

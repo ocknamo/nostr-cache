@@ -7,8 +7,8 @@ import type {
   RelayDisconnectHandler,
   RelayErrorHandler,
   RelayEventHandler,
-} from './message';
-import type { Filter, NostrEvent, Subscription } from './nostr';
+} from './message.js';
+import type { Filter, NostrEvent, Subscription } from './nostr.js';
 
 /**
  * Relay connection status

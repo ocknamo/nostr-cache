@@ -3,10 +3,10 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/types';
-import type { SubscriptionManager } from '../core/SubscriptionManager';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import { EventHandler } from './EventHandler';
-import type { EventValidator } from './EventValidator';
+import type { SubscriptionManager } from '../core/subscription-manager.js';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { EventHandler } from './event-handler.js';
+import type { EventValidator } from './event-validator.js';
 
 describe('EventHandler', () => {
   // Mock storage adapter

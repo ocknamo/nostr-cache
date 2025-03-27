@@ -3,7 +3,12 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import { createFilterKey, eventMatchesFilter, mergeFilters, normalizeFilter } from './filterUtils';
+import {
+  createFilterKey,
+  eventMatchesFilter,
+  mergeFilters,
+  normalizeFilter,
+} from './filter-utils.js';
 
 describe('filterUtils', () => {
   // Sample event

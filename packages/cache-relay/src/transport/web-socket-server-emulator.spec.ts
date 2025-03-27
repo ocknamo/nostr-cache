@@ -1,5 +1,5 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
-import { WebSocketServerEmulator } from './WebSocketServerEmulator';
+import { WebSocketServerEmulator } from './web-socket-server-emulator.js';
 
 describe('WebSocketServerEmulator', () => {
   let emulator: WebSocketServerEmulator;

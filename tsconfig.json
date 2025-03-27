@@ -12,8 +12,14 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@nostr-cache/*": ["packages/*/src"]
+      "@nostr-cache/*": [
+        "packages/*/src"
+      ]
     }
   },
-  "exclude": ["node_modules", "dist", "build"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build"
+  ]
 }

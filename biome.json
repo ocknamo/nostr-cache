@@ -11,7 +11,18 @@
         "useLiteralKeys": "off"
       },
       "correctness": {
-        "noUnusedImports": "error"
+        "noUnusedImports": "error",
+        "useImportExtensions": {
+          "level": "error",
+          "options": {
+            "suggestedExtensions": {
+              "ts": {
+                "module": "js",
+                "component": "js"
+              }
+            }
+          }
+        }
       }
     }
   },

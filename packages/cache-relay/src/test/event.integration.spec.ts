@@ -7,7 +7,7 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
-import { getRandomSecret } from './utils/getRandomSecret';
+import { getRandomSecret } from './utils/getRandomSecret.js';
 
 describe('Event Handler Integration', () => {
   let testBase: IntegrationTestBase;

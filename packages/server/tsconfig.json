@@ -4,14 +4,22 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "target": "ES2020",
-    "module": "CommonJS",
+    "module": "ESNext",
     "esModuleInterop": true,
     "composite": true
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*"
+  ],
   "references": [
-    { "path": "../types" },
-    { "path": "../shared" },
-    { "path": "../cache-relay" }
+    {
+      "path": "../types"
+    },
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../cache-relay"
+    }
   ]
 }

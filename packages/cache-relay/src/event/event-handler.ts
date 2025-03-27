@@ -6,9 +6,9 @@
 
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import type { SubscriptionManager } from '../core/SubscriptionManager';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import { EventValidator } from './EventValidator';
+import type { SubscriptionManager } from '../core/subscription-manager.js';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { EventValidator } from './event-validator.js';
 
 interface Subscription {
   clientId: string;

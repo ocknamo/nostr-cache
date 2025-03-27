@@ -16,9 +16,9 @@ import {
   type RelayEventHandler,
   wireToMessage,
 } from '@nostr-cache/types';
-import { EventValidator } from '../event/EventValidator';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import type { TransportAdapter } from '../transport/TransportAdapter';
+import { EventValidator } from '../event/event-validator.js';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { TransportAdapter } from '../transport/transport-adapter.js';
 
 /**
  * Nostr Cache Relay options

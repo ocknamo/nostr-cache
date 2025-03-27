@@ -2,7 +2,7 @@
  * Relay-related type definitions
  */
 
-import type { Filter, NostrEvent, Subscription } from './nostr';
+import type { Filter, NostrEvent, Subscription } from './nostr.js';
 
 /**
  * Relay connection status

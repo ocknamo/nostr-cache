@@ -4,6 +4,7 @@
   "description": "Type definitions for Nostr cache project",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "test": "echo 'Add test here'",
@@ -11,7 +12,8 @@
     "format:check": "biome check ./src",
     "lint": "biome check ./src",
     "lint:fix": "biome check --write ./src",
-    "fix": "npm run lint:fix && npm run format"
+    "fix": "npm run lint:fix && npm run format",
+    "fix:unsafe": "biome check --fix --unsafe"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

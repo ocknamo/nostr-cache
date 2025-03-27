@@ -3,8 +3,8 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import { SubscriptionManager } from './SubscriptionManager';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { SubscriptionManager } from './subscription-manager.js';
 
 describe('SubscriptionManager', () => {
   // Mock storage adapter

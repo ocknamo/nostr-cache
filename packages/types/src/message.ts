@@ -1,4 +1,4 @@
-import type { Filter, NostrEvent } from './nostr';
+import type { Filter, NostrEvent } from './nostr.js';
 
 /**
  * Nostr message types as defined in NIP-01

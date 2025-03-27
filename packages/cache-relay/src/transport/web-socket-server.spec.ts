@@ -1,6 +1,6 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
 import { WebSocket } from 'ws';
-import { WebSocketServer } from './WebSocketServer';
+import { WebSocketServer } from './web-socket-server.js';
 
 describe('WebSocketServer', () => {
   let server: WebSocketServer;

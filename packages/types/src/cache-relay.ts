@@ -2,8 +2,8 @@
  * Cache-specific type definitions for cache-relay
  */
 
-import type { CacheOptions } from './cache';
-import type { NostrEvent } from './nostr';
+import type { CacheOptions } from './cache.js';
+import type { NostrEvent } from './nostr.js';
 
 /**
  * Cache library specific options

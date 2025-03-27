@@ -1,6 +1,6 @@
 import type { NostrEvent } from '@nostr-cache/types';
 import 'fake-indexeddb/auto';
-import { DexieStorage } from './DexieStorage';
+import { DexieStorage } from './dexie-storage.js';
 
 describe('DexieStorage', () => {
   let storage: DexieStorage;

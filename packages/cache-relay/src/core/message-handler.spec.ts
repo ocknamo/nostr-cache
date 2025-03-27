@@ -3,9 +3,9 @@
  */
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/types';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import { MessageHandler } from './MessageHandler';
-import type { SubscriptionManager } from './SubscriptionManager';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { MessageHandler } from './message-handler.js';
+import type { SubscriptionManager } from './subscription-manager.js';
 
 describe('MessageHandler', () => {
   // Mock storage adapter

@@ -3,7 +3,7 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/types';
-import { EventValidator } from './EventValidator';
+import { EventValidator } from './event-validator.js';
 
 describe('EventValidator', () => {
   // Sample event

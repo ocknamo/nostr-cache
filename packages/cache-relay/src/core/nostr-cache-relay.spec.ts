@@ -3,9 +3,9 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import type { StorageAdapter } from '../storage/StorageAdapter';
-import type { TransportAdapter } from '../transport/TransportAdapter';
-import { NostrCacheRelay } from './NostrCacheRelay';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { NostrCacheRelay } from './nostr-cache-relay.js';
 
 describe('NostrCacheRelay', () => {
   // Mock storage adapter

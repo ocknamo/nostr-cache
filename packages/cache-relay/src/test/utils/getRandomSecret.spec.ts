@@ -1,4 +1,4 @@
-import { getRandomSecret } from './getRandomSecret';
+import { getRandomSecret } from './getRandomSecret.js';
 
 describe('getRandomSecret', () => {
   it('should generate a 64-character lowercase hex string', () => {
