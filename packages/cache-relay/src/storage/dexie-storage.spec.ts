@@ -1,5 +1,5 @@
 import type { NostrEvent } from '@nostr-cache/types';
-import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { DexieStorage } from './dexie-storage.js';
 

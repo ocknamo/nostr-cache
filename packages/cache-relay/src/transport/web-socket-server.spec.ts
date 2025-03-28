@@ -1,5 +1,5 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
-import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
+import { vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { WebSocketServer } from './web-socket-server.js';
 

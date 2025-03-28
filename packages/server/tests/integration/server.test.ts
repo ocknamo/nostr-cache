@@ -3,7 +3,6 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/types';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/index.js';
 import { createTestEvent } from '../utils/testEvents.js';

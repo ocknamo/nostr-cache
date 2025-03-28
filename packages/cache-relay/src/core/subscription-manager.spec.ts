@@ -3,7 +3,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
+import { vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { SubscriptionManager } from './subscription-manager.js';
 

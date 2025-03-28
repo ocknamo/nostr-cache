@@ -3,7 +3,6 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
-import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import {
   createFilterKey,
   eventMatchesFilter,
