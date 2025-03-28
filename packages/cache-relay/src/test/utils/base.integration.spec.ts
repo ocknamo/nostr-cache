@@ -1,4 +1,5 @@
 import { IntegrationTestBase } from './base.integration';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 
 /**
  * Simple test to prevent "empty test suite" error

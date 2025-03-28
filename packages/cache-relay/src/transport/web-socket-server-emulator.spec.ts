@@ -1,4 +1,5 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocketServerEmulator } from './web-socket-server-emulator.js';
 
 describe('WebSocketServerEmulator', () => {
@@ -18,20 +19,24 @@ describe('WebSocketServerEmulator', () => {
   });
 
   describe('start()', () => {
-    it('should use default URL when no URL is provided', (done) => {
-      emulator.start().then(() => {
+    it('should use default URL when no URL is provided', async () => {
+      await emulator.start();
+
+      return new Promise<void>((resolve) => {
         const ws = new WebSocket(defaultUrl);
         ws.onopen = () => {
-          done();
+          resolve();
         };
       });
     });
 
-    it('should use custom URL when provided', (done) => {
-      emulator.start(customUrl).then(() => {
+    it('should use custom URL when provided', async () => {
+      await emulator.start(customUrl);
+
+      return new Promise<void>((resolve) => {
         const ws = new WebSocket(customUrl);
         ws.onopen = () => {
-          done();
+          resolve();
         };
       });
     });
@@ -42,23 +47,27 @@ describe('WebSocketServerEmulator', () => {
       expect(ws instanceof originalWebSocket).toBe(true);
     });
 
-    it('should trigger onopen event', (done) => {
-      emulator.start().then(() => {
+    it('should trigger onopen event', async () => {
+      await emulator.start();
+
+      return new Promise<void>((resolve) => {
         const ws = new WebSocket(defaultUrl);
         ws.onopen = () => {
-          done();
+          resolve();
         };
       });
     });
 
-    it('should trigger connect callback', (done) => {
-      emulator.onConnect((clientId) => {
-        expect(clientId).toBe('cache-relay');
-        done();
-      });
+    it('should trigger connect callback', async () => {
+      return new Promise<void>((resolve) => {
+        emulator.onConnect((clientId) => {
+          expect(clientId).toBe('cache-relay');
+          resolve();
+        });
 
-      emulator.start().then(() => {
-        new WebSocket(defaultUrl);
+        emulator.start().then(() => {
+          new WebSocket(defaultUrl);
+        });
       });
     });
   });
@@ -68,7 +77,7 @@ describe('WebSocketServerEmulator', () => {
       await emulator.start();
     });
 
-    it('should handle valid Nostr messages', (done) => {
+    it('should handle valid Nostr messages', async () => {
       const event: NostrEvent = {
         id: '123',
         kind: 1,
@@ -80,26 +89,30 @@ describe('WebSocketServerEmulator', () => {
       };
       const message: NostrWireMessage = ['EVENT', event];
 
-      emulator.onMessage((clientId, receivedMessage) => {
-        expect(clientId).toBe('cache-relay');
-        expect(receivedMessage).toEqual(message);
-        done();
-      });
+      return new Promise<void>((resolve) => {
+        emulator.onMessage((clientId, receivedMessage) => {
+          expect(clientId).toBe('cache-relay');
+          expect(receivedMessage).toEqual(message);
+          resolve();
+        });
 
-      const ws = new WebSocket(defaultUrl);
-      ws.onopen = () => {
-        ws.send(JSON.stringify(message));
-      };
+        const ws = new WebSocket(defaultUrl);
+        ws.onopen = () => {
+          ws.send(JSON.stringify(message));
+        };
+      });
     });
 
-    it('should handle invalid messages', (done) => {
-      const ws = new WebSocket(defaultUrl);
-      ws.onerror = () => {
-        done();
-      };
-      ws.onopen = () => {
-        ws.send('invalid json');
-      };
+    it('should handle invalid messages', async () => {
+      return new Promise<void>((resolve) => {
+        const ws = new WebSocket(defaultUrl);
+        ws.onerror = () => {
+          resolve();
+        };
+        ws.onopen = () => {
+          ws.send('invalid json');
+        };
+      });
     });
   });
 
@@ -110,45 +123,43 @@ describe('WebSocketServerEmulator', () => {
       expect(globalThis.WebSocket).toBe(originalWebSocket);
     });
 
-    it('should trigger close event and disconnect callback', (done) => {
+    it('should trigger close event and disconnect callback', async () => {
       let closeEventTriggered = false;
       let disconnectCallbackTriggered = false;
 
-      function checkDone() {
-        if (closeEventTriggered && disconnectCallbackTriggered) {
-          done();
-        }
-      }
+      return new Promise<void>((resolve) => {
+        emulator.onDisconnect((clientId) => {
+          expect(clientId).toBe('cache-relay');
+          disconnectCallbackTriggered = true;
+          if (closeEventTriggered) resolve();
+        });
 
-      emulator.onDisconnect((clientId) => {
-        expect(clientId).toBe('cache-relay');
-        disconnectCallbackTriggered = true;
-        checkDone();
-      });
-
-      emulator.start().then(() => {
-        const ws = new WebSocket(defaultUrl);
-        ws.onclose = () => {
-          closeEventTriggered = true;
-          checkDone();
-        };
-        ws.onopen = () => {
-          emulator.stop();
-        };
+        emulator.start().then(() => {
+          const ws = new WebSocket(defaultUrl);
+          ws.onclose = () => {
+            closeEventTriggered = true;
+            if (disconnectCallbackTriggered) resolve();
+          };
+          ws.onopen = () => {
+            emulator.stop();
+          };
+        });
       });
     });
   });
 
   describe('send()', () => {
-    it('should send messages to connected client', (done) => {
+    it('should send messages to connected client', async () => {
       const message: NostrWireMessage = ['NOTICE', 'test message'];
 
-      emulator.start().then(() => {
+      await emulator.start();
+
+      return new Promise<void>((resolve) => {
         const ws = new WebSocket(defaultUrl);
         ws.onmessage = (event) => {
           const receivedMessage = JSON.parse(event.data);
           expect(receivedMessage).toEqual(message);
-          done();
+          resolve();
         };
         ws.onopen = () => {
           emulator.send('cache-relay', message);

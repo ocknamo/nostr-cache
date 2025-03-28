@@ -3,6 +3,7 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import { EventValidator } from './event-validator.js';
 
 describe('EventValidator', () => {

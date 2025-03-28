@@ -1,4 +1,5 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import { WebSocket } from 'ws';
 import { WebSocketServer } from './web-socket-server.js';
 
@@ -83,7 +84,7 @@ describe('WebSocketServer', () => {
     });
 
     it('should handle invalid messages', async () => {
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation();
 
       client = new WebSocket(`ws://localhost:${port}`);
       await new Promise<void>((resolve) => client.on('open', () => resolve()));

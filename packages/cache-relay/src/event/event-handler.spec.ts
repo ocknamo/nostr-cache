@@ -3,6 +3,7 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventHandler } from './event-handler.js';
@@ -11,35 +12,35 @@ import type { EventValidator } from './event-validator.js';
 describe('EventHandler', () => {
   // Mock storage adapter
   const mockStorage = {
-    saveEvent: jest.fn().mockResolvedValue(true),
-    getEvents: jest.fn().mockResolvedValue([]),
-    deleteEvent: jest.fn().mockResolvedValue(true),
-    clear: jest.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: jest.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: jest.fn().mockResolvedValue(true),
-  } as jest.Mocked<StorageAdapter>;
+    saveEvent: vi.fn().mockResolvedValue(true),
+    getEvents: vi.fn().mockResolvedValue([]),
+    deleteEvent: vi.fn().mockResolvedValue(true),
+    clear: vi.fn().mockResolvedValue(undefined),
+    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
+    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+  } as Mock<StorageAdapter>;
 
   // Mock subscription manager
   const mockSubscriptionManager = {
     subscriptions: new Map(),
     clientSubscriptions: new Map(),
     storage: mockStorage,
-    createSubscription: jest.fn(),
-    removeSubscription: jest.fn(),
-    removeAllSubscriptions: jest.fn(),
-    removeSubscriptionByIdForAllClients: jest.fn(),
-    getSubscription: jest.fn(),
-    getClientSubscriptions: jest.fn(),
-    getAllSubscriptions: jest.fn(),
-    findMatchingSubscriptions: jest.fn().mockReturnValue(new Map()),
-    eventMatchesFilter: jest.fn(),
-    getSubscriptionKey: jest.fn(),
-  } as unknown as jest.Mocked<SubscriptionManager>;
+    createSubscription: vi.fn(),
+    removeSubscription: vi.fn(),
+    removeAllSubscriptions: vi.fn(),
+    removeSubscriptionByIdForAllClients: vi.fn(),
+    getSubscription: vi.fn(),
+    getClientSubscriptions: vi.fn(),
+    getAllSubscriptions: vi.fn(),
+    findMatchingSubscriptions: vi.fn().mockReturnValue(new Map()),
+    eventMatchesFilter: vi.fn(),
+    getSubscriptionKey: vi.fn(),
+  } as unknown as Mock<SubscriptionManager>;
 
   // Mock event validator
   const mockEventValidator = {
-    validate: jest.fn().mockReturnValue(true),
-  } as jest.Mocked<EventValidator>;
+    validate: vi.fn().mockReturnValue(true),
+  } as Mock<EventValidator>;
 
   // Sample events
   const regularEvent: NostrEvent = {
@@ -85,7 +86,7 @@ describe('EventHandler', () => {
   let eventHandler: EventHandler;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     eventHandler = new EventHandler(mockStorage, mockSubscriptionManager);
     // @ts-ignore - private field access
     eventHandler.validator = mockEventValidator;

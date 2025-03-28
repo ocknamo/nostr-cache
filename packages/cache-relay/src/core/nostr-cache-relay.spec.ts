@@ -3,6 +3,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { NostrCacheRelay } from './nostr-cache-relay.js';
@@ -10,22 +11,22 @@ import { NostrCacheRelay } from './nostr-cache-relay.js';
 describe('NostrCacheRelay', () => {
   // Mock storage adapter
   const mockStorage: StorageAdapter = {
-    saveEvent: jest.fn().mockResolvedValue(true),
-    getEvents: jest.fn().mockResolvedValue([]),
-    deleteEvent: jest.fn().mockResolvedValue(true),
-    clear: jest.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: jest.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: jest.fn().mockResolvedValue(true),
+    saveEvent: vi.fn().mockResolvedValue(true),
+    getEvents: vi.fn().mockResolvedValue([]),
+    deleteEvent: vi.fn().mockResolvedValue(true),
+    clear: vi.fn().mockResolvedValue(undefined),
+    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
+    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
   };
 
   // Mock transport adapter
   const mockTransport: TransportAdapter = {
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined),
-    send: jest.fn(),
-    onMessage: jest.fn(),
-    onConnect: jest.fn(),
-    onDisconnect: jest.fn(),
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    send: vi.fn(),
+    onMessage: vi.fn(),
+    onConnect: vi.fn(),
+    onDisconnect: vi.fn(),
   };
 
   // Sample event
@@ -48,7 +49,7 @@ describe('NostrCacheRelay', () => {
   let relay: NostrCacheRelay;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     relay = new NostrCacheRelay(mockStorage, mockTransport, {});
   });
 
@@ -76,7 +77,7 @@ describe('NostrCacheRelay', () => {
     });
 
     it('should emit a connect event', async () => {
-      const connectHandler = jest.fn();
+      const connectHandler = vi.fn();
       relay.on('connect', connectHandler);
 
       await relay.connect();
@@ -93,7 +94,7 @@ describe('NostrCacheRelay', () => {
     });
 
     it('should emit a disconnect event', async () => {
-      const disconnectHandler = jest.fn();
+      const disconnectHandler = vi.fn();
       relay.on('disconnect', disconnectHandler);
 
       await relay.disconnect();
@@ -128,7 +129,7 @@ describe('NostrCacheRelay', () => {
 
   describe('event listeners', () => {
     it('should add and remove event listeners', () => {
-      const handler = jest.fn();
+      const handler = vi.fn();
 
       relay.on('connect', handler);
       relay['emit']('connect');

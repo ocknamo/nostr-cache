@@ -3,18 +3,19 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 describe('SubscriptionManager', () => {
   // Mock storage adapter
   const mockStorage: StorageAdapter = {
-    saveEvent: jest.fn().mockResolvedValue(true),
-    getEvents: jest.fn().mockResolvedValue([]),
-    deleteEvent: jest.fn().mockResolvedValue(true),
-    clear: jest.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: jest.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: jest.fn().mockResolvedValue(true),
+    saveEvent: vi.fn().mockResolvedValue(true),
+    getEvents: vi.fn().mockResolvedValue([]),
+    deleteEvent: vi.fn().mockResolvedValue(true),
+    clear: vi.fn().mockResolvedValue(undefined),
+    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
+    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
   };
 
   // Sample event
@@ -47,7 +48,7 @@ describe('SubscriptionManager', () => {
   let subscriptionManager: SubscriptionManager;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     subscriptionManager = new SubscriptionManager(mockStorage);
   });
 

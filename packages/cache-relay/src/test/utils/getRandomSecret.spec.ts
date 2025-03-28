@@ -1,4 +1,5 @@
 import { getRandomSecret } from './getRandomSecret.js';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 
 describe('getRandomSecret', () => {
   it('should generate a 64-character lowercase hex string', () => {

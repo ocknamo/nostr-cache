@@ -5,6 +5,7 @@
  */
 
 import { type NostrEvent, NostrMessageType } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 
 describe('Subscription Integration', () => {

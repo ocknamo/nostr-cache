@@ -3,6 +3,8 @@
  */
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
+import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { MessageHandler } from './message-handler.js';
 import type { SubscriptionManager } from './subscription-manager.js';
@@ -10,36 +12,36 @@ import type { SubscriptionManager } from './subscription-manager.js';
 describe('MessageHandler', () => {
   // Mock storage adapter
   const mockStorage = {
-    saveEvent: jest.fn().mockResolvedValue(true),
-    getEvents: jest.fn().mockResolvedValue([]),
-    deleteEvent: jest.fn().mockResolvedValue(true),
-    clear: jest.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: jest.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: jest.fn().mockResolvedValue(true),
-  } as jest.Mocked<StorageAdapter>;
+    saveEvent: vi.fn().mockResolvedValue(true),
+    getEvents: vi.fn().mockResolvedValue([]),
+    deleteEvent: vi.fn().mockResolvedValue(true),
+    clear: vi.fn().mockResolvedValue(undefined),
+    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
+    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+  } as StorageAdapter;
 
   // Mock subscription manager
   const mockSubscriptionManager = {
     subscriptions: new Map(),
     clientSubscriptions: new Map(),
     storage: mockStorage,
-    createSubscription: jest.fn(),
-    removeSubscription: jest.fn(),
-    removeAllSubscriptions: jest.fn(),
-    removeSubscriptionByIdForAllClients: jest.fn(),
-    getSubscription: jest.fn(),
-    getClientSubscriptions: jest.fn(),
-    getAllSubscriptions: jest.fn(),
-    findMatchingSubscriptions: jest.fn().mockReturnValue(new Map()),
-    eventMatchesFilter: jest.fn().mockReturnValue(true),
-    getSubscriptionKey: jest
+    createSubscription: vi.fn(),
+    removeSubscription: vi.fn(),
+    removeAllSubscriptions: vi.fn(),
+    removeSubscriptionByIdForAllClients: vi.fn(),
+    getSubscription: vi.fn(),
+    getClientSubscriptions: vi.fn(),
+    getAllSubscriptions: vi.fn(),
+    findMatchingSubscriptions: vi.fn().mockReturnValue(new Map()),
+    eventMatchesFilter: vi.fn().mockReturnValue(true),
+    getSubscriptionKey: vi
       .fn()
       .mockImplementation((clientId, subscriptionId) => `${clientId}:${subscriptionId}`),
   } as unknown as SubscriptionManager;
 
   // // Mock event validator
   const mockEventValidator = {
-    validate: jest.fn().mockResolvedValue(true),
+    validate: vi.fn().mockResolvedValue(true),
   };
 
   // Sample events
@@ -59,12 +61,12 @@ describe('MessageHandler', () => {
   };
 
   let messageHandler: MessageHandler;
-  let responseCallback: jest.Mock;
+  let responseCallback: Mock;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     messageHandler = new MessageHandler(mockStorage, mockSubscriptionManager);
-    responseCallback = jest.fn();
+    responseCallback = vi.fn();
     messageHandler.onResponse(responseCallback);
   });
 
@@ -144,7 +146,7 @@ describe('MessageHandler', () => {
       });
 
       it('should handle storage failure', async () => {
-        mockStorage.saveEvent.mockRejectedValueOnce(new Error('Storage error'));
+        (mockStorage.saveEvent as Mock).mockRejectedValueOnce(new Error('Storage error'));
 
         const message: NostrWireMessage = ['EVENT', sampleEvent];
         await messageHandler.handleMessage('client1', message);
@@ -160,7 +162,7 @@ describe('MessageHandler', () => {
 
       it('should broadcast event to matching subscriptions', async () => {
         const subscriptions = new Map([['client2', [{ id: 'sub1', filters: [sampleFilter] }]]]);
-        (mockSubscriptionManager.findMatchingSubscriptions as jest.Mock).mockReturnValueOnce(
+        (mockSubscriptionManager.findMatchingSubscriptions as Mock).mockReturnValueOnce(
           subscriptions
         );
 
@@ -185,7 +187,7 @@ describe('MessageHandler', () => {
       });
 
       it('should send matching events', async () => {
-        (mockStorage.getEvents as jest.Mock).mockResolvedValueOnce([sampleEvent]);
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce([sampleEvent]);
 
         const message: NostrWireMessage = ['REQ', 'sub1', sampleFilter];
         await messageHandler.handleMessage('client1', message);
@@ -195,7 +197,7 @@ describe('MessageHandler', () => {
       });
 
       it('should handle storage errors during event retrieval', async () => {
-        (mockStorage.getEvents as jest.Mock).mockRejectedValueOnce(new Error('Storage error'));
+        (mockStorage.getEvents as Mock).mockRejectedValueOnce(new Error('Storage error'));
 
         const message: NostrWireMessage = ['REQ', 'sub1', sampleFilter];
         await messageHandler.handleMessage('client1', message);
@@ -221,7 +223,7 @@ describe('MessageHandler', () => {
       });
 
       it('should handle non-existent subscription', () => {
-        (mockSubscriptionManager.removeSubscription as jest.Mock).mockReturnValueOnce(false);
+        (mockSubscriptionManager.removeSubscription as Mock).mockReturnValueOnce(false);
 
         const message: NostrWireMessage = ['CLOSE', 'sub1'];
         messageHandler.handleMessage('client1', message);
@@ -262,7 +264,7 @@ describe('MessageHandler', () => {
     });
 
     it('should handle multiple response callbacks', () => {
-      const secondCallback = jest.fn();
+      const secondCallback = vi.fn();
       messageHandler.onResponse(secondCallback);
 
       messageHandler.sendNotice('client1', 'message');
@@ -275,7 +277,7 @@ describe('MessageHandler', () => {
   describe('error handling', () => {
     it('should handle global errors', async () => {
       // グローバルエラーハンドリングのテスト
-      (mockStorage.saveEvent as jest.Mock).mockImplementationOnce(() => {
+      (mockStorage.saveEvent as Mock).mockImplementationOnce(() => {
         throw new Error('System internal error with sensitive details');
       });
 
@@ -293,7 +295,7 @@ describe('MessageHandler', () => {
 
     it('should handle storage errors with safe error message', async () => {
       // ストレージエラー処理のテスト
-      (mockStorage.getEvents as jest.Mock).mockRejectedValueOnce(
+      (mockStorage.getEvents as Mock).mockRejectedValueOnce(
         new Error('Database connection details exposed')
       );
 
@@ -309,7 +311,7 @@ describe('MessageHandler', () => {
 
     it('should handle subscription manager errors with safe error message', () => {
       // サブスクリプション作成エラー処理のテスト
-      (mockSubscriptionManager.createSubscription as jest.Mock).mockImplementationOnce(() => {
+      (mockSubscriptionManager.createSubscription as Mock).mockImplementationOnce(() => {
         throw new Error('Subscription error with stack trace and internal details');
       });
 
@@ -325,7 +327,7 @@ describe('MessageHandler', () => {
 
     it('should handle subscription close errors with safe error message', () => {
       // サブスクリプション削除エラー処理のテスト
-      (mockSubscriptionManager.removeSubscription as jest.Mock).mockImplementationOnce(() => {
+      (mockSubscriptionManager.removeSubscription as Mock).mockImplementationOnce(() => {
         throw new Error('Database connection failure with credentials');
       });
 
@@ -341,7 +343,7 @@ describe('MessageHandler', () => {
 
     it('should handle malformed event data', async () => {
       const mockEventValidator = {
-        validate: jest.fn().mockResolvedValueOnce(false),
+        validate: vi.fn().mockResolvedValueOnce(false),
       };
       const invalidEvent = {
         ...sampleEvent,

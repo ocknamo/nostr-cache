@@ -1,4 +1,5 @@
 import type { NostrEvent } from '@nostr-cache/types';
+import { beforeAll, beforeEach, afterEach, afterAll, describe, it, expect, vi, type Mock } from 'vitest';
 import 'fake-indexeddb/auto';
 import { DexieStorage } from './dexie-storage.js';
 
@@ -292,7 +293,7 @@ describe('DexieStorage', () => {
     it('should handle error gracefully', async () => {
       // IndexedDBがロックされていることをシミュレート
       // @ts-ignore - private field access for testing
-      jest.spyOn(storage.events, 'where').mockImplementationOnce(() => {
+      vi.spyOn(storage.events, 'where').mockImplementationOnce(() => {
         throw new Error('Database is locked');
       });
 
@@ -422,7 +423,7 @@ describe('DexieStorage', () => {
     it('should handle error gracefully', async () => {
       // IndexedDBがロックされていることをシミュレート
       // @ts-ignore - private field access for testing
-      jest.spyOn(storage.events, 'where').mockImplementationOnce(() => {
+      vi.spyOn(storage.events, 'where').mockImplementationOnce(() => {
         throw new Error('Database is locked');
       });
 
