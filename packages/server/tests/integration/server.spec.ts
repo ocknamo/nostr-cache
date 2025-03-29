@@ -1,11 +1,7 @@
-/**
- * NostrRelayServer統合テスト
- */
-
 import type { NostrEvent } from '@nostr-cache/types';
 import WebSocket from 'ws';
-import { NostrRelayServer } from '../../src/index.js';
-import { createTestEvent } from '../utils/testEvents.js';
+import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { createTestEvent } from '../utils/test-events.js';
 
 describe('NostrRelayServer', () => {
   let server: NostrRelayServer;
@@ -44,7 +40,9 @@ describe('NostrRelayServer', () => {
 
     // 接続待機
     await new Promise<void>((resolve) => {
-      client.on('open', resolve);
+      client.on('open', () => {
+        resolve();
+      });
     });
 
     // OK応答待機

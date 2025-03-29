@@ -6,5 +6,6 @@
     "composite": true
   },
   "include": ["src/**/*"],
+  "exclude": ["src/**/*.spec.ts"],
   "references": [{ "path": "../types" }, { "path": "../shared" }]
 }

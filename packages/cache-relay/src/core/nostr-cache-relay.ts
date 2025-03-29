@@ -5,20 +5,21 @@
  */
 
 import { logger } from '@nostr-cache/shared';
-import {
-  type Filter,
-  type NostrEvent,
-  type NostrWireMessage,
-  type RelayConnectHandler,
-  type RelayDisconnectHandler,
-  type RelayEoseHandler,
-  type RelayErrorHandler,
-  type RelayEventHandler,
-  wireToMessage,
+import type {
+  Filter,
+  NostrEvent,
+  NostrWireMessage,
+  RelayConnectHandler,
+  RelayDisconnectHandler,
+  RelayEoseHandler,
+  RelayErrorHandler,
+  RelayEventHandler,
 } from '@nostr-cache/types';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { MessageHandler } from './message-handler.js';
+import { SubscriptionManager } from './subscription-manager.js';
 
 /**
  * Nostr Cache Relay options
@@ -94,6 +95,7 @@ export class NostrCacheRelay {
   private storage: StorageAdapter;
   private transport: TransportAdapter;
   private validator: EventValidator;
+  private messageHandler: MessageHandler;
   private eventListeners: Map<
     string,
     Array<
@@ -128,6 +130,15 @@ export class NostrCacheRelay {
     this.transport = transport;
     this.validator = new EventValidator();
 
+    // 初期化
+    const subscriptionManager = new SubscriptionManager(storage);
+    this.messageHandler = new MessageHandler(storage, subscriptionManager);
+
+    // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
+    this.messageHandler.onResponse((clientId, message) => {
+      this.transport.send(clientId, message);
+    });
+
     this.setupTransportHandlers();
   }
 
@@ -158,12 +169,8 @@ export class NostrCacheRelay {
    * @private
    */
   private handleMessage(clientId: string, wireMessage: NostrWireMessage): void {
-    try {
-      const message = wireToMessage(wireMessage);
-      logger.debug(`Received message from ${clientId}:`, message);
-    } catch (error) {
-      logger.error(`Error processing message from ${clientId}:`, error);
-    }
+    // メッセージハンドラにメッセージを委譲
+    this.messageHandler.handleMessage(clientId, wireMessage);
   }
 
   /**
