@@ -30,6 +30,15 @@ npm run dev:web-client
 
 # キャッシュリレーパッケージのビルド
 npm run build:cache-relay
+
+# サーバーパッケージのビルド
+npm run build:server
+
+# サーバーの開発モードで起動（ホットリロード対応）
+npm run dev:server
+
+# サーバーを本番モードで起動
+npm run start:server
 ```
 
 ## テスト

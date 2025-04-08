@@ -1,53 +1,102 @@
 # Nostr Cache Server
 
-将来的なサーバーサイド実装のためのプレースホルダー。
+**注意: このパッケージは開発中のため、一部の機能は正常に動作しません。**
 
-## 計画されている機能
+NIP-01準拠のNostrリレーサーバー実装。このパッケージは`@nostr-cache/cache-relay`を使用してNostrリレーサーバーをローカルで実行できるようにします。
 
-- リレーデータの集中キャッシュ
-- APIエンドポイントの提供
-- 認証と認可
-- 複数クライアント間でのキャッシュ共有
-- パフォーマンス最適化
+## 主な機能
 
-## 開発ステータス
+- WebSocketを通じたNIP-01準拠のNostrリレープロトコルの実装
+- イベントの保存と取得
+- サブスクリプション管理
+- イベントのバリデーション
+- fake-indexedDBを使用したサーバーサイドでのデータ保存
 
-現在計画段階です。実装は今後進められる予定です。
+## インストールと実行
 
-## 予定されている実装
+ルートディレクトリから以下のコマンドを実行してください：
+
+```bash
+# サーバーパッケージをビルド
+npm run build:server
+
+# 開発モードでサーバーを起動
+# 注意: 実行時に実験的機能の警告が表示されますが、機能には影響ありません
+npm run dev:server
+
+# 本番モードでサーバーを起動
+npm run start:server
+```
+
+## 使用方法
+
+サーバーはデフォルトで8008ポートで起動します。WebSocketクライアントを使用して接続できます。
+
+### 設定オプション
+
+`NostrRelayServer`クラスは以下の設定オプションをサポートしています：
 
 ```typescript
-// サーバーサイドキャッシュサービス
-class CacheService {
-  private cache: NostrCache;
-  
-  constructor() {
-    this.cache = new NostrCache({
-      maxSize: 10000,
-      ttl: 3600000, // 1時間
-      persist: true,
-      persistPath: './cache-data'
-    });
-  }
-  
-  async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
-    return this.cache.getEvents(filters);
-  }
-  
-  // その他のメソッド...
-}
+interface NostrRelayServerOptions {
+  // サーバー設定
+  port: number;       // デフォルト: 8008
+  host?: string;      // ホスト名
 
-// RESTful API
-app.get('/api/events', async (req, res) => {
-  const filters = parseFilters(req.query);
-  const events = await cacheService.getEvents(filters);
-  res.json(events);
-});
+  // ストレージ設定
+  storageOptions?: {
+    dbName?: string;   // データベース名
+    maxSize?: number;  // 最大サイズ
+  };
+
+  // リレー設定
+  relay?: {
+    maxSubscriptions?: number;     // 最大サブスクリプション数
+    maxEventsPerRequest?: number;  // リクエストあたりの最大イベント数
+    validateEvents?: boolean;      // イベントのバリデーションを行うかどうか
+  };
+}
 ```
+
+### プログラムからの利用
+
+```typescript
+import { NostrRelayServer } from '@nostr-cache/server';
+
+// カスタム設定でサーバーを作成
+const server = new NostrRelayServer({
+  port: 9000,
+  storageOptions: {
+    dbName: 'MyNostrRelay',
+    maxSize: 1000000
+  },
+  relay: {
+    maxSubscriptions: 200,
+    maxEventsPerRequest: 1000,
+    validateEvents: true
+  }
+});
+
+// サーバーを起動
+await server.start();
+
+// サーバーを停止
+await server.stop();
+```
+
+## 注意事項
+
+現在のサーバー実装では、以下の機能が未実装または一部実装されています：
+
+- `getConnectionCount()`: 接続数を取得するメソッドは実装されていませんが、インターフェースは提供されています
+- `getEventCount()`: イベント数を取得するメソッドは実装されていませんが、インターフェースは提供されています
+- メトリクスや詳細な監視機能はまだ実装されていません
+
+これらの機能は将来のアップデートで実装される予定です。
 
 ## 将来的な拡張
 
-- WebSocketサポート
+- RESTful APIサポート
 - クラスタリングとスケーリング
-- 分散キャッシュ
 - メトリクスとモニタリング
+- 認証と認可
+- パフォーマンス最適化
