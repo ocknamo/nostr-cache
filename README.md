@@ -6,9 +6,10 @@ Nostrリレーとのやり取りをキャッシュするためのモノリポプ
 
 このプロジェクトは以下のパッケージで構成されています：
 
-- **cache-lib**: Nostrリレーとのやり取りをキャッシュするライブラリ
+- **cache-relay**: Nostrリレーとのやり取りをキャッシュするためのリレーパッケージ
 - **shared**: 共有型定義とユーティリティ
-- **web-client**: Angularベースのフロントエンドクライアント
+- **types**: Nostrキャッシュプロジェクト全体で使用される型定義
+- **web-client**: Angularベースのフロントエンドクライアント（Angular 19.2.0）
 - **server**: 将来的なサーバーサイド実装（計画段階）
 
 ## 開発環境のセットアップ
@@ -27,8 +28,8 @@ npm run build
 # Webクライアントの開発サーバーを起動
 npm run dev:web-client
 
-# キャッシュライブラリのビルド
-npm run build:cache-lib
+# キャッシュリレーパッケージのビルド
+npm run build:cache-relay
 ```
 
 ## テスト
