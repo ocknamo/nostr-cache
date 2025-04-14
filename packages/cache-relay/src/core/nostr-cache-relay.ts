@@ -29,20 +29,9 @@ import { SubscriptionManager } from './subscription-manager.js';
  */
 export interface NostrRelayOptions {
   /**
-   * Storage type to use
-   * 'indexeddb' for browser environments, 'memory' for Node.js
-   */
-  storage?: 'indexeddb' | 'memory';
-
-  /**
    * Storage options
    */
   storageOptions?: {
-    /**
-     * Database name for IndexedDB
-     */
-    dbName?: string;
-
     /**
      * Maximum number of events to store
      * 未実装
@@ -68,6 +57,12 @@ export interface NostrRelayOptions {
   validateEvents?: boolean;
 
   /**
+   * lazyValidate
+   * 未実装
+   */
+  lazyValidate?: boolean;
+
+  /**
    * Maximum number of subscriptions per client
    * 未実装
    */
@@ -78,12 +73,6 @@ export interface NostrRelayOptions {
    * 未実装
    */
   maxEventsPerRequest?: number;
-
-  /**
-   * Transport type to use
-   * 'websocket' for Node.js, 'emulator' for browser
-   */
-  transport?: 'websocket' | 'emulator';
 
   /**
    * Port for WebSocket server (Node.js only)
@@ -136,7 +125,7 @@ export class NostrCacheRelay {
     this.validator = new EventValidator();
 
     // 初期化
-    const subscriptionManager = new SubscriptionManager(storage);
+    const subscriptionManager = new SubscriptionManager();
     this.messageHandler = new MessageHandler(storage, subscriptionManager);
 
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定

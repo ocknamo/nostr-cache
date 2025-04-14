@@ -61,9 +61,7 @@ export class NostrRelayServer {
 
     // リレーの初期化
     this.relay = new NostrCacheRelay(this.storage, this.server, {
-      storage: 'indexeddb', // fake-indexeddbを使用
       storageOptions: {
-        dbName: this.options.storageOptions?.dbName,
         maxSize: this.options.storageOptions?.maxSize,
       },
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,

@@ -5,8 +5,6 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
-
 /**
  * Subscription information
  */
@@ -39,16 +37,6 @@ interface Subscription {
 export class SubscriptionManager {
   private subscriptions: Map<string, Subscription> = new Map();
   private clientSubscriptions: Map<string, Set<string>> = new Map();
-  private storage: StorageAdapter;
-
-  /**
-   * Create a new SubscriptionManager instance
-   *
-   * @param storage Storage adapter
-   */
-  constructor(storage: StorageAdapter) {
-    this.storage = storage;
-  }
 
   /**
    * Create a new subscription

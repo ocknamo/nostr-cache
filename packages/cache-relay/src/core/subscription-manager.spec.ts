@@ -4,20 +4,8 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
-import { SubscriptionManager } from './subscription-manager.js';
 
 describe('SubscriptionManager', () => {
-  // Mock storage adapter
-  const mockStorage: StorageAdapter = {
-    saveEvent: vi.fn().mockResolvedValue(true),
-    getEvents: vi.fn().mockResolvedValue([]),
-    deleteEvent: vi.fn().mockResolvedValue(true),
-    clear: vi.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-  };
-
   // Sample event
   const sampleEvent: NostrEvent = {
     id: '123',
@@ -49,7 +37,7 @@ describe('SubscriptionManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    subscriptionManager = new SubscriptionManager(mockStorage);
+    subscriptionManager = new SubscriptionManager();
   });
 
   describe('createSubscription', () => {

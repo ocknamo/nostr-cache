@@ -54,7 +54,7 @@ export class IntegrationTestBase {
    */
   constructor(port = 0) {
     this.storage = new DexieStorage('TestNostrCacheRelay');
-    this.subscriptionManager = new SubscriptionManager(this.storage);
+    this.subscriptionManager = new SubscriptionManager();
     this.messageHandler = new MessageHandler(this.storage, this.subscriptionManager);
     this.server = new WebSocketServer(port);
   }
