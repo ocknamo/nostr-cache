@@ -5,7 +5,7 @@
  */
 
 import { logger } from '@nostr-cache/shared';
-import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventValidator } from './event-validator.js';

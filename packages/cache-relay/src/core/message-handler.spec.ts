@@ -2,7 +2,7 @@
  * Tests for MessageHandler
  */
 
-import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { MessageHandler } from './message-handler.js';

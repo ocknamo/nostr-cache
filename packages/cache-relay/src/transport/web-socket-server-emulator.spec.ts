@@ -1,4 +1,4 @@
-import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import type { NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { WebSocketServerEmulator } from './web-socket-server-emulator.js';
 
 describe('WebSocketServerEmulator', () => {

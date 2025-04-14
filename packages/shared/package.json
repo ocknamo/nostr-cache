@@ -15,9 +15,6 @@
     "fix": "npm run lint:fix && npm run format",
     "fix:unsafe": "biome check --fix --unsafe"
   },
-  "dependencies": {
-    "@nostr-cache/types": "^0.1.0"
-  },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/node": "^18.15.0",

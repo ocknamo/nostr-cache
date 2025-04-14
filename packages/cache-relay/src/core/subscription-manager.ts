@@ -4,7 +4,7 @@
  * Manages client subscriptions
  */
 
-import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 
 /**

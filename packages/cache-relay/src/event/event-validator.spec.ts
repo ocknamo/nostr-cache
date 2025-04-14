@@ -2,7 +2,7 @@
  * Tests for EventValidator
  */
 
-import type { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/shared';
 import { EventValidator } from './event-validator.js';
 
 describe('EventValidator', () => {

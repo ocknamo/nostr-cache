@@ -2,7 +2,7 @@
  * Tests for NostrCacheRelay
  */
 
-import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';

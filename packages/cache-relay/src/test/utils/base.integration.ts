@@ -2,7 +2,7 @@
  * Base setup for integration tests
  */
 
-import type { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/shared';
 import 'fake-indexeddb/auto';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { MessageHandler } from '../../core/message-handler.js';

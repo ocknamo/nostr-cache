@@ -9,8 +9,7 @@
 ### 2.1. 依存関係
 #### 2.1.1. 主要依存パッケージ
 - dexie: ^4.0.11（IndexedDBラッパーライブラリ）
-- @nostr-cache/shared: ^0.1.0（共有ユーティリティ）
-- @nostr-cache/types: ^0.1.0（型定義）
+- @nostr-cache/shared: ^0.1.0（共有型定義、共有ユーティリティ）
 
 #### 2.1.2. テスト用依存パッケージ
 - fake-indexeddb: ^6.0.0（IndexedDBモック）

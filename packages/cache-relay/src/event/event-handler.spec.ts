@@ -2,7 +2,7 @@
  * Tests for EventHandler
  */
 
-import type { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';

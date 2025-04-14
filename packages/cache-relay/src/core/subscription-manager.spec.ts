@@ -2,7 +2,7 @@
  * Tests for SubscriptionManager
  */
 
-import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { SubscriptionManager } from './subscription-manager.js';

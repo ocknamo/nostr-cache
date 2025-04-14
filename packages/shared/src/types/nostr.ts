@@ -30,11 +30,3 @@ export interface Filter {
   limit?: number;
   [key: `#${string}`]: string[] | undefined;
 }
-
-/**
- * Nostr subscription as defined in NIP-01
- */
-export interface Subscription {
-  id: string;
-  filters: Filter[];
-}

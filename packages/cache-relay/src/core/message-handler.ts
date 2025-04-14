@@ -18,7 +18,7 @@ import {
   type OkResponse,
   type ReqMessage,
   messageToWire,
-} from '@nostr-cache/types';
+} from '@nostr-cache/shared';
 import { EventHandler } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';

@@ -1,4 +1,4 @@
-import type { NostrEvent, NostrWireMessage } from '@nostr-cache/types';
+import type { NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { WebSocketServer } from './web-socket-server.js';

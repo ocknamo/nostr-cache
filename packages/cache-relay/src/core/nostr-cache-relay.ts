@@ -14,7 +14,7 @@ import type {
   RelayEoseHandler,
   RelayErrorHandler,
   RelayEventHandler,
-} from '@nostr-cache/types';
+} from '@nostr-cache/shared';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
@@ -45,17 +45,20 @@ export interface NostrRelayOptions {
 
     /**
      * Maximum number of events to store
+     * 未実装
      */
     maxSize?: number;
 
     /**
      * Time-to-live in milliseconds
+     * 未実装
      */
     ttl?: number;
   };
 
   /**
    * Cache eviction strategy
+   * 未実装
    */
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
 
@@ -66,11 +69,13 @@ export interface NostrRelayOptions {
 
   /**
    * Maximum number of subscriptions per client
+   * 未実装
    */
   maxSubscriptions?: number;
 
   /**
    * Maximum number of events to return per request
+   * 未実装
    */
   maxEventsPerRequest?: number;
 

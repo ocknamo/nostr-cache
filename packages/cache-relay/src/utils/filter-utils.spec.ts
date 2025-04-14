@@ -2,7 +2,7 @@
  * Tests for filterUtils
  */
 
-import type { Filter, NostrEvent } from '@nostr-cache/types';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import {
   createFilterKey,
   eventMatchesFilter,

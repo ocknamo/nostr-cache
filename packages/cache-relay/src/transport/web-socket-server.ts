@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from '@nostr-cache/shared';
-import type { NostrWireMessage } from '@nostr-cache/types';
+import type { NostrWireMessage } from '@nostr-cache/shared';
 import { WebSocketServer as WS, WebSocket } from 'ws';
 import type { TransportAdapter } from './transport-adapter.js';
 

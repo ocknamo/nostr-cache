@@ -1,4 +1,4 @@
-import type { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
 import { createTestEvent } from '../utils/test-events.js';

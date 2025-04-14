@@ -1,4 +1,4 @@
-import type { NostrWireMessage } from '@nostr-cache/types';
+import type { NostrWireMessage } from '@nostr-cache/shared';
 import type { TransportAdapter } from './transport-adapter.js';
 
 /**

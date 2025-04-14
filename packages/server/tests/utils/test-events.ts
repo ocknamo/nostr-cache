@@ -2,7 +2,7 @@
  * テストイベント生成関数
  */
 
-import type { NostrEvent } from '@nostr-cache/types';
+import type { NostrEvent } from '@nostr-cache/shared';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { getRandomSecret } from './get-random-secret.js';
 

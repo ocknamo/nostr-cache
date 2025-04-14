@@ -4,7 +4,7 @@
  * Tests the interaction between MessageHandler and SubscriptionManager
  */
 
-import { type NostrEvent, NostrMessageType } from '@nostr-cache/types';
+import { type NostrEvent, NostrMessageType } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
 
