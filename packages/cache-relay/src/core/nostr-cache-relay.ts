@@ -30,6 +30,18 @@ import { SubscriptionManager } from './subscription-manager.js';
  */
 export interface NostrRelayOptions {
   /**
+   * Maximum number of subscriptions per client
+   * 未実装
+   */
+  maxSubscriptions?: number;
+
+  /**
+   * Maximum number of events to return per request
+   * 未実装
+   */
+  maxEventsPerRequest?: number;
+
+  /**
    * Maximum number of events to store
    * 未実装
    */
@@ -50,17 +62,7 @@ export interface NostrRelayOptions {
   /**
    * Whether to validate events
    */
-  validateEvents?: boolean;
-
-  /**
-   * lazyValidateOptions
-   */
-
-  /**
-   * lazyValidate
-   * 未実装
-   */
-  lazyValidate?: boolean;
+  validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
 
   /**
    * lazyValidateInterval
@@ -75,18 +77,6 @@ export interface NostrRelayOptions {
    * 未実装
    */
   lazyValidateBachSize?: number;
-
-  /**
-   * Maximum number of subscriptions per client
-   * 未実装
-   */
-  maxSubscriptions?: number;
-
-  /**
-   * Maximum number of events to return per request
-   * 未実装
-   */
-  maxEventsPerRequest?: number;
 
   /**
    * Port for WebSocket server (Node.js only)
@@ -128,7 +118,7 @@ export class NostrCacheRelay {
     options: NostrRelayOptions = {}
   ) {
     this.options = {
-      validateEvents: true,
+      validateEventsType: 'IMMEDIATELY',
       maxSubscriptions: 20,
       maxEventsPerRequest: 500,
       ...options,
@@ -209,7 +199,10 @@ export class NostrCacheRelay {
    */
   async publishEvent(event: NostrEvent): Promise<boolean> {
     // Validate the event if enabled
-    if (this.options.validateEvents && !(await this.validator.validate(event))) {
+    if (
+      this.options.validateEventsType === 'IMMEDIATELY' &&
+      !(await this.validator.validate(event))
+    ) {
       return false;
     }
 
