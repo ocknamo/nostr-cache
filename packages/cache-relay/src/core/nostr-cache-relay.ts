@@ -23,27 +23,23 @@ import { SubscriptionManager } from './subscription-manager.js';
 
 /**
  * Nostr Cache Relay options
+ * flat option
  *
  * 注意: 一部のオプションは現在実装中のため、完全にはサポートされていません。
  * 将来のバージョンで全機能が利用可能になる予定です。
  */
 export interface NostrRelayOptions {
   /**
-   * Storage options
+   * Maximum number of events to store
+   * 未実装
    */
-  storageOptions?: {
-    /**
-     * Maximum number of events to store
-     * 未実装
-     */
-    maxSize?: number;
+  storageMaxSize?: number;
 
-    /**
-     * Time-to-live in milliseconds
-     * 未実装
-     */
-    ttl?: number;
-  };
+  /**
+   * Time-to-live in seconds
+   * 未実装
+   */
+  ttl?: number;
 
   /**
    * Cache eviction strategy
@@ -57,10 +53,28 @@ export interface NostrRelayOptions {
   validateEvents?: boolean;
 
   /**
+   * lazyValidateOptions
+   */
+
+  /**
    * lazyValidate
    * 未実装
    */
   lazyValidate?: boolean;
+
+  /**
+   * lazyValidateInterval
+   * Validate interval in seconds
+   * 未実装
+   */
+  lazyValidateInterval?: number;
+
+  /**
+   * lazyValidateBachSize
+   * Number of events to process at one time
+   * 未実装
+   */
+  lazyValidateBachSize?: number;
 
   /**
    * Maximum number of subscriptions per client

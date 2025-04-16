@@ -38,7 +38,7 @@ const events = await cache.getEvents(filters);
 #### コンストラクタ
 
 ```typescript
-constructor(options?: CacheOptions)
+constructor(options?: NostrRelayOptions)
 ```
 
 ##### オプション
