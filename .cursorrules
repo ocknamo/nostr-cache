@@ -22,7 +22,7 @@
 ## コミットメッセージ規約
 
 ### 基本構造
-<type>(<scope>): <subject> (cline)
+<type>(<scope>): <subject> (cursor)
 
 <body>
 
