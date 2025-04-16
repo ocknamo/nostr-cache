@@ -6,7 +6,8 @@
 
 import { type NostrEvent, NostrMessageType } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
+import { MessageHandler } from '../core/message-handler.js';
+import { IntegrationTestBase, createTestEvent } from './utils/base.integration.js';
 
 describe('Subscription Integration', () => {
   let testBase: IntegrationTestBase;
@@ -111,6 +112,42 @@ describe('Subscription Integration', () => {
       expect(sub2).toBeDefined();
       expect(sub1?.filters[0].kinds).toEqual([1]);
       expect(sub2?.filters[0].authors).toEqual(['test-author']);
+    });
+
+    it('should enforce subscription limit per client', async () => {
+      // Create MessageHandler with lower limit for testing
+      const testBase = new IntegrationTestBase();
+      await testBase.setup();
+      testBase.messageHandler = new MessageHandler(
+        testBase.storage,
+        testBase.subscriptionManager,
+        2
+      );
+
+      // Create first subscription
+      await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
+
+      // Create second subscription
+      await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub2', { kinds: [2] }]);
+
+      // Try to create third subscription (should fail)
+      let noticeReceived = false;
+      testBase.messageHandler.onResponse((clientId, msg) => {
+        if (clientId === 'test-client' && msg[0] === 'NOTICE') {
+          noticeReceived = true;
+        }
+      });
+
+      await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub3', { kinds: [3] }]);
+
+      // Verify notice was sent
+      expect(noticeReceived).toBe(true);
+
+      // Verify only 2 subscriptions were created
+      const clientSubs = testBase.subscriptionManager.getClientSubscriptions('test-client');
+      expect(clientSubs).toHaveLength(2);
+
+      await testBase.teardown();
     });
   });
 
