@@ -198,6 +198,16 @@ export class SubscriptionManager {
   }
 
   /**
+   * Get the number of subscriptions for a client
+   *
+   * @param clientId ID of the client
+   * @returns Number of subscriptions
+   */
+  getClientSubscriptionCount(clientId: string): number {
+    return this.clientSubscriptions.get(clientId)?.size || 0;
+  }
+
+  /**
    * Find subscriptions that match an event
    *
    * @param event Event to match

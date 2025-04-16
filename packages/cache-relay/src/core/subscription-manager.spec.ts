@@ -4,6 +4,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';
+import { SubscriptionManager } from './subscription-manager.js';
 
 describe('SubscriptionManager', () => {
   // Sample event
@@ -162,6 +163,39 @@ describe('SubscriptionManager', () => {
       const subscriptions = subscriptionManager.getAllSubscriptions();
 
       expect(subscriptions).toEqual([]);
+    });
+  });
+
+  describe('getClientSubscriptionCount', () => {
+    it('should return the number of subscriptions for a client', () => {
+      subscriptionManager.createSubscription('client1', 'sub1', [sampleFilter1]);
+      subscriptionManager.createSubscription('client1', 'sub2', [sampleFilter2]);
+
+      const count = subscriptionManager.getClientSubscriptionCount('client1');
+
+      expect(count).toBe(2);
+    });
+
+    it('should return 0 for a client with no subscriptions', () => {
+      const count = subscriptionManager.getClientSubscriptionCount('non-existent');
+
+      expect(count).toBe(0);
+    });
+
+    it('should return correct count after removing subscriptions', () => {
+      subscriptionManager.createSubscription('client1', 'sub1', [sampleFilter1]);
+      subscriptionManager.createSubscription('client1', 'sub2', [sampleFilter2]);
+
+      let count = subscriptionManager.getClientSubscriptionCount('client1');
+      expect(count).toBe(2);
+
+      subscriptionManager.removeSubscription('client1', 'sub1');
+      count = subscriptionManager.getClientSubscriptionCount('client1');
+      expect(count).toBe(1);
+
+      subscriptionManager.removeSubscription('client1', 'sub2');
+      count = subscriptionManager.getClientSubscriptionCount('client1');
+      expect(count).toBe(0);
     });
   });
 

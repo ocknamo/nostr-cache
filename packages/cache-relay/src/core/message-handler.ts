@@ -40,8 +40,13 @@ export class MessageHandler {
    *
    * @param storage Storage adapter
    * @param subscriptionManager Subscription manager
+   * @param maxSubscriptions Maximum number of subscriptions per client
    */
-  constructor(storage: StorageAdapter, subscriptionManager: SubscriptionManager) {
+  constructor(
+    storage: StorageAdapter,
+    subscriptionManager: SubscriptionManager,
+    private maxSubscriptions = 20
+  ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
     this.eventHandler = new EventHandler(storage, subscriptionManager);
@@ -202,6 +207,16 @@ export class MessageHandler {
         this.sendNotice(clientId, `Invalid filter format in subscription ${subscriptionId}`);
         return;
       }
+    }
+
+    // サブスクリプション数の上限チェック
+    const currentSubscriptions = this.subscriptionManager.getClientSubscriptionCount(clientId);
+    if (currentSubscriptions >= this.maxSubscriptions) {
+      this.sendNotice(
+        clientId,
+        `Subscription limit reached: maximum ${this.maxSubscriptions} subscriptions per client`
+      );
+      return;
     }
 
     try {

@@ -33,6 +33,7 @@ describe('MessageHandler', () => {
     getAllSubscriptions: vi.fn(),
     findMatchingSubscriptions: vi.fn().mockReturnValue(new Map()),
     eventMatchesFilter: vi.fn().mockReturnValue(true),
+    getClientSubscriptionCount: vi.fn().mockReturnValue(0),
     getSubscriptionKey: vi
       .fn()
       .mockImplementation((clientId, subscriptionId) => `${clientId}:${subscriptionId}`),

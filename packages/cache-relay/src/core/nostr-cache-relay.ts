@@ -31,7 +31,7 @@ import { SubscriptionManager } from './subscription-manager.js';
 export interface NostrRelayOptions {
   /**
    * Maximum number of subscriptions per client
-   * 未実装
+   * デフォルト値20
    */
   maxSubscriptions?: number;
 
@@ -130,7 +130,11 @@ export class NostrCacheRelay {
 
     // 初期化
     const subscriptionManager = new SubscriptionManager();
-    this.messageHandler = new MessageHandler(storage, subscriptionManager);
+    this.messageHandler = new MessageHandler(
+      storage,
+      subscriptionManager,
+      this.options.maxSubscriptions
+    );
 
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
     this.messageHandler.onResponse((clientId, message) => {
