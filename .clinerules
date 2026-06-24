@@ -28,8 +28,7 @@
 
 <footer>
 
-※末尾の `(cline)` は作業に使用したツール名を表す。ツールに応じて `(cursor)` / `(claude)` 等を用いてもよい。
-　Claude Code 利用時は `(claude)` を付与し、必要に応じて `Co-Authored-By` / `Claude-Session` フッタを併記する。
+※末尾の `(cline)` はツールに応じて `(cursor)` / `(claude)` に調整する
 
 ### タイプ
 - "feat:" - 機能追加
