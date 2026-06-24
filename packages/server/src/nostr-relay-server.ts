@@ -61,12 +61,10 @@ export class NostrRelayServer {
 
     // リレーの初期化
     this.relay = new NostrCacheRelay(this.storage, this.server, {
-      storageOptions: {
-        maxSize: this.options.storageOptions?.maxSize,
-      },
+      storageMaxSize: this.options.storageOptions?.maxSize,
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
-      validateEvents: this.options.relay?.validateEvents !== false,
+      validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',
     });
   }
 
