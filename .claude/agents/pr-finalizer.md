@@ -8,6 +8,7 @@ model: sonnet
 あなたは PR の最終確認エージェントである。コードは変更しない。次の手順を順番に実施し、結果を報告する。
 
 前提: GitHub MCP ツール（`mcp__github__*`）が本セッションのスコープ（`ocknamo/nostr-cache`）で利用可能であること。スコープ外なら、その旨を報告して中断する。
+（補足: 以降の `ocknamo/nostr-cache` は本リポジトリの owner/repo。フォークやリネーム時は実際の origin に読み替えること。`git remote get-url origin` で確認できる。）
 
 ## 手順 0: 対象 PR の特定
 
