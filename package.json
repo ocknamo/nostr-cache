@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspace=packages/shared --workspace=packages/cache-relay --workspace=packages/server",
     "test": "npm run test --workspaces",
     "test:server": "npm run test -w packages/server",
     "test:cache-relay": "npm run test -w packages/cache-relay",

@@ -3,7 +3,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { vi } from 'vitest';
+import { type Mock, vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { NostrCacheRelay } from './nostr-cache-relay.js';
@@ -60,7 +60,7 @@ describe('NostrCacheRelay', () => {
 
     it('should create a relay with custom options', () => {
       const customRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEvents: false,
+        validateEventsType: 'NONE',
         maxSubscriptions: 50,
         maxEventsPerRequest: 200,
       });
@@ -111,7 +111,7 @@ describe('NostrCacheRelay', () => {
     });
 
     it('should return true if the event was saved', async () => {
-      (mockStorage.saveEvent as jest.Mock).mockResolvedValueOnce(true);
+      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(true);
 
       const result = await relay.publishEvent(sampleEvent);
 
@@ -119,7 +119,7 @@ describe('NostrCacheRelay', () => {
     });
 
     it('should return false if the event was not saved', async () => {
-      (mockStorage.saveEvent as jest.Mock).mockResolvedValueOnce(false);
+      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
 
       const result = await relay.publishEvent(sampleEvent);
 
