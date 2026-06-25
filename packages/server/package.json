@@ -16,7 +16,8 @@
     "format:check": "biome check ./src",
     "lint": "biome check ./src",
     "lint:fix": "biome check --write ./src",
-    "fix": "npm run lint:fix && npm run format"
+    "fix": "npm run lint:fix && npm run format",
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@nostr-cache/cache-relay": "^0.1.0",

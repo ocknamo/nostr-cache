@@ -84,7 +84,7 @@ describe('WebSocketServer', () => {
     });
 
     it('should handle invalid messages', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation();
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       client = new WebSocket(`ws://localhost:${port}`);
       await new Promise<void>((resolve) => client.on('open', () => resolve()));

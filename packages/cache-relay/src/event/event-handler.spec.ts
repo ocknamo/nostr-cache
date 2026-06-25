@@ -3,7 +3,7 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
-import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mocked, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventHandler } from './event-handler.js';
@@ -18,7 +18,7 @@ describe('EventHandler', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-  } as Mock<StorageAdapter>;
+  } as unknown as Mocked<StorageAdapter>;
 
   // Mock subscription manager
   const mockSubscriptionManager = {
@@ -35,12 +35,12 @@ describe('EventHandler', () => {
     findMatchingSubscriptions: vi.fn().mockReturnValue(new Map()),
     eventMatchesFilter: vi.fn(),
     getSubscriptionKey: vi.fn(),
-  } as unknown as Mock<SubscriptionManager>;
+  } as unknown as Mocked<SubscriptionManager>;
 
   // Mock event validator
   const mockEventValidator = {
     validate: vi.fn().mockReturnValue(true),
-  } as Mock<EventValidator>;
+  } as unknown as Mocked<EventValidator>;
 
   // Sample events
   const regularEvent: NostrEvent = {
