@@ -133,9 +133,12 @@ describe('NostrCacheRelay', () => {
       relay.on('event', eventHandler);
 
       await relay.subscribe('sub1', [{ kinds: [1] }]);
+      // Ignore any replay during subscribe; assert only the publish-driven emit
+      eventHandler.mockClear();
       await relay.publishEvent(sampleEvent);
 
       expect(eventHandler).toHaveBeenCalledWith(sampleEvent);
+      expect(eventHandler).toHaveBeenCalledTimes(1);
     });
 
     it('should not emit an event that no subscriber matches', async () => {
