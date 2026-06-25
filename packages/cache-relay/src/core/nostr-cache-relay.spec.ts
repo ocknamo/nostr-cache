@@ -127,6 +127,92 @@ describe('NostrCacheRelay', () => {
     });
   });
 
+  describe('publishEvent notifications', () => {
+    it('should emit a matching event to local subscribers', async () => {
+      const eventHandler = vi.fn();
+      relay.on('event', eventHandler);
+
+      await relay.subscribe('sub1', [{ kinds: [1] }]);
+      await relay.publishEvent(sampleEvent);
+
+      expect(eventHandler).toHaveBeenCalledWith(sampleEvent);
+    });
+
+    it('should not emit an event that no subscriber matches', async () => {
+      const eventHandler = vi.fn();
+      relay.on('event', eventHandler);
+
+      await relay.subscribe('sub1', [{ kinds: [9999] }]);
+      // EOSE replay aside, the published event should not be delivered
+      eventHandler.mockClear();
+      await relay.publishEvent(sampleEvent);
+
+      expect(eventHandler).not.toHaveBeenCalled();
+    });
+
+    it('should not emit when the event fails to save', async () => {
+      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
+      const eventHandler = vi.fn();
+      relay.on('event', eventHandler);
+
+      await relay.subscribe('sub1', [{ kinds: [1] }]);
+      eventHandler.mockClear();
+      await relay.publishEvent(sampleEvent);
+
+      expect(eventHandler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('subscribe', () => {
+    it('should replay stored events and then emit eose', async () => {
+      (mockStorage.getEvents as Mock).mockResolvedValueOnce([sampleEvent]);
+      const eventHandler = vi.fn();
+      const eoseHandler = vi.fn();
+      relay.on('event', eventHandler);
+      relay.on('eose', eoseHandler);
+
+      await relay.subscribe('sub1', [sampleFilter]);
+
+      expect(mockStorage.getEvents).toHaveBeenCalledWith([sampleFilter]);
+      expect(eventHandler).toHaveBeenCalledWith(sampleEvent);
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
+
+    it('should emit eose even when there are no stored events', async () => {
+      const eoseHandler = vi.fn();
+      relay.on('eose', eoseHandler);
+
+      await relay.subscribe('sub1', [sampleFilter]);
+
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
+  });
+
+  describe('unsubscribe', () => {
+    it('should return true when removing an existing subscription', async () => {
+      await relay.subscribe('sub1', [sampleFilter]);
+
+      expect(relay.unsubscribe('sub1')).toBe(true);
+    });
+
+    it('should return false for an unknown subscription', () => {
+      expect(relay.unsubscribe('non-existent')).toBe(false);
+    });
+
+    it('should stop delivering events after unsubscribe', async () => {
+      const eventHandler = vi.fn();
+      relay.on('event', eventHandler);
+
+      await relay.subscribe('sub1', [{ kinds: [1] }]);
+      relay.unsubscribe('sub1');
+      eventHandler.mockClear();
+
+      await relay.publishEvent(sampleEvent);
+
+      expect(eventHandler).not.toHaveBeenCalled();
+    });
+  });
+
   describe('event listeners', () => {
     it('should add and remove event listeners', () => {
       const handler = vi.fn();
