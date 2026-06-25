@@ -5,6 +5,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
+import { eventMatchesFilter } from '../utils/filter-utils.js';
 /**
  * Subscription information
  */
@@ -218,9 +219,7 @@ export class SubscriptionManager {
 
     for (const subscription of this.subscriptions.values()) {
       // Check if any filter matches the event
-      const matchesEvent = subscription.filters.some((filter) =>
-        this.eventMatchesFilter(event, filter)
-      );
+      const matchesEvent = subscription.filters.some((filter) => eventMatchesFilter(event, filter));
 
       if (matchesEvent) {
         if (!matches.has(subscription.clientId)) {
@@ -232,63 +231,6 @@ export class SubscriptionManager {
     }
 
     return matches;
-  }
-
-  /**
-   * Check if an event matches a filter
-   *
-   * @param event Event to check
-   * @param filter Filter to check against
-   * @returns True if the event matches the filter
-   * @private
-   */
-  private eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
-    // This is a placeholder implementation
-    // In a real implementation, this would check all filter criteria
-
-    // Check ids
-    if (filter.ids && !filter.ids.includes(event.id)) {
-      return false;
-    }
-
-    // Check authors
-    if (filter.authors && !filter.authors.includes(event.pubkey)) {
-      return false;
-    }
-
-    // Check kinds
-    if (filter.kinds && !filter.kinds.includes(event.kind)) {
-      return false;
-    }
-
-    // Check since
-    if (filter.since && event.created_at < filter.since) {
-      return false;
-    }
-
-    // Check until
-    if (filter.until && event.created_at > filter.until) {
-      return false;
-    }
-
-    // Check tag filters (e.g. #e, #p)
-    for (const [key, values] of Object.entries(filter)) {
-      if (key.startsWith('#') && Array.isArray(values)) {
-        const tagName = key.slice(1);
-        const eventTags = event.tags.filter((tag) => tag[0] === tagName);
-        const eventTagValues = eventTags.map((tag) => tag[1]);
-
-        // Check if any of the filter values match any of the event tag values
-        const hasMatch = (values as string[]).some((value) => eventTagValues.includes(value));
-
-        if (!hasMatch) {
-          return false;
-        }
-      }
-    }
-
-    // If we got here, the event matches the filter
-    return true;
   }
 
   /**

@@ -22,6 +22,13 @@ import { MessageHandler } from './message-handler.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 /**
+ * Client ID used for subscriptions created through the in-process API
+ * (`subscribe()` / `unsubscribe()`), as opposed to subscriptions created
+ * by remote clients over the transport layer.
+ */
+const LOCAL_CLIENT_ID = 'local';
+
+/**
  * Nostr Cache Relay options
  * flat option
  *
@@ -94,6 +101,7 @@ export class NostrCacheRelay {
   private transport: TransportAdapter;
   private validator: EventValidator;
   private messageHandler: MessageHandler;
+  private subscriptionManager: SubscriptionManager;
   private eventListeners: Map<
     string,
     Array<
@@ -129,10 +137,10 @@ export class NostrCacheRelay {
     this.validator = new EventValidator();
 
     // 初期化
-    const subscriptionManager = new SubscriptionManager();
+    this.subscriptionManager = new SubscriptionManager();
     this.messageHandler = new MessageHandler(
       storage,
-      subscriptionManager,
+      this.subscriptionManager,
       this.options.maxSubscriptions
     );
 
@@ -211,36 +219,68 @@ export class NostrCacheRelay {
     }
 
     // Save the event to storage
-    return await this.storage.saveEvent(event);
+    const saved = await this.storage.saveEvent(event);
+
+    // Notify local subscribers whose filters match the published event
+    if (saved) {
+      const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+      if (matches.has(LOCAL_CLIENT_ID)) {
+        this.emit('event', event);
+      }
+    }
+
+    return saved;
   }
 
   /**
    * Subscribe to events matching the given filters
    *
+   * Creates an in-process subscription, replays the matching stored events
+   * through the `event` listeners, and finishes with an `eose` event. Any
+   * events published afterwards that match the filters are delivered to the
+   * `event` listeners via {@link publishEvent}.
+   *
    * @param subscriptionId Subscription ID
    * @param filters Filters to match events against
+   * @returns Promise resolving when the stored events have been replayed
    */
-  subscribe(subscriptionId: string, filters: Filter[]): void {
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Create a subscription
-    // 2. Send matching events to the client
-    // 3. Send EOSE message
+  async subscribe(subscriptionId: string, filters: Filter[]): Promise<void> {
+    // Register the subscription so future events can be matched against it
+    this.subscriptionManager.createSubscription(LOCAL_CLIENT_ID, subscriptionId, filters);
 
     logger.info(`Created subscription ${subscriptionId} with filters:`, filters);
+
+    // Replay the matching stored events to the listeners
+    try {
+      const events = await this.storage.getEvents(filters);
+      for (const event of events) {
+        this.emit('event', event);
+      }
+    } catch (error) {
+      logger.error(`Failed to load stored events for subscription ${subscriptionId}:`, error);
+      this.emit('error', error instanceof Error ? error : new Error(String(error)));
+    }
+
+    // Signal the end of stored events
+    this.emit('eose', subscriptionId);
   }
 
   /**
    * Unsubscribe from a subscription
    *
    * @param subscriptionId Subscription ID to unsubscribe from
+   * @returns True if the subscription existed and was removed, false otherwise
    */
-  unsubscribe(subscriptionId: string): void {
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Remove the subscription
+  unsubscribe(subscriptionId: string): boolean {
+    const removed = this.subscriptionManager.removeSubscription(LOCAL_CLIENT_ID, subscriptionId);
 
-    logger.info(`Removed subscription ${subscriptionId}`);
+    if (removed) {
+      logger.info(`Removed subscription ${subscriptionId}`);
+    } else {
+      logger.debug(`Subscription ${subscriptionId} not found`);
+    }
+
+    return removed;
   }
 
   /**
@@ -302,28 +342,39 @@ export class NostrCacheRelay {
   }
 
   /**
-   * Emit an event
+   * Emit an event to the registered listeners
    *
    * @param event Event type to emit
-   * @param args Arguments to pass to listeners
+   * @param payload Data to pass to the listeners (an Error for `error`, a
+   *   NostrEvent for `event`, the subscription ID for `eose`)
    * @private
    */
-  private emit(event: string): void {
+  private emit(event: 'connect' | 'disconnect'): void;
+  private emit(event: 'error', payload: Error): void;
+  private emit(event: 'event', payload: NostrEvent): void;
+  private emit(event: 'eose', payload: string): void;
+  private emit(event: string, payload?: Error | NostrEvent | string): void {
     const listeners = this.eventListeners.get(event);
 
-    if (listeners) {
-      for (const listener of listeners) {
-        if (event === 'connect' || event === 'disconnect') {
+    if (!listeners) {
+      return;
+    }
+
+    for (const listener of listeners) {
+      switch (event) {
+        case 'connect':
+        case 'disconnect':
           (listener as RelayConnectHandler | RelayDisconnectHandler)();
-        } else if (event === 'error') {
-          (listener as RelayErrorHandler)(new Error('Unknown error'));
-        } else if (event === 'event') {
-          // This is a placeholder, in a real implementation we would pass the actual event
-          (listener as RelayEventHandler)({} as NostrEvent);
-        } else if (event === 'eose') {
-          // This is a placeholder, in a real implementation we would pass the actual subscription ID
-          (listener as RelayEoseHandler)('');
-        }
+          break;
+        case 'error':
+          (listener as RelayErrorHandler)(payload as Error);
+          break;
+        case 'event':
+          (listener as RelayEventHandler)(payload as NostrEvent);
+          break;
+        case 'eose':
+          (listener as RelayEoseHandler)(payload as string);
+          break;
       }
     }
   }
