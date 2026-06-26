@@ -17,6 +17,9 @@ describe('Logger', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // Restore the shared singleton's defaults so state does not leak across files.
+    logger.setLevel(LogLevel.INFO);
+    logger.setTestEnvironment(true);
   });
 
   it('exposes a singleton instance', () => {
