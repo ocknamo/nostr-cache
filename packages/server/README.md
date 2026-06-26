@@ -54,8 +54,35 @@ interface NostrRelayServerOptions {
     maxEventsPerRequest?: number;  // リクエストあたりの最大イベント数
     validateEvents?: boolean;      // イベントのバリデーションを行うかどうか
   };
+
+  // ヘルスチェック設定
+  healthCheck?: {
+    enabled?: boolean;  // 有効にするか（デフォルト: true）
+    port?: number;      // HTTP ポート（デフォルト: WebSocket ポート + 1）
+    path?: string;      // パス（デフォルト: '/health'）
+  };
 }
 ```
+
+### ヘルスチェックエンドポイント
+
+サーバー起動時、WebSocket ポートとは別の HTTP ポート（デフォルトは `port + 1`）で
+ヘルスチェックエンドポイント（デフォルト `/health`）が起動します。リレーの稼働状況を
+JSON で返します。
+
+```bash
+curl http://localhost:8009/health
+# => {"status":"ok","uptime":12.34,"connections":1,"events":42}
+```
+
+- `status`: 常に `"ok"`（応答できる場合）
+- `uptime`: プロセスの稼働秒数
+- `connections`: 現在の WebSocket 接続数
+- `events`: 保存済みイベント数
+
+`/health` 以外のパスや `GET` 以外のメソッドには `404` を返します。
+`healthCheck.enabled: false` で無効化できます。なお補助機能のため、ヘルスチェック用
+ポートの確保に失敗してもリレー本体は停止せず、警告ログのみを出力します。
 
 ### プログラムからの利用
 
@@ -89,7 +116,8 @@ await server.stop();
 
 - `getConnectionCount()`: **実装済み**。現在の接続数を返します（`WebSocketServer` の接続中クライアント数）
 - `getEventCount()`: **実装済み**。保存済みイベント数を返します（`DexieStorage` のイベント件数）
-- メトリクスや詳細な監視機能（ヘルスチェックエンドポイント等）は**未実装**です
+- ヘルスチェックエンドポイント（`/health`）: **実装済み**。HTTP で稼働状況（接続数・イベント数・稼働時間）を返します（上記「ヘルスチェックエンドポイント」参照）
+- より詳細なメトリクス（Prometheus 形式の出力等）は**未実装**です
 
 未実装のメトリクス・監視機能は将来のアップデートで実装される予定です。
 
