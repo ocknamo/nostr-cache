@@ -20,7 +20,7 @@
     "lint": "npm run lint --workspaces",
     "lint:fix": "npm run lint:fix --workspaces",
     "format": "npm run format --workspaces",
-    "lint:check": "npm run lint:check --workspace=packages/web-client",
+    "lint:check": "npm run lint:check --workspaces --if-present",
     "format:check": "npm run format:check --workspaces",
     "build:cache-relay": "npm run build --workspace=packages/cache-relay",
     "build:web-client": "npm run build --workspace=packages/web-client",
