@@ -258,6 +258,11 @@ export class NostrCacheRelay {
       const storedEvents = await this.storage.getEvents(filters);
       // Skip cached events that have outlived the configured TTL
       const events = filterExpiredEvents(storedEvents, this.options.ttl);
+      if (storedEvents.length > events.length) {
+        logger.info(
+          `Subscription ${subscriptionId} dropped ${storedEvents.length - events.length} expired events (ttl ${this.options.ttl}s)`
+        );
+      }
       for (const event of events) {
         this.emit('event', event);
       }
