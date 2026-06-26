@@ -18,8 +18,15 @@ import type {
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { capEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
 import { SubscriptionManager } from './subscription-manager.js';
+
+/**
+ * Default relay-imposed cap on the number of stored events returned per REQ
+ * subscription / in-process subscribe replay.
+ */
+const DEFAULT_MAX_EVENTS = 500;
 
 /**
  * Client ID used for subscriptions created through the in-process API
@@ -43,8 +50,9 @@ export interface NostrRelayOptions {
   maxSubscriptions?: number;
 
   /**
-   * Maximum number of events to return per request
-   * 未実装
+   * Maximum number of stored events returned per REQ subscription
+   * (relay-imposed cap applied on top of each filter's own `limit`).
+   * デフォルト値500
    */
   maxEventsPerRequest?: number;
 
@@ -128,8 +136,9 @@ export class NostrCacheRelay {
     this.options = {
       validateEventsType: 'IMMEDIATELY',
       maxSubscriptions: 20,
-      maxEventsPerRequest: 500,
       ...options,
+      // Guard against an explicit `undefined` clobbering the default
+      maxEventsPerRequest: options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS,
     };
 
     this.storage = storage;
@@ -141,7 +150,8 @@ export class NostrCacheRelay {
     this.messageHandler = new MessageHandler(
       storage,
       this.subscriptionManager,
-      this.options.maxSubscriptions
+      this.options.maxSubscriptions,
+      this.options.maxEventsPerRequest
     );
 
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
@@ -253,7 +263,11 @@ export class NostrCacheRelay {
     // Replay the matching stored events to the listeners
     try {
       const events = await this.storage.getEvents(filters);
-      for (const event of events) {
+      const limitedEvents = capEvents(
+        events,
+        this.options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS
+      );
+      for (const event of limitedEvents) {
         this.emit('event', event);
       }
     } catch (error) {

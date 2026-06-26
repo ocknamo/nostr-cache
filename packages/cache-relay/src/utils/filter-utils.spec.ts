@@ -4,6 +4,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import {
+  capEvents,
   createFilterKey,
   eventMatchesFilter,
   mergeFilters,
@@ -297,6 +298,46 @@ describe('filterUtils', () => {
       expect(result.since).toBe(500);
       expect(result.until).toBe(1500);
       expect(result.limit).toBe(10);
+    });
+  });
+
+  describe('capEvents', () => {
+    const makeEvent = (id: string, created_at: number): NostrEvent => ({
+      id,
+      pubkey: 'pk',
+      created_at,
+      kind: 1,
+      tags: [],
+      content: '',
+      sig: 'sig',
+    });
+
+    it('should return the same array reference when within the cap', () => {
+      const events = [makeEvent('a', 1), makeEvent('b', 2)];
+      expect(capEvents(events, 2)).toBe(events);
+      expect(capEvents(events, 5)).toBe(events);
+    });
+
+    it('should keep the newest events (created_at descending) when over the cap', () => {
+      const events = [
+        makeEvent('old', 100),
+        makeEvent('newest', 500),
+        makeEvent('mid', 300),
+        makeEvent('second', 400),
+      ];
+      expect(capEvents(events, 2).map((e) => e.id)).toEqual(['newest', 'second']);
+    });
+
+    it('should break created_at ties by id for deterministic output', () => {
+      const events = [makeEvent('c', 100), makeEvent('a', 100), makeEvent('b', 100)];
+      expect(capEvents(events, 2).map((e) => e.id)).toEqual(['a', 'b']);
+    });
+
+    it('should not mutate the input array', () => {
+      const events = [makeEvent('old', 100), makeEvent('newest', 500), makeEvent('mid', 300)];
+      const snapshot = events.map((e) => e.id);
+      capEvents(events, 1);
+      expect(events.map((e) => e.id)).toEqual(snapshot);
     });
   });
 });

@@ -197,6 +197,32 @@ describe('MessageHandler', () => {
         expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
       });
 
+      it('should cap to the newest maxEventsPerRequest events', async () => {
+        const limitedHandler = new MessageHandler(mockStorage, mockSubscriptionManager, 20, 2);
+        const limitedCallback = vi.fn();
+        limitedHandler.onResponse(limitedCallback);
+
+        // Returned in arbitrary (non-time) order to prove the cap sorts by recency
+        const events: NostrEvent[] = [
+          { ...sampleEvent, id: 'event-old', created_at: 100 },
+          { ...sampleEvent, id: 'event-newest', created_at: 500 },
+          { ...sampleEvent, id: 'event-mid', created_at: 300 },
+          { ...sampleEvent, id: 'event-second', created_at: 400 },
+        ];
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce(events);
+
+        const message: NostrWireMessage = ['REQ', 'sub1', sampleFilter];
+        await limitedHandler.handleMessage('client1', message);
+
+        const sentEvents = limitedCallback.mock.calls
+          .filter(([, wire]) => wire[0] === 'EVENT')
+          .map(([, wire]) => (wire[2] as NostrEvent).id);
+        // The two newest events are kept (newest first)
+        expect(sentEvents).toEqual(['event-newest', 'event-second']);
+        // EOSE is still sent after the truncated batch
+        expect(limitedCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+      });
+
       it('should handle storage errors during event retrieval', async () => {
         (mockStorage.getEvents as Mock).mockRejectedValueOnce(new Error('Storage error'));
 
