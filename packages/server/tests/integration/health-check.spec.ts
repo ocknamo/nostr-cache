@@ -12,7 +12,7 @@ import { NostrRelayServer } from '../../src/nostr-relay-server.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 /**
- * ランダムな WebSocket ポートを返す（ヘルスチェック用に +1 を予約するため余裕を持たせる）。
+ * ランダムな WebSocket ポートを返す。
  */
 function randomPort(): number {
   return Math.floor(Math.random() * 10000) + 30000;
@@ -23,21 +23,40 @@ describe('NostrRelayServer health check endpoint', () => {
   let healthPort: number;
 
   beforeEach(async () => {
-    const wsPort = randomPort();
-    healthPort = wsPort + 1;
+    // ヘルスチェックは動的ポート（0）で起動し、実際のバインドポートを取得することで
+    // ポート衝突によるフレークを避ける。
     server = new NostrRelayServer({
-      port: wsPort,
-      healthCheck: { port: healthPort },
+      port: randomPort(),
+      healthCheck: { port: 0 },
     });
     await server.start();
+
+    const resolved = server.getHealthPort();
+    if (resolved === null) {
+      throw new Error('Health server failed to start');
+    }
+    healthPort = resolved;
   });
 
   afterEach(async () => {
     await server.stop();
   });
 
-  it('should expose the resolved health port', () => {
+  it('should expose the actual bound health port', () => {
     expect(server.getHealthPort()).toBe(healthPort);
+    expect(healthPort).toBeGreaterThan(0);
+  });
+
+  it('should default the health port to the WebSocket port + 1', async () => {
+    // 既定（port 未指定）では WebSocket ポート + 1 にバインドされることを確認する。
+    const wsPort = randomPort();
+    const defaultServer = new NostrRelayServer({ port: wsPort });
+    await defaultServer.start();
+    try {
+      expect(defaultServer.getHealthPort()).toBe(wsPort + 1);
+    } finally {
+      await defaultServer.stop();
+    }
   });
 
   it('should respond to GET /health with status ok and relay stats', async () => {

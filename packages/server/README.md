@@ -84,6 +84,14 @@ curl http://localhost:8009/health
 `healthCheck.enabled: false` で無効化できます。なお補助機能のため、ヘルスチェック用
 ポートの確保に失敗してもリレー本体は停止せず、警告ログのみを出力します。
 
+`healthCheck.port: 0` を指定すると OS による動的ポート割り当てになり、実際に
+バインドされたポート番号は `getHealthPort()` で取得できます。
+
+> **注意（host バインドについて）**: `host` オプションはヘルスチェック用 HTTP サーバーには
+> 適用されますが、現状の WebSocket サーバー（`@nostr-cache/cache-relay` の `WebSocketServer`）は
+> `host` を受け取らず全インターフェースで待ち受けます。`host` で待ち受け範囲を厳密に
+> 制限したい場合はこの非対称性に注意してください。
+
 ### プログラムからの利用
 
 ```typescript

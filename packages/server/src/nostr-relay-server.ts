@@ -198,6 +198,11 @@ export class NostrRelayServer {
         });
     });
 
+    // 補助エンドポイントを Slowloris 等の接続保持型攻撃から守るためのタイムアウト。
+    // ヘッダ／リクエスト全体を短時間で受け切れない接続は切断する。
+    server.headersTimeout = 5000;
+    server.requestTimeout = 10000;
+
     const port = this.getHealthCheckPort();
 
     try {
@@ -211,7 +216,7 @@ export class NostrRelayServer {
       });
 
       this.healthServer = server;
-      logger.info(`Health check endpoint listening on port ${port} (path ${path})`);
+      logger.info(`Health check endpoint listening on port ${this.getHealthPort()} (path ${path})`);
     } catch (error) {
       logger.error(`Failed to start health check endpoint on port ${port}:`, error);
       // リレー本体には影響させない
@@ -246,10 +251,14 @@ export class NostrRelayServer {
   /**
    * 稼働中のヘルスチェックエンドポイントのポート番号を取得する。
    *
+   * 設定値ではなく実際にバインドされたポートを返すため、`healthCheck.port: 0`
+   * （動的割り当て）にも対応する。
+   *
    * @returns リッスン中のポート番号。無効化されている、または起動に失敗した場合は null
    */
   getHealthPort(): number | null {
-    return this.healthServer ? this.getHealthCheckPort() : null;
+    const address = this.healthServer?.address();
+    return typeof address === 'object' && address !== null ? address.port : null;
   }
 
   /**
