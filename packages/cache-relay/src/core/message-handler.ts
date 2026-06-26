@@ -22,6 +22,7 @@ import {
 import { EventHandler } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { filterExpiredEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
 /**
@@ -41,11 +42,13 @@ export class MessageHandler {
    * @param storage Storage adapter
    * @param subscriptionManager Subscription manager
    * @param maxSubscriptions Maximum number of subscriptions per client
+   * @param ttl Time-to-live in seconds for served cached events (disabled when undefined)
    */
   constructor(
     storage: StorageAdapter,
     subscriptionManager: SubscriptionManager,
-    private maxSubscriptions = 20
+    private maxSubscriptions = 20,
+    private ttl?: number
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -235,13 +238,22 @@ export class MessageHandler {
       // 既存の一致するイベントの取得と送信
       try {
         // 各フィルタに一致するイベントを取得
-        const events = await this.storage.getEvents(filters);
+        const storedEvents = await this.storage.getEvents(filters);
+
+        // TTL を超過した（鮮度切れの）イベントはキャッシュから返さない
+        const events = filterExpiredEvents(storedEvents, this.ttl);
 
         // イベントをクライアントに送信
         let eventCount = 0;
         for (const event of events) {
           this.sendEvent(clientId, subscriptionId, event);
           eventCount++;
+        }
+
+        if (storedEvents.length > events.length) {
+          logger.info(
+            `Subscription ${subscriptionId} dropped ${storedEvents.length - events.length} expired events (ttl ${this.ttl}s)`
+          );
         }
 
         logger.info(`Sent ${eventCount} events for subscription ${subscriptionId}`);

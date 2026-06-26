@@ -197,6 +197,26 @@ describe('MessageHandler', () => {
         expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
       });
 
+      it('should not send events that have outlived the ttl', async () => {
+        const ttlHandler = new MessageHandler(mockStorage, mockSubscriptionManager, 20, 3600);
+        const ttlCallback = vi.fn();
+        ttlHandler.onResponse(ttlCallback);
+
+        const now = Math.floor(Date.now() / 1000);
+        const fresh = { ...sampleEvent, id: 'fresh', created_at: now - 60 };
+        const stale = { ...sampleEvent, id: 'stale', created_at: now - 7200 };
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce([fresh, stale]);
+
+        const message: NostrWireMessage = ['REQ', 'sub1', sampleFilter];
+        await ttlHandler.handleMessage('client1', message);
+
+        const sentIds = ttlCallback.mock.calls
+          .filter(([, wire]) => wire[0] === 'EVENT')
+          .map(([, wire]) => (wire[2] as NostrEvent).id);
+        expect(sentIds).toEqual(['fresh']);
+        expect(ttlCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+      });
+
       it('should handle storage errors during event retrieval', async () => {
         (mockStorage.getEvents as Mock).mockRejectedValueOnce(new Error('Storage error'));
 

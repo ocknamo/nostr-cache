@@ -191,6 +191,24 @@ describe('NostrCacheRelay', () => {
 
       expect(eoseHandler).toHaveBeenCalledWith('sub1');
     });
+
+    it('should not replay events that have outlived the ttl', async () => {
+      const ttlRelay = new NostrCacheRelay(mockStorage, mockTransport, { ttl: 3600 });
+      const now = Math.floor(Date.now() / 1000);
+      const fresh = { ...sampleEvent, id: 'fresh', created_at: now - 60 };
+      const stale = { ...sampleEvent, id: 'stale', created_at: now - 7200 };
+      (mockStorage.getEvents as Mock).mockResolvedValueOnce([fresh, stale]);
+      const eventHandler = vi.fn();
+      const eoseHandler = vi.fn();
+      ttlRelay.on('event', eventHandler);
+      ttlRelay.on('eose', eoseHandler);
+
+      await ttlRelay.subscribe('sub1', [sampleFilter]);
+
+      const replayedIds = eventHandler.mock.calls.map(([event]) => (event as NostrEvent).id);
+      expect(replayedIds).toEqual(['fresh']);
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
   });
 
   describe('unsubscribe', () => {

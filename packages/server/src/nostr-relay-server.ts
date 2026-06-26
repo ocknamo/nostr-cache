@@ -47,6 +47,8 @@ interface NostrRelayServerOptions {
     maxSubscriptions?: number;
     maxEventsPerRequest?: number;
     validateEvents?: boolean;
+    // 鮮度切れイベントをキャッシュから返さない TTL（秒）。未指定で無効
+    ttl?: number;
   };
 
   // ヘルスチェック設定
@@ -104,6 +106,7 @@ export class NostrRelayServer {
       storageMaxSize: this.options.storageOptions?.maxSize,
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
+      ttl: this.options.relay?.ttl,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',
     });
   }

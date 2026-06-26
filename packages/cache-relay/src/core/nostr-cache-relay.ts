@@ -18,6 +18,7 @@ import type {
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { filterExpiredEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
@@ -55,8 +56,9 @@ export interface NostrRelayOptions {
   storageMaxSize?: number;
 
   /**
-   * Time-to-live in seconds
-   * 未実装
+   * Time-to-live in seconds for cached events. Stored events whose
+   * `created_at` is older than `ttl` seconds are not served from the cache
+   * (REQ results and `subscribe()` replay). Disabled when undefined.
    */
   ttl?: number;
 
@@ -141,7 +143,8 @@ export class NostrCacheRelay {
     this.messageHandler = new MessageHandler(
       storage,
       this.subscriptionManager,
-      this.options.maxSubscriptions
+      this.options.maxSubscriptions,
+      this.options.ttl
     );
 
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
@@ -252,7 +255,9 @@ export class NostrCacheRelay {
 
     // Replay the matching stored events to the listeners
     try {
-      const events = await this.storage.getEvents(filters);
+      const storedEvents = await this.storage.getEvents(filters);
+      // Skip cached events that have outlived the configured TTL
+      const events = filterExpiredEvents(storedEvents, this.options.ttl);
       for (const event of events) {
         this.emit('event', event);
       }

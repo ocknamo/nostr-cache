@@ -6,6 +6,7 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import {
   createFilterKey,
   eventMatchesFilter,
+  filterExpiredEvents,
   mergeFilters,
   normalizeFilter,
 } from './filter-utils.js';
@@ -297,6 +298,43 @@ describe('filterUtils', () => {
       expect(result.since).toBe(500);
       expect(result.until).toBe(1500);
       expect(result.limit).toBe(10);
+    });
+  });
+
+  describe('filterExpiredEvents', () => {
+    const makeEvent = (id: string, created_at: number): NostrEvent => ({
+      id,
+      pubkey: 'pk',
+      created_at,
+      kind: 1,
+      tags: [],
+      content: '',
+      sig: 'sig',
+    });
+
+    const now = 1_000_000;
+
+    it('should return the input untouched when ttl is undefined or non-positive', () => {
+      const events = [makeEvent('a', 1), makeEvent('b', now)];
+      expect(filterExpiredEvents(events, undefined, now)).toBe(events);
+      expect(filterExpiredEvents(events, 0, now)).toBe(events);
+      expect(filterExpiredEvents(events, -10, now)).toBe(events);
+    });
+
+    it('should drop events older than now - ttl', () => {
+      const events = [
+        makeEvent('fresh', now - 10),
+        makeEvent('boundary', now - 100),
+        makeEvent('stale', now - 101),
+      ];
+      const result = filterExpiredEvents(events, 100, now).map((e) => e.id);
+      // boundary (exactly now - ttl) is kept; anything older is dropped
+      expect(result).toEqual(['fresh', 'boundary']);
+    });
+
+    it('should keep all events that are within the ttl window', () => {
+      const events = [makeEvent('a', now), makeEvent('b', now - 5)];
+      expect(filterExpiredEvents(events, 60, now)).toHaveLength(2);
     });
   });
 });
