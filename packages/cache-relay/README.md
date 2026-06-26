@@ -1,12 +1,26 @@
 # Nostr Cache Relay
 
-Nostrリレーとのやり取りをキャッシュするためのリレーパッケージです。
+クライアント層で動く Nostr リレー実装本体です。NIP-01 に準拠したメッセージ処理
+（`EVENT` / `REQ` / `CLOSE` → `OK` / `EVENT` / `EOSE` / `CLOSED` / `NOTICE`）を実装し、
+kind 0 / 3 などの replaceable イベントにも対応します（NIP-02 のフォローリストは
+この replaceable 処理の範囲でのみ扱われ、専用ロジックは持ちません）。
+ストレージ（IndexedDB / Dexie.js）とトランスポート（WebSocket）をアダプタとして
+差し替えることで、**Node.js サーバ**としても**ブラウザ内のローカルキャッシュリレー**としても
+動作します。プロジェクト全体の目的は [../../doc/concept.md](../../doc/concept.md) を参照してください。
 
-## 機能
+> **注意:** 開発中のパッケージです。`NostrRelayOptions` の一部（`maxEventsPerRequest`,
+> `storageMaxSize`, `ttl`, `cacheStrategy`, 遅延バリデーション系）は型のみ定義されており
+> 未実装です。詳細は [../../doc/TODO.md](../../doc/TODO.md) を参照してください。
 
-- リレーからのイベント取得のキャッシュ
-- 効率的なデータ取得と保存
-- 設定可能なキャッシュ戦略
+## 構成要素
+
+`NostrCacheRelay` は次の 2 つのアダプタを受け取って動作します。
+
+- **StorageAdapter** … イベントの永続化。`DexieStorage`（IndexedDB / Dexie.js）を提供。
+  テスト・サーバ環境では `fake-indexeddb` でエミュレートします。
+- **TransportAdapter** … クライアントとの通信。
+  - `WebSocketServer` … Node.js 用（`ws` ベース）。
+  - `WebSocketServerEmulator` … ブラウザ用。`globalThis.WebSocket` をインターセプトします。
 
 ## インストール
 
@@ -16,40 +30,103 @@ npm install @nostr-cache/cache-relay
 
 ## 使用方法
 
-```typescript
-import { NostrCache } from '@nostr-cache/cache-relay';
+### ブラウザ（ローカルキャッシュリレー）
 
-const cache = new NostrCache({
-  // 設定オプション
-  maxSize: 1000,
-  ttl: 3600000 // 1時間（ミリ秒）
+```typescript
+import {
+  NostrCacheRelay,
+  DexieStorage,
+  WebSocketServerEmulator,
+} from '@nostr-cache/cache-relay';
+
+const storage = new DexieStorage('NostrCacheRelay');
+const transport = new WebSocketServerEmulator();
+
+const relay = new NostrCacheRelay(storage, transport, {
+  validateEventsType: 'IMMEDIATELY',
+  maxSubscriptions: 20,
 });
 
-// キャッシュを使用してリレーからデータを取得
-const events = await cache.getEvents(filters);
+// WebSocket をインターセプトして接続を開始
+await relay.connect();
 ```
 
-## API ドキュメント
+> **制約:** `WebSocketServerEmulator` は**特定の1つの URL に一致する接続のみ**を
+> インターセプトします。現状 `connect()` はインターセプト対象 URL を `start()` へ
+> 渡さないため、既定の `ws://localhost:3000` 宛ての接続だけが対象になります。
+> 任意のリレー URL を横取りする用途にはまだ対応していません。
 
-### NostrCache
-
-キャッシュの主要クラス。
-
-#### コンストラクタ
+### Node.js（サーバとして起動）
 
 ```typescript
-constructor(options?: NostrRelayOptions)
+import {
+  NostrCacheRelay,
+  DexieStorage,
+  WebSocketServer,
+} from '@nostr-cache/cache-relay';
+import 'fake-indexeddb/auto'; // Node.js で IndexedDB をエミュレート
+
+const storage = new DexieStorage('NostrRelay');
+const transport = new WebSocketServer(8008);
+
+const relay = new NostrCacheRelay(storage, transport, {
+  maxSubscriptions: 100,
+});
+
+await relay.connect();
 ```
 
-##### オプション
+> すぐに使えるサーバ実装は `@nostr-cache/server` パッケージにもあります。
 
-- `maxSize`: キャッシュに保存する最大アイテム数
-- `ttl`: キャッシュアイテムの有効期限（ミリ秒）
-- `strategy`: キャッシュ戦略（'LRU'、'FIFO'など）
+### ローカル API による購読 / 発行
 
-#### メソッド
+トランスポート越しのクライアントとは別に、同一プロセス内から直接購読・発行できます。
 
-- `getEvents(filters: Filter[]): Promise<Event[]>`: フィルタに一致するイベントを取得
-- `addEvent(event: Event): void`: イベントをキャッシュに追加
-- `clearCache(): void`: キャッシュをクリア
-- `invalidate(filter: Filter): void`: 特定のフィルタに一致するキャッシュを無効化
+```typescript
+relay.on('event', (event) => console.log('event', event));
+relay.on('eose', (subscriptionId) => console.log('eose', subscriptionId));
+
+// 保存済みイベントを再生し、最後に eose を発火
+await relay.subscribe('sub1', [{ kinds: [1], limit: 50 }]);
+
+// 発行。ローカル購読にマッチすれば 'event' が発火する
+await relay.publishEvent(event);
+
+relay.unsubscribe('sub1');
+```
+
+## API
+
+### `new NostrCacheRelay(storage, transport, options?)`
+
+- `storage: StorageAdapter` — 例: `new DexieStorage(dbName)`
+- `transport: TransportAdapter` — 例: `new WebSocketServer(port)` / `new WebSocketServerEmulator()`
+- `options?: NostrRelayOptions`
+
+### メソッド
+
+- `connect(): Promise<void>` — トランスポートを開始し `connect` を発火。
+- `disconnect(): Promise<void>` — トランスポートを停止し `disconnect` を発火。
+- `publishEvent(event: NostrEvent): Promise<boolean>` — イベントを検証・保存し、
+  マッチするローカル購読へ `event` を通知。保存成否を返す。
+- `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` — ローカル購読を
+  登録し、保存済みの一致イベントを `event` で再生後、`eose` を発火。
+- `unsubscribe(subscriptionId: string): boolean` — ローカル購読を削除。削除できれば `true`。
+- `on(event, callback)` / `off(event, callback)` — イベントリスナの登録・解除。
+  イベント種別: `'connect' | 'disconnect' | 'error' | 'event' | 'eose'`。
+
+### `NostrRelayOptions`
+
+| オプション | 型 | 状況 |
+|---|---|---|
+| `maxSubscriptions` | `number` | 実装済み（デフォルト 20） |
+| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 一部実装。`LAZY` は未実装。**注意:** この設定が効くのは in-process の `publishEvent()` のみ。トランスポート経由（`EVENT` メッセージ）の検証は本設定に関わらず常に実行されるため、`NONE` でもリレー入口の検証は無効化されない |
+| `port` | `number` | Node.js の WebSocket サーバ用 |
+| `maxEventsPerRequest` | `number` | **未実装** |
+| `storageMaxSize` | `number` | **未実装** |
+| `ttl` | `number` | **未実装** |
+| `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | **未実装** |
+| `lazyValidateInterval` | `number` | **未実装** |
+| `lazyValidateBachSize` | `number` | **未実装**（`Batch` のタイポ。リネームは破壊的変更のため留意） |
+
+詳細・最新の状況は [../../doc/TODO.md](../../doc/TODO.md) を参照してください。
