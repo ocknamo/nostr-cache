@@ -173,4 +173,35 @@ describe('WebSocketServer', () => {
       }).not.toThrow();
     });
   });
+
+  describe('getConnectionCount()', () => {
+    it('should start at zero', () => {
+      expect(server.getConnectionCount()).toBe(0);
+    });
+
+    it('should track connects and disconnects', async () => {
+      await server.start();
+      port = server.getPort();
+
+      const connected = new Promise<void>((resolve) => {
+        server.onConnect(() => resolve());
+      });
+      client = new WebSocket(`ws://localhost:${port}`);
+      // Wait for the client handshake to complete before closing, so the socket
+      // is never torn down mid-handshake.
+      await new Promise<void>((resolve, reject) => {
+        client.on('open', () => resolve());
+        client.on('error', reject);
+      });
+      await connected;
+      expect(server.getConnectionCount()).toBe(1);
+
+      const disconnected = new Promise<void>((resolve) => {
+        server.onDisconnect(() => resolve());
+      });
+      client.close();
+      await disconnected;
+      expect(server.getConnectionCount()).toBe(0);
+    });
+  });
 });

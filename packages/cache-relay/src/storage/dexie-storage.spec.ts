@@ -661,4 +661,24 @@ describe('DexieStorage', () => {
       }
     });
   });
+
+  describe('count', () => {
+    it('should return 0 for empty storage', async () => {
+      expect(await storage.count()).toBe(0);
+    });
+
+    it('should reflect the number of stored events', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.saveEvent({ ...mockEvent, id: 'test-id-2' });
+
+      expect(await storage.count()).toBe(2);
+    });
+
+    it('should not double-count an event saved twice with the same id', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.saveEvent(mockEvent);
+
+      expect(await storage.count()).toBe(1);
+    });
+  });
 });

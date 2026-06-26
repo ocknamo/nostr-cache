@@ -96,8 +96,7 @@ export class NostrRelayServer {
    * @returns 現在の接続数
    */
   getConnectionCount(): number {
-    // 実装が必要
-    return 0;
+    return this.server.getConnectionCount();
   }
 
   /**
@@ -106,8 +105,7 @@ export class NostrRelayServer {
    * @returns Promise resolving to the number of events
    */
   async getEventCount(): Promise<number> {
-    // 実装が必要
-    return 0;
+    return this.storage.count();
   }
 
   /**
