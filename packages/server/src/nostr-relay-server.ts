@@ -36,6 +36,9 @@ interface NostrRelayServerOptions {
  * NIP-01準拠のNostrリレーサーバーを実装
  */
 export class NostrRelayServer {
+  // Held as concrete types (not the StorageAdapter/TransportAdapter interfaces)
+  // so that getConnectionCount()/getEventCount() can delegate to the concrete
+  // count accessors without widening those shared interfaces.
   private server: WebSocketServer;
   private relay: NostrCacheRelay;
   private storage: DexieStorage;
