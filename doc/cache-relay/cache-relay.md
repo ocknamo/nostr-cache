@@ -87,41 +87,43 @@
 
 ## 4. ディレクトリ構造
 
+> 注: ファイル名は kebab-case にリファクタ済み（旧 PascalCase 表記から変更）。共有の型は `@nostr-cache/shared` パッケージに分離されている。
+
 ```
 packages/cache-relay/
 ├── src/
-│   ├── index.ts                 # メインエントリーポイント
-│   ├── core/                    # コア機能
-│   │   ├── NostrCacheRelay.ts   # リレーの主要実装
-│   │   ├── NostrCacheRelay.spec.ts # リレーの単体テスト
-│   │   ├── MessageHandler.ts    # メッセージ処理
-│   │   ├── MessageHandler.spec.ts # メッセージ処理の単体テスト
-│   │   ├── SubscriptionManager.ts # サブスクリプション管理
-│   │   └── SubscriptionManager.spec.ts # サブスクリプション管理の単体テスト
-│   ├── event/                   # イベント処理
-│   │   ├── EventHandler.ts      # イベント処理
-│   │   ├── EventHandler.spec.ts # イベント処理の単体テスト
-│   │   ├── EventValidator.ts    # イベント検証（空実装）
-│   │   └── EventValidator.spec.ts # イベント検証の単体テスト
-│   ├── storage/                 # ストレージ
-│   │   ├── StorageAdapter.ts    # ストレージアダプタインターフェース
-│   │   ├── DexieStorage.ts      # Dexie.jsを使用したIndexedDBアダプタ
-│   │   └── DexieStorage.spec.ts # IndexedDBアダプタの単体テスト
-│   ├── transport/               # 通信層
-│   │   ├── TransportAdapter.ts  # トランスポートアダプタインターフェース
-│   │   ├── WebSocketServer.ts   # WebSocketサーバー（Node.js用）
-│   │   ├── WebSocketServer.spec.ts # WebSocketサーバーの単体テスト
-│   │   ├── WebSocketServerEmulator.ts # WebSocketエミュレーション（ブラウザ用）
-│   │   └── WebSocketServerEmulator.spec.ts # WebSocketエミュレーションの単体テスト
-│   └── utils/                   # ユーティリティ
-│       ├── filterUtils.ts       # フィルタ処理ユーティリティ
-│       ├── filterUtils.spec.ts  # フィルタ処理の単体テスト
-│       ├── types.ts             # 内部型定義
-│       └── types.spec.ts        # 型定義の単体テスト
-├── tests/                       # テスト
-│   ├── integration/             # 統合テスト
-│   │   ├── node/                # Node.js環境での統合テスト
-│   └── browser-client/          # ブラウザクライアント例
+│   ├── index.ts                       # メインエントリーポイント
+│   ├── core/                          # コア機能
+│   │   ├── nostr-cache-relay.ts       # リレーの主要実装
+│   │   ├── nostr-cache-relay.spec.ts  # リレーの単体テスト
+│   │   ├── message-handler.ts         # メッセージ処理
+│   │   ├── message-handler.spec.ts    # メッセージ処理の単体テスト
+│   │   ├── subscription-manager.ts    # サブスクリプション管理
+│   │   └── subscription-manager.spec.ts # サブスクリプション管理の単体テスト
+│   ├── event/                         # イベント処理
+│   │   ├── event-handler.ts           # イベント処理
+│   │   ├── event-handler.spec.ts      # イベント処理の単体テスト
+│   │   ├── event-validator.ts         # イベント検証（rx-nostr-crypto で実装済み）
+│   │   └── event-validator.spec.ts    # イベント検証の単体テスト
+│   ├── storage/                       # ストレージ
+│   │   ├── storage-adapter.ts         # ストレージアダプタインターフェース
+│   │   ├── dexie-storage.ts           # Dexie.jsを使用したIndexedDBアダプタ
+│   │   └── dexie-storage.spec.ts      # IndexedDBアダプタの単体テスト
+│   ├── transport/                     # 通信層
+│   │   ├── transport-adapter.ts       # トランスポートアダプタインターフェース
+│   │   ├── web-socket-server.ts       # WebSocketサーバー（Node.js用）
+│   │   ├── web-socket-server.spec.ts  # WebSocketサーバーの単体テスト
+│   │   ├── web-socket-server-emulator.ts # WebSocketエミュレーション（ブラウザ用）
+│   │   └── web-socket-server-emulator.spec.ts # WebSocketエミュレーションの単体テスト
+│   ├── utils/                         # ユーティリティ
+│   │   ├── filter-utils.ts            # フィルタ処理ユーティリティ
+│   │   └── filter-utils.spec.ts       # フィルタ処理の単体テスト
+│   └── test/                          # 統合テスト・テスト補助
+│       ├── setup-vitest.ts            # Vitest セットアップ
+│       ├── event.integration.spec.ts  # イベント処理の統合テスト
+│       ├── subscription.integration.spec.ts # サブスクリプションの統合テスト
+│       ├── websocket.integration.spec.ts # WebSocket の統合テスト
+│       └── utils/                     # テスト用ユーティリティ
 ├── package.json
 └── tsconfig.json
 ```
@@ -147,7 +149,7 @@ packages/cache-relay/
 
 4. **メッセージハンドリングの実装** (2日)
    - MessageHandlerの実装
-   - EventHandlerの実装（検証は空実装）
+   - EventHandlerの実装（検証は `rx-nostr-crypto` で実装済み）
    - 単体テストの作成と実行
 
 5. **サブスクリプション管理の実装** (2日)
@@ -175,43 +177,46 @@ packages/cache-relay/
 ## 6. API設計
 
 ```typescript
-// リレーインターフェース
+// リレーインターフェース（現行の NostrCacheRelay 実装に準拠）
 interface NostrRelay {
   // 接続管理
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  
+
   // イベント処理
   publishEvent(event: NostrEvent): Promise<boolean>;
-  
+
   // サブスクリプション管理
-  subscribe(subscriptionId: string, filters: Filter[]): void;
-  unsubscribe(subscriptionId: string): void;
-  
-  // イベントリスナー
-  on(event: 'connect' | 'disconnect' | 'event' | 'eose', callback: Function): void;
-  off(event: 'connect' | 'disconnect' | 'event' | 'eose', callback: Function): void;
+  subscribe(subscriptionId: string, filters: Filter[]): Promise<void>;
+  unsubscribe(subscriptionId: string): boolean;
+
+  // イベントリスナー（'error' を含む）
+  on(event: 'connect' | 'disconnect' | 'error' | 'event' | 'eose', callback: Function): void;
+  off(event: 'connect' | 'disconnect' | 'error' | 'event' | 'eose', callback: Function): void;
 }
 
-// リレーオプション
+// リレーオプション（現行 API）
 interface NostrRelayOptions {
-  // ストレージ設定
-  storage: 'indexeddb';
-  storageOptions?: {
-    dbName?: string;
-    maxSize?: number;
-    ttl?: number;
-  };
-  
-  // キャッシュ戦略
-  cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
-  
-  // イベント処理設定
-  validateEvents?: boolean;
+  // サブスクリプション上限（デフォルト 20）
   maxSubscriptions?: number;
+
+  // イベント検証方式（'NONE' | 'IMMEDIATELY' | 'LAZY'）
+  validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
+
+  // WebSocket サーバーのポート（Node.js のみ）
+  port?: number;
+
+  // 以下は型定義のみで未実装（将来対応予定）
   maxEventsPerRequest?: number;
+  storageMaxSize?: number;
+  ttl?: number;
+  cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
+  lazyValidateInterval?: number;
+  lazyValidateBachSize?: number; // 注: タイポ（正: lazyValidateBatchSize）
 }
 ```
+
+> 旧版にあった `storage: 'indexeddb'` / `storageOptions` / `validateEvents`(boolean) は廃止され、`storageMaxSize` / `validateEventsType` 等へ置き換えられている。
 
 ## 7. 実装上の注意点
 
@@ -221,8 +226,8 @@ interface NostrRelayOptions {
    - テスト環境ではfake-indexeddbを使用
 
 2. **イベント検証**
-   - 空の関数で仮実装
-   - 後でライブラリを導入予定
+   - `rx-nostr-crypto` の `verifier` を用いて実装済み（`event-validator.ts`）
+   - `validateEventsType` で検証方式を切り替え可能（即時検証は実装済み、遅延検証 `LAZY` は未実装）
 
 3. **テスト戦略**
    - 各実装ステップごとに単体テストを作成・実行
