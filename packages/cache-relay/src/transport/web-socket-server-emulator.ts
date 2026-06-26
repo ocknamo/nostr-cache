@@ -125,4 +125,16 @@ export class WebSocketServerEmulator implements TransportAdapter {
   onDisconnect(callback: (clientId: string) => void): void {
     this.disconnectCallback = callback;
   }
+
+  /**
+   * Get the number of currently connected clients
+   *
+   * The emulator manages a single emulated socket, so this is 1 while a
+   * connection is active and 0 otherwise.
+   *
+   * @returns The number of active emulated connections (0 or 1)
+   */
+  getConnectionCount(): number {
+    return this.emulatedSocket ? 1 : 0;
+  }
 }

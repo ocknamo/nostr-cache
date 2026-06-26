@@ -51,4 +51,11 @@ export interface TransportAdapter {
    * @param callback Function to call when a client disconnects
    */
   onDisconnect(callback: (clientId: string) => void): void;
+
+  /**
+   * Get the number of currently connected clients
+   *
+   * @returns The number of active client connections
+   */
+  getConnectionCount(): number;
 }

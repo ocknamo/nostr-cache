@@ -41,6 +41,13 @@ export interface StorageAdapter {
   clear(): Promise<void>;
 
   /**
+   * Count the number of stored events
+   *
+   * @returns Promise resolving to the number of stored events
+   */
+  count(): Promise<number>;
+
+  /**
    * Delete events with the same pubkey and kind
    * Used for handling replaceable events
    *

@@ -17,6 +17,7 @@ describe('MessageHandler', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+    count: vi.fn().mockResolvedValue(0),
   } as StorageAdapter;
 
   // Mock subscription manager

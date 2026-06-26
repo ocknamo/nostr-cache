@@ -173,4 +173,21 @@ describe('WebSocketServerEmulator', () => {
       }).not.toThrow();
     });
   });
+
+  describe('getConnectionCount()', () => {
+    it('should be 0 before any connection', () => {
+      expect(emulator.getConnectionCount()).toBe(0);
+    });
+
+    it('should be 1 while an emulated connection is open', async () => {
+      await emulator.start();
+
+      await new Promise<void>((resolve) => {
+        const ws = new WebSocket(defaultUrl);
+        ws.onopen = () => resolve();
+      });
+
+      expect(emulator.getConnectionCount()).toBe(1);
+    });
+  });
 });

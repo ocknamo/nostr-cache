@@ -17,6 +17,7 @@ describe('NostrCacheRelay', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+    count: vi.fn().mockResolvedValue(0),
   };
 
   // Mock transport adapter
@@ -27,6 +28,7 @@ describe('NostrCacheRelay', () => {
     onMessage: vi.fn(),
     onConnect: vi.fn(),
     onDisconnect: vi.fn(),
+    getConnectionCount: vi.fn().mockReturnValue(0),
   };
 
   // Sample event
