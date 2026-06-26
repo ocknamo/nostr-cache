@@ -164,7 +164,13 @@ describe('NostrRelayServer NIP-01 compliance', () => {
     });
 
     it('should respect the filter limit', async () => {
-      const events = await Promise.all([createTestEvent(), createTestEvent(), createTestEvent()]);
+      // created_at を分散させて「3 件中 limit:2 で 2 件のみ返る」ことを確認する。
+      // 返る 2 件の選択順序（最新優先）は実装依存のため、ここでは件数のみを検証する。
+      const events = await Promise.all([
+        createTestEvent(undefined, { created_at: 1_000 }),
+        createTestEvent(undefined, { created_at: 2_000 }),
+        createTestEvent(undefined, { created_at: 3_000 }),
+      ]);
       for (const event of events) {
         await publishEvent(port, event);
       }
@@ -174,6 +180,11 @@ describe('NostrRelayServer NIP-01 compliance', () => {
       client.close();
 
       expect(received).toHaveLength(2);
+      // 返却されたイベントは保存済みイベントの部分集合であること
+      const storedIds = new Set(events.map((event) => event.id));
+      for (const event of received) {
+        expect(storedIds.has(event.id)).toBe(true);
+      }
     });
 
     it('should exclude events outside the since/until time range', async () => {
@@ -193,22 +204,40 @@ describe('NostrRelayServer NIP-01 compliance', () => {
       expect(outOfRange).toHaveLength(0);
     });
 
-    it('should combine results from multiple filters without duplicates', async () => {
-      const kind1 = await createTestEvent(undefined, { kind: 1 });
-      const kind2 = await createTestEvent(undefined, { kind: 2 });
-      await publishEvent(port, kind1);
-      await publishEvent(port, kind2);
+    it('should treat the since boundary as inclusive', async () => {
+      // created_at と等しい since は境界を含む（NIP-01: since <= created_at）
+      const event = await createTestEvent(undefined, { created_at: 1_500_000 });
+      await publishEvent(port, event);
 
       const client = await connect(port);
-      // 2 つのフィルタが同一イベント(kind1)を含むケースでも重複しないことを確認
-      const events = await collectReqEvents(client, 'sub-multi', [
-        { kinds: [1] },
-        { ids: [kind1.id] },
+      const atSince = await collectReqEvents(client, 'sub-since-eq', [
+        { kinds: [1], since: 1_500_000 },
       ]);
       client.close();
 
-      const ids = events.map((event) => event.id).sort();
-      expect(ids).toEqual([kind1.id].sort());
+      expect(atSince).toHaveLength(1);
+    });
+
+    it('should combine results from multiple overlapping filters without duplicates', async () => {
+      // kinds:[1] は両イベントに一致し、ids:[shared.id] は片方に重複して一致する。
+      // 重複排除が働けば 2 件（shared, another）が一意に返るはず。
+      const shared = await createTestEvent(undefined, { kind: 1 });
+      const another = await createTestEvent(undefined, { kind: 1 });
+      await publishEvent(port, shared);
+      await publishEvent(port, another);
+
+      const client = await connect(port);
+      const events = await collectReqEvents(client, 'sub-multi', [
+        { kinds: [1] },
+        { ids: [shared.id] },
+      ]);
+      client.close();
+
+      const ids = events.map((event) => event.id);
+      const uniqueIds = new Set(ids);
+      // 重複が無いこと（配列長 === ユニーク数）
+      expect(ids).toHaveLength(uniqueIds.size);
+      expect([...uniqueIds].sort()).toEqual([shared.id, another.id].sort());
     });
 
     it('should only return the latest replaceable event (kind 0)', async () => {
