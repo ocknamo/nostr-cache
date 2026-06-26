@@ -14,14 +14,50 @@ import { createTestEvent } from '../utils/test-events.js';
 
 /**
  * サーバーへ接続し、open するまで待機した WebSocket を返す。
+ *
+ * open 後は error リスナを解除し、テスト終了時のソケット切断で未捕捉の 'error' が
+ * throw されないよう no-op ハンドラを残す。
  */
 async function connect(port: number): Promise<WebSocket> {
   const client = new WebSocket(`ws://localhost:${port}`);
   await new Promise<void>((resolve, reject) => {
-    client.on('open', () => resolve());
-    client.on('error', reject);
+    const onError = (error: Error): void => reject(error);
+    client.once('error', onError);
+    client.once('open', () => {
+      client.off('error', onError);
+      resolve();
+    });
+  });
+  client.on('error', () => {
+    // open 済み接続のテスト中／終了時に発生する error は無視する
   });
   return client;
+}
+
+/**
+ * クライアントを閉じ、close が完了するまで待機する。
+ */
+async function closeClient(client: WebSocket): Promise<void> {
+  if (client.readyState === WebSocket.CLOSED) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    client.once('close', () => resolve());
+    client.close();
+  });
+}
+
+/**
+ * 条件が成立するまで短間隔でポーリングする（固定スリープによるフレークを避ける）。
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 5000, intervalMs = 20): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 /**
@@ -120,21 +156,13 @@ describe('NostrRelayServer performance', () => {
     const numClients = 30;
     const clients = await Promise.all(Array.from({ length: numClients }, () => connect(port)));
 
-    // サーバーが全接続を登録するのを待つ
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // サーバーが全接続を登録するまで待つ
+    await waitFor(() => server.getConnectionCount() === numClients);
     expect(server.getConnectionCount()).toBe(numClients);
 
     // すべて切断し、接続数が 0 に戻ることを確認
-    await Promise.all(
-      clients.map(
-        (client) =>
-          new Promise<void>((resolve) => {
-            client.on('close', () => resolve());
-            client.close();
-          })
-      )
-    );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await Promise.all(clients.map((client) => closeClient(client)));
+    await waitFor(() => server.getConnectionCount() === 0);
     expect(server.getConnectionCount()).toBe(0);
   }, 20000);
 
@@ -148,7 +176,7 @@ describe('NostrRelayServer performance', () => {
 
     const client = await connect(port);
     const acked = await publishAll(client, events);
-    client.close();
+    await closeClient(client);
 
     expect(acked.size).toBe(numEvents);
     expect(await server.getEventCount()).toBe(numEvents);
@@ -174,9 +202,7 @@ describe('NostrRelayServer performance', () => {
     // 全クライアントから並行して投入
     await Promise.all(clients.map((client, idx) => publishAll(client, perClientEvents[idx])));
 
-    for (const client of clients) {
-      client.close();
-    }
+    await Promise.all(clients.map((client) => closeClient(client)));
 
     const totalEvents = numClients * eventsPerClient;
     expect(await server.getEventCount()).toBe(totalEvents);
@@ -192,7 +218,7 @@ describe('NostrRelayServer performance', () => {
     );
     const publisher = await connect(port);
     await publishAll(publisher, events);
-    publisher.close();
+    await closeClient(publisher);
 
     expect(await server.getEventCount()).toBe(numStored);
 
@@ -206,9 +232,7 @@ describe('NostrRelayServer performance', () => {
       subscribers.map((client, idx) => countReqEvents(client, `sub-${idx}`, { kinds: [1] }))
     );
 
-    for (const client of subscribers) {
-      client.close();
-    }
+    await Promise.all(subscribers.map((client) => closeClient(client)));
 
     for (const count of counts) {
       expect(count).toBe(numStored);
