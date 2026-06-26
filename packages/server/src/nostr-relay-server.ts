@@ -6,7 +6,13 @@
 
 // fake-indexeddbの自動セットアップ
 import 'fake-indexeddb/auto';
-import { DexieStorage, NostrCacheRelay, WebSocketServer } from '@nostr-cache/cache-relay';
+import {
+  DexieStorage,
+  NostrCacheRelay,
+  type StorageAdapter,
+  type TransportAdapter,
+  WebSocketServer,
+} from '@nostr-cache/cache-relay';
 import { logger } from '@nostr-cache/shared';
 
 /**
@@ -36,9 +42,12 @@ interface NostrRelayServerOptions {
  * NIP-01準拠のNostrリレーサーバーを実装
  */
 export class NostrRelayServer {
-  private server: WebSocketServer;
+  // Depend on the transport/storage abstractions; getConnectionCount() and
+  // getEventCount() are part of those contracts, so the concrete WebSocketServer
+  // / DexieStorage instances are only needed at construction time.
+  private server: TransportAdapter;
   private relay: NostrCacheRelay;
-  private storage: DexieStorage;
+  private storage: StorageAdapter;
   private options: NostrRelayServerOptions;
 
   /**
@@ -96,8 +105,7 @@ export class NostrRelayServer {
    * @returns 現在の接続数
    */
   getConnectionCount(): number {
-    // 実装が必要
-    return 0;
+    return this.server.getConnectionCount();
   }
 
   /**
@@ -106,8 +114,7 @@ export class NostrRelayServer {
    * @returns Promise resolving to the number of events
    */
   async getEventCount(): Promise<number> {
-    // 実装が必要
-    return 0;
+    return this.storage.count();
   }
 
   /**

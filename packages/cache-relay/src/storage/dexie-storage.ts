@@ -326,6 +326,22 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
+   * Count the number of stored events
+   *
+   * @returns Promise resolving to the number of stored events (0 on error)
+   */
+  async count(): Promise<number> {
+    try {
+      return await this.events.count();
+    } catch (error) {
+      logger.error(
+        `Failed to count events: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return 0;
+    }
+  }
+
+  /**
    * Delete events with the same pubkey and kind
    * Used for handling replaceable events
    *

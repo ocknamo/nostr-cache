@@ -88,6 +88,15 @@ export class WebSocketServer implements TransportAdapter {
   }
 
   /**
+   * Get the number of currently connected clients
+   *
+   * @returns The number of active client connections
+   */
+  getConnectionCount(): number {
+    return this.clients.size;
+  }
+
+  /**
    * Stop the WebSocket server
    */
   async stop(): Promise<void> {

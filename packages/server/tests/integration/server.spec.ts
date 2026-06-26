@@ -167,6 +167,55 @@ describe('NostrRelayServer', () => {
     client.close();
   });
 
+  it('should report the active connection count', async () => {
+    expect(server.getConnectionCount()).toBe(0);
+
+    const client = new WebSocket(`ws://localhost:${port}`);
+    await new Promise<void>((resolve) => {
+      client.on('open', resolve);
+    });
+
+    // Allow the server to register the connection.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.getConnectionCount()).toBe(1);
+
+    await new Promise<void>((resolve) => {
+      client.on('close', () => resolve());
+      client.close();
+    });
+
+    // Allow the server to register the disconnection.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.getConnectionCount()).toBe(0);
+  });
+
+  it('should report the stored event count', async () => {
+    expect(await server.getEventCount()).toBe(0);
+
+    const client = new WebSocket(`ws://localhost:${port}`);
+    const event = await createTestEvent();
+
+    await new Promise<void>((resolve) => {
+      client.on('open', resolve);
+    });
+
+    const okPromise = new Promise<void>((resolve) => {
+      client.on('message', (data) => {
+        const message = JSON.parse(data.toString());
+        if (message[0] === 'OK' && message[1] === event.id) {
+          resolve();
+        }
+      });
+    });
+
+    client.send(JSON.stringify(['EVENT', event]));
+    await okPromise;
+
+    expect(await server.getEventCount()).toBe(1);
+
+    client.close();
+  });
+
   it('should handle multiple connections simultaneously', async () => {
     // 複数の接続を同時に処理できることを確認
     const numClients = 5;
