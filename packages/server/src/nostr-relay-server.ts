@@ -8,6 +8,7 @@
 import 'fake-indexeddb/auto';
 import { type Server as HttpServer, createServer } from 'node:http';
 import {
+  type CacheStrategy,
   DexieStorage,
   NostrCacheRelay,
   type StorageAdapter,
@@ -39,7 +40,10 @@ interface NostrRelayServerOptions {
   // ストレージ設定
   storageOptions?: {
     dbName?: string;
+    // 保存イベント数の上限。超過時は古いイベントから退避（未指定で無制限）
     maxSize?: number;
+    // 退避戦略（現状 FIFO のみ実装。LRU/LFU は FIFO にフォールバック）
+    cacheStrategy?: CacheStrategy;
   };
 
   // リレー設定（NostrCacheRelayに渡すオプション）
@@ -93,15 +97,18 @@ export class NostrRelayServer {
       ...options,
     };
 
-    // fake-indexeddbを使用したDexieStorageの初期化
-    this.storage = new DexieStorage(this.options.storageOptions?.dbName || 'NostrRelay');
+    // fake-indexeddbを使用したDexieStorageの初期化。
+    // ストレージ上限・退避戦略はストレージ層で適用する
+    this.storage = new DexieStorage(this.options.storageOptions?.dbName || 'NostrRelay', {
+      maxSize: this.options.storageOptions?.maxSize,
+      cacheStrategy: this.options.storageOptions?.cacheStrategy,
+    });
 
     // WebSocketサーバーの作成
     this.server = new WebSocketServer(this.options.port);
 
     // リレーの初期化
     this.relay = new NostrCacheRelay(this.storage, this.server, {
-      storageMaxSize: this.options.storageOptions?.maxSize,
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',

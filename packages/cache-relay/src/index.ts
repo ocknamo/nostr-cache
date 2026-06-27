@@ -13,9 +13,9 @@ import { SubscriptionManager } from './core/subscription-manager.js';
 import { EventHandler } from './event/event-handler.js';
 import { EventValidator } from './event/event-validator.js';
 
-import { DexieStorage } from './storage/dexie-storage.js';
+import { DexieStorage, DexieStorageOptions } from './storage/dexie-storage.js';
 // Storage
-import { StorageAdapter } from './storage/storage-adapter.js';
+import { CacheStrategy, StorageAdapter } from './storage/storage-adapter.js';
 
 // Transport
 import { TransportAdapter } from './transport/transport-adapter.js';
@@ -36,7 +36,9 @@ export {
   EventValidator,
   // Storage
   StorageAdapter,
+  CacheStrategy,
   DexieStorage,
+  DexieStorageOptions,
   // Transport
   TransportAdapter,
   WebSocketServer,

@@ -5,6 +5,15 @@
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 
 /**
+ * Cache eviction strategy.
+ *
+ * - `FIFO`: evict the oldest events first (by `created_at`).
+ * - `LRU` / `LFU`: planned; currently fall back to `FIFO` until per-event
+ *   access metadata (read tracking) is added.
+ */
+export type CacheStrategy = 'LRU' | 'FIFO' | 'LFU';
+
+/**
  * Storage adapter interface
  * Defines the contract for storage implementations
  */
