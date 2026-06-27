@@ -230,6 +230,28 @@ describe('MessageHandler', () => {
           expect(cb).toHaveBeenCalledWith('client1', ['OK', invalidEvent.id, true, '']);
           expect(lazyValidator.enqueue).not.toHaveBeenCalled();
         });
+
+        it('LAZY: does not enqueue ephemeral events (not stored)', async () => {
+          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+          const lazyHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'LAZY',
+            lazyValidator
+          );
+          const cb = vi.fn();
+          lazyHandler.onResponse(cb);
+          // kind 20000-29999 are ephemeral: accepted but never persisted
+          const ephemeral: NostrEvent = { ...sampleEvent, id: 'ephemeral', kind: 20001 };
+
+          await lazyHandler.handleMessage('client1', ['EVENT', ephemeral]);
+
+          expect(cb).toHaveBeenCalledWith('client1', ['OK', 'ephemeral', true, '']);
+          expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+          expect(lazyValidator.enqueue).not.toHaveBeenCalled();
+        });
       });
     });
 

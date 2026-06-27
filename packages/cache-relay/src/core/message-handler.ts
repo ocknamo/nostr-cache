@@ -62,6 +62,14 @@ export class MessageHandler {
     this.subscriptionManager = subscriptionManager;
     this.eventHandler = new EventHandler(storage, subscriptionManager, validateEventsType);
     this.eventValidator = new EventValidator();
+
+    // Guard against silent no-validation: LAZY without a validator would accept
+    // and store every event and never validate it.
+    if (validateEventsType === 'LAZY' && !lazyValidator) {
+      logger.warn(
+        "validateEventsType is 'LAZY' but no LazyValidator was provided; events will be accepted without any validation"
+      );
+    }
   }
 
   /**
@@ -169,7 +177,7 @@ export class MessageHandler {
     }
 
     try {
-      const { success, message, matches } = await this.eventHandler.handleEvent(event);
+      const { success, stored, message, matches } = await this.eventHandler.handleEvent(event);
 
       if (!success) {
         this.sendOK(clientId, event.id, false, message);
@@ -179,9 +187,10 @@ export class MessageHandler {
       // OK レスポンスの送信
       this.sendOK(clientId, event.id, true);
 
-      // LAZY モードでは、保存済みイベントをバックグラウンド検証へ回す。
+      // LAZY モードでは、実際に保存されたイベントだけをバックグラウンド検証へ回す。
+      // ephemeral など未保存のものは検証しても削除対象がなく、キューを浪費するため除外。
       // 不正なら後続の検証パスでストレージから削除される
-      if (this.validateEventsType === 'LAZY') {
+      if (this.validateEventsType === 'LAZY' && stored) {
         this.lazyValidator?.enqueue(event);
       }
 
