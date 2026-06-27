@@ -22,7 +22,7 @@ import {
 import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
 import type { LazyValidator } from '../event/lazy-validator.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import { capEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
@@ -49,6 +49,9 @@ export class MessageHandler {
    *   accepts and stores immediately, then validates in the background.
    * @param lazyValidator Background validator used to enqueue stored events
    *   when `validateEventsType` is `LAZY`
+   * @param storageMaxSize When set (> 0), evict down to this size after each
+   *   stored event via `storage.enforceLimit`
+   * @param cacheStrategy Eviction strategy used with `storageMaxSize`
    */
   constructor(
     storage: StorageAdapter,
@@ -56,7 +59,9 @@ export class MessageHandler {
     private maxSubscriptions = 20,
     private maxEventsPerRequest = 500,
     private validateEventsType: ValidateEventsType = 'IMMEDIATELY',
-    private lazyValidator?: LazyValidator
+    private lazyValidator?: LazyValidator,
+    private storageMaxSize?: number,
+    private cacheStrategy?: CacheStrategy
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -192,6 +197,11 @@ export class MessageHandler {
       // 不正なら後続の検証パスでストレージから削除される
       if (this.validateEventsType === 'LAZY' && stored) {
         this.lazyValidator?.enqueue(event);
+      }
+
+      // 保存されたイベントについてはストレージ上限の退避を行う
+      if (stored && this.storageMaxSize !== undefined && this.storageMaxSize > 0) {
+        await this.storage.enforceLimit?.(this.storageMaxSize, this.cacheStrategy);
       }
 
       // マッチするサブスクリプションへのブロードキャスト

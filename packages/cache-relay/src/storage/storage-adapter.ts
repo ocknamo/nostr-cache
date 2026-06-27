@@ -92,4 +92,17 @@ export interface StorageAdapter {
    * @returns Promise resolving to the number of events deleted
    */
   deleteExpired?(olderThan: number): Promise<number>;
+
+  /**
+   * Evict events so that no more than `maxSize` remain.
+   *
+   * Optional capability used by the relay to bound storage size. The relay
+   * calls this after saving events when `storageMaxSize` is configured.
+   * Implementations that cannot evict may omit this method.
+   *
+   * @param maxSize Maximum number of events to keep (no-op when <= 0)
+   * @param strategy Eviction strategy (default `FIFO`)
+   * @returns Promise resolving to the number of events evicted
+   */
+  enforceLimit?(maxSize: number, strategy?: CacheStrategy): Promise<number>;
 }

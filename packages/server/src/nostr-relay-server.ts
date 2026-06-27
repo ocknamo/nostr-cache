@@ -102,20 +102,19 @@ export class NostrRelayServer {
       ...options,
     };
 
-    // fake-indexeddbを使用したDexieStorageの初期化。
-    // ストレージ上限・退避戦略はストレージ層で適用する
-    this.storage = new DexieStorage(this.options.storageOptions?.dbName || 'NostrRelay', {
-      maxSize: this.options.storageOptions?.maxSize,
-      cacheStrategy: this.options.storageOptions?.cacheStrategy,
-    });
+    // fake-indexeddbを使用したDexieStorageの初期化
+    this.storage = new DexieStorage(this.options.storageOptions?.dbName || 'NostrRelay');
 
     // WebSocketサーバーの作成
     this.server = new WebSocketServer(this.options.port);
 
-    // リレーの初期化
+    // リレーの初期化。ストレージ上限・退避戦略は relay 経由で適用する
+    // （relay が保存後に storage.enforceLimit を呼ぶ）
     this.relay = new NostrCacheRelay(this.storage, this.server, {
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
+      storageMaxSize: this.options.storageOptions?.maxSize,
+      cacheStrategy: this.options.storageOptions?.cacheStrategy,
       ttl: this.options.relay?.ttl,
       ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',

@@ -689,52 +689,48 @@ describe('DexieStorage', () => {
     created_at,
   });
 
-  describe('storage eviction (storageMaxSize / cacheStrategy)', () => {
-    // Each test reassigns `storage` to a bounded instance; the suite-level
-    // afterEach tears it down, so no extra cleanup is needed here.
+  describe('enforceLimit (storageMaxSize / cacheStrategy)', () => {
     it('should not evict while at or under maxSize', async () => {
-      storage = new DexieStorage('EvictUnder', { maxSize: 3 });
       await storage.saveEvent(eventAt('a', 1));
       await storage.saveEvent(eventAt('b', 2));
       await storage.saveEvent(eventAt('c', 3));
 
+      const removed = await storage.enforceLimit(3);
+
+      expect(removed).toBe(0);
       expect(await storage.count()).toBe(3);
     });
 
     it('should evict the oldest events (FIFO) when exceeding maxSize', async () => {
-      storage = new DexieStorage('EvictFifo', { maxSize: 2 });
       await storage.saveEvent(eventAt('oldest', 100));
       await storage.saveEvent(eventAt('middle', 200));
       await storage.saveEvent(eventAt('newest', 300));
 
+      const removed = await storage.enforceLimit(2);
+
+      expect(removed).toBe(1);
       expect(await storage.count()).toBe(2);
       const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
       expect(remaining).toEqual(['middle', 'newest']);
     });
 
-    it('should be unbounded when maxSize is not set', async () => {
-      storage = new DexieStorage('EvictNone');
-      for (let i = 0; i < 5; i++) {
-        await storage.saveEvent(eventAt(`e${i}`, i));
-      }
-
-      expect(await storage.count()).toBe(5);
-    });
-
-    it('should treat non-positive maxSize as unbounded', async () => {
-      storage = new DexieStorage('EvictZero', { maxSize: 0 });
+    it('should be a no-op for non-positive maxSize', async () => {
       await storage.saveEvent(eventAt('a', 1));
       await storage.saveEvent(eventAt('b', 2));
 
+      expect(await storage.enforceLimit(0)).toBe(0);
+      expect(await storage.enforceLimit(-5)).toBe(0);
       expect(await storage.count()).toBe(2);
     });
 
     it('should fall back to FIFO (with a warning) for LRU/LFU strategies', async () => {
       const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      storage = new DexieStorage('EvictLru', { maxSize: 1, cacheStrategy: 'LRU' });
       await storage.saveEvent(eventAt('oldest', 10));
       await storage.saveEvent(eventAt('newest', 20));
 
+      const removed = await storage.enforceLimit(1, 'LRU');
+
+      expect(removed).toBe(1);
       expect(await storage.count()).toBe(1);
       const remaining = await storage.getEvents([{ kinds: [1] }]);
       expect(remaining[0].id).toBe('newest');

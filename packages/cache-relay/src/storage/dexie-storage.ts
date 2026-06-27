@@ -5,23 +5,6 @@ import { eventMatchesFilter } from '../utils/filter-utils.js';
 import type { CacheStrategy, StorageAdapter } from './storage-adapter.js';
 
 /**
- * Options controlling DexieStorage eviction behaviour.
- */
-export interface DexieStorageOptions {
-  /**
-   * Maximum number of events to keep. When exceeded after a save, the oldest
-   * events are evicted. Disabled (unbounded) when undefined or non-positive.
-   */
-  maxSize?: number;
-
-  /**
-   * Eviction strategy. Currently only `FIFO` is implemented; `LRU` / `LFU`
-   * fall back to `FIFO` (with a one-time warning) until read tracking exists.
-   */
-  cacheStrategy?: CacheStrategy;
-}
-
-/**
  * NostrEvent table schema
  */
 interface NostrEventTable {
@@ -42,17 +25,11 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   private static readonly MAX_INDEXED_TAGS = 100;
   private static readonly PRIORITY_TAGS = new Set(['e', 'p', 'a', 't', 'd', 'h', 'm', 'q', 'r']);
   private events!: Dexie.Table<NostrEventTable, string>;
-  private readonly maxSize?: number;
-  private readonly cacheStrategy: CacheStrategy;
   /** Ensures the "non-FIFO falls back to FIFO" warning is logged only once. */
   private nonFifoStrategyWarned = false;
 
-  constructor(dbName = 'NostrCacheRelay', options: DexieStorageOptions = {}) {
+  constructor(dbName = 'NostrCacheRelay') {
     super(dbName);
-
-    this.maxSize =
-      options.maxSize !== undefined && options.maxSize > 0 ? options.maxSize : undefined;
-    this.cacheStrategy = options.cacheStrategy ?? 'FIFO';
 
     // Define database schema with improved index definitions
     this.version(1).stores({
@@ -132,10 +109,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         content: event.content,
         sig: event.sig,
       });
-
-      // ストレージ上限を超えた場合は古いイベントを退避する。
-      // 退避の失敗は保存自体の成否に影響させない
-      await this.enforceLimit();
 
       return true;
     } catch (error) {
@@ -394,10 +367,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
-   * Evict events when the store exceeds the configured `maxSize`.
+   * Evict events so that no more than `maxSize` remain.
    *
    * Uses FIFO (oldest `created_at` first). `LRU` / `LFU` currently fall back to
-   * FIFO and emit a one-time warning. Disabled when `maxSize` is not set.
+   * FIFO and emit a one-time warning. No-op when `maxSize` is not positive.
    *
    * Semantics / caveats:
    * - This is a **soft limit**. The count and the delete run inside a single
@@ -408,14 +381,14 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    *   `created_at` are evicted in primary-key (id) order, not strict arrival
    *   order — a deliberate approximation, since no insertion sequence is stored.
    *
+   * @param maxSize Maximum number of events to keep (no-op when <= 0)
+   * @param strategy Eviction strategy (default `FIFO`)
    * @returns Promise resolving to the number of events evicted
    */
-  async enforceLimit(): Promise<number> {
-    if (this.maxSize === undefined) {
+  async enforceLimit(maxSize: number, strategy: CacheStrategy = 'FIFO'): Promise<number> {
+    if (!(maxSize > 0)) {
       return 0;
     }
-
-    const maxSize = this.maxSize;
 
     try {
       // Run count + delete atomically so concurrent passes don't over- or
@@ -426,9 +399,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           return 0;
         }
 
-        if (this.cacheStrategy !== 'FIFO' && !this.nonFifoStrategyWarned) {
+        if (strategy !== 'FIFO' && !this.nonFifoStrategyWarned) {
           logger.warn(
-            `Cache strategy '${this.cacheStrategy}' is not yet implemented; falling back to FIFO eviction`
+            `Cache strategy '${strategy}' is not yet implemented; falling back to FIFO eviction`
           );
           this.nonFifoStrategyWarned = true;
         }

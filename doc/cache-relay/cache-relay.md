@@ -217,12 +217,13 @@ interface NostrRelayOptions {
   // TTL スイープの実行間隔 秒（デフォルト 60）
   ttlSweepInterval?: number;
 
+  // 最大保存件数。超過時は relay が保存後に storage.enforceLimit を呼び古い順に退避（未指定で無効）
+  storageMaxSize?: number;
+  // 退避戦略（デフォルト FIFO）。現状 FIFO のみ実装で LRU/LFU は FIFO にフォールバック
+  cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
+
   // WebSocket サーバーのポート（Node.js のみ）
   port?: number;
-
-  // 以下は型定義のみで未実装（将来対応予定）
-  storageMaxSize?: number;
-  cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
 }
 ```
 

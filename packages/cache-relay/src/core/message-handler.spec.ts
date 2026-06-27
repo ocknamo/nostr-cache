@@ -19,6 +19,7 @@ describe('MessageHandler', () => {
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(0),
+    enforceLimit: vi.fn().mockResolvedValue(0),
   } as StorageAdapter;
 
   // Mock subscription manager
@@ -262,6 +263,24 @@ describe('MessageHandler', () => {
           ]);
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
           expect(lazyValidator.enqueue).not.toHaveBeenCalled();
+        });
+
+        it('enforces the storage limit after a stored transport EVENT', async () => {
+          const boundedHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'IMMEDIATELY',
+            undefined,
+            100,
+            'FIFO'
+          );
+          boundedHandler.onResponse(vi.fn());
+
+          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO');
         });
 
         it('LAZY: does not enqueue events that were not stored', async () => {
