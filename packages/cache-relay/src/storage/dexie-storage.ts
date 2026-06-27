@@ -356,6 +356,28 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
+   * Delete all events whose `created_at` is strictly older than `olderThan`.
+   *
+   * Uses the `created_at` index for an efficient bulk range delete, backing
+   * the TTL background sweep.
+   *
+   * @param olderThan Unix timestamp (seconds)
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteExpired(olderThan: number): Promise<number> {
+    try {
+      return await this.events.where('created_at').below(olderThan).delete();
+    } catch (error) {
+      logger.error(
+        `Failed to delete expired events: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
+    }
+  }
+
+  /**
    * Count the number of stored events
    *
    * @returns Promise resolving to the number of stored events (0 on error)

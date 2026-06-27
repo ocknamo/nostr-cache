@@ -16,10 +16,19 @@ import type {
   RelayEventHandler,
 } from '@nostr-cache/shared';
 import { EventValidator } from '../event/event-validator.js';
+import { LazyValidator } from '../event/lazy-validator.js';
+import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { capEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
 import { SubscriptionManager } from './subscription-manager.js';
+
+/**
+ * Default relay-imposed cap on the number of stored events returned per REQ
+ * subscription / in-process subscribe replay.
+ */
+const DEFAULT_MAX_EVENTS = 500;
 
 /**
  * Client ID used for subscriptions created through the in-process API
@@ -43,8 +52,9 @@ export interface NostrRelayOptions {
   maxSubscriptions?: number;
 
   /**
-   * Maximum number of events to return per request
-   * 未実装
+   * Maximum number of stored events returned per REQ subscription
+   * (relay-imposed cap applied on top of each filter's own `limit`).
+   * デフォルト値500
    */
   maxEventsPerRequest?: number;
 
@@ -55,10 +65,25 @@ export interface NostrRelayOptions {
   storageMaxSize?: number;
 
   /**
-   * Time-to-live in seconds
-   * 未実装
+   * Time-to-live in seconds for cached events. Events whose `created_at` is
+   * older than `ttl` seconds are deleted from storage by a periodic background
+   * sweep (see {@link ttlSweepInterval}) rather than filtered on every read.
+   *
+   * Trade-off: an expired event may still be returned for up to one sweep
+   * interval before it is purged. Disabled when undefined or non-positive.
+   *
+   * Requires a storage adapter implementing `deleteExpired` (DexieStorage
+   * does). If the adapter does not, the TTL silently has no effect aside from
+   * a one-time warning logged on the first sweep.
    */
   ttl?: number;
+
+  /**
+   * Interval in seconds between TTL background sweeps when `ttl` is set.
+   * Defaults to 60. Smaller values reduce staleness at the cost of more
+   * frequent delete passes.
+   */
+  ttlSweepInterval?: number;
 
   /**
    * Cache eviction strategy
@@ -72,18 +97,16 @@ export interface NostrRelayOptions {
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
 
   /**
-   * lazyValidateInterval
-   * Validate interval in seconds
-   * 未実装
+   * Interval in seconds between background validation passes when
+   * `validateEventsType` is `'LAZY'`. Defaults to 60.
    */
   lazyValidateInterval?: number;
 
   /**
-   * lazyValidateBachSize
-   * Number of events to process at one time
-   * 未実装
+   * Number of events validated per background pass when `validateEventsType`
+   * is `'LAZY'`. Defaults to 100.
    */
-  lazyValidateBachSize?: number;
+  lazyValidateBatchSize?: number;
 
   /**
    * Port for WebSocket server (Node.js only)
@@ -102,6 +125,10 @@ export class NostrCacheRelay {
   private validator: EventValidator;
   private messageHandler: MessageHandler;
   private subscriptionManager: SubscriptionManager;
+  /** Background validator, present only when `validateEventsType` is `'LAZY'`. */
+  private lazyValidator?: LazyValidator;
+  /** Background TTL sweeper, present only when `ttl` is configured. */
+  private expiryReaper?: ExpiryReaper;
   private eventListeners: Map<
     string,
     Array<
@@ -128,21 +155,48 @@ export class NostrCacheRelay {
     this.options = {
       validateEventsType: 'IMMEDIATELY',
       maxSubscriptions: 20,
-      maxEventsPerRequest: 500,
       ...options,
+      // Guard against an explicit `undefined` clobbering the default
+      maxEventsPerRequest: options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS,
     };
 
     this.storage = storage;
     this.transport = transport;
     this.validator = new EventValidator();
 
+    // 遅延バリデーション有効時はバックグラウンド検証器を用意
+    if (this.options.validateEventsType === 'LAZY') {
+      this.lazyValidator = new LazyValidator(
+        storage,
+        {
+          intervalSeconds: this.options.lazyValidateInterval,
+          batchSize: this.options.lazyValidateBatchSize,
+        },
+        // relay と検証器インスタンスを共有
+        this.validator
+      );
+    }
+
     // 初期化
     this.subscriptionManager = new SubscriptionManager();
     this.messageHandler = new MessageHandler(
       storage,
       this.subscriptionManager,
-      this.options.maxSubscriptions
+      this.options.maxSubscriptions,
+      this.options.maxEventsPerRequest,
+      // トランスポート経由 EVENT の検証モードと、LAZY 時の検証キューを委譲
+      this.options.validateEventsType ?? 'IMMEDIATELY',
+      this.lazyValidator
     );
+
+    // TTL 設定時はバックグラウンドの定期パージを用意する。
+    // 期限切れイベントは読み出し時ではなく、このスイープで削除する
+    if (this.options.ttl !== undefined && this.options.ttl > 0) {
+      this.expiryReaper = new ExpiryReaper(storage, {
+        ttlSeconds: this.options.ttl,
+        intervalSeconds: this.options.ttlSweepInterval,
+      });
+    }
 
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
     this.messageHandler.onResponse((clientId, message) => {
@@ -190,6 +244,10 @@ export class NostrCacheRelay {
    */
   async connect(): Promise<void> {
     await this.transport.start();
+    // 遅延バリデーションの定期実行を開始
+    this.lazyValidator?.start();
+    // TTL の定期パージを開始
+    this.expiryReaper?.start();
     this.emit('connect');
   }
 
@@ -200,6 +258,12 @@ export class NostrCacheRelay {
    */
   async disconnect(): Promise<void> {
     await this.transport.stop();
+    // 遅延バリデーションの定期実行を停止し、未処理キューを検証しきってから終了
+    // （未検証イベントの取りこぼしを防ぐ）
+    this.lazyValidator?.stop();
+    await this.lazyValidator?.flush();
+    // TTL の定期パージを停止
+    this.expiryReaper?.stop();
     this.emit('disconnect');
   }
 
@@ -221,8 +285,12 @@ export class NostrCacheRelay {
     // Save the event to storage
     const saved = await this.storage.saveEvent(event);
 
-    // Notify local subscribers whose filters match the published event
     if (saved) {
+      // 'LAZY' モードでは保存後にバックグラウンド検証へ回す。
+      // 不正なイベントは後続の検証パスでストレージから削除される
+      this.lazyValidator?.enqueue(event);
+
+      // Notify local subscribers whose filters match the published event
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
       if (matches.has(LOCAL_CLIENT_ID)) {
         this.emit('event', event);
@@ -250,10 +318,15 @@ export class NostrCacheRelay {
 
     logger.info(`Created subscription ${subscriptionId} with filters:`, filters);
 
-    // Replay the matching stored events to the listeners
+    // Replay the matching stored events to the listeners.
+    // TTL expiry is handled by the background sweep, not filtered here.
     try {
       const events = await this.storage.getEvents(filters);
-      for (const event of events) {
+      const limitedEvents = capEvents(
+        events,
+        this.options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS
+      );
+      for (const event of limitedEvents) {
         this.emit('event', event);
       }
     } catch (error) {

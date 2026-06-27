@@ -80,4 +80,16 @@ export interface StorageAdapter {
     kind: number,
     dTagValue: string
   ): Promise<boolean>;
+
+  /**
+   * Delete all events older than the given timestamp.
+   *
+   * Optional capability used by the TTL background sweep. Implementations
+   * backed by a time index can do this as an efficient bulk range delete.
+   *
+   * @param olderThan Unix timestamp (seconds); events with `created_at`
+   *   strictly less than this are deleted
+   * @returns Promise resolving to the number of events deleted
+   */
+  deleteExpired?(olderThan: number): Promise<number>;
 }

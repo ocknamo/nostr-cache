@@ -4,6 +4,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
+import { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { NostrCacheRelay } from './nostr-cache-relay.js';
@@ -18,6 +19,7 @@ describe('NostrCacheRelay', () => {
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(0),
+    deleteExpired: vi.fn().mockResolvedValue(0),
   };
 
   // Mock transport adapter
@@ -191,6 +193,29 @@ describe('NostrCacheRelay', () => {
 
       expect(eoseHandler).toHaveBeenCalledWith('sub1');
     });
+
+    it('should cap replayed events to the newest maxEventsPerRequest', async () => {
+      const cappedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        maxEventsPerRequest: 2,
+      });
+      const events = [
+        { ...sampleEvent, id: 'event-old', created_at: 100 },
+        { ...sampleEvent, id: 'event-newest', created_at: 500 },
+        { ...sampleEvent, id: 'event-mid', created_at: 300 },
+        { ...sampleEvent, id: 'event-second', created_at: 400 },
+      ];
+      (mockStorage.getEvents as Mock).mockResolvedValueOnce(events);
+      const eventHandler = vi.fn();
+      const eoseHandler = vi.fn();
+      cappedRelay.on('event', eventHandler);
+      cappedRelay.on('eose', eoseHandler);
+
+      await cappedRelay.subscribe('sub1', [sampleFilter]);
+
+      const replayedIds = eventHandler.mock.calls.map(([event]) => (event as NostrEvent).id);
+      expect(replayedIds).toEqual(['event-newest', 'event-second']);
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
   });
 
   describe('unsubscribe', () => {
@@ -233,6 +258,154 @@ describe('NostrCacheRelay', () => {
       relay['emit']('connect');
 
       expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lazy validation', () => {
+    // Track prototype spies so we can restore only them — restoring all mocks
+    // would wipe the shared mockStorage implementations.
+    let spies: ReturnType<typeof vi.spyOn>[] = [];
+    const spyOnLazy = (method: 'enqueue' | 'start' | 'stop' | 'flush') => {
+      const spy = vi.spyOn(LazyValidator.prototype, method);
+      spies.push(spy);
+      return spy;
+    };
+
+    afterEach(() => {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+      spies = [];
+    });
+
+    it('should not create a lazy validator unless validateEventsType is LAZY', async () => {
+      const enqueueSpy = spyOnLazy('enqueue');
+      const immediate = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
+      });
+
+      // No lazy validator is wired, so publishing never enqueues
+      await immediate.publishEvent(sampleEvent);
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('should enqueue saved events for background validation in LAZY mode', async () => {
+      const enqueueSpy = spyOnLazy('enqueue');
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      const result = await lazyRelay.publishEvent(sampleEvent);
+
+      // Event is accepted/saved without synchronous validation, then enqueued
+      expect(result).toBe(true);
+      expect(enqueueSpy).toHaveBeenCalledWith(sampleEvent);
+    });
+
+    it('should not enqueue when the event fails to save in LAZY mode', async () => {
+      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
+      const enqueueSpy = spyOnLazy('enqueue');
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      await lazyRelay.publishEvent(sampleEvent);
+
+      expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
+    it('should start and stop the background validator on connect/disconnect', async () => {
+      const startSpy = spyOnLazy('start');
+      const stopSpy = spyOnLazy('stop');
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      await lazyRelay.connect();
+      expect(startSpy).toHaveBeenCalledTimes(1);
+
+      await lazyRelay.disconnect();
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should flush the pending queue on disconnect', async () => {
+      const flushSpy = spyOnLazy('flush').mockResolvedValue(0);
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      await lazyRelay.connect();
+      await lazyRelay.disconnect();
+
+      expect(flushSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should keep a single background validator across repeated connects', async () => {
+      const startSpy = spyOnLazy('start');
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      await lazyRelay.connect();
+      await lazyRelay.connect();
+
+      // start() is idempotent (guards its own timer), so repeated connects are safe
+      expect(startSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('ttl background sweep', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should not sweep when ttl is not configured', async () => {
+      await relay.connect();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(mockStorage.deleteExpired).not.toHaveBeenCalled();
+    });
+
+    it('should purge expired events from storage on connect and on the interval', async () => {
+      const ttlRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        ttl: 100,
+        ttlSweepInterval: 30,
+      });
+
+      await ttlRelay.connect();
+      // Immediate sweep on start, flushed by the async timer helper
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockStorage.deleteExpired).toHaveBeenCalledTimes(1);
+
+      // Subsequent sweeps run on the configured interval
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockStorage.deleteExpired).toHaveBeenCalledTimes(2);
+
+      // Each sweep deletes everything older than now - ttl
+      const now = Math.floor(Date.now() / 1000);
+      const [[threshold]] = (mockStorage.deleteExpired as Mock).mock.calls;
+      expect(threshold).toBeLessThanOrEqual(now - 100);
+
+      await ttlRelay.disconnect();
+    });
+
+    it('should stop sweeping after disconnect', async () => {
+      const ttlRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        ttl: 100,
+        ttlSweepInterval: 30,
+      });
+
+      await ttlRelay.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      await ttlRelay.disconnect();
+      (mockStorage.deleteExpired as Mock).mockClear();
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(mockStorage.deleteExpired).not.toHaveBeenCalled();
     });
   });
 });
