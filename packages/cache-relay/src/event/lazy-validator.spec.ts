@@ -106,8 +106,60 @@ describe('LazyValidator', () => {
   });
 
   it('should fall back to defaults for non-positive options', () => {
-    const lv = new LazyValidator(storage, { intervalSeconds: 0, batchSize: -5 }, validator);
+    const lv = new LazyValidator(
+      storage,
+      { intervalSeconds: 0, batchSize: -5, maxQueueSize: 0 },
+      validator
+    );
     // Defaults applied; nothing throws and queue starts empty
     expect(lv.pendingCount).toBe(0);
+  });
+
+  it('should drop the oldest event when the queue exceeds maxQueueSize', () => {
+    const lv = new LazyValidator(storage, { maxQueueSize: 2 }, validator);
+    lv.enqueue(makeEvent('a'));
+    lv.enqueue(makeEvent('b'));
+    lv.enqueue(makeEvent('c'));
+
+    // Queue is capped at 2; the oldest ('a') was dropped
+    expect(lv.pendingCount).toBe(2);
+  });
+
+  it('should validate and drain the entire queue on flush', async () => {
+    (validator.validate as Mock).mockResolvedValue(false);
+    const lv = new LazyValidator(storage, { batchSize: 2 }, validator);
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      lv.enqueue(makeEvent(id));
+    }
+
+    const removed = await lv.flush();
+
+    expect(removed).toBe(5);
+    expect(lv.pendingCount).toBe(0);
+    expect(storage.deleteEvent).toHaveBeenCalledTimes(5);
+  });
+
+  it('should not overlap passes when a previous pass is still running', async () => {
+    let resolveValidate: (value: boolean) => void = () => {};
+    (validator.validate as Mock).mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveValidate = resolve;
+        })
+    );
+    const lv = new LazyValidator(storage, { intervalSeconds: 1 }, validator);
+    lv.enqueue(makeEvent('slow'));
+
+    lv.start();
+    // First tick starts a pass that is awaiting validation
+    await vi.advanceTimersByTimeAsync(1000);
+    // Second tick should be skipped because the first pass has not resolved
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(validator.validate).toHaveBeenCalledTimes(1);
+
+    // Let the in-flight pass finish
+    resolveValidate(true);
+    lv.stop();
   });
 });

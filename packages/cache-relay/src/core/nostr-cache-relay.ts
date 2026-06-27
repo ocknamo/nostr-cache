@@ -149,11 +149,16 @@ export class NostrCacheRelay {
 
     // 遅延バリデーション有効時はバックグラウンド検証器を用意
     if (this.options.validateEventsType === 'LAZY') {
-      this.lazyValidator = new LazyValidator(storage, {
-        intervalSeconds: this.options.lazyValidateInterval,
-        // 正式名を優先し、タイポの旧名はフォールバックとして許容
-        batchSize: this.options.lazyValidateBatchSize ?? this.options.lazyValidateBachSize,
-      });
+      this.lazyValidator = new LazyValidator(
+        storage,
+        {
+          intervalSeconds: this.options.lazyValidateInterval,
+          // 正式名を優先し、タイポの旧名はフォールバックとして許容
+          batchSize: this.options.lazyValidateBatchSize ?? this.options.lazyValidateBachSize,
+        },
+        // relay と検証器インスタンスを共有
+        this.validator
+      );
     }
 
     // 初期化
@@ -222,8 +227,10 @@ export class NostrCacheRelay {
    */
   async disconnect(): Promise<void> {
     await this.transport.stop();
-    // 遅延バリデーションの定期実行を停止
+    // 遅延バリデーションの定期実行を停止し、未処理キューを検証しきってから終了
+    // （未検証イベントの取りこぼしを防ぐ）
     this.lazyValidator?.stop();
+    await this.lazyValidator?.flush();
     this.emit('disconnect');
   }
 

@@ -241,7 +241,7 @@ describe('NostrCacheRelay', () => {
     // Track prototype spies so we can restore only them — restoring all mocks
     // would wipe the shared mockStorage implementations.
     let spies: ReturnType<typeof vi.spyOn>[] = [];
-    const spyOnLazy = (method: 'enqueue' | 'start' | 'stop') => {
+    const spyOnLazy = (method: 'enqueue' | 'start' | 'stop' | 'flush') => {
       const spy = vi.spyOn(LazyValidator.prototype, method);
       spies.push(spy);
       return spy;
@@ -302,6 +302,31 @@ describe('NostrCacheRelay', () => {
 
       await lazyRelay.disconnect();
       expect(stopSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should flush the pending queue on disconnect', async () => {
+      const flushSpy = spyOnLazy('flush').mockResolvedValue(0);
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      await lazyRelay.connect();
+      await lazyRelay.disconnect();
+
+      expect(flushSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should keep a single background validator across repeated connects', async () => {
+      const startSpy = spyOnLazy('start');
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      await lazyRelay.connect();
+      await lazyRelay.connect();
+
+      // start() is idempotent (guards its own timer), so repeated connects are safe
+      expect(startSpy).toHaveBeenCalledTimes(2);
     });
   });
 });
