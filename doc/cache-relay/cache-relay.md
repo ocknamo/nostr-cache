@@ -200,19 +200,28 @@ interface NostrRelayOptions {
   // サブスクリプション上限（デフォルト 20）
   maxSubscriptions?: number;
 
+  // REQ 応答 / subscribe 再生で返す最大件数（デフォルト 500、超過時は新しい順）
+  maxEventsPerRequest?: number;
+
   // イベント検証方式（'NONE' | 'IMMEDIATELY' | 'LAZY'）
+  // 'LAZY' は受理・保存後にバックグラウンドで検証し不正を削除（in-process / transport 両経路）
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
+  // LAZY のバックグラウンド検証間隔 秒（デフォルト 60）
+  lazyValidateInterval?: number;
+  // LAZY の 1 回あたり検証件数（デフォルト 100）
+  lazyValidateBatchSize?: number;
+
+  // TTL 秒。古いイベントを定期スイープで削除（未指定で無効）
+  ttl?: number;
+  // TTL スイープの実行間隔 秒（デフォルト 60）
+  ttlSweepInterval?: number;
 
   // WebSocket サーバーのポート（Node.js のみ）
   port?: number;
 
   // 以下は型定義のみで未実装（将来対応予定）
-  maxEventsPerRequest?: number;
   storageMaxSize?: number;
-  ttl?: number;
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
-  lazyValidateInterval?: number;
-  lazyValidateBachSize?: number; // 注: タイポ（正: lazyValidateBatchSize）
 }
 ```
 

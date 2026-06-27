@@ -91,14 +91,16 @@ new NostrCacheRelay(
 ```typescript
 interface NostrRelayOptions {
   maxSubscriptions?: number;        // クライアントあたりの最大購読数 (default: 20)
-  maxEventsPerRequest?: number;     // ※未実装（型・デフォルト 500 は存在するが返却件数には影響しない）
+  maxEventsPerRequest?: number;     // REQ 応答 / subscribe 再生で返す最大件数 (default: 500)。超過時は新しい順に N 件
   storageMaxSize?: number;          // 最大保存件数 ※未実装
-  ttl?: number;                     // TTL 秒 ※未実装
+  ttl?: number;                     // TTL 秒。古いイベントを定期スイープで削除（未指定で無効。deleteExpired 対応ストレージが必要）
+  ttlSweepInterval?: number;        // TTL スイープの実行間隔 秒 (default: 60)
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // 退避戦略 ※未実装
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
-                                    // ※'LAZY' は現状未実装で、検証は行われません（'NONE' 相当）
-  lazyValidateInterval?: number;    // ※未実装
-  lazyValidateBachSize?: number;    // ※未実装（既存のタイポ）
+                                    // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
+                                    // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
+  lazyValidateInterval?: number;    // LAZY のバックグラウンド検証間隔 秒 (default: 60)
+  lazyValidateBatchSize?: number;   // LAZY の1回あたり検証件数 (default: 100)
   port?: number;                    // WebSocket ポート (Node.js)
 }
 ```
