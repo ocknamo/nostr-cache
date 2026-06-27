@@ -120,7 +120,7 @@ relay.unsubscribe('sub1');
 | オプション | 型 | 状況 |
 |---|---|---|
 | `maxSubscriptions` | `number` | 実装済み（デフォルト 20） |
-| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み。`LAZY` は保存後にバックグラウンドで検証し不正イベントを削除。**注意:** この設定が効くのは in-process の `publishEvent()` のみ。トランスポート経由（`EVENT` メッセージ）の検証は本設定に関わらず常に実行されるため、`NONE` / `LAZY` でもリレー入口の検証は無効化されない |
+| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では不正イベントが最大 `lazyValidateInterval` 秒ぶん一時的に保存・配信され得る |
 | `port` | `number` | Node.js の WebSocket サーバ用 |
 | `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
 | `storageMaxSize` | `number` | **未実装** |
@@ -129,6 +129,5 @@ relay.unsubscribe('sub1');
 | `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | **未実装** |
 | `lazyValidateInterval` | `number` | 実装済み。`LAZY` 時のバックグラウンド検証の実行間隔（秒、デフォルト 60） |
 | `lazyValidateBatchSize` | `number` | 実装済み。`LAZY` 時の 1 回の検証で処理するイベント数（デフォルト 100） |
-| `lazyValidateBachSize` | `number` | 非推奨。`lazyValidateBatchSize` のタイポ別名。後方互換のため受理するが将来削除予定 |
 
 詳細・最新の状況は [../../doc/TODO.md](../../doc/TODO.md) を参照してください。

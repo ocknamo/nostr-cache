@@ -105,16 +105,6 @@ export interface NostrRelayOptions {
   /**
    * Number of events validated per background pass when `validateEventsType`
    * is `'LAZY'`. Defaults to 100.
-   *
-   * @deprecated Misspelled. Use {@link lazyValidateBatchSize} instead; this
-   *   alias is kept for backward compatibility and will be removed.
-   */
-  lazyValidateBachSize?: number;
-
-  /**
-   * Number of events validated per background pass when `validateEventsType`
-   * is `'LAZY'`. Defaults to 100. Supersedes the misspelled
-   * {@link lazyValidateBachSize}.
    */
   lazyValidateBatchSize?: number;
 
@@ -180,8 +170,7 @@ export class NostrCacheRelay {
         storage,
         {
           intervalSeconds: this.options.lazyValidateInterval,
-          // 正式名を優先し、タイポの旧名はフォールバックとして許容
-          batchSize: this.options.lazyValidateBatchSize ?? this.options.lazyValidateBachSize,
+          batchSize: this.options.lazyValidateBatchSize,
         },
         // relay と検証器インスタンスを共有
         this.validator
@@ -194,7 +183,10 @@ export class NostrCacheRelay {
       storage,
       this.subscriptionManager,
       this.options.maxSubscriptions,
-      this.options.maxEventsPerRequest
+      this.options.maxEventsPerRequest,
+      // トランスポート経由 EVENT の検証モードと、LAZY 時の検証キューを委譲
+      this.options.validateEventsType ?? 'IMMEDIATELY',
+      this.lazyValidator
     );
 
     // TTL 設定時はバックグラウンドの定期パージを用意する。

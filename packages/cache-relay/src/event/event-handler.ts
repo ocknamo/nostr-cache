@@ -10,6 +10,9 @@ import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventValidator } from './event-validator.js';
 
+/** How events are validated as they enter the relay. */
+export type ValidateEventsType = 'NONE' | 'IMMEDIATELY' | 'LAZY';
+
 interface Subscription {
   clientId: string;
   id: string;
@@ -29,10 +32,14 @@ export class EventHandler {
    *
    * @param storage Storage adapter
    * @param subscriptionManager Subscription manager
+   * @param validateEventsType How events are validated. Only `IMMEDIATELY`
+   *   validates synchronously here; `NONE` / `LAZY` skip (LAZY validation is
+   *   performed later by the background validator).
    */
   constructor(
     private storage: StorageAdapter,
-    private subscriptionManager: SubscriptionManager
+    private subscriptionManager: SubscriptionManager,
+    private validateEventsType: ValidateEventsType = 'IMMEDIATELY'
   ) {
     this.validator = new EventValidator();
   }
@@ -48,18 +55,22 @@ export class EventHandler {
     message: string;
     matches?: Map<string, Subscription[]>;
   }> {
-    // Validate the event
-    try {
-      if (!(await this.validator.validate(event))) {
-        logger.info('Event validation failed');
-        return { success: false, message: 'invalid: event validation failed' };
+    // Validate the event synchronously only in IMMEDIATELY mode. In NONE the
+    // event is never validated; in LAZY it is validated later by the
+    // background validator, so it is accepted and stored here.
+    if (this.validateEventsType === 'IMMEDIATELY') {
+      try {
+        if (!(await this.validator.validate(event))) {
+          logger.info('Event validation failed');
+          return { success: false, message: 'invalid: event validation failed' };
+        }
+      } catch (error) {
+        logger.info('Validation error:', error);
+        return {
+          success: false,
+          message: 'invalid: validation error',
+        };
       }
-    } catch (error) {
-      logger.info('Validation error:', error);
-      return {
-        success: false,
-        message: 'invalid: validation error',
-      };
     }
 
     // イベントの種類に応じた処理

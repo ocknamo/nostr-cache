@@ -4,6 +4,7 @@
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
+import type { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { MessageHandler } from './message-handler.js';
 import type { SubscriptionManager } from './subscription-manager.js';
@@ -172,6 +173,63 @@ describe('MessageHandler', () => {
 
         // client2にイベントが送信されることを確認
         expect(responseCallback).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
+      });
+
+      describe('validateEventsType modes', () => {
+        // A structurally-present but cryptographically invalid event
+        const invalidEvent: NostrEvent = { ...sampleEvent, id: 'invalid-event', sig: 'deadbeef' };
+
+        it('IMMEDIATELY (default): rejects an invalid event without storing it', async () => {
+          await messageHandler.handleMessage('client1', ['EVENT', invalidEvent]);
+
+          expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+          expect(responseCallback).toHaveBeenCalledWith('client1', [
+            'OK',
+            invalidEvent.id,
+            false,
+            'invalid: event validation failed',
+          ]);
+        });
+
+        it('LAZY: accepts and stores an invalid event, enqueuing it for background validation', async () => {
+          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+          const lazyHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'LAZY',
+            lazyValidator
+          );
+          const cb = vi.fn();
+          lazyHandler.onResponse(cb);
+
+          await lazyHandler.handleMessage('client1', ['EVENT', invalidEvent]);
+
+          expect(mockStorage.saveEvent).toHaveBeenCalledWith(invalidEvent);
+          expect(cb).toHaveBeenCalledWith('client1', ['OK', invalidEvent.id, true, '']);
+          expect(lazyValidator.enqueue).toHaveBeenCalledWith(invalidEvent);
+        });
+
+        it('NONE: accepts and stores without validating and without enqueuing', async () => {
+          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+          const noneHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'NONE',
+            lazyValidator
+          );
+          const cb = vi.fn();
+          noneHandler.onResponse(cb);
+
+          await noneHandler.handleMessage('client1', ['EVENT', invalidEvent]);
+
+          expect(mockStorage.saveEvent).toHaveBeenCalledWith(invalidEvent);
+          expect(cb).toHaveBeenCalledWith('client1', ['OK', invalidEvent.id, true, '']);
+          expect(lazyValidator.enqueue).not.toHaveBeenCalled();
+        });
       });
     });
 
