@@ -1,5 +1,14 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
+import { vi } from 'vitest';
 import { WebSocketServerEmulator } from './web-socket-server-emulator.js';
+
+// These tests drive real, asynchronously-delivered WebSocket events (the
+// emulator opens a background socket and signals open/message via setTimeout).
+// Under loaded CI the default 5s timeout is occasionally exceeded, causing a
+// flaky failure of "should send messages to connected client". Give the whole
+// spec generous headroom; the proper fix (dropping the real `super()` socket)
+// is tracked with the E2E-wiring task in doc/TODO.md.
+vi.setConfig({ testTimeout: 20_000 });
 
 describe('WebSocketServerEmulator', () => {
   let emulator: WebSocketServerEmulator;
