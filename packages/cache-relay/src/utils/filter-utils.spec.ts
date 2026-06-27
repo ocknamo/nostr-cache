@@ -301,17 +301,17 @@ describe('filterUtils', () => {
     });
   });
 
-  describe('capEvents', () => {
-    const makeEvent = (id: string, created_at: number): NostrEvent => ({
-      id,
-      pubkey: 'pk',
-      created_at,
-      kind: 1,
-      tags: [],
-      content: '',
-      sig: 'sig',
-    });
+  const makeEvent = (id: string, created_at: number): NostrEvent => ({
+    id,
+    pubkey: 'pk',
+    created_at,
+    kind: 1,
+    tags: [],
+    content: '',
+    sig: 'sig',
+  });
 
+  describe('capEvents', () => {
     it('should return the same array reference when within the cap', () => {
       const events = [makeEvent('a', 1), makeEvent('b', 2)];
       expect(capEvents(events, 2)).toBe(events);

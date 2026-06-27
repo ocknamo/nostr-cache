@@ -237,7 +237,8 @@ export class MessageHandler {
 
       // 既存の一致するイベントの取得と送信
       try {
-        // 各フィルタに一致するイベントを取得
+        // 各フィルタに一致するイベントを取得（TTL の期限切れは
+        // バックグラウンドのスイープで削除されるため、ここでは絞り込まない）
         const events = await this.storage.getEvents(filters);
 
         // リレーが一度に返すイベント数の上限を適用。上限超過時は NIP-01 の

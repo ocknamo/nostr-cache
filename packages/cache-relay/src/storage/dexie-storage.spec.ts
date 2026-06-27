@@ -681,4 +681,32 @@ describe('DexieStorage', () => {
       expect(await storage.count()).toBe(1);
     });
   });
+
+  describe('deleteExpired', () => {
+    const eventAt = (id: string, created_at: number): NostrEvent => ({
+      ...mockEvent,
+      id,
+      created_at,
+    });
+
+    it('should delete only events strictly older than the threshold', async () => {
+      await storage.saveEvent(eventAt('old', 100));
+      await storage.saveEvent(eventAt('boundary', 200));
+      await storage.saveEvent(eventAt('fresh', 300));
+
+      const removed = await storage.deleteExpired(200);
+
+      // 'old' (<200) deleted; 'boundary' (==200) and 'fresh' kept
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['boundary', 'fresh']);
+    });
+
+    it('should return 0 when nothing is expired', async () => {
+      await storage.saveEvent(eventAt('a', 500));
+
+      expect(await storage.deleteExpired(100)).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+  });
 });

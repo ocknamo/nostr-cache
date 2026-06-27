@@ -16,6 +16,7 @@ import type {
   RelayEventHandler,
 } from '@nostr-cache/shared';
 import { EventValidator } from '../event/event-validator.js';
+import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { capEvents } from '../utils/filter-utils.js';
@@ -63,10 +64,25 @@ export interface NostrRelayOptions {
   storageMaxSize?: number;
 
   /**
-   * Time-to-live in seconds
-   * 未実装
+   * Time-to-live in seconds for cached events. Events whose `created_at` is
+   * older than `ttl` seconds are deleted from storage by a periodic background
+   * sweep (see {@link ttlSweepInterval}) rather than filtered on every read.
+   *
+   * Trade-off: an expired event may still be returned for up to one sweep
+   * interval before it is purged. Disabled when undefined or non-positive.
+   *
+   * Requires a storage adapter implementing `deleteExpired` (DexieStorage
+   * does). If the adapter does not, the TTL silently has no effect aside from
+   * a one-time warning logged on the first sweep.
    */
   ttl?: number;
+
+  /**
+   * Interval in seconds between TTL background sweeps when `ttl` is set.
+   * Defaults to 60. Smaller values reduce staleness at the cost of more
+   * frequent delete passes.
+   */
+  ttlSweepInterval?: number;
 
   /**
    * Cache eviction strategy
@@ -110,6 +126,8 @@ export class NostrCacheRelay {
   private validator: EventValidator;
   private messageHandler: MessageHandler;
   private subscriptionManager: SubscriptionManager;
+  /** Background TTL sweeper, present only when `ttl` is configured. */
+  private expiryReaper?: ExpiryReaper;
   private eventListeners: Map<
     string,
     Array<
@@ -153,6 +171,15 @@ export class NostrCacheRelay {
       this.options.maxSubscriptions,
       this.options.maxEventsPerRequest
     );
+
+    // TTL 設定時はバックグラウンドの定期パージを用意する。
+    // 期限切れイベントは読み出し時ではなく、このスイープで削除する
+    if (this.options.ttl !== undefined && this.options.ttl > 0) {
+      this.expiryReaper = new ExpiryReaper(storage, {
+        ttlSeconds: this.options.ttl,
+        intervalSeconds: this.options.ttlSweepInterval,
+      });
+    }
 
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
     this.messageHandler.onResponse((clientId, message) => {
@@ -200,6 +227,8 @@ export class NostrCacheRelay {
    */
   async connect(): Promise<void> {
     await this.transport.start();
+    // TTL の定期パージを開始
+    this.expiryReaper?.start();
     this.emit('connect');
   }
 
@@ -210,6 +239,8 @@ export class NostrCacheRelay {
    */
   async disconnect(): Promise<void> {
     await this.transport.stop();
+    // TTL の定期パージを停止
+    this.expiryReaper?.stop();
     this.emit('disconnect');
   }
 
@@ -260,7 +291,8 @@ export class NostrCacheRelay {
 
     logger.info(`Created subscription ${subscriptionId} with filters:`, filters);
 
-    // Replay the matching stored events to the listeners
+    // Replay the matching stored events to the listeners.
+    // TTL expiry is handled by the background sweep, not filtered here.
     try {
       const events = await this.storage.getEvents(filters);
       const limitedEvents = capEvents(
