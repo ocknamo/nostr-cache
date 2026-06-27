@@ -22,7 +22,7 @@ import {
 import { EventHandler } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
-import { filterExpiredEvents } from '../utils/filter-utils.js';
+import { capEvents, filterExpiredEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
 /**
@@ -42,12 +42,14 @@ export class MessageHandler {
    * @param storage Storage adapter
    * @param subscriptionManager Subscription manager
    * @param maxSubscriptions Maximum number of subscriptions per client
+   * @param maxEventsPerRequest Maximum number of stored events returned per REQ
    * @param ttl Time-to-live in seconds for served cached events (disabled when undefined)
    */
   constructor(
     storage: StorageAdapter,
     subscriptionManager: SubscriptionManager,
     private maxSubscriptions = 20,
+    private maxEventsPerRequest = 500,
     private ttl?: number
   ) {
     this.storage = storage;
@@ -243,9 +245,13 @@ export class MessageHandler {
         // TTL を超過した（鮮度切れの）イベントはキャッシュから返さない
         const events = filterExpiredEvents(storedEvents, this.ttl);
 
+        // リレーが一度に返すイベント数の上限を適用。上限超過時は NIP-01 の
+        // limit セマンティクスに合わせ、新しい順（created_at 降順）に N 件残す
+        const limitedEvents = capEvents(events, this.maxEventsPerRequest);
+
         // イベントをクライアントに送信
         let eventCount = 0;
-        for (const event of events) {
+        for (const event of limitedEvents) {
           this.sendEvent(clientId, subscriptionId, event);
           eventCount++;
         }
@@ -253,6 +259,12 @@ export class MessageHandler {
         if (storedEvents.length > events.length) {
           logger.info(
             `Subscription ${subscriptionId} dropped ${storedEvents.length - events.length} expired events (ttl ${this.ttl}s)`
+          );
+        }
+
+        if (events.length > limitedEvents.length) {
+          logger.info(
+            `Subscription ${subscriptionId} truncated to ${this.maxEventsPerRequest} events (matched ${events.length})`
           );
         }
 

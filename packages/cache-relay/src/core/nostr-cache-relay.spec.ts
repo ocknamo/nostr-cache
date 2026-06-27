@@ -209,6 +209,29 @@ describe('NostrCacheRelay', () => {
       expect(replayedIds).toEqual(['fresh']);
       expect(eoseHandler).toHaveBeenCalledWith('sub1');
     });
+
+    it('should cap replayed events to the newest maxEventsPerRequest', async () => {
+      const cappedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        maxEventsPerRequest: 2,
+      });
+      const events = [
+        { ...sampleEvent, id: 'event-old', created_at: 100 },
+        { ...sampleEvent, id: 'event-newest', created_at: 500 },
+        { ...sampleEvent, id: 'event-mid', created_at: 300 },
+        { ...sampleEvent, id: 'event-second', created_at: 400 },
+      ];
+      (mockStorage.getEvents as Mock).mockResolvedValueOnce(events);
+      const eventHandler = vi.fn();
+      const eoseHandler = vi.fn();
+      cappedRelay.on('event', eventHandler);
+      cappedRelay.on('eose', eoseHandler);
+
+      await cappedRelay.subscribe('sub1', [sampleFilter]);
+
+      const replayedIds = eventHandler.mock.calls.map(([event]) => (event as NostrEvent).id);
+      expect(replayedIds).toEqual(['event-newest', 'event-second']);
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
   });
 
   describe('unsubscribe', () => {

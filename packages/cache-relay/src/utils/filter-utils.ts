@@ -143,6 +143,28 @@ export function filterExpiredEvents(
 }
 
 /**
+ * Apply a relay-imposed cap on the number of events returned.
+ *
+ * When the number of matching events exceeds the cap, the newest events
+ * (highest `created_at`, ties broken by `id` for determinism) are kept,
+ * matching NIP-01's `limit` semantics. When the count is within the cap the
+ * original array is returned untouched so existing ordering is preserved.
+ *
+ * @param events Events to cap
+ * @param maxEvents Maximum number of events to keep
+ * @returns The capped (and, when capped, newest-first) list of events
+ */
+export function capEvents(events: NostrEvent[], maxEvents: number): NostrEvent[] {
+  if (events.length <= maxEvents) {
+    return events;
+  }
+
+  return [...events]
+    .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .slice(0, maxEvents);
+}
+
+/**
  * Merge multiple filters into a single filter
  *
  * @param filters Array of filters to merge

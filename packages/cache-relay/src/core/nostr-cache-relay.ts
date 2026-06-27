@@ -18,9 +18,15 @@ import type {
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
-import { filterExpiredEvents } from '../utils/filter-utils.js';
+import { capEvents, filterExpiredEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
 import { SubscriptionManager } from './subscription-manager.js';
+
+/**
+ * Default relay-imposed cap on the number of stored events returned per REQ
+ * subscription / in-process subscribe replay.
+ */
+const DEFAULT_MAX_EVENTS = 500;
 
 /**
  * Client ID used for subscriptions created through the in-process API
@@ -44,8 +50,9 @@ export interface NostrRelayOptions {
   maxSubscriptions?: number;
 
   /**
-   * Maximum number of events to return per request
-   * 未実装
+   * Maximum number of stored events returned per REQ subscription
+   * (relay-imposed cap applied on top of each filter's own `limit`).
+   * デフォルト値500
    */
   maxEventsPerRequest?: number;
 
@@ -130,8 +137,9 @@ export class NostrCacheRelay {
     this.options = {
       validateEventsType: 'IMMEDIATELY',
       maxSubscriptions: 20,
-      maxEventsPerRequest: 500,
       ...options,
+      // Guard against an explicit `undefined` clobbering the default
+      maxEventsPerRequest: options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS,
     };
 
     this.storage = storage;
@@ -144,6 +152,7 @@ export class NostrCacheRelay {
       storage,
       this.subscriptionManager,
       this.options.maxSubscriptions,
+      this.options.maxEventsPerRequest,
       this.options.ttl
     );
 
@@ -257,13 +266,18 @@ export class NostrCacheRelay {
     try {
       const storedEvents = await this.storage.getEvents(filters);
       // Skip cached events that have outlived the configured TTL
-      const events = filterExpiredEvents(storedEvents, this.options.ttl);
-      if (storedEvents.length > events.length) {
+      const freshEvents = filterExpiredEvents(storedEvents, this.options.ttl);
+      if (storedEvents.length > freshEvents.length) {
         logger.info(
-          `Subscription ${subscriptionId} dropped ${storedEvents.length - events.length} expired events (ttl ${this.options.ttl}s)`
+          `Subscription ${subscriptionId} dropped ${storedEvents.length - freshEvents.length} expired events (ttl ${this.options.ttl}s)`
         );
       }
-      for (const event of events) {
+      // Apply the relay-imposed cap (newest-first) on top of the TTL filter
+      const limitedEvents = capEvents(
+        freshEvents,
+        this.options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS
+      );
+      for (const event of limitedEvents) {
         this.emit('event', event);
       }
     } catch (error) {

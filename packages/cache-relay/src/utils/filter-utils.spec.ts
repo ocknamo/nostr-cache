@@ -4,6 +4,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import {
+  capEvents,
   createFilterKey,
   eventMatchesFilter,
   filterExpiredEvents,
@@ -301,17 +302,17 @@ describe('filterUtils', () => {
     });
   });
 
-  describe('filterExpiredEvents', () => {
-    const makeEvent = (id: string, created_at: number): NostrEvent => ({
-      id,
-      pubkey: 'pk',
-      created_at,
-      kind: 1,
-      tags: [],
-      content: '',
-      sig: 'sig',
-    });
+  const makeEvent = (id: string, created_at: number): NostrEvent => ({
+    id,
+    pubkey: 'pk',
+    created_at,
+    kind: 1,
+    tags: [],
+    content: '',
+    sig: 'sig',
+  });
 
+  describe('filterExpiredEvents', () => {
     const now = 1_000_000;
 
     it('should return the input untouched when ttl is undefined or non-positive', () => {
@@ -335,6 +336,36 @@ describe('filterUtils', () => {
     it('should keep all events that are within the ttl window', () => {
       const events = [makeEvent('a', now), makeEvent('b', now - 5)];
       expect(filterExpiredEvents(events, 60, now)).toHaveLength(2);
+    });
+  });
+
+  describe('capEvents', () => {
+    it('should return the same array reference when within the cap', () => {
+      const events = [makeEvent('a', 1), makeEvent('b', 2)];
+      expect(capEvents(events, 2)).toBe(events);
+      expect(capEvents(events, 5)).toBe(events);
+    });
+
+    it('should keep the newest events (created_at descending) when over the cap', () => {
+      const events = [
+        makeEvent('old', 100),
+        makeEvent('newest', 500),
+        makeEvent('mid', 300),
+        makeEvent('second', 400),
+      ];
+      expect(capEvents(events, 2).map((e) => e.id)).toEqual(['newest', 'second']);
+    });
+
+    it('should break created_at ties by id for deterministic output', () => {
+      const events = [makeEvent('c', 100), makeEvent('a', 100), makeEvent('b', 100)];
+      expect(capEvents(events, 2).map((e) => e.id)).toEqual(['a', 'b']);
+    });
+
+    it('should not mutate the input array', () => {
+      const events = [makeEvent('old', 100), makeEvent('newest', 500), makeEvent('mid', 300)];
+      const snapshot = events.map((e) => e.id);
+      capEvents(events, 1);
+      expect(events.map((e) => e.id)).toEqual(snapshot);
     });
   });
 });
