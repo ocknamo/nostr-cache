@@ -113,36 +113,6 @@ export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
 }
 
 /**
- * Filter out events that have outlived the relay's time-to-live (TTL).
- *
- * Cache freshness is evaluated against the event's own `created_at`
- * timestamp: an event is considered expired when it was authored more than
- * `ttlSeconds` ago. When `ttlSeconds` is undefined or non-positive the TTL is
- * disabled and the input is returned untouched.
- *
- * Note: this is intentionally a read-side freshness policy keyed on
- * `created_at`. A "time since cached" TTL would require the storage layer to
- * persist an insertion timestamp, which is out of scope here.
- *
- * @param events Events to filter
- * @param ttlSeconds TTL in seconds (disabled when undefined / <= 0)
- * @param nowSeconds Current unix time in seconds (defaults to wall clock)
- * @returns Events that are still within the TTL window
- */
-export function filterExpiredEvents(
-  events: NostrEvent[],
-  ttlSeconds?: number,
-  nowSeconds: number = Math.floor(Date.now() / 1000)
-): NostrEvent[] {
-  if (ttlSeconds === undefined || ttlSeconds <= 0) {
-    return events;
-  }
-
-  const threshold = nowSeconds - ttlSeconds;
-  return events.filter((event) => event.created_at >= threshold);
-}
-
-/**
  * Apply a relay-imposed cap on the number of events returned.
  *
  * When the number of matching events exceeds the cap, the newest events

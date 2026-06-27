@@ -124,7 +124,8 @@ relay.unsubscribe('sub1');
 | `port` | `number` | Node.js の WebSocket サーバ用 |
 | `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
 | `storageMaxSize` | `number` | **未実装** |
-| `ttl` | `number` | 実装済み。`created_at` が `now - ttl` より古いキャッシュイベントを REQ 応答 / `subscribe()` 再生から除外する read-side フィルタ。未指定で無効 |
+| `ttl` | `number` | 実装済み。`created_at` が `now - ttl` より古いイベントを**バックグラウンドの定期スイープ**でストレージから削除（読み出し時フィルタではない）。最大で `ttlSweepInterval` 秒ぶん古いイベントを返しうる。未指定で無効。`deleteExpired` 対応ストレージ（`DexieStorage`）が必要 |
+| `ttlSweepInterval` | `number` | 実装済み。TTL スイープの実行間隔（秒、デフォルト 60） |
 | `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | **未実装** |
 | `lazyValidateInterval` | `number` | **未実装** |
 | `lazyValidateBachSize` | `number` | **未実装**（`Batch` のタイポ。リネームは破壊的変更のため留意） |

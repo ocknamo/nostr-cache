@@ -22,7 +22,7 @@ import {
 import { EventHandler } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
-import { capEvents, filterExpiredEvents } from '../utils/filter-utils.js';
+import { capEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
 /**
@@ -43,14 +43,12 @@ export class MessageHandler {
    * @param subscriptionManager Subscription manager
    * @param maxSubscriptions Maximum number of subscriptions per client
    * @param maxEventsPerRequest Maximum number of stored events returned per REQ
-   * @param ttl Time-to-live in seconds for served cached events (disabled when undefined)
    */
   constructor(
     storage: StorageAdapter,
     subscriptionManager: SubscriptionManager,
     private maxSubscriptions = 20,
-    private maxEventsPerRequest = 500,
-    private ttl?: number
+    private maxEventsPerRequest = 500
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -239,11 +237,9 @@ export class MessageHandler {
 
       // 既存の一致するイベントの取得と送信
       try {
-        // 各フィルタに一致するイベントを取得
-        const storedEvents = await this.storage.getEvents(filters);
-
-        // TTL を超過した（鮮度切れの）イベントはキャッシュから返さない
-        const events = filterExpiredEvents(storedEvents, this.ttl);
+        // 各フィルタに一致するイベントを取得（TTL の期限切れは
+        // バックグラウンドのスイープで削除されるため、ここでは絞り込まない）
+        const events = await this.storage.getEvents(filters);
 
         // リレーが一度に返すイベント数の上限を適用。上限超過時は NIP-01 の
         // limit セマンティクスに合わせ、新しい順（created_at 降順）に N 件残す
@@ -254,12 +250,6 @@ export class MessageHandler {
         for (const event of limitedEvents) {
           this.sendEvent(clientId, subscriptionId, event);
           eventCount++;
-        }
-
-        if (storedEvents.length > events.length) {
-          logger.info(
-            `Subscription ${subscriptionId} dropped ${storedEvents.length - events.length} expired events (ttl ${this.ttl}s)`
-          );
         }
 
         if (events.length > limitedEvents.length) {

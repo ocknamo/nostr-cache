@@ -47,8 +47,11 @@ interface NostrRelayServerOptions {
     maxSubscriptions?: number;
     maxEventsPerRequest?: number;
     validateEvents?: boolean;
-    // 鮮度切れイベントをキャッシュから返さない TTL（秒）。未指定で無効
+    // 鮮度切れイベントを削除する TTL（秒）。未指定で無効。バックグラウンドの
+    // 定期スイープで削除されるため、最大で ttlSweepInterval 秒ぶん古い結果を返しうる
     ttl?: number;
+    // TTL スイープの実行間隔（秒）。既定 60
+    ttlSweepInterval?: number;
   };
 
   // ヘルスチェック設定
@@ -107,6 +110,7 @@ export class NostrRelayServer {
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
       ttl: this.options.relay?.ttl,
+      ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',
     });
   }
