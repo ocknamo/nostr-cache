@@ -99,6 +99,7 @@ interface NostrRelayOptions {
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
                                     // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
+                                    //         ※ ephemeral 等の未保存イベントは LAZY でも同期検証して即拒否
   lazyValidateInterval?: number;    // LAZY のバックグラウンド検証間隔 秒 (default: 60)
   lazyValidateBatchSize?: number;   // LAZY の1回あたり検証件数 (default: 100)
   port?: number;                    // WebSocket ポート (Node.js)

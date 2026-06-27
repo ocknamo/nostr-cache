@@ -57,10 +57,18 @@ export class EventHandler {
     stored: boolean;
     matches?: Map<string, Subscription[]>;
   }> {
-    // Validate the event synchronously only in IMMEDIATELY mode. In NONE the
-    // event is never validated; in LAZY it is validated later by the
-    // background validator, so it is accepted and stored here.
-    if (this.validateEventsType === 'IMMEDIATELY') {
+    // Decide whether to validate synchronously now.
+    // - IMMEDIATELY: always validate up front.
+    // - NONE: never validate.
+    // - LAZY: defer validation to the background pass — but only works for
+    //   events we actually store (invalid ones are deleted later). Ephemeral
+    //   events are never persisted, so there is nothing to delete after the
+    //   fact; they must be validated synchronously or they would be accepted
+    //   and broadcast without ever being checked.
+    const mustValidateNow =
+      this.validateEventsType === 'IMMEDIATELY' ||
+      (this.validateEventsType === 'LAZY' && this.isEphemeralEvent(event));
+    if (mustValidateNow) {
       try {
         if (!(await this.validator.validate(event))) {
           logger.info('Event validation failed');

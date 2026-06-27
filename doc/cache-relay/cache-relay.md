@@ -204,7 +204,8 @@ interface NostrRelayOptions {
   maxEventsPerRequest?: number;
 
   // イベント検証方式（'NONE' | 'IMMEDIATELY' | 'LAZY'）
-  // 'LAZY' は受理・保存後にバックグラウンドで検証し不正を削除（in-process / transport 両経路）
+  // 'LAZY' は受理・保存後にバックグラウンドで検証し不正を削除（in-process / transport 両経路）。
+  // ただし ephemeral 等の未保存イベントは後追い削除できないため LAZY でも同期検証する
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
   // LAZY のバックグラウンド検証間隔 秒（デフォルト 60）
   lazyValidateInterval?: number;

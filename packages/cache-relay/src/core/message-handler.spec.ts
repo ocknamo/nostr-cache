@@ -231,7 +231,9 @@ describe('MessageHandler', () => {
           expect(lazyValidator.enqueue).not.toHaveBeenCalled();
         });
 
-        it('LAZY: does not enqueue ephemeral events (not stored)', async () => {
+        it('LAZY: validates ephemeral events synchronously and rejects invalid ones', async () => {
+          // Ephemeral events are never stored, so lazy/background validation
+          // can never check them; they must be validated up front even in LAZY.
           const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
           const lazyHandler = new MessageHandler(
             mockStorage,
@@ -243,12 +245,50 @@ describe('MessageHandler', () => {
           );
           const cb = vi.fn();
           lazyHandler.onResponse(cb);
-          // kind 20000-29999 are ephemeral: accepted but never persisted
-          const ephemeral: NostrEvent = { ...sampleEvent, id: 'ephemeral', kind: 20001 };
+          const invalidEphemeral: NostrEvent = {
+            ...sampleEvent,
+            id: 'invalid-ephemeral',
+            kind: 20001,
+            sig: 'deadbeef',
+          };
 
-          await lazyHandler.handleMessage('client1', ['EVENT', ephemeral]);
+          await lazyHandler.handleMessage('client1', ['EVENT', invalidEphemeral]);
 
-          expect(cb).toHaveBeenCalledWith('client1', ['OK', 'ephemeral', true, '']);
+          expect(cb).toHaveBeenCalledWith('client1', [
+            'OK',
+            'invalid-ephemeral',
+            false,
+            'invalid: event validation failed',
+          ]);
+          expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+          expect(lazyValidator.enqueue).not.toHaveBeenCalled();
+        });
+
+        it('LAZY: does not enqueue events that were not stored', async () => {
+          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+          const lazyHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'LAZY',
+            lazyValidator
+          );
+          const cb = vi.fn();
+          lazyHandler.onResponse(cb);
+          // Addressable (kind 30000-39999) without a `d` tag is not persisted;
+          // LAZY skips up-front validation for it, but it must not be enqueued
+          // since there is nothing stored to later delete.
+          const addressableNoDTag: NostrEvent = {
+            ...sampleEvent,
+            id: 'addr-no-d',
+            kind: 30000,
+            tags: [],
+          };
+
+          await lazyHandler.handleMessage('client1', ['EVENT', addressableNoDTag]);
+
+          expect(cb).toHaveBeenCalledWith('client1', ['OK', 'addr-no-d', true, '']);
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
           expect(lazyValidator.enqueue).not.toHaveBeenCalled();
         });

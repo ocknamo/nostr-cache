@@ -120,7 +120,7 @@ relay.unsubscribe('sub1');
 | オプション | 型 | 状況 |
 |---|---|---|
 | `maxSubscriptions` | `number` | 実装済み（デフォルト 20） |
-| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では不正イベントが最大 `lazyValidateInterval` 秒ぶん一時的に保存・配信され得る |
+| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では保存されたイベントが最大 `lazyValidateInterval` 秒ぶん一時的に未検証で配信され得る。なお **ephemeral（kind 20000–29999）など保存されないイベントは、後から削除できないため `LAZY` でも同期検証**して不正を即拒否する |
 | `port` | `number` | Node.js の WebSocket サーバ用 |
 | `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
 | `storageMaxSize` | `number` | **未実装** |
