@@ -70,7 +70,10 @@ export interface NostrRelayOptions {
    *
    * Trade-off: an expired event may still be returned for up to one sweep
    * interval before it is purged. Disabled when undefined or non-positive.
-   * Requires a storage adapter implementing `deleteExpired` (DexieStorage does).
+   *
+   * Requires a storage adapter implementing `deleteExpired` (DexieStorage
+   * does). If the adapter does not, the TTL silently has no effect aside from
+   * a one-time warning logged on the first sweep.
    */
   ttl?: number;
 

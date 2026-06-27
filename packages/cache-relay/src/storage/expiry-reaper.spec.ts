@@ -2,6 +2,7 @@
  * Tests for ExpiryReaper
  */
 
+import { logger } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
 import { ExpiryReaper } from './expiry-reaper.js';
 import type { StorageAdapter } from './storage-adapter.js';
@@ -46,11 +47,38 @@ describe('ExpiryReaper', () => {
   });
 
   it('should warn (once) and no-op when storage lacks deleteExpired', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const noExpiry = { ...storage, deleteExpired: undefined } as StorageAdapter;
     const reaper = new ExpiryReaper(noExpiry, { ttlSeconds: 100 });
 
     expect(await reaper.sweep()).toBe(0);
     expect(await reaper.sweep()).toBe(0);
+    // Warning is emitted only once across repeated sweeps
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('should not sweep again after stop() even if a sweep was in flight', async () => {
+    let resolveDelete: (n: number) => void = () => {};
+    (storage.deleteExpired as Mock).mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveDelete = resolve;
+        })
+    );
+    const reaper = new ExpiryReaper(storage, { ttlSeconds: 100, intervalSeconds: 10 });
+
+    reaper.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(storage.deleteExpired).toHaveBeenCalledTimes(1);
+
+    // Stop while the first sweep is still pending, then let it resolve
+    reaper.stop();
+    resolveDelete(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // No further sweeps are scheduled after stop()
+    expect(storage.deleteExpired).toHaveBeenCalledTimes(1);
   });
 
   it('should run an immediate sweep on start and then on the interval', async () => {

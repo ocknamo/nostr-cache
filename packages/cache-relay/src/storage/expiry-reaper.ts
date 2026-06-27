@@ -76,6 +76,11 @@ export class ExpiryReaper {
 
   /**
    * Stop the periodic sweep. Idempotent.
+   *
+   * Note: this only cancels the timer; a sweep already in flight is allowed to
+   * finish (it merely deletes expired rows). Consequently, calling `stop()`
+   * immediately followed by `start()` while a sweep is still running will skip
+   * `start()`'s immediate sweep — the next interval tick will catch up.
    */
   stop(): void {
     if (this.timer !== undefined) {
