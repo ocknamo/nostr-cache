@@ -19,6 +19,7 @@ describe('MessageHandler', () => {
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(0),
+    enforceLimit: vi.fn().mockResolvedValue(0),
   } as StorageAdapter;
 
   // Mock subscription manager
@@ -262,6 +263,53 @@ describe('MessageHandler', () => {
           ]);
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
           expect(lazyValidator.enqueue).not.toHaveBeenCalled();
+        });
+
+        it('enforces the storage limit after a stored transport EVENT', async () => {
+          const boundedHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'IMMEDIATELY',
+            undefined,
+            100,
+            'FIFO'
+          );
+          boundedHandler.onResponse(vi.fn());
+
+          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO');
+        });
+
+        it('does not let an enforceLimit failure break the OK/broadcast of a stored event', async () => {
+          (mockStorage.enforceLimit as Mock).mockRejectedValueOnce(new Error('evict boom'));
+          const subscriptions = new Map([['client2', [{ id: 'sub1', filters: [sampleFilter] }]]]);
+          (mockSubscriptionManager.findMatchingSubscriptions as Mock).mockReturnValueOnce(
+            subscriptions
+          );
+          const boundedHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'IMMEDIATELY',
+            undefined,
+            100,
+            'FIFO'
+          );
+          const cb = vi.fn();
+          boundedHandler.onResponse(cb);
+
+          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          // Exactly one OK (true) — no double OK(false) from a swallowed eviction error
+          const okCalls = cb.mock.calls.filter(([, wire]) => wire[0] === 'OK');
+          expect(okCalls).toHaveLength(1);
+          expect(okCalls[0][1]).toEqual(['OK', sampleEvent.id, true, '']);
+          // Broadcast to the matching subscriber still happened
+          expect(cb).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
         });
 
         it('LAZY: does not enqueue events that were not stored', async () => {

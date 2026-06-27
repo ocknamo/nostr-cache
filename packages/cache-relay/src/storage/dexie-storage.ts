@@ -2,7 +2,7 @@ import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import Dexie from 'dexie';
 import { eventMatchesFilter } from '../utils/filter-utils.js';
-import type { StorageAdapter } from './storage-adapter.js';
+import type { CacheStrategy, StorageAdapter } from './storage-adapter.js';
 
 /**
  * NostrEvent table schema
@@ -25,6 +25,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   private static readonly MAX_INDEXED_TAGS = 100;
   private static readonly PRIORITY_TAGS = new Set(['e', 'p', 'a', 't', 'd', 'h', 'm', 'q', 'r']);
   private events!: Dexie.Table<NostrEventTable, string>;
+  /** Ensures the "non-FIFO falls back to FIFO" warning is logged only once. */
+  private nonFifoStrategyWarned = false;
 
   constructor(dbName = 'NostrCacheRelay') {
     super(dbName);
@@ -358,6 +360,65 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     } catch (error) {
       logger.error(
         `Failed to count events: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Evict events so that no more than `maxSize` remain.
+   *
+   * Uses FIFO (oldest `created_at` first). `LRU` / `LFU` currently fall back to
+   * FIFO and emit a one-time warning. No-op when `maxSize` is not positive.
+   *
+   * Semantics / caveats:
+   * - This is a **soft limit**. The count and the delete run inside a single
+   *   read-write transaction so a given pass is atomic, but the preceding
+   *   `saveEvent` commits separately, so under heavy concurrent writes the
+   *   store may briefly exceed `maxSize` before converging.
+   * - FIFO is keyed on `created_at` (second precision). Events sharing the same
+   *   `created_at` are evicted in primary-key (id) order, not strict arrival
+   *   order — a deliberate approximation, since no insertion sequence is stored.
+   *
+   * @param maxSize Maximum number of events to keep (no-op when <= 0)
+   * @param strategy Eviction strategy (default `FIFO`)
+   * @returns Promise resolving to the number of events evicted
+   */
+  async enforceLimit(maxSize: number, strategy: CacheStrategy = 'FIFO'): Promise<number> {
+    if (!(maxSize > 0)) {
+      return 0;
+    }
+
+    try {
+      // Run count + delete atomically so concurrent passes don't over- or
+      // under-evict against a stale count.
+      return await this.transaction('rw', this.events, async () => {
+        const count = await this.events.count();
+        if (count <= maxSize) {
+          return 0;
+        }
+
+        if (strategy !== 'FIFO' && !this.nonFifoStrategyWarned) {
+          logger.warn(
+            `Cache strategy '${strategy}' is not yet implemented; falling back to FIFO eviction`
+          );
+          this.nonFifoStrategyWarned = true;
+        }
+
+        const excess = count - maxSize;
+        // FIFO: evict the oldest events first (by created_at ascending)
+        const idsToEvict = await this.events.orderBy('created_at').limit(excess).primaryKeys();
+
+        if (idsToEvict.length > 0) {
+          await this.events.bulkDelete(idsToEvict);
+          logger.info(`Evicted ${idsToEvict.length} events to respect storageMaxSize ${maxSize}`);
+        }
+
+        return idsToEvict.length;
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to enforce storage limit: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return 0;
     }

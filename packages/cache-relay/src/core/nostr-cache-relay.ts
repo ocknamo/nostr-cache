@@ -18,7 +18,7 @@ import type {
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { capEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
@@ -59,8 +59,12 @@ export interface NostrRelayOptions {
   maxEventsPerRequest?: number;
 
   /**
-   * Maximum number of events to store
-   * 未実装
+   * Maximum number of events to keep in storage. When set, after each saved
+   * event the relay asks the storage adapter to evict down to this size
+   * (see {@link cacheStrategy}). Disabled when undefined or non-positive.
+   *
+   * Requires a storage adapter implementing `enforceLimit` (DexieStorage
+   * does); otherwise it has no effect.
    */
   storageMaxSize?: number;
 
@@ -86,10 +90,10 @@ export interface NostrRelayOptions {
   ttlSweepInterval?: number;
 
   /**
-   * Cache eviction strategy
-   * 未実装
+   * Eviction strategy used when `storageMaxSize` is exceeded. Currently only
+   * `FIFO` is implemented; `LRU` / `LFU` fall back to `FIFO`. Defaults to `FIFO`.
    */
-  cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
+  cacheStrategy?: CacheStrategy;
 
   /**
    * Whether to validate events
@@ -186,7 +190,10 @@ export class NostrCacheRelay {
       this.options.maxEventsPerRequest,
       // トランスポート経由 EVENT の検証モードと、LAZY 時の検証キューを委譲
       this.options.validateEventsType ?? 'IMMEDIATELY',
-      this.lazyValidator
+      this.lazyValidator,
+      // 保存後のストレージ上限退避（transport 経由 EVENT）
+      this.options.storageMaxSize,
+      this.options.cacheStrategy
     );
 
     // TTL 設定時はバックグラウンドの定期パージを用意する。
@@ -290,6 +297,9 @@ export class NostrCacheRelay {
       // 不正なイベントは後続の検証パスでストレージから削除される
       this.lazyValidator?.enqueue(event);
 
+      // ストレージ上限を超えた場合は古いイベントを退避する
+      await this.enforceStorageLimit();
+
       // Notify local subscribers whose filters match the published event
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
       if (matches.has(LOCAL_CLIENT_ID)) {
@@ -298,6 +308,26 @@ export class NostrCacheRelay {
     }
 
     return saved;
+  }
+
+  /**
+   * Ask the storage adapter to evict down to `storageMaxSize` (if configured
+   * and supported). Eviction failures never affect the originating save.
+   *
+   * @private
+   */
+  private async enforceStorageLimit(): Promise<void> {
+    const maxSize = this.options.storageMaxSize;
+    if (maxSize === undefined || maxSize <= 0) {
+      return;
+    }
+    // Eviction is a post-save side effect; never let its failure affect the
+    // originating save / notification.
+    try {
+      await this.storage.enforceLimit?.(maxSize, this.options.cacheStrategy);
+    } catch (error) {
+      logger.error('Failed to enforce storage limit:', error);
+    }
   }
 
   /**

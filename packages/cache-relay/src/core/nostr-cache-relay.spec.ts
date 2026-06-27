@@ -20,6 +20,7 @@ describe('NostrCacheRelay', () => {
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(0),
     deleteExpired: vi.fn().mockResolvedValue(0),
+    enforceLimit: vi.fn().mockResolvedValue(0),
   };
 
   // Mock transport adapter
@@ -128,6 +129,39 @@ describe('NostrCacheRelay', () => {
       const result = await relay.publishEvent(sampleEvent);
 
       expect(result).toBe(false);
+    });
+
+    it('should enforce the storage limit after a save when storageMaxSize is set', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cacheStrategy: 'FIFO',
+      });
+
+      await boundedRelay.publishEvent(sampleEvent);
+
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO');
+    });
+
+    it('should not enforce the storage limit when storageMaxSize is unset', async () => {
+      await relay.publishEvent(sampleEvent);
+
+      expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
+    });
+
+    it('should not let an enforceLimit failure affect the save or notification', async () => {
+      (mockStorage.enforceLimit as Mock).mockRejectedValueOnce(new Error('evict boom'));
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, { storageMaxSize: 1 });
+      const eventHandler = vi.fn();
+      boundedRelay.on('event', eventHandler);
+      await boundedRelay.subscribe('sub1', [{ kinds: [1] }]);
+      eventHandler.mockClear();
+
+      const result = await boundedRelay.publishEvent(sampleEvent);
+
+      // The save succeeded and the local subscriber was notified despite the
+      // eviction failure.
+      expect(result).toBe(true);
+      expect(eventHandler).toHaveBeenCalledWith(sampleEvent);
     });
   });
 

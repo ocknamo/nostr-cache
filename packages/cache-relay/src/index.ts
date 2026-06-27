@@ -15,7 +15,7 @@ import { EventValidator } from './event/event-validator.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
 // Storage
-import { StorageAdapter } from './storage/storage-adapter.js';
+import { CacheStrategy, StorageAdapter } from './storage/storage-adapter.js';
 
 // Transport
 import { TransportAdapter } from './transport/transport-adapter.js';
@@ -36,6 +36,7 @@ export {
   EventValidator,
   // Storage
   StorageAdapter,
+  CacheStrategy,
   DexieStorage,
   // Transport
   TransportAdapter,

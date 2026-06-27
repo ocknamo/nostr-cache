@@ -1,3 +1,4 @@
+import { logger } from '@nostr-cache/shared';
 import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
@@ -682,13 +683,63 @@ describe('DexieStorage', () => {
     });
   });
 
-  describe('deleteExpired', () => {
-    const eventAt = (id: string, created_at: number): NostrEvent => ({
-      ...mockEvent,
-      id,
-      created_at,
+  const eventAt = (id: string, created_at: number): NostrEvent => ({
+    ...mockEvent,
+    id,
+    created_at,
+  });
+
+  describe('enforceLimit (storageMaxSize / cacheStrategy)', () => {
+    it('should not evict while at or under maxSize', async () => {
+      await storage.saveEvent(eventAt('a', 1));
+      await storage.saveEvent(eventAt('b', 2));
+      await storage.saveEvent(eventAt('c', 3));
+
+      const removed = await storage.enforceLimit(3);
+
+      expect(removed).toBe(0);
+      expect(await storage.count()).toBe(3);
     });
 
+    it('should evict the oldest events (FIFO) when exceeding maxSize', async () => {
+      await storage.saveEvent(eventAt('oldest', 100));
+      await storage.saveEvent(eventAt('middle', 200));
+      await storage.saveEvent(eventAt('newest', 300));
+
+      const removed = await storage.enforceLimit(2);
+
+      expect(removed).toBe(1);
+      expect(await storage.count()).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['middle', 'newest']);
+    });
+
+    it('should be a no-op for non-positive maxSize', async () => {
+      await storage.saveEvent(eventAt('a', 1));
+      await storage.saveEvent(eventAt('b', 2));
+
+      expect(await storage.enforceLimit(0)).toBe(0);
+      expect(await storage.enforceLimit(-5)).toBe(0);
+      expect(await storage.count()).toBe(2);
+    });
+
+    it('should fall back to FIFO (with a warning) for LRU/LFU strategies', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      await storage.saveEvent(eventAt('oldest', 10));
+      await storage.saveEvent(eventAt('newest', 20));
+
+      const removed = await storage.enforceLimit(1, 'LRU');
+
+      expect(removed).toBe(1);
+      expect(await storage.count()).toBe(1);
+      const remaining = await storage.getEvents([{ kinds: [1] }]);
+      expect(remaining[0].id).toBe('newest');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('deleteExpired', () => {
     it('should delete only events strictly older than the threshold', async () => {
       await storage.saveEvent(eventAt('old', 100));
       await storage.saveEvent(eventAt('boundary', 200));
