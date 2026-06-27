@@ -19,6 +19,7 @@ describe('NostrCacheRelay', () => {
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(0),
+    deleteExpired: vi.fn().mockResolvedValue(0),
   };
 
   // Mock transport adapter
@@ -192,6 +193,29 @@ describe('NostrCacheRelay', () => {
 
       expect(eoseHandler).toHaveBeenCalledWith('sub1');
     });
+
+    it('should cap replayed events to the newest maxEventsPerRequest', async () => {
+      const cappedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        maxEventsPerRequest: 2,
+      });
+      const events = [
+        { ...sampleEvent, id: 'event-old', created_at: 100 },
+        { ...sampleEvent, id: 'event-newest', created_at: 500 },
+        { ...sampleEvent, id: 'event-mid', created_at: 300 },
+        { ...sampleEvent, id: 'event-second', created_at: 400 },
+      ];
+      (mockStorage.getEvents as Mock).mockResolvedValueOnce(events);
+      const eventHandler = vi.fn();
+      const eoseHandler = vi.fn();
+      cappedRelay.on('event', eventHandler);
+      cappedRelay.on('eose', eoseHandler);
+
+      await cappedRelay.subscribe('sub1', [sampleFilter]);
+
+      const replayedIds = eventHandler.mock.calls.map(([event]) => (event as NostrEvent).id);
+      expect(replayedIds).toEqual(['event-newest', 'event-second']);
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
   });
 
   describe('unsubscribe', () => {
@@ -327,6 +351,61 @@ describe('NostrCacheRelay', () => {
 
       // start() is idempotent (guards its own timer), so repeated connects are safe
       expect(startSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('ttl background sweep', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should not sweep when ttl is not configured', async () => {
+      await relay.connect();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(mockStorage.deleteExpired).not.toHaveBeenCalled();
+    });
+
+    it('should purge expired events from storage on connect and on the interval', async () => {
+      const ttlRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        ttl: 100,
+        ttlSweepInterval: 30,
+      });
+
+      await ttlRelay.connect();
+      // Immediate sweep on start, flushed by the async timer helper
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockStorage.deleteExpired).toHaveBeenCalledTimes(1);
+
+      // Subsequent sweeps run on the configured interval
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mockStorage.deleteExpired).toHaveBeenCalledTimes(2);
+
+      // Each sweep deletes everything older than now - ttl
+      const now = Math.floor(Date.now() / 1000);
+      const [[threshold]] = (mockStorage.deleteExpired as Mock).mock.calls;
+      expect(threshold).toBeLessThanOrEqual(now - 100);
+
+      await ttlRelay.disconnect();
+    });
+
+    it('should stop sweeping after disconnect', async () => {
+      const ttlRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        ttl: 100,
+        ttlSweepInterval: 30,
+      });
+
+      await ttlRelay.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      await ttlRelay.disconnect();
+      (mockStorage.deleteExpired as Mock).mockClear();
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(mockStorage.deleteExpired).not.toHaveBeenCalled();
     });
   });
 });

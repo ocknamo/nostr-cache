@@ -22,6 +22,7 @@ import {
 import { EventHandler } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { capEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
 /**
@@ -41,11 +42,13 @@ export class MessageHandler {
    * @param storage Storage adapter
    * @param subscriptionManager Subscription manager
    * @param maxSubscriptions Maximum number of subscriptions per client
+   * @param maxEventsPerRequest Maximum number of stored events returned per REQ
    */
   constructor(
     storage: StorageAdapter,
     subscriptionManager: SubscriptionManager,
-    private maxSubscriptions = 20
+    private maxSubscriptions = 20,
+    private maxEventsPerRequest = 500
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -234,14 +237,25 @@ export class MessageHandler {
 
       // 既存の一致するイベントの取得と送信
       try {
-        // 各フィルタに一致するイベントを取得
+        // 各フィルタに一致するイベントを取得（TTL の期限切れは
+        // バックグラウンドのスイープで削除されるため、ここでは絞り込まない）
         const events = await this.storage.getEvents(filters);
+
+        // リレーが一度に返すイベント数の上限を適用。上限超過時は NIP-01 の
+        // limit セマンティクスに合わせ、新しい順（created_at 降順）に N 件残す
+        const limitedEvents = capEvents(events, this.maxEventsPerRequest);
 
         // イベントをクライアントに送信
         let eventCount = 0;
-        for (const event of events) {
+        for (const event of limitedEvents) {
           this.sendEvent(clientId, subscriptionId, event);
           eventCount++;
+        }
+
+        if (events.length > limitedEvents.length) {
+          logger.info(
+            `Subscription ${subscriptionId} truncated to ${this.maxEventsPerRequest} events (matched ${events.length})`
+          );
         }
 
         logger.info(`Sent ${eventCount} events for subscription ${subscriptionId}`);
