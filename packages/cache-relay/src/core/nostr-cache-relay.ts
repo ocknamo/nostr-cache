@@ -16,6 +16,7 @@ import type {
   RelayEventHandler,
 } from '@nostr-cache/shared';
 import { EventValidator } from '../event/event-validator.js';
+import { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { MessageHandler } from './message-handler.js';
@@ -72,18 +73,26 @@ export interface NostrRelayOptions {
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
 
   /**
-   * lazyValidateInterval
-   * Validate interval in seconds
-   * 未実装
+   * Interval in seconds between background validation passes when
+   * `validateEventsType` is `'LAZY'`. Defaults to 60.
    */
   lazyValidateInterval?: number;
 
   /**
-   * lazyValidateBachSize
-   * Number of events to process at one time
-   * 未実装
+   * Number of events validated per background pass when `validateEventsType`
+   * is `'LAZY'`. Defaults to 100.
+   *
+   * @deprecated Misspelled. Use {@link lazyValidateBatchSize} instead; this
+   *   alias is kept for backward compatibility and will be removed.
    */
   lazyValidateBachSize?: number;
+
+  /**
+   * Number of events validated per background pass when `validateEventsType`
+   * is `'LAZY'`. Defaults to 100. Supersedes the misspelled
+   * {@link lazyValidateBachSize}.
+   */
+  lazyValidateBatchSize?: number;
 
   /**
    * Port for WebSocket server (Node.js only)
@@ -102,6 +111,8 @@ export class NostrCacheRelay {
   private validator: EventValidator;
   private messageHandler: MessageHandler;
   private subscriptionManager: SubscriptionManager;
+  /** Background validator, present only when `validateEventsType` is `'LAZY'`. */
+  private lazyValidator?: LazyValidator;
   private eventListeners: Map<
     string,
     Array<
@@ -135,6 +146,15 @@ export class NostrCacheRelay {
     this.storage = storage;
     this.transport = transport;
     this.validator = new EventValidator();
+
+    // 遅延バリデーション有効時はバックグラウンド検証器を用意
+    if (this.options.validateEventsType === 'LAZY') {
+      this.lazyValidator = new LazyValidator(storage, {
+        intervalSeconds: this.options.lazyValidateInterval,
+        // 正式名を優先し、タイポの旧名はフォールバックとして許容
+        batchSize: this.options.lazyValidateBatchSize ?? this.options.lazyValidateBachSize,
+      });
+    }
 
     // 初期化
     this.subscriptionManager = new SubscriptionManager();
@@ -190,6 +210,8 @@ export class NostrCacheRelay {
    */
   async connect(): Promise<void> {
     await this.transport.start();
+    // 遅延バリデーションの定期実行を開始
+    this.lazyValidator?.start();
     this.emit('connect');
   }
 
@@ -200,6 +222,8 @@ export class NostrCacheRelay {
    */
   async disconnect(): Promise<void> {
     await this.transport.stop();
+    // 遅延バリデーションの定期実行を停止
+    this.lazyValidator?.stop();
     this.emit('disconnect');
   }
 
@@ -221,8 +245,12 @@ export class NostrCacheRelay {
     // Save the event to storage
     const saved = await this.storage.saveEvent(event);
 
-    // Notify local subscribers whose filters match the published event
     if (saved) {
+      // 'LAZY' モードでは保存後にバックグラウンド検証へ回す。
+      // 不正なイベントは後続の検証パスでストレージから削除される
+      this.lazyValidator?.enqueue(event);
+
+      // Notify local subscribers whose filters match the published event
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
       if (matches.has(LOCAL_CLIENT_ID)) {
         this.emit('event', event);
