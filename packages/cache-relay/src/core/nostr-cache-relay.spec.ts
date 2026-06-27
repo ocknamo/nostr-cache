@@ -147,6 +147,22 @@ describe('NostrCacheRelay', () => {
 
       expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
     });
+
+    it('should not let an enforceLimit failure affect the save or notification', async () => {
+      (mockStorage.enforceLimit as Mock).mockRejectedValueOnce(new Error('evict boom'));
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, { storageMaxSize: 1 });
+      const eventHandler = vi.fn();
+      boundedRelay.on('event', eventHandler);
+      await boundedRelay.subscribe('sub1', [{ kinds: [1] }]);
+      eventHandler.mockClear();
+
+      const result = await boundedRelay.publishEvent(sampleEvent);
+
+      // The save succeeded and the local subscriber was notified despite the
+      // eviction failure.
+      expect(result).toBe(true);
+      expect(eventHandler).toHaveBeenCalledWith(sampleEvent);
+    });
   });
 
   describe('publishEvent notifications', () => {

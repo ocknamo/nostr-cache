@@ -109,7 +109,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         content: event.content,
         sig: event.sig,
       });
-
       return true;
     } catch (error) {
       logger.error(

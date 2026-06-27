@@ -321,7 +321,13 @@ export class NostrCacheRelay {
     if (maxSize === undefined || maxSize <= 0) {
       return;
     }
-    await this.storage.enforceLimit?.(maxSize, this.options.cacheStrategy);
+    // Eviction is a post-save side effect; never let its failure affect the
+    // originating save / notification.
+    try {
+      await this.storage.enforceLimit?.(maxSize, this.options.cacheStrategy);
+    } catch (error) {
+      logger.error('Failed to enforce storage limit:', error);
+    }
   }
 
   /**

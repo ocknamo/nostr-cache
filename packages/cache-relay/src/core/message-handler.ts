@@ -199,9 +199,14 @@ export class MessageHandler {
         this.lazyValidator?.enqueue(event);
       }
 
-      // 保存されたイベントについてはストレージ上限の退避を行う
+      // 保存されたイベントについてはストレージ上限の退避を行う。
+      // 退避は保存後の付随処理であり、失敗してもレスポンス/配信に影響させない
       if (stored && this.storageMaxSize !== undefined && this.storageMaxSize > 0) {
-        await this.storage.enforceLimit?.(this.storageMaxSize, this.cacheStrategy);
+        try {
+          await this.storage.enforceLimit?.(this.storageMaxSize, this.cacheStrategy);
+        } catch (error) {
+          logger.error('Failed to enforce storage limit:', error);
+        }
       }
 
       // マッチするサブスクリプションへのブロードキャスト
