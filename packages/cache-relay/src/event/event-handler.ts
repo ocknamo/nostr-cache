@@ -10,6 +10,9 @@ import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventValidator } from './event-validator.js';
 
+/** How events are validated as they enter the relay. */
+export type ValidateEventsType = 'NONE' | 'IMMEDIATELY' | 'LAZY';
+
 interface Subscription {
   clientId: string;
   id: string;
@@ -29,10 +32,14 @@ export class EventHandler {
    *
    * @param storage Storage adapter
    * @param subscriptionManager Subscription manager
+   * @param validateEventsType How events are validated. Only `IMMEDIATELY`
+   *   validates synchronously here; `NONE` / `LAZY` skip (LAZY validation is
+   *   performed later by the background validator).
    */
   constructor(
     private storage: StorageAdapter,
-    private subscriptionManager: SubscriptionManager
+    private subscriptionManager: SubscriptionManager,
+    private validateEventsType: ValidateEventsType = 'IMMEDIATELY'
   ) {
     this.validator = new EventValidator();
   }
@@ -46,20 +53,35 @@ export class EventHandler {
   async handleEvent(event: NostrEvent): Promise<{
     success: boolean;
     message: string;
+    /** Whether the event was persisted (false for ephemeral / not-stored). */
+    stored: boolean;
     matches?: Map<string, Subscription[]>;
   }> {
-    // Validate the event
-    try {
-      if (!(await this.validator.validate(event))) {
-        logger.info('Event validation failed');
-        return { success: false, message: 'invalid: event validation failed' };
+    // Decide whether to validate synchronously now.
+    // - IMMEDIATELY: always validate up front.
+    // - NONE: never validate.
+    // - LAZY: defer validation to the background pass — but only works for
+    //   events we actually store (invalid ones are deleted later). Ephemeral
+    //   events are never persisted, so there is nothing to delete after the
+    //   fact; they must be validated synchronously or they would be accepted
+    //   and broadcast without ever being checked.
+    const mustValidateNow =
+      this.validateEventsType === 'IMMEDIATELY' ||
+      (this.validateEventsType === 'LAZY' && this.isEphemeralEvent(event));
+    if (mustValidateNow) {
+      try {
+        if (!(await this.validator.validate(event))) {
+          logger.info('Event validation failed');
+          return { success: false, stored: false, message: 'invalid: event validation failed' };
+        }
+      } catch (error) {
+        logger.info('Validation error:', error);
+        return {
+          success: false,
+          stored: false,
+          message: 'invalid: validation error',
+        };
       }
-    } catch (error) {
-      logger.info('Validation error:', error);
-      return {
-        success: false,
-        message: 'invalid: validation error',
-      };
     }
 
     // イベントの種類に応じた処理
@@ -67,11 +89,12 @@ export class EventHandler {
       try {
         // 永続化せずにサブスクリプションマッチングのみ
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-        return { success: true, message: 'success', matches };
+        return { success: true, stored: false, message: 'success', matches };
       } catch (error) {
         logger.info('Subscription matching error:', error);
         return {
           success: false,
+          stored: false,
           message: 'error: subscription matching failed',
         };
       }
@@ -79,13 +102,14 @@ export class EventHandler {
       try {
         // Replaceableイベントの処理
         // 同じpubkeyとkindの組み合わせに対して最新のものだけ保存
-        await this.handleReplaceableEvent(event);
+        const stored = await this.handleReplaceableEvent(event);
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-        return { success: true, message: 'success', matches };
+        return { success: true, stored, message: 'success', matches };
       } catch (error) {
         logger.info('Replaceable event handling error:', error);
         return {
           success: false,
+          stored: false,
           message: 'error: replaceable event handling failed',
         };
       }
@@ -93,13 +117,14 @@ export class EventHandler {
       try {
         // Addressableイベントの処理
         // 同じpubkey、kind、dタグ値の組み合わせに対して最新のものだけ保存
-        await this.handleAddressableEvent(event);
+        const stored = await this.handleAddressableEvent(event);
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-        return { success: true, message: 'success', matches };
+        return { success: true, stored, message: 'success', matches };
       } catch (error) {
         logger.info('Addressable event handling error:', error);
         return {
           success: false,
+          stored: false,
           message: 'error: addressable event handling failed',
         };
       }
@@ -110,12 +135,13 @@ export class EventHandler {
       const saved = await this.storage.saveEvent(event);
       if (!saved) {
         logger.info('Event storage failed');
-        return { success: false, message: 'error: failed to save event' };
+        return { success: false, stored: false, message: 'error: failed to save event' };
       }
     } catch (error) {
       logger.info('Storage error:', error);
       return {
         success: false,
+        stored: false,
         message: 'error: storage operation failed',
       };
     }
@@ -123,11 +149,13 @@ export class EventHandler {
     // Find matching subscriptions
     try {
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-      return { success: true, message: 'success', matches };
+      return { success: true, stored: true, message: 'success', matches };
     } catch (error) {
       logger.info('Subscription matching error:', error);
+      // The event was persisted above, but matching failed → reported as error.
       return {
         success: false,
+        stored: true,
         message: 'error: subscription matching failed',
       };
     }

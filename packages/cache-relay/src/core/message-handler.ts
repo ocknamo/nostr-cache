@@ -19,8 +19,9 @@ import {
   type ReqMessage,
   messageToWire,
 } from '@nostr-cache/shared';
-import { EventHandler } from '../event/event-handler.js';
+import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
+import type { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { capEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
@@ -43,17 +44,32 @@ export class MessageHandler {
    * @param subscriptionManager Subscription manager
    * @param maxSubscriptions Maximum number of subscriptions per client
    * @param maxEventsPerRequest Maximum number of stored events returned per REQ
+   * @param validateEventsType How incoming EVENTs are validated. `IMMEDIATELY`
+   *   rejects invalid events synchronously; `NONE` skips validation; `LAZY`
+   *   accepts and stores immediately, then validates in the background.
+   * @param lazyValidator Background validator used to enqueue stored events
+   *   when `validateEventsType` is `LAZY`
    */
   constructor(
     storage: StorageAdapter,
     subscriptionManager: SubscriptionManager,
     private maxSubscriptions = 20,
-    private maxEventsPerRequest = 500
+    private maxEventsPerRequest = 500,
+    private validateEventsType: ValidateEventsType = 'IMMEDIATELY',
+    private lazyValidator?: LazyValidator
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
-    this.eventHandler = new EventHandler(storage, subscriptionManager);
+    this.eventHandler = new EventHandler(storage, subscriptionManager, validateEventsType);
     this.eventValidator = new EventValidator();
+
+    // Guard against silent no-validation: LAZY without a validator would accept
+    // and store every event and never validate it.
+    if (validateEventsType === 'LAZY' && !lazyValidator) {
+      logger.warn(
+        "validateEventsType is 'LAZY' but no LazyValidator was provided; events will be accepted without any validation"
+      );
+    }
   }
 
   /**
@@ -152,14 +168,16 @@ export class MessageHandler {
   private async handleEventMessage(clientId: string, message: EventMessage): Promise<void> {
     const event = message.event;
 
-    // Validate event format
-    if (!(await this.validateEvent(event))) {
+    // Synchronous validation only in IMMEDIATELY mode. In LAZY the event is
+    // accepted and stored now, then validated by the background pass; in NONE
+    // it is never validated. (EventHandler honours the same mode internally.)
+    if (this.validateEventsType === 'IMMEDIATELY' && !(await this.validateEvent(event))) {
       this.sendOK(clientId, event.id, false, 'invalid: event validation failed');
       return;
     }
 
     try {
-      const { success, message, matches } = await this.eventHandler.handleEvent(event);
+      const { success, stored, message, matches } = await this.eventHandler.handleEvent(event);
 
       if (!success) {
         this.sendOK(clientId, event.id, false, message);
@@ -168,6 +186,13 @@ export class MessageHandler {
 
       // OK レスポンスの送信
       this.sendOK(clientId, event.id, true);
+
+      // LAZY モードでは、実際に保存されたイベントだけをバックグラウンド検証へ回す。
+      // ephemeral など未保存のものは検証しても削除対象がなく、キューを浪費するため除外。
+      // 不正なら後続の検証パスでストレージから削除される
+      if (this.validateEventsType === 'LAZY' && stored) {
+        this.lazyValidator?.enqueue(event);
+      }
 
       // マッチするサブスクリプションへのブロードキャスト
       if (matches) {
