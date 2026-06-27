@@ -96,6 +96,11 @@ const storage = new DexieStorage('NostrCacheRelay', {
 `@nostr-cache/server` では `storageOptions.maxSize` / `storageOptions.cacheStrategy`
 で同じ設定を渡せます。
 
+> **注意:** 上限は**ソフトリミット**です。退避パス（件数確認＋削除）はトランザクション
+> で原子化していますが、`saveEvent` 自体は別コミットのため、並行書き込み下では一時的に
+> `maxSize` を超えることがあります（最終的に収束）。また FIFO は `created_at`（秒精度）
+> 基準で、同値のイベントは主キー（id）順で退避されます（厳密な到着順ではない近似）。
+
 ### ローカル API による購読 / 発行
 
 トランスポート越しのクライアントとは別に、同一プロセス内から直接購読・発行できます。

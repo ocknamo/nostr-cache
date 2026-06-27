@@ -377,6 +377,15 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Uses FIFO (oldest `created_at` first). `LRU` / `LFU` currently fall back to
    * FIFO and emit a one-time warning. Disabled when `maxSize` is not set.
    *
+   * Semantics / caveats:
+   * - This is a **soft limit**. The count and the delete run inside a single
+   *   read-write transaction so a given pass is atomic, but the preceding
+   *   `saveEvent` commits separately, so under heavy concurrent writes the
+   *   store may briefly exceed `maxSize` before converging.
+   * - FIFO is keyed on `created_at` (second precision). Events sharing the same
+   *   `created_at` are evicted in primary-key (id) order, not strict arrival
+   *   order — a deliberate approximation, since no insertion sequence is stored.
+   *
    * @returns Promise resolving to the number of events evicted
    */
   async enforceLimit(): Promise<number> {
@@ -384,31 +393,35 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       return 0;
     }
 
+    const maxSize = this.maxSize;
+
     try {
-      const count = await this.events.count();
-      if (count <= this.maxSize) {
-        return 0;
-      }
+      // Run count + delete atomically so concurrent passes don't over- or
+      // under-evict against a stale count.
+      return await this.transaction('rw', this.events, async () => {
+        const count = await this.events.count();
+        if (count <= maxSize) {
+          return 0;
+        }
 
-      if (this.cacheStrategy !== 'FIFO' && !this.nonFifoStrategyWarned) {
-        logger.warn(
-          `Cache strategy '${this.cacheStrategy}' is not yet implemented; falling back to FIFO eviction`
-        );
-        this.nonFifoStrategyWarned = true;
-      }
+        if (this.cacheStrategy !== 'FIFO' && !this.nonFifoStrategyWarned) {
+          logger.warn(
+            `Cache strategy '${this.cacheStrategy}' is not yet implemented; falling back to FIFO eviction`
+          );
+          this.nonFifoStrategyWarned = true;
+        }
 
-      const excess = count - this.maxSize;
-      // FIFO: evict the oldest events first (by created_at ascending)
-      const idsToEvict = await this.events.orderBy('created_at').limit(excess).primaryKeys();
+        const excess = count - maxSize;
+        // FIFO: evict the oldest events first (by created_at ascending)
+        const idsToEvict = await this.events.orderBy('created_at').limit(excess).primaryKeys();
 
-      if (idsToEvict.length > 0) {
-        await this.events.bulkDelete(idsToEvict);
-        logger.info(
-          `Evicted ${idsToEvict.length} events to respect storageMaxSize ${this.maxSize}`
-        );
-      }
+        if (idsToEvict.length > 0) {
+          await this.events.bulkDelete(idsToEvict);
+          logger.info(`Evicted ${idsToEvict.length} events to respect storageMaxSize ${maxSize}`);
+        }
 
-      return idsToEvict.length;
+        return idsToEvict.length;
+      });
     } catch (error) {
       logger.error(
         `Failed to enforce storage limit: ${error instanceof Error ? error.message : 'Unknown error'}`

@@ -684,15 +684,8 @@ describe('DexieStorage', () => {
   });
 
   describe('storage eviction (storageMaxSize / cacheStrategy)', () => {
-    afterEach(async () => {
-      // Ensure each bounded store is torn down like the default one
-      await storage.clear();
-      await storage.delete();
-      // @ts-ignore - fake-indexeddb types
-      // biome-ignore lint/suspicious/noGlobalAssign: for indexedDB mock
-      indexedDB = new IDBFactory();
-    });
-
+    // Each test reassigns `storage` to a bounded instance; the suite-level
+    // afterEach tears it down, so no extra cleanup is needed here.
     const eventAt = (id: string, created_at: number): NostrEvent => ({
       ...mockEvent,
       id,
