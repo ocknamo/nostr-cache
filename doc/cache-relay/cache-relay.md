@@ -212,14 +212,15 @@ interface NostrRelayOptions {
   // LAZY の 1 回あたり検証件数（デフォルト 100）
   lazyValidateBatchSize?: number;
 
-  // TTL 秒。古いイベントを定期スイープで削除（未指定で無効）
+  // TTL 秒。キャッシュ投入（保存）からの経過時間が超過したイベントを定期スイープで削除
+  // （created_at 基準ではない。未指定で無効）
   ttl?: number;
   // TTL スイープの実行間隔 秒（デフォルト 60）
   ttlSweepInterval?: number;
 
   // 最大保存件数。超過時は relay が保存後に storage.enforceLimit を呼び古い順に退避（未指定で無効）
   storageMaxSize?: number;
-  // 退避戦略（デフォルト FIFO）。現状 FIFO のみ実装で LRU/LFU は FIFO にフォールバック
+  // 退避戦略（デフォルト FIFO）。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
 
   // WebSocket サーバーのポート（Node.js のみ）

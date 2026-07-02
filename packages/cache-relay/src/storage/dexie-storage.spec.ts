@@ -815,17 +815,53 @@ describe('DexieStorage', () => {
   });
 
   describe('deleteExpired', () => {
-    it('should delete only events strictly older than the threshold', async () => {
-      await storage.saveEvent(eventAt('old', 100));
-      await storage.saveEvent(eventAt('boundary', 200));
-      await storage.saveEvent(eventAt('fresh', 300));
+    it('should delete only events cached strictly before the threshold', async () => {
+      const nowSpy = vi.spyOn(Date, 'now');
+      // cached_at はミリ秒、deleteExpired の閾値は秒
+      nowSpy.mockReturnValue(100_000);
+      await storage.saveEvent(eventAt('old', 1));
+      nowSpy.mockReturnValue(200_000);
+      await storage.saveEvent(eventAt('boundary', 2));
+      nowSpy.mockReturnValue(300_000);
+      await storage.saveEvent(eventAt('fresh', 3));
+      nowSpy.mockRestore();
 
       const removed = await storage.deleteExpired(200);
 
-      // 'old' (<200) deleted; 'boundary' (==200) and 'fresh' kept
+      // 'old' (cached before 200s) deleted; 'boundary' (==200s) and 'fresh' kept
       expect(removed).toBe(1);
       const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
       expect(remaining).toEqual(['boundary', 'fresh']);
+    });
+
+    it('should expire by cache insertion time, not created_at', async () => {
+      const nowSpy = vi.spyOn(Date, 'now');
+      // created_at はとうに古いが、たった今キャッシュに入ったイベント
+      nowSpy.mockReturnValue(500_000);
+      await storage.saveEvent(eventAt('old-event-fresh-cache', 1));
+      // created_at は新しいが、キャッシュ投入がずっと前のイベント
+      nowSpy.mockReturnValue(100_000);
+      await storage.saveEvent(eventAt('new-event-stale-cache', 400));
+      nowSpy.mockRestore();
+
+      const removed = await storage.deleteExpired(300);
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id);
+      expect(remaining).toEqual(['old-event-fresh-cache']);
+    });
+
+    it('should refresh the TTL when an event is saved again', async () => {
+      const nowSpy = vi.spyOn(Date, 'now');
+      nowSpy.mockReturnValue(100_000);
+      await storage.saveEvent(eventAt('re-put', 1));
+      // 再 put で cached_at が更新され、期限が数え直しになる
+      nowSpy.mockReturnValue(400_000);
+      await storage.saveEvent(eventAt('re-put', 1));
+      nowSpy.mockRestore();
+
+      expect(await storage.deleteExpired(300)).toBe(0);
+      expect(await storage.count()).toBe(1);
     });
 
     it('should return 0 when nothing is expired', async () => {

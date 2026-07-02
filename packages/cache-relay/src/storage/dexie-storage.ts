@@ -18,6 +18,7 @@ interface NostrEventTable {
   sig: string;
   last_accessed_at: number; // 最終アクセス時刻（ミリ秒）。LRU 退避に使用
   access_count: number; // 読み出し回数。LFU 退避に使用
+  cached_at: number; // キャッシュ投入（保存）時刻（ミリ秒）。保存時刻ベース TTL に使用
 }
 
 /**
@@ -33,7 +34,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
 
     // Define database schema with improved index definitions.
     // last_accessed_at / [access_count+last_accessed_at] は LRU / LFU 退避用の
-    // アクセスメタデータインデックス
+    // アクセスメタデータインデックス、cached_at は保存時刻ベース TTL 用の
+    // スイープインデックス（いずれも未リリースのため v1 に直接定義）
     this.version(1).stores({
       events: `
         id,
@@ -46,7 +48,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         [pubkey+created_at],
         [pubkey+kind+created_at],
         last_accessed_at,
-        [access_count+last_accessed_at]
+        [access_count+last_accessed_at],
+        cached_at
       `,
     });
   }
@@ -103,6 +106,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
 
   async saveEvent(event: NostrEvent): Promise<boolean> {
     try {
+      const now = Date.now();
       await this.events.put({
         id: event.id,
         pubkey: event.pubkey,
@@ -115,9 +119,11 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         // 挿入も1回のアクセスとみなす（access_count: 1）。これにより LFU で
         // 挿入直後のイベントが「未読イベントより不利」にならない（既読 >=2 の
         // イベントよりは退避されやすい、標準的な LFU の挙動は残る）。
-        // 置換可能イベント等の再 put ではメタデータがリセットされ、頻度履歴を失う
-        last_accessed_at: Date.now(),
+        // 置換可能イベント等の再 put ではメタデータがリセットされ、頻度履歴を
+        // 失い、cached_at も更新される（TTL が保存し直しから数え直しになる）
+        last_accessed_at: now,
         access_count: 1,
+        cached_at: now,
       });
       return true;
     } catch (error) {
@@ -376,17 +382,24 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
-   * Delete all events whose `created_at` is strictly older than `olderThan`.
+   * Delete all events cached (saved to storage) strictly before `olderThan`.
    *
-   * Uses the `created_at` index for an efficient bulk range delete, backing
-   * the TTL background sweep.
+   * Expiry is keyed on `cached_at` — the time the event was written into this
+   * cache — not on the event's own `created_at`, so an old event fetched
+   * recently still gets a full TTL. Uses the `cached_at` index for an
+   * efficient bulk range delete, backing the TTL background sweep.
    *
-   * @param olderThan Unix timestamp (seconds)
+   * @param olderThan Unix timestamp (seconds); events cached strictly before
+   *   this moment are deleted
    * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteExpired(olderThan: number): Promise<number> {
     try {
-      return await this.events.where('created_at').below(olderThan).delete();
+      // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
+      return await this.events
+        .where('cached_at')
+        .below(olderThan * 1000)
+        .delete();
     } catch (error) {
       logger.error(
         `Failed to delete expired events: ${
@@ -430,9 +443,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    *   read-write transaction so a given pass is atomic, but the preceding
    *   `saveEvent` commits separately, so under heavy concurrent writes the
    *   store may briefly exceed `maxSize` before converging.
-   * - FIFO is keyed on `created_at` (second precision). Events sharing the same
-   *   `created_at` are evicted in primary-key (id) order, not strict arrival
-   *   order — a deliberate approximation, since no insertion sequence is stored.
+   * - FIFO is keyed on `created_at` (second precision), i.e. "oldest event
+   *   first" rather than strict arrival order (`cached_at`) — a deliberate
+   *   choice. Events sharing the same `created_at` are evicted in primary-key
+   *   (id) order.
    *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)

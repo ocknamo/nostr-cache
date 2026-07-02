@@ -144,9 +144,9 @@ relay.unsubscribe('sub1');
 | `port` | `number` | Node.js の WebSocket サーバ用 |
 | `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
 | `storageMaxSize` | `number` | 実装済み。保存後に relay が `storage.enforceLimit()` を呼び、この件数を超えたら古い順に退避（未指定で無効。`enforceLimit` 対応ストレージが必要） |
-| `ttl` | `number` | 実装済み。`created_at` が `now - ttl` より古いイベントを**バックグラウンドの定期スイープ**でストレージから削除（読み出し時フィルタではない）。最大で `ttlSweepInterval` 秒ぶん古いイベントを返しうる。未指定で無効。`deleteExpired` 対応ストレージ（`DexieStorage`）が必要 |
+| `ttl` | `number` | 実装済み。キャッシュ投入（保存）時刻 `cached_at` が `now - ttl` より古いイベントを**バックグラウンドの定期スイープ**でストレージから削除（`created_at` 基準ではなく、読み出し時フィルタでもない）。最大で `ttlSweepInterval` 秒ぶん期限切れイベントを返しうる。未指定で無効。`deleteExpired` 対応ストレージ（`DexieStorage`）が必要 |
 | `ttlSweepInterval` | `number` | 実装済み。TTL スイープの実行間隔（秒、デフォルト 60） |
-| `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | 実装済み（`storageMaxSize` の退避戦略、デフォルト `FIFO`）。現状 `FIFO` のみ実装（`LRU`/`LFU` は FIFO にフォールバック・警告） |
+| `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | 実装済み（`storageMaxSize` の退避戦略、デフォルト `FIFO`）。`FIFO`=作成が古い順、`LRU`=読み出しが古い順、`LFU`=読み出し頻度が低い順（同数なら古い順） |
 | `lazyValidateInterval` | `number` | 実装済み。`LAZY` 時のバックグラウンド検証の実行間隔（秒、デフォルト 60） |
 | `lazyValidateBatchSize` | `number` | 実装済み。`LAZY` 時の 1 回の検証で処理するイベント数（デフォルト 100） |
 

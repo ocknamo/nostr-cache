@@ -93,7 +93,8 @@ interface NostrRelayOptions {
   maxSubscriptions?: number;        // クライアントあたりの最大購読数 (default: 20)
   maxEventsPerRequest?: number;     // REQ 応答 / subscribe 再生で返す最大件数 (default: 500)。超過時は新しい順に N 件
   storageMaxSize?: number;          // 最大保存件数。超過時は relay が storage.enforceLimit を呼び cacheStrategy に従って退避（未指定で無効）
-  ttl?: number;                     // TTL 秒。古いイベントを定期スイープで削除（未指定で無効。deleteExpired 対応ストレージが必要）
+  ttl?: number;                     // TTL 秒。キャッシュ投入（保存）からの経過時間が超過したイベントを定期スイープで削除
+                                    // （created_at 基準ではない。未指定で無効。deleteExpired 対応ストレージが必要）
   ttlSweepInterval?: number;        // TTL スイープの実行間隔 秒 (default: 60)
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // 退避戦略 (default: 'FIFO')。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順（同数なら古い順）
                                     // ※ 挿入も1回のアクセスとして数える。置換可能イベントは上書きのたびに
