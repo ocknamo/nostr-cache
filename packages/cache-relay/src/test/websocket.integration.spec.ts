@@ -6,7 +6,7 @@
 
 import { type NostrEvent, NostrMessageType, type NostrWireMessage } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { IntegrationTestBase, createTestEvent } from './utils/base.integration';
+import { IntegrationTestBase, createTestEvent } from './utils/base.integration.js';
 
 describe('WebSocket Integration', () => {
   let testBase: IntegrationTestBase;

@@ -3,10 +3,8 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "target": "ES2020",
-    "module": "ESNext",
-    "esModuleInterop": true,
-    "composite": true
+    "composite": true,
+    "types": ["node"]
   },
   "include": [
     "src/**/*"
