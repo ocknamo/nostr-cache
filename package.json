@@ -5,15 +5,14 @@
   "workspaces": [
     "packages/shared",
     "packages/cache-relay",
-    "packages/server",
-    "packages/web-client"
+    "packages/server"
   ],
   "engines": {
     "node": "22.x"
   },
   "scripts": {
     "build": "npm run build --workspaces",
-    "typecheck": "npm run typecheck --workspace=packages/shared --workspace=packages/cache-relay --workspace=packages/server",
+    "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces",
     "test:server": "npm run test -w packages/server",
     "test:cache-relay": "npm run test -w packages/cache-relay",
@@ -23,15 +22,12 @@
     "lint:check": "npm run lint:check --workspaces --if-present",
     "format:check": "npm run format:check --workspaces",
     "build:cache-relay": "npm run build --workspace=packages/cache-relay",
-    "build:web-client": "npm run build --workspace=packages/web-client",
     "build:server": "npm run build --workspace=packages/server",
-    "dev:web-client": "npm run start --workspace=packages/web-client",
     "dev:server": "npm run dev --workspace=packages/server",
     "start:server": "npm run start --workspace=packages/server"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "eslint": "^8.0.0",
+    "typescript": "^6.0.0",
     "@biomejs/biome": "^1.9.4"
   }
 }
