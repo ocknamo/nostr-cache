@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"for(const p of ['dist','tsconfig.tsbuildinfo'])fs.rmSync(p,{recursive:true,force:true})\" && tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
