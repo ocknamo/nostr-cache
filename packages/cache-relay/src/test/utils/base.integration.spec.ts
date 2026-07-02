@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { IntegrationTestBase } from './base.integration';
+import { IntegrationTestBase } from './base.integration.js';
 
 /**
  * Simple test to prevent "empty test suite" error

@@ -1,6 +1,6 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import Dexie from 'dexie';
+import { Dexie } from 'dexie';
 import { eventMatchesFilter } from '../utils/filter-utils.js';
 import type { CacheStrategy, StorageAdapter } from './storage-adapter.js';
 
