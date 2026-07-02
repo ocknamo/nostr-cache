@@ -86,13 +86,19 @@
     });
   }
 
-  async function post(content: string) {
+  async function post(content: string): Promise<boolean> {
     if (!connection.isConnected) {
       pushNotice('リレーに接続していないため投稿できません');
-      return;
+      return false;
     }
-    const event = await signer.signTextNote(content);
-    connection.publish(event);
+    try {
+      const event = await signer.signTextNote(content);
+      connection.publish(event);
+      return true;
+    } catch (error) {
+      pushNotice(`投稿に失敗しました: ${(error as Error).message}`);
+      return false;
+    }
   }
 
   onMount(() => {

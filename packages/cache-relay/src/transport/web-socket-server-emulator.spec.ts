@@ -95,6 +95,26 @@ describe('WebSocketServerEmulator', () => {
       ws.close();
     });
 
+    it('should answer a client that sends synchronously from its open handler', async () => {
+      await emulator.start();
+      // Echo every message straight back through the emulator.
+      emulator.onMessage((clientId, message) => {
+        emulator.send(clientId, message);
+      });
+
+      const echoed = await new Promise<NostrWireMessage>((resolve) => {
+        const ws = new WebSocket(defaultUrl);
+        ws.onmessage = (event) => resolve(JSON.parse(event.data));
+        ws.onopen = () => {
+          // The relay must already know this connection: a synchronous
+          // response here must not be dropped.
+          ws.send(JSON.stringify(['NOTICE', 'sync send']));
+        };
+      });
+
+      expect(echoed).toEqual(['NOTICE', 'sync send']);
+    });
+
     it('should trigger connect callback with the same clientId used for messages', async () => {
       const connectedIds: string[] = [];
       emulator.onConnect((clientId) => connectedIds.push(clientId));
@@ -221,6 +241,24 @@ describe('WebSocketServerEmulator', () => {
 
       expect(disconnectedClientId).toBeDefined();
       expect(disconnectedClientId).toBe(connectedClientId);
+    });
+
+    it('should cancel sockets that are still connecting when stopped', async () => {
+      const connected: string[] = [];
+      emulator.onConnect((clientId) => connected.push(clientId));
+      await emulator.start();
+
+      // Create the socket but stop the emulator before its open timer fires.
+      const ws = new WebSocket(defaultUrl);
+      await emulator.stop();
+
+      // Give the (cancelled) open timer a chance to run.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(connected).toEqual([]);
+      expect(emulator.getConnectionCount()).toBe(0);
+      expect(ws.readyState).toBe(WebSocket.CLOSED);
+      expect(globalThis.WebSocket).toBe(originalWebSocket);
     });
 
     it('should fire disconnect when the client closes the socket', async () => {

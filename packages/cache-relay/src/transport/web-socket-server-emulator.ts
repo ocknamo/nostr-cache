@@ -82,14 +82,16 @@ class EmulatedWebSocket extends EventTarget {
     this.hooks = hooks;
 
     // Open asynchronously, mirroring real WebSocket semantics (handlers are
-    // attached after the constructor returns).
+    // attached after the constructor returns). The relay side registers the
+    // connection first (hooks.onOpen) so that a client sending synchronously
+    // from its own open handler can already be answered.
     setTimeout(() => {
       if (this.readyState !== EmulatedWebSocket.CONNECTING) {
         return;
       }
       this.readyState = EmulatedWebSocket.OPEN;
-      this.dispatchEvent(new Event('open'));
       this.hooks.onOpen(this);
+      this.dispatchEvent(new Event('open'));
     }, 0);
   }
 
@@ -146,7 +148,13 @@ class EmulatedWebSocket extends EventTarget {
       return;
     }
     this.readyState = EmulatedWebSocket.CLOSED;
-    this.dispatchEvent(new Event('close'));
+    // CloseEvent is not available in every runtime (e.g. older Node.js);
+    // fall back to a plain Event there.
+    this.dispatchEvent(
+      typeof CloseEvent !== 'undefined'
+        ? new CloseEvent('close', { code: 1000, wasClean: true })
+        : new Event('close')
+    );
     this.hooks.onClose(this);
   }
 
@@ -200,6 +208,8 @@ class EmulatedWebSocket extends EventTarget {
 export class WebSocketServerEmulator implements TransportAdapter {
   private originalWebSocket: typeof WebSocket | undefined;
   private sockets = new Map<string, EmulatedWebSocket>();
+  /** Every created socket, including ones still CONNECTING (not yet in `sockets`) */
+  private allSockets = new Set<EmulatedWebSocket>();
   private targetUrls: Set<string>;
   private messageCallback?: (clientId: string, message: NostrWireMessage) => void;
   private connectCallback?: (clientId: string) => void;
@@ -254,9 +264,12 @@ export class WebSocketServerEmulator implements TransportAdapter {
    * Closes all emulated connections and restores the original WebSocket
    */
   async stop(): Promise<void> {
-    for (const socket of [...this.sockets.values()]) {
+    // Close every created socket, including ones still CONNECTING (their
+    // pending open timer then becomes a no-op).
+    for (const socket of [...this.allSockets]) {
       socket.close();
     }
+    this.allSockets.clear();
     this.sockets.clear();
     if (this.originalWebSocket) {
       globalThis.WebSocket = this.originalWebSocket;
@@ -313,26 +326,29 @@ export class WebSocketServerEmulator implements TransportAdapter {
    */
   private createEmulatedSocket(url: string): EmulatedWebSocket {
     const clientId = generateClientId();
-    return new EmulatedWebSocket(url, {
-      onOpen: (socket) => {
-        this.sockets.set(clientId, socket);
+    const socket = new EmulatedWebSocket(url, {
+      onOpen: (opened) => {
+        this.sockets.set(clientId, opened);
         this.connectCallback?.(clientId);
       },
-      onSend: (socket, data) => {
+      onSend: (sender, data) => {
         let message: NostrWireMessage;
         try {
           message = JSON.parse(data) as NostrWireMessage;
         } catch {
-          socket.emitError();
+          sender.emitError();
           return;
         }
         this.messageCallback?.(clientId, message);
       },
-      onClose: () => {
+      onClose: (closed) => {
+        this.allSockets.delete(closed);
         if (this.sockets.delete(clientId)) {
           this.disconnectCallback?.(clientId);
         }
       },
     });
+    this.allSockets.add(socket);
+    return socket;
   }
 }

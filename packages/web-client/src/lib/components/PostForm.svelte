@@ -1,6 +1,7 @@
 <script lang="ts">
   interface Props {
-    onPost: (content: string) => Promise<void>;
+    /** Returns true when the note was accepted for publishing */
+    onPost: (content: string) => Promise<boolean>;
     disabled?: boolean;
   }
 
@@ -17,8 +18,9 @@
     }
     posting = true;
     try {
-      await onPost(trimmed);
-      content = '';
+      if (await onPost(trimmed)) {
+        content = '';
+      }
     } finally {
       posting = false;
     }
