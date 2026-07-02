@@ -8,8 +8,10 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
  * Cache eviction strategy.
  *
  * - `FIFO`: evict the oldest events first (by `created_at`).
- * - `LRU` / `LFU`: planned; currently fall back to `FIFO` until per-event
- *   access metadata (read tracking) is added.
+ * - `LRU`: evict the least recently read events first (reads are tracked
+ *   per event on `getEvents`; insertion also counts as an access).
+ * - `LFU`: evict the least frequently read events first, ties broken by
+ *   least recently read.
  */
 export type CacheStrategy = 'LRU' | 'FIFO' | 'LFU';
 

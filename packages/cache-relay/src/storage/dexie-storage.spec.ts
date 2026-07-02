@@ -1,7 +1,6 @@
-import { logger } from '@nostr-cache/shared';
+import 'fake-indexeddb/auto';
 import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import 'fake-indexeddb/auto';
 import { DexieStorage } from './dexie-storage.js';
 
 describe('DexieStorage', () => {
@@ -723,19 +722,95 @@ describe('DexieStorage', () => {
       expect(await storage.count()).toBe(2);
     });
 
-    it('should fall back to FIFO (with a warning) for LRU/LFU strategies', async () => {
-      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      await storage.saveEvent(eventAt('oldest', 10));
-      await storage.saveEvent(eventAt('newest', 20));
+    it('should evict the least recently read events (LRU)', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventAt('a', 100));
+      await storage.saveEvent(eventAt('b', 200));
+      await storage.saveEvent(eventAt('c', 300));
 
-      const removed = await storage.enforceLimit(1, 'LRU');
+      // Read 'a' then 'c', leaving 'b' the least recently accessed.
+      // (FIFO would have evicted 'a', the oldest by created_at.)
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.getEvents([{ ids: ['a'] }]);
+      nowSpy.mockReturnValue(3_000_000);
+      await storage.getEvents([{ ids: ['c'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LRU');
 
       expect(removed).toBe(1);
-      expect(await storage.count()).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['a', 'c']);
+      nowSpy.mockRestore();
+    });
+
+    it('should evict the least frequently read events (LFU)', async () => {
+      await storage.saveEvent(eventAt('a', 100));
+      await storage.saveEvent(eventAt('b', 200));
+      await storage.saveEvent(eventAt('c', 300));
+
+      // 'a' read twice, 'c' once, 'b' never.
+      // (FIFO would have evicted 'a', the oldest by created_at.)
+      await storage.getEvents([{ ids: ['a'] }]);
+      await storage.getEvents([{ ids: ['a'] }]);
+      await storage.getEvents([{ ids: ['c'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LFU');
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['a', 'c']);
+    });
+
+    it('should not evict a fresh insert (LFU) in favour of never-read events', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventAt('stale', 100));
+
+      // Insertion counts as one access, so the fresh insert ties with the
+      // never-read event and recency keeps it; the older insert is evicted
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.saveEvent(eventAt('fresh', 50));
+
+      const removed = await storage.enforceLimit(1, 'LFU');
+
+      expect(removed).toBe(1);
       const remaining = await storage.getEvents([{ kinds: [1] }]);
-      expect(remaining[0].id).toBe('newest');
-      expect(warnSpy).toHaveBeenCalled();
-      warnSpy.mockRestore();
+      expect(remaining.map((e) => e.id)).toEqual(['fresh']);
+      nowSpy.mockRestore();
+    });
+
+    it('should evict a fresh insert (LFU) before events that have been read', async () => {
+      await storage.saveEvent(eventAt('hot', 100));
+      // 'hot' reaches access_count 2 (insert + read)
+      await storage.getEvents([{ ids: ['hot'] }]);
+
+      // Standard LFU: a fresh insert (access_count 1) loses against read
+      // events, even though it is the most recently touched
+      await storage.saveEvent(eventAt('cold-newcomer', 200));
+
+      const removed = await storage.enforceLimit(1, 'LFU');
+
+      expect(removed).toBe(1);
+      const remaining = await storage.getEvents([{ kinds: [1] }]);
+      expect(remaining.map((e) => e.id)).toEqual(['hot']);
+    });
+
+    it('should break LFU ties by least recently read', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventAt('x', 100));
+      await storage.saveEvent(eventAt('y', 200));
+
+      // Both read once, but 'y' longer ago than 'x'
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.getEvents([{ ids: ['y'] }]);
+      nowSpy.mockReturnValue(3_000_000);
+      await storage.getEvents([{ ids: ['x'] }]);
+
+      const removed = await storage.enforceLimit(1, 'LFU');
+
+      expect(removed).toBe(1);
+      const remaining = await storage.getEvents([{ kinds: [1] }]);
+      expect(remaining[0].id).toBe('x');
+      nowSpy.mockRestore();
     });
   });
 
