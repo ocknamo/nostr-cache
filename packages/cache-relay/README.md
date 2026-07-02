@@ -50,10 +50,11 @@ const relay = new NostrCacheRelay(storage, transport, {
 await relay.connect();
 ```
 
-> **制約:** `WebSocketServerEmulator` は**特定の1つの URL に一致する接続のみ**を
-> インターセプトします。現状 `connect()` はインターセプト対象 URL を `start()` へ
-> 渡さないため、既定の `ws://localhost:3000` 宛ての接続だけが対象になります。
-> 任意のリレー URL を横取りする用途にはまだ対応していません。
+> インターセプト対象 URL はコンストラクタで指定できます
+> （例: `new WebSocketServerEmulator(['wss://relay.example.com/', 'ws://localhost:3000'])`。
+> 省略時は `ws://localhost:3000`）。対象 URL への接続は実ネットワークに一切触れず、
+> 複数の同時接続をそれぞれ独立したクライアントとして扱います。対象外の URL への
+> 接続は元の `WebSocket` にそのまま委譲されます。
 
 ### Node.js（サーバとして起動）
 
