@@ -69,9 +69,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           .table<NostrEventTable, string>('events')
           .toCollection()
           .modify((event) => {
-            // 過去のアクセス履歴は存在しないため、作成時刻を最終アクセスとみなす
+            // 過去のアクセス履歴は存在しないため、作成時刻を最終アクセスとみなし、
+            // 挿入ぶんの1アクセス（saveEvent と同じ初期値）を与える
             event.last_accessed_at = event.created_at * 1000;
-            event.access_count = 0;
+            event.access_count = 1;
           })
       );
   }
@@ -137,9 +138,12 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         indexed_tags: this.getIndexedTags(event.tags),
         content: event.content,
         sig: event.sig,
-        // 挿入も1回のアクセスとみなす（再 put でメタデータはリセットされる）
+        // 挿入も1回のアクセスとみなす（access_count: 1）。これにより LFU で
+        // 挿入直後のイベントが「未読イベントより不利」にならない（既読 >=2 の
+        // イベントよりは退避されやすい、標準的な LFU の挙動は残る）。
+        // 置換可能イベント等の再 put ではメタデータがリセットされ、頻度履歴を失う
         last_accessed_at: Date.now(),
-        access_count: 0,
+        access_count: 1,
       });
       return true;
     } catch (error) {
@@ -321,7 +325,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         ).values()
       );
 
-      // LRU / LFU 退避のためのアクセス追跡（失敗しても読み出し結果には影響させない）
+      // LRU / LFU 退避のためのアクセス追跡（失敗しても読み出し結果には影響させない）。
+      // トレードオフ: 読み出しごとにヒット分の一括書き込みが1回入り、その分
+      // レイテンシが増える。テストの決定性と実装の単純さを優先して await している
       await this.trackAccess(results.map((event) => event.id));
 
       return results;
@@ -454,8 +460,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    *   `created_at` are evicted in primary-key (id) order, not strict arrival
    *   order — a deliberate approximation, since no insertion sequence is stored.
    * - Access metadata for events stored before the v2 schema upgrade is
-   *   backfilled from `created_at` (as `access_count` 0), so LRU / LFU treat
-   *   them as never read since creation.
+   *   backfilled from `created_at` (with the same `access_count` 1 that a
+   *   fresh insert gets), so LRU / LFU treat them as never read since creation.
    *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)

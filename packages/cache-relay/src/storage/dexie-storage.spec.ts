@@ -762,6 +762,39 @@ describe('DexieStorage', () => {
       expect(remaining).toEqual(['a', 'c']);
     });
 
+    it('should not evict a fresh insert (LFU) in favour of never-read events', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventAt('stale', 100));
+
+      // Insertion counts as one access, so the fresh insert ties with the
+      // never-read event and recency keeps it; the older insert is evicted
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.saveEvent(eventAt('fresh', 50));
+
+      const removed = await storage.enforceLimit(1, 'LFU');
+
+      expect(removed).toBe(1);
+      const remaining = await storage.getEvents([{ kinds: [1] }]);
+      expect(remaining.map((e) => e.id)).toEqual(['fresh']);
+      nowSpy.mockRestore();
+    });
+
+    it('should evict a fresh insert (LFU) before events that have been read', async () => {
+      await storage.saveEvent(eventAt('hot', 100));
+      // 'hot' reaches access_count 2 (insert + read)
+      await storage.getEvents([{ ids: ['hot'] }]);
+
+      // Standard LFU: a fresh insert (access_count 1) loses against read
+      // events, even though it is the most recently touched
+      await storage.saveEvent(eventAt('cold-newcomer', 200));
+
+      const removed = await storage.enforceLimit(1, 'LFU');
+
+      expect(removed).toBe(1);
+      const remaining = await storage.getEvents([{ kinds: [1] }]);
+      expect(remaining.map((e) => e.id)).toEqual(['hot']);
+    });
+
     it('should break LFU ties by least recently read', async () => {
       const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
       await storage.saveEvent(eventAt('x', 100));
@@ -816,7 +849,7 @@ describe('DexieStorage', () => {
       try {
         const row = await migrated.table('events').get('legacy');
         expect(row.last_accessed_at).toBe(100 * 1000);
-        expect(row.access_count).toBe(0);
+        expect(row.access_count).toBe(1);
 
         // The backfilled metadata makes the legacy event the LRU candidate
         await migrated.saveEvent(eventAt('fresh', 50));

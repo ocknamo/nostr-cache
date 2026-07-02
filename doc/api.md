@@ -96,6 +96,8 @@ interface NostrRelayOptions {
   ttl?: number;                     // TTL 秒。古いイベントを定期スイープで削除（未指定で無効。deleteExpired 対応ストレージが必要）
   ttlSweepInterval?: number;        // TTL スイープの実行間隔 秒 (default: 60)
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // 退避戦略 (default: 'FIFO')。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順（同数なら古い順）
+                                    // ※ 挿入も1回のアクセスとして数える。置換可能イベントは上書きのたびに
+                                    //    アクセス履歴がリセットされるため、頻繁に更新されるものは LFU で不利になる
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
                                     // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
