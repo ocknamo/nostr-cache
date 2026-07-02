@@ -1,0 +1,110 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans",
+    "Noto Sans JP", sans-serif;
+  background-color: #f5f8fa;
+  color: #14171a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: rgba(245, 248, 250, 0.95);
+  padding: 16px 0 8px;
+  border-bottom: 1px solid #e1e8ed;
+  margin-bottom: 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.app-header .tagline {
+  margin: 4px 0 0;
+  color: #657786;
+  font-size: 0.85rem;
+}
+
+.panel {
+  background-color: #fff;
+  border: 1px solid #e1e8ed;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: #536471;
+}
+
+input[type="text"],
+textarea {
+  width: 100%;
+  border: 1px solid #cfd9de;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  background: #fff;
+}
+
+input[type="text"]:focus,
+textarea:focus {
+  outline: 2px solid #1d9bf0;
+  outline-offset: -1px;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background-color: #1d9bf0;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background-color: #eff3f4;
+  color: #0f1419;
+}
+
+.notices {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notices li {
+  background-color: #fff8e6;
+  border: 1px solid #f5d68a;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}

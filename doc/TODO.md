@@ -9,7 +9,7 @@
 | shared | 共有型・ユーティリティ | ビルド成功。テスト未実装 |
 | cache-relay | ブラウザ内 Nostr リレー本体 | ビルド成功・テスト201件通過。コアは概ね実装済み（一部未実装オプションあり） |
 | server | Node.js サーバー（fake-indexeddb利用） | ビルド失敗（型エラー）。テスト5件は通過 |
-| web-client | Angular 製フロントエンド（POC） | ビルド成功。POC実装あり → **廃棄済み（2026-07）** |
+| web-client | Angular 製フロントエンド（POC） | ビルド成功。POC実装あり → **廃棄済み（2026-07）**。その後 Svelte 製で作り直し（下記 目的④ 参照） |
 
 検証時点で `npm run build` はモノレポ全体としては失敗する（server の型エラーが原因）。
 Vitest は型チェックを行わないためテストは通るが、ビルドで型エラーが露見する状態。
@@ -23,19 +23,24 @@ web-client は 2026-07 に廃棄した）
 透過的に挟まる「完全なキャッシュ」を実現する）に直結するが、まだ未着手の中核項目。
 リレーコアや個別のコンポーネントは実装済みでも、これらが揃わない限り当初の目的は達成されない。
 
-- [ ] **Web クライアントとローカルリレーのエンドツーエンド配線**（目的④）
-  - 「Web クライアント → ローカルリレー（キャッシュ）」が実際に動くよう配線し、デモを用意する
+- [x] **Web クライアントとローカルリレーのエンドツーエンド配線**（目的④）
+  - `packages/web-client`（Svelte 5 + Vite）として実装（2026-07）。起動時に
+    `DexieStorage`（IndexedDB）+ `WebSocketServerEmulator` + `NostrCacheRelay` を組み立て、
+    クライアントは素の `new WebSocket('ws://localhost:3000')` で接続（エミュレータが横取り）。
+    タイムライン表示・NIP-01 フィルタフォーム・kind1 投稿フォームを備え、投稿は IndexedDB に
+    永続化されてリロード後も再購読で再生される（＝ローカルキャッシュとして機能）。
+    URL を差し替えれば実リレー（`wss://…`）にも同一 UI で直結できる
   - 注: 旧 Angular 製 web-client（生の `new WebSocket('wss://nos.lol/')` で実リレーへ直結し、
-    `WebSocketServerEmulator` を一切経由していなかった）は廃棄済み（優先度: 低の
-    「web-client の廃棄」参照）。配線・デモは作り直す軽量クライアントを前提とする
-  - 併せてエミュレータ（`packages/cache-relay/src/transport/web-socket-server-emulator.ts`）の
-    設計上の問題を見直す:
-    - インターセプト分岐内で `super(urlString, protocols)` を呼んでおり、横取りしたはずの URL へ
-      実ネットワーク接続を張ってしまう（「ローカルで完結」という意図と矛盾）
-    - `emulatedSocket` を単一保持しており複数接続を扱えない。実クライアントが複数リレーへ張る
-      接続を一括インターセプトできない
-    - 対象 URL が単一一致のみ。`connect()` がエミュレータへ URL を渡せない（`TransportAdapter.start()`
-      が引数なし）ため、既定 `ws://localhost:3000` 以外を横取りできない
+    `WebSocketServerEmulator` を一切経由していなかった）は廃棄済みで、上記は軽量構成での作り直し
+  - [x] エミュレータ（`packages/cache-relay/src/transport/web-socket-server-emulator.ts`）の
+    設計上の問題を修正（2026-07）:
+    - [x] インターセプト分岐内の `super(urlString, protocols)` による実ネットワーク接続を排除。
+      元 WebSocket を継承せず、EventTarget ベースの `EmulatedWebSocket`（WebSocket インターフェイス
+      互換）を返す構成に変更し、対象 URL への接続はネットワークに一切出ない
+    - [x] 単一 `emulatedSocket` 保持を `Map<clientId, socket>`（clientId は `randomUUID`）へ変更し、
+      複数同時接続に対応
+    - [x] 対象 URL をコンストラクタで指定可能に（単数または配列、URL 正規化で末尾スラッシュ差異を
+      吸収）。`TransportAdapter.start()` の引数なしのままリレー経由で任意 URL を横取りできる
 - [ ] **上流リレーへの透過キャッシュ化（リードスルー / ライトスルー）**（目的① — 「完全な Cache」の本丸）
   - 現状のローカルリレーは「自分が保存済みのイベントしか返さない独立リレー」であり、
     実リレー群の手前に挟まる透過キャッシュにはなっていない

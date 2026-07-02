@@ -5,7 +5,8 @@
   "workspaces": [
     "packages/shared",
     "packages/cache-relay",
-    "packages/server"
+    "packages/server",
+    "packages/web-client"
   ],
   "engines": {
     "node": "22.x"
@@ -24,7 +25,9 @@
     "build:cache-relay": "npm run build --workspace=packages/cache-relay",
     "build:server": "npm run build --workspace=packages/server",
     "dev:server": "npm run dev --workspace=packages/server",
-    "start:server": "npm run start --workspace=packages/server"
+    "start:server": "npm run start --workspace=packages/server",
+    "build:web": "npm run build --workspace=packages/web-client",
+    "dev:web": "npm run dev --workspace=packages/web-client"
   },
   "devDependencies": {
     "typescript": "^6.0.0",
