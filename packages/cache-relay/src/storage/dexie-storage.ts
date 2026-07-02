@@ -31,26 +31,11 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   constructor(dbName = 'NostrCacheRelay') {
     super(dbName);
 
-    // Define database schema with improved index definitions
+    // Define database schema with improved index definitions.
+    // last_accessed_at / [access_count+last_accessed_at] は LRU / LFU 退避用の
+    // アクセスメタデータインデックス
     this.version(1).stores({
       events: `
-        id,
-        pubkey,
-        created_at,
-        kind,
-        *indexed_tags,
-        [pubkey+kind],
-        [kind+created_at],
-        [pubkey+created_at],
-        [pubkey+kind+created_at]
-      `,
-    });
-
-    // v2: LRU / LFU 退避用のアクセスメタデータ（last_accessed_at / access_count）
-    // とそのインデックスを追加。既存イベントは created_at 由来の値でバックフィルする
-    this.version(2)
-      .stores({
-        events: `
         id,
         pubkey,
         created_at,
@@ -63,18 +48,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         last_accessed_at,
         [access_count+last_accessed_at]
       `,
-      })
-      .upgrade((tx) =>
-        tx
-          .table<NostrEventTable, string>('events')
-          .toCollection()
-          .modify((event) => {
-            // 過去のアクセス履歴は存在しないため、作成時刻を最終アクセスとみなし、
-            // 挿入ぶんの1アクセス（saveEvent と同じ初期値）を与える
-            event.last_accessed_at = event.created_at * 1000;
-            event.access_count = 1;
-          })
-      );
+    });
   }
 
   /**
@@ -459,9 +433,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * - FIFO is keyed on `created_at` (second precision). Events sharing the same
    *   `created_at` are evicted in primary-key (id) order, not strict arrival
    *   order — a deliberate approximation, since no insertion sequence is stored.
-   * - Access metadata for events stored before the v2 schema upgrade is
-   *   backfilled from `created_at` (with the same `access_count` 1 that a
-   *   fresh insert gets), so LRU / LFU treat them as never read since creation.
    *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)

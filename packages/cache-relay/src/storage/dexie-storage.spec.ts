@@ -1,6 +1,5 @@
 import 'fake-indexeddb/auto';
 import type { NostrEvent } from '@nostr-cache/shared';
-import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DexieStorage } from './dexie-storage.js';
 
@@ -812,54 +811,6 @@ describe('DexieStorage', () => {
       const remaining = await storage.getEvents([{ kinds: [1] }]);
       expect(remaining[0].id).toBe('x');
       nowSpy.mockRestore();
-    });
-  });
-
-  describe('schema v2 migration (access metadata)', () => {
-    const V1_SCHEMA = `
-        id,
-        pubkey,
-        created_at,
-        kind,
-        *indexed_tags,
-        [pubkey+kind],
-        [kind+created_at],
-        [pubkey+created_at],
-        [pubkey+kind+created_at]
-      `;
-
-    it('should backfill access metadata for events stored before v2', async () => {
-      // Create a v1 database containing an event without access metadata
-      const legacy = new Dexie('TestNostrCacheRelay-migration');
-      legacy.version(1).stores({ events: V1_SCHEMA });
-      await legacy.table('events').put({
-        id: 'legacy',
-        pubkey: 'test-pubkey',
-        created_at: 100,
-        kind: 1,
-        tags: [],
-        indexed_tags: [],
-        content: 'legacy content',
-        sig: 'legacy-sig',
-      });
-      legacy.close();
-
-      // Re-open through DexieStorage, triggering the v1 -> v2 upgrade
-      const migrated = new DexieStorage('TestNostrCacheRelay-migration');
-      try {
-        const row = await migrated.table('events').get('legacy');
-        expect(row.last_accessed_at).toBe(100 * 1000);
-        expect(row.access_count).toBe(1);
-
-        // The backfilled metadata makes the legacy event the LRU candidate
-        await migrated.saveEvent(eventAt('fresh', 50));
-        const removed = await migrated.enforceLimit(1, 'LRU');
-        expect(removed).toBe(1);
-        const remaining = await migrated.getEvents([{ kinds: [1] }]);
-        expect(remaining.map((e) => e.id)).toEqual(['fresh']);
-      } finally {
-        await migrated.delete();
-      }
     });
   });
 
