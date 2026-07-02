@@ -69,9 +69,11 @@ export interface NostrRelayOptions {
   storageMaxSize?: number;
 
   /**
-   * Time-to-live in seconds for cached events. Events whose `created_at` is
-   * older than `ttl` seconds are deleted from storage by a periodic background
+   * Time-to-live in seconds for cached events. Events cached (saved to
+   * storage) more than `ttl` seconds ago are deleted by a periodic background
    * sweep (see {@link ttlSweepInterval}) rather than filtered on every read.
+   * Expiry counts from when the event entered this cache, not from the
+   * event's own `created_at`.
    *
    * Trade-off: an expired event may still be returned for up to one sweep
    * interval before it is purged. Disabled when undefined or non-positive.

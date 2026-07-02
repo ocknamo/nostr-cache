@@ -84,13 +84,15 @@ export interface StorageAdapter {
   ): Promise<boolean>;
 
   /**
-   * Delete all events older than the given timestamp.
+   * Delete all events cached (saved to storage) before the given timestamp.
    *
-   * Optional capability used by the TTL background sweep. Implementations
-   * backed by a time index can do this as an efficient bulk range delete.
+   * Optional capability used by the TTL background sweep. Expiry is keyed on
+   * when the event was written into the cache (its storage insertion time),
+   * not on the event's own `created_at`. Implementations backed by a time
+   * index can do this as an efficient bulk range delete.
    *
-   * @param olderThan Unix timestamp (seconds); events with `created_at`
-   *   strictly less than this are deleted
+   * @param olderThan Unix timestamp (seconds); events cached strictly before
+   *   this moment are deleted
    * @returns Promise resolving to the number of events deleted
    */
   deleteExpired?(olderThan: number): Promise<number>;

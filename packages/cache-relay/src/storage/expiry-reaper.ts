@@ -17,7 +17,7 @@ export const DEFAULT_TTL_SWEEP_INTERVAL = 60;
  * Options controlling the TTL sweep.
  */
 export interface ExpiryReaperOptions {
-  /** Events older than this many seconds (by `created_at`) are deleted. */
+  /** Events cached more than this many seconds ago (by storage insertion time) are deleted. */
   ttlSeconds: number;
   /** Interval between sweeps, in seconds. Defaults to 60. */
   intervalSeconds?: number;
@@ -90,7 +90,7 @@ export class ExpiryReaper {
   }
 
   /**
-   * Delete events older than `now - ttl`.
+   * Delete events cached before `now - ttl`.
    *
    * @returns Promise resolving to the number of events deleted
    */
