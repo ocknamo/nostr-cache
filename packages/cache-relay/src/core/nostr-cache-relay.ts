@@ -90,8 +90,9 @@ export interface NostrRelayOptions {
   ttlSweepInterval?: number;
 
   /**
-   * Eviction strategy used when `storageMaxSize` is exceeded. Currently only
-   * `FIFO` is implemented; `LRU` / `LFU` fall back to `FIFO`. Defaults to `FIFO`.
+   * Eviction strategy used when `storageMaxSize` is exceeded: `FIFO` (oldest
+   * `created_at` first), `LRU` (least recently read first) or `LFU` (least
+   * frequently read first). Defaults to `FIFO`.
    */
   cacheStrategy?: CacheStrategy;
 

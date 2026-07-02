@@ -1,7 +1,7 @@
-import { logger } from '@nostr-cache/shared';
-import type { NostrEvent } from '@nostr-cache/shared';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
+import type { NostrEvent } from '@nostr-cache/shared';
+import Dexie from 'dexie';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DexieStorage } from './dexie-storage.js';
 
 describe('DexieStorage', () => {
@@ -723,19 +723,110 @@ describe('DexieStorage', () => {
       expect(await storage.count()).toBe(2);
     });
 
-    it('should fall back to FIFO (with a warning) for LRU/LFU strategies', async () => {
-      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      await storage.saveEvent(eventAt('oldest', 10));
-      await storage.saveEvent(eventAt('newest', 20));
+    it('should evict the least recently read events (LRU)', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventAt('a', 100));
+      await storage.saveEvent(eventAt('b', 200));
+      await storage.saveEvent(eventAt('c', 300));
 
-      const removed = await storage.enforceLimit(1, 'LRU');
+      // Read 'a' then 'c', leaving 'b' the least recently accessed.
+      // (FIFO would have evicted 'a', the oldest by created_at.)
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.getEvents([{ ids: ['a'] }]);
+      nowSpy.mockReturnValue(3_000_000);
+      await storage.getEvents([{ ids: ['c'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LRU');
 
       expect(removed).toBe(1);
-      expect(await storage.count()).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['a', 'c']);
+      nowSpy.mockRestore();
+    });
+
+    it('should evict the least frequently read events (LFU)', async () => {
+      await storage.saveEvent(eventAt('a', 100));
+      await storage.saveEvent(eventAt('b', 200));
+      await storage.saveEvent(eventAt('c', 300));
+
+      // 'a' read twice, 'c' once, 'b' never.
+      // (FIFO would have evicted 'a', the oldest by created_at.)
+      await storage.getEvents([{ ids: ['a'] }]);
+      await storage.getEvents([{ ids: ['a'] }]);
+      await storage.getEvents([{ ids: ['c'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LFU');
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['a', 'c']);
+    });
+
+    it('should break LFU ties by least recently read', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventAt('x', 100));
+      await storage.saveEvent(eventAt('y', 200));
+
+      // Both read once, but 'y' longer ago than 'x'
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.getEvents([{ ids: ['y'] }]);
+      nowSpy.mockReturnValue(3_000_000);
+      await storage.getEvents([{ ids: ['x'] }]);
+
+      const removed = await storage.enforceLimit(1, 'LFU');
+
+      expect(removed).toBe(1);
       const remaining = await storage.getEvents([{ kinds: [1] }]);
-      expect(remaining[0].id).toBe('newest');
-      expect(warnSpy).toHaveBeenCalled();
-      warnSpy.mockRestore();
+      expect(remaining[0].id).toBe('x');
+      nowSpy.mockRestore();
+    });
+  });
+
+  describe('schema v2 migration (access metadata)', () => {
+    const V1_SCHEMA = `
+        id,
+        pubkey,
+        created_at,
+        kind,
+        *indexed_tags,
+        [pubkey+kind],
+        [kind+created_at],
+        [pubkey+created_at],
+        [pubkey+kind+created_at]
+      `;
+
+    it('should backfill access metadata for events stored before v2', async () => {
+      // Create a v1 database containing an event without access metadata
+      const legacy = new Dexie('TestNostrCacheRelay-migration');
+      legacy.version(1).stores({ events: V1_SCHEMA });
+      await legacy.table('events').put({
+        id: 'legacy',
+        pubkey: 'test-pubkey',
+        created_at: 100,
+        kind: 1,
+        tags: [],
+        indexed_tags: [],
+        content: 'legacy content',
+        sig: 'legacy-sig',
+      });
+      legacy.close();
+
+      // Re-open through DexieStorage, triggering the v1 -> v2 upgrade
+      const migrated = new DexieStorage('TestNostrCacheRelay-migration');
+      try {
+        const row = await migrated.table('events').get('legacy');
+        expect(row.last_accessed_at).toBe(100 * 1000);
+        expect(row.access_count).toBe(0);
+
+        // The backfilled metadata makes the legacy event the LRU candidate
+        await migrated.saveEvent(eventAt('fresh', 50));
+        const removed = await migrated.enforceLimit(1, 'LRU');
+        expect(removed).toBe(1);
+        const remaining = await migrated.getEvents([{ kinds: [1] }]);
+        expect(remaining.map((e) => e.id)).toEqual(['fresh']);
+      } finally {
+        await migrated.delete();
+      }
     });
   });
 

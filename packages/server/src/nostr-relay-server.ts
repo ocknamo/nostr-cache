@@ -42,7 +42,7 @@ interface NostrRelayServerOptions {
     dbName?: string;
     // 保存イベント数の上限。超過時は古いイベントから退避（未指定で無制限）
     maxSize?: number;
-    // 退避戦略（現状 FIFO のみ実装。LRU/LFU は FIFO にフォールバック）
+    // 退避戦略（FIFO: 作成が古い順 / LRU: 読み出しが古い順 / LFU: 読み出し頻度が低い順）
     cacheStrategy?: CacheStrategy;
   };
 

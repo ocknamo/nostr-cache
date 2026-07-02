@@ -16,6 +16,8 @@ interface NostrEventTable {
   indexed_tags: string[]; // インデックス化されたタグ
   content: string;
   sig: string;
+  last_accessed_at: number; // 最終アクセス時刻（ミリ秒）。LRU 退避に使用
+  access_count: number; // 読み出し回数。LFU 退避に使用
 }
 
 /**
@@ -25,8 +27,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   private static readonly MAX_INDEXED_TAGS = 100;
   private static readonly PRIORITY_TAGS = new Set(['e', 'p', 'a', 't', 'd', 'h', 'm', 'q', 'r']);
   private events!: Dexie.Table<NostrEventTable, string>;
-  /** Ensures the "non-FIFO falls back to FIFO" warning is logged only once. */
-  private nonFifoStrategyWarned = false;
 
   constructor(dbName = 'NostrCacheRelay') {
     super(dbName);
@@ -45,6 +45,35 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         [pubkey+kind+created_at]
       `,
     });
+
+    // v2: LRU / LFU 退避用のアクセスメタデータ（last_accessed_at / access_count）
+    // とそのインデックスを追加。既存イベントは created_at 由来の値でバックフィルする
+    this.version(2)
+      .stores({
+        events: `
+        id,
+        pubkey,
+        created_at,
+        kind,
+        *indexed_tags,
+        [pubkey+kind],
+        [kind+created_at],
+        [pubkey+created_at],
+        [pubkey+kind+created_at],
+        last_accessed_at,
+        [access_count+last_accessed_at]
+      `,
+      })
+      .upgrade((tx) =>
+        tx
+          .table<NostrEventTable, string>('events')
+          .toCollection()
+          .modify((event) => {
+            // 過去のアクセス履歴は存在しないため、作成時刻を最終アクセスとみなす
+            event.last_accessed_at = event.created_at * 1000;
+            event.access_count = 0;
+          })
+      );
   }
 
   /**
@@ -108,6 +137,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         indexed_tags: this.getIndexedTags(event.tags),
         content: event.content,
         sig: event.sig,
+        // 挿入も1回のアクセスとみなす（再 put でメタデータはリセットされる）
+        last_accessed_at: Date.now(),
+        access_count: 0,
       });
       return true;
     } catch (error) {
@@ -272,7 +304,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       );
 
       // Convert NostrEventTable to NostrEvent and deduplicate results
-      return Array.from(
+      const results = Array.from(
         new Map(
           eventSets.flat().map((event) => [
             event.id,
@@ -288,11 +320,47 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           ])
         ).values()
       );
+
+      // LRU / LFU 退避のためのアクセス追跡（失敗しても読み出し結果には影響させない）
+      await this.trackAccess(results.map((event) => event.id));
+
+      return results;
     } catch (error) {
       logger.error(
         `Failed to get events: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return [];
+    }
+  }
+
+  /**
+   * Record a read access for the given event ids, updating the metadata
+   * backing the `LRU` / `LFU` eviction strategies (`last_accessed_at` /
+   * `access_count`) in a single bulk write.
+   *
+   * Tracking failures are logged and swallowed so they never affect the read
+   * path that triggered them.
+   *
+   * @param ids IDs of the events that were read
+   */
+  private async trackAccess(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+
+    try {
+      const now = Date.now();
+      await this.events
+        .where('id')
+        .anyOf(ids)
+        .modify((event) => {
+          event.last_accessed_at = now;
+          event.access_count = (event.access_count ?? 0) + 1;
+        });
+    } catch (error) {
+      logger.error(
+        `Failed to track event access: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -368,8 +436,14 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   /**
    * Evict events so that no more than `maxSize` remain.
    *
-   * Uses FIFO (oldest `created_at` first). `LRU` / `LFU` currently fall back to
-   * FIFO and emit a one-time warning. No-op when `maxSize` is not positive.
+   * Eviction order depends on `strategy`:
+   * - `FIFO` (default): oldest `created_at` first.
+   * - `LRU`: least recently read first (`last_accessed_at`, updated on every
+   *   `getEvents` hit; insertion also counts as an access).
+   * - `LFU`: least frequently read first (`access_count`), ties broken by
+   *   least recently read.
+   *
+   * No-op when `maxSize` is not positive.
    *
    * Semantics / caveats:
    * - This is a **soft limit**. The count and the delete run inside a single
@@ -379,6 +453,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * - FIFO is keyed on `created_at` (second precision). Events sharing the same
    *   `created_at` are evicted in primary-key (id) order, not strict arrival
    *   order — a deliberate approximation, since no insertion sequence is stored.
+   * - Access metadata for events stored before the v2 schema upgrade is
+   *   backfilled from `created_at` (as `access_count` 0), so LRU / LFU treat
+   *   them as never read since creation.
    *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)
@@ -389,6 +466,13 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       return 0;
     }
 
+    // 戦略ごとの退避順序を決めるインデックス。昇順で先頭から退避する
+    const evictionIndex: Record<CacheStrategy, string> = {
+      FIFO: 'created_at',
+      LRU: 'last_accessed_at',
+      LFU: '[access_count+last_accessed_at]',
+    };
+
     try {
       // Run count + delete atomically so concurrent passes don't over- or
       // under-evict against a stale count.
@@ -398,16 +482,11 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           return 0;
         }
 
-        if (strategy !== 'FIFO' && !this.nonFifoStrategyWarned) {
-          logger.warn(
-            `Cache strategy '${strategy}' is not yet implemented; falling back to FIFO eviction`
-          );
-          this.nonFifoStrategyWarned = true;
-        }
-
         const excess = count - maxSize;
-        // FIFO: evict the oldest events first (by created_at ascending)
-        const idsToEvict = await this.events.orderBy('created_at').limit(excess).primaryKeys();
+        const idsToEvict = await this.events
+          .orderBy(evictionIndex[strategy])
+          .limit(excess)
+          .primaryKeys();
 
         if (idsToEvict.length > 0) {
           await this.events.bulkDelete(idsToEvict);
