@@ -73,11 +73,16 @@ const ws = new WebSocket('ws://nostr-cache.invalid');
 **② 直接型: `NostrCacheRelay` の in-process API を呼ぶ**
 
 WebSocket を介さず、リレーをライブラリとして直接使うこともできます
-（自前クライアントを新規に書く場合はこちらが最短）。
+（自前クライアントを新規に書く場合はこちらが最短）。エミュレータは不要で、
+①と同様に組み立てた `relay`（transport は使われない）に対してリスナを登録して使います。
 
 ```typescript
-await relay.publishEvent(event); // 保存 (検証込み)
-await relay.subscribe('sub-1', [{ kinds: [1] }]); // 'event'/'eose' リスナへ再生
+// 購読結果・ライブ配信は 'event' / 'eose' リスナに届く
+relay.on('event', (event) => console.log('event:', event.content));
+relay.on('eose', (subscriptionId) => console.log('eose:', subscriptionId));
+
+await relay.publishEvent(event); // 保存 (既定の validateEventsType: 'IMMEDIATELY' では検証込み)
+await relay.subscribe('sub-1', [{ kinds: [1] }]); // 保存済みイベントをリスナへ再生し eose を発火
 relay.unsubscribe('sub-1');
 ```
 
