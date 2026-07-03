@@ -137,7 +137,7 @@ interface StorageAdapter {
 クライアントとの通信を担う抽象。Node.js 向け `WebSocketServer` と、ブラウザ向けに
 `WebSocket` を横取りする `WebSocketServerEmulator` が提供されます。
 `WebSocketServerEmulator` はコンストラクタでインターセプト対象 URL（単数または配列、
-既定 `ws://localhost:3000`）を受け取り、対象 URL への接続を実ネットワークに触れずに
+既定 `ws://nostr-cache.invalid`）を受け取り、対象 URL への接続を実ネットワークに触れずに
 エミュレートします（複数同時接続対応）。対象外 URL は元の `WebSocket` に委譲されます。
 
 ```typescript

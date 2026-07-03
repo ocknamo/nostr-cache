@@ -26,7 +26,7 @@ web-client は 2026-07 に廃棄した）
 - [x] **Web クライアントとローカルリレーのエンドツーエンド配線**（目的④）
   - `packages/web-client`（Svelte 5 + Vite）として実装（2026-07）。起動時に
     `DexieStorage`（IndexedDB）+ `WebSocketServerEmulator` + `NostrCacheRelay` を組み立て、
-    クライアントは素の `new WebSocket('ws://localhost:3000')` で接続（エミュレータが横取り）。
+    クライアントは素の `new WebSocket('ws://nostr-cache.invalid')` で接続（エミュレータが横取り）。
     タイムライン表示・NIP-01 フィルタフォーム・kind1 投稿フォームを備え、投稿は IndexedDB に
     永続化されてリロード後も再購読で再生される（＝ローカルキャッシュとして機能）。
     URL を差し替えれば実リレー（`wss://…`）にも同一 UI で直結できる

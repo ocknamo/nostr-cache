@@ -36,7 +36,7 @@
     <input
       type="text"
       bind:value={inputUrl}
-      placeholder="ws://localhost:3000 または wss://relay.example.com"
+      placeholder="ws://nostr-cache.invalid または wss://relay.example.com"
       aria-label="リレーURL"
     />
     {#if status === 'connected'}

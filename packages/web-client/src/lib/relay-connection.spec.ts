@@ -64,7 +64,7 @@ async function createOpenConnection(
   options: ConstructorParameters<typeof RelayConnection>[0] = {}
 ) {
   const connection = createConnection(options);
-  const promise = connection.connect('ws://localhost:3000');
+  const promise = connection.connect('ws://nostr-cache.invalid');
   const socket = FakeWebSocket.instances[0];
   socket.simulateOpen();
   await promise;
@@ -89,7 +89,7 @@ describe('RelayConnection', () => {
       const statuses: ConnectionStatus[] = [];
       const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
-      const promise = connection.connect('ws://localhost:3000');
+      const promise = connection.connect('ws://nostr-cache.invalid');
       expect(statuses).toEqual(['connecting']);
 
       FakeWebSocket.instances[0].simulateOpen();
@@ -103,7 +103,7 @@ describe('RelayConnection', () => {
       const statuses: ConnectionStatus[] = [];
       const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
-      const promise = connection.connect('ws://localhost:3000');
+      const promise = connection.connect('ws://nostr-cache.invalid');
       FakeWebSocket.instances[0].simulateError();
 
       await expect(promise).rejects.toThrow('Failed to connect');
@@ -113,7 +113,7 @@ describe('RelayConnection', () => {
 
     it('rejects when the socket closes before opening', async () => {
       const connection = createConnection();
-      const promise = connection.connect('ws://localhost:3000');
+      const promise = connection.connect('ws://nostr-cache.invalid');
       FakeWebSocket.instances[0].close();
       await expect(promise).rejects.toThrow('closed before opening');
     });

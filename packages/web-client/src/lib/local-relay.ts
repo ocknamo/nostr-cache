@@ -7,8 +7,10 @@ import {
 /**
  * URL served by the in-browser cache relay. Connections to this URL are
  * intercepted by WebSocketServerEmulator and never reach the network.
+ * The RFC 6761 reserved `.invalid` TLD guarantees no real server can ever
+ * exist at this address, even if the emulator is not running.
  */
-export const LOCAL_RELAY_URL = 'ws://localhost:3000';
+export const LOCAL_RELAY_URL = 'ws://nostr-cache.invalid';
 
 export interface LocalRelayHandle {
   relay: NostrCacheRelay;

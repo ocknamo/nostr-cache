@@ -14,7 +14,7 @@ function openSocket(url: string): Promise<WebSocket> {
 describe('WebSocketServerEmulator', () => {
   let emulator: WebSocketServerEmulator;
   let originalWebSocket: typeof WebSocket;
-  const defaultUrl = 'ws://localhost:3000';
+  const defaultUrl = 'ws://nostr-cache.invalid';
   const customUrl = 'ws://localhost:3001';
 
   beforeEach(() => {
@@ -62,7 +62,7 @@ describe('WebSocketServerEmulator', () => {
     it('should normalize URLs when matching (trailing slash)', async () => {
       await emulator.start();
       // Same URL with a trailing slash must still be intercepted.
-      await openSocket('ws://localhost:3000/');
+      await openSocket('ws://nostr-cache.invalid/');
       expect(emulator.getConnectionCount()).toBe(1);
     });
 

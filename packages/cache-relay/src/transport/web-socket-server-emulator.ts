@@ -216,9 +216,12 @@ export class WebSocketServerEmulator implements TransportAdapter {
   private disconnectCallback?: (clientId: string) => void;
 
   /**
-   * @param urls URL or URLs to intercept (default: ws://localhost:3000)
+   * @param urls URL or URLs to intercept. The default uses the RFC 6761
+   * reserved `.invalid` TLD, which is guaranteed never to resolve — so a
+   * misconfigured (non-intercepted) connection can never reach a real
+   * server, unlike e.g. `ws://localhost:3000`.
    */
-  constructor(urls: string | string[] = 'ws://localhost:3000') {
+  constructor(urls: string | string[] = 'ws://nostr-cache.invalid') {
     const list = Array.isArray(urls) ? urls : [urls];
     this.targetUrls = new Set(list.map(normalizeWebSocketUrl));
   }
