@@ -5,6 +5,17 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    }
+  },
   "scripts": {
     "build": "node -e \"for(const p of ['dist','tsconfig.tsbuildinfo'])fs.rmSync(p,{recursive:true,force:true})\" && tsc",
     "test": "vitest run",

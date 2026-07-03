@@ -31,12 +31,21 @@ npm install @nostr-cache/cache-relay
 
 ### ブラウザ（ローカルキャッシュリレー）
 
+ブラウザからキャッシュとして使う方法は2つあります。
+
+**① 透過型: `WebSocketServerEmulator` で WebSocket を横取り**
+
+既存の Nostr クライアント実装（素の `WebSocket` で NIP-01 を話すもの）を変更せずに、
+対象 URL への接続をブラウザ内リレーへ差し替えます。手順の詳細は
+[doc/transparent-cache.md](../../doc/transparent-cache.md) を参照してください。
+
 ```typescript
+// ブラウザでは Node.js 専用 WebSocketServer を含まない /browser エントリを使う
 import {
   NostrCacheRelay,
   DexieStorage,
   WebSocketServerEmulator,
-} from '@nostr-cache/cache-relay';
+} from '@nostr-cache/cache-relay/browser';
 
 const storage = new DexieStorage('NostrCacheRelay');
 const transport = new WebSocketServerEmulator();
@@ -48,12 +57,39 @@ const relay = new NostrCacheRelay(storage, transport, {
 
 // WebSocket をインターセプトして接続を開始
 await relay.connect();
+
+// 以降、クライアントは普通に接続するだけでローカルリレーに繋がる
+const ws = new WebSocket('ws://nostr-cache.invalid');
 ```
 
-> **制約:** `WebSocketServerEmulator` は**特定の1つの URL に一致する接続のみ**を
-> インターセプトします。現状 `connect()` はインターセプト対象 URL を `start()` へ
-> 渡さないため、既定の `ws://localhost:3000` 宛ての接続だけが対象になります。
-> 任意のリレー URL を横取りする用途にはまだ対応していません。
+> インターセプト対象 URL はコンストラクタで指定できます
+> （例: `new WebSocketServerEmulator(['wss://relay.example.com/', 'ws://nostr-cache.invalid'])`）。
+> 省略時は `ws://nostr-cache.invalid`。既定値に RFC 6761 予約 TLD の `.invalid` を
+> 使っているのは、エミュレータが動いていない場合でも実在するサーバーへ誤接続する
+> 可能性をゼロにするためです（`ws://localhost:3000` のような「ありえる」URL は使わない）。
+> 対象 URL への接続は実ネットワークに一切触れず、複数の同時接続をそれぞれ独立した
+> クライアントとして扱います。対象外の URL への接続は元の `WebSocket` にそのまま
+> 委譲されます。
+
+**② 直接型: `NostrCacheRelay` の in-process API を呼ぶ**
+
+WebSocket を介さず、リレーをライブラリとして直接使うこともできます
+（自前クライアントを新規に書く場合はこちらが最短）。エミュレータは不要で、
+①と同様に組み立てた `relay`（transport は使われない）に対してリスナを登録して使います。
+
+```typescript
+// 購読結果・ライブ配信は 'event' / 'eose' リスナに届く
+relay.on('event', (event) => console.log('event:', event.content));
+relay.on('eose', (subscriptionId) => console.log('eose:', subscriptionId));
+
+await relay.publishEvent(event); // 保存 (既定の validateEventsType: 'IMMEDIATELY' では検証込み)
+await relay.subscribe('sub-1', [{ kinds: [1] }]); // 保存済みイベントをリスナへ再生し eose を発火
+relay.unsubscribe('sub-1');
+```
+
+現状はどちらの形態も「ローカルに保存済みのイベントを返す独立リレー」であり、
+上流リレーへのリードスルー / ライトスルー（透過キャッシュ化）は未実装です
+（[doc/TODO.md](../../doc/TODO.md) 参照）。
 
 ### Node.js（サーバとして起動）
 
