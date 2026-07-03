@@ -47,6 +47,7 @@ export class UpstreamRelayPool implements UpstreamPool {
       const connection = new UpstreamConnection(url, connectionOptions, {
         onEvent: (subId, event) => this.eventCallback?.(subId, event, url),
         onEose: (subId) => this.handleRelayEose(url, subId),
+        onDisconnect: () => this.handleRelayDisconnect(url),
       });
       this.connections.set(url, connection);
     }
@@ -124,6 +125,24 @@ export class UpstreamRelayPool implements UpstreamPool {
       }
     }
     return count;
+  }
+
+  /**
+   * A relay dropped: it can no longer answer EOSE for any open subscription, so
+   * stop waiting on it. Remove it from every pending set and fire the aggregated
+   * EOSE for subscriptions that are now complete — otherwise a relay that goes
+   * away mid-REQ would stall the client's EOSE until the coordinator timeout.
+   */
+  private handleRelayDisconnect(relayUrl: string): void {
+    const toFire: string[] = [];
+    for (const [upstreamSubId, pending] of this.pendingEose) {
+      if (pending.delete(relayUrl) && pending.size === 0) {
+        toFire.push(upstreamSubId);
+      }
+    }
+    for (const upstreamSubId of toFire) {
+      this.fireEose(upstreamSubId);
+    }
   }
 
   /** Record a relay's EOSE and, once all pending relays have answered, fire once. */

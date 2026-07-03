@@ -196,6 +196,10 @@ export class MessageHandler {
         for (const [targetClientId, subscriptions] of matches.entries()) {
           for (const subscription of subscriptions) {
             this.sendEvent(targetClientId, subscription.id, event);
+            // ライトスルーで上流へ転送するイベントは、上流からエコーバックされて
+            // 戻ってくる。ローカル配信済みの id を coordinator の重複排除集合に
+            // 記録し、エコーの二重配信を防ぐ（上流購読が無ければ no-op）。
+            this.upstreamCoordinator?.markDelivered(targetClientId, subscription.id, event.id);
           }
         }
       }

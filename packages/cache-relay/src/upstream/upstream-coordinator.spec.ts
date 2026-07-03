@@ -230,6 +230,47 @@ describe('UpstreamCoordinator', () => {
     expect(pool.published).toEqual([event]);
   });
 
+  it('markDelivered dedups a subsequent upstream echo of a locally-delivered event', async () => {
+    const { pool, coordinator, deliver } = makeHarness();
+    coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+    // The event was already broadcast to this subscription locally (write-through
+    // path), so record it.
+    coordinator.markDelivered('client', 'sub', 'echo-id');
+
+    // The upstream echo of the same event must not be delivered again.
+    pool.emitEvent(pool.lastSubId(), makeEvent('echo-id'));
+    await flush();
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it('markDelivered is a no-op for a subscription with no upstream counterpart', () => {
+    const { coordinator } = makeHarness();
+    // No openForSubscription: must not throw.
+    expect(() => coordinator.markDelivered('client', 'missing', 'id')).not.toThrow();
+  });
+
+  it('stop() prevents an already-queued ingest from delivering', async () => {
+    // ingest resolves on demand so we can stop() while it is in flight.
+    let releaseIngest: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseIngest = resolve;
+    });
+    const { pool, coordinator, deliver } = makeHarness(async () => {
+      await gate;
+      return { success: true, stored: true };
+    });
+    coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+    pool.emitEvent(pool.lastSubId(), makeEvent('a'));
+
+    // Stop while the ingest promise is still pending.
+    await coordinator.stop();
+    releaseIngest?.();
+    await flush();
+
+    // The subscription was marked closed by stop(), so no delivery happens.
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it('bounds the dedup set to maxSentIdsPerSub', async () => {
     const { pool, coordinator, deliver } = makeHarness(undefined, { maxSentIdsPerSub: 2 });
     coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);

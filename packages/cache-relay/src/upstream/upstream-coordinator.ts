@@ -96,6 +96,9 @@ export class UpstreamCoordinator {
   /** Clear all pending EOSE timers and stop the pool. */
   async stop(): Promise<void> {
     for (const state of this.subs.values()) {
+      // Mark closed so any in-flight ingest queued on a subscription's chain
+      // stops before it delivers (the chain re-checks `state.closed`).
+      state.closed = true;
       this.clearEoseTimer(state);
     }
     this.subs.clear();
@@ -173,6 +176,29 @@ export class UpstreamCoordinator {
   }
 
   /**
+   * Record that an event was already delivered to a client subscription through
+   * another path (a local broadcast in `MessageHandler`, or the in-process
+   * `emit`). This seeds the subscription's dedup set so that the upstream echo
+   * of the same event — inevitable once write-through forwards it upstream — is
+   * dropped instead of re-delivered. No-op if the subscription has no upstream
+   * counterpart.
+   *
+   * @param clientId Owning client
+   * @param subscriptionId Owning subscription
+   * @param eventId Id of the event already sent to that subscription
+   */
+  markDelivered(clientId: string, subscriptionId: string, eventId: string): void {
+    const upstreamSubId = this.byClientSub.get(clientSubKey(clientId, subscriptionId));
+    if (!upstreamSubId) {
+      return;
+    }
+    const state = this.subs.get(upstreamSubId);
+    if (state) {
+      this.addSentId(state, eventId);
+    }
+  }
+
+  /**
    * Dedup, backfill and deliver an upstream event. Ingest is serialized per
    * subscription so replaceable events cannot race each other.
    */
@@ -202,7 +228,13 @@ export class UpstreamCoordinator {
         return;
       }
       this.addSentId(state, event.id);
-      this.deps.deliver(state.clientId, state.subscriptionId, event);
+      // Delivery goes out over the transport; never let a send failure turn the
+      // ingest chain into an unhandled rejection.
+      try {
+        this.deps.deliver(state.clientId, state.subscriptionId, event);
+      } catch (error) {
+        logger.debug('Upstream event delivery failed:', error);
+      }
     });
   }
 

@@ -76,6 +76,46 @@ describe('UpstreamRelayPool', () => {
     expect(onEose).toHaveBeenCalledTimes(1);
   });
 
+  it('fires aggregated EOSE when a still-pending relay disconnects before EOSE', () => {
+    const fake = createFakeWebSocketFactory();
+    const pool = new UpstreamRelayPool(['wss://a', 'wss://b'], { webSocketFactory: fake.factory });
+    const onEose = vi.fn();
+    pool.onEose(onEose);
+    pool.start();
+    fake.sockets[0].mockOpen();
+    fake.sockets[1].mockOpen();
+    pool.openSubscription('up1', [{ kinds: [1] }]);
+
+    // Relay A answers; only relay B is still pending.
+    fake.sockets[0].mockMessage(['EOSE', 'up1']);
+    expect(onEose).not.toHaveBeenCalled();
+
+    // Relay B drops before it can answer → it no longer owes EOSE, so the
+    // aggregate completes instead of stalling until the coordinator timeout.
+    fake.sockets[1].mockClose();
+    expect(onEose).toHaveBeenCalledTimes(1);
+    expect(onEose).toHaveBeenCalledWith('up1');
+  });
+
+  it('does not fire EOSE early when a disconnecting relay is not the last pending', () => {
+    const fake = createFakeWebSocketFactory();
+    const pool = new UpstreamRelayPool(['wss://a', 'wss://b'], { webSocketFactory: fake.factory });
+    const onEose = vi.fn();
+    pool.onEose(onEose);
+    pool.start();
+    fake.sockets[0].mockOpen();
+    fake.sockets[1].mockOpen();
+    pool.openSubscription('up1', [{ kinds: [1] }]);
+
+    // Relay A drops while relay B is still pending → no EOSE yet.
+    fake.sockets[0].mockClose();
+    expect(onEose).not.toHaveBeenCalled();
+
+    // Relay B then answers → aggregate completes.
+    fake.sockets[1].mockMessage(['EOSE', 'up1']);
+    expect(onEose).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards upstream events with the originating relay url', () => {
     const fake = createFakeWebSocketFactory();
     const pool = new UpstreamRelayPool(['wss://a', 'wss://b'], { webSocketFactory: fake.factory });

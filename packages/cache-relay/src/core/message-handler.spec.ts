@@ -582,6 +582,7 @@ describe('MessageHandler', () => {
         openForSubscription: vi.fn(),
         closeForSubscription: vi.fn(),
         closeAllForClient: vi.fn(),
+        markDelivered: vi.fn(),
         // Unused by MessageHandler but part of the type surface.
         start: vi.fn(),
         stop: vi.fn(),
@@ -606,6 +607,20 @@ describe('MessageHandler', () => {
       await messageHandler.handleMessage('client1', ['EVENT', invalidEvent]);
 
       expect(coordinator.publish).not.toHaveBeenCalled();
+    });
+
+    it('records locally-broadcast events so upstream echoes are deduped', async () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+      const subscriptions = new Map([['client2', [{ id: 'sub1', filters: [sampleFilter] }]]]);
+      (mockSubscriptionManager.findMatchingSubscriptions as Mock).mockReturnValueOnce(
+        subscriptions
+      );
+
+      await messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+      expect(responseCallback).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
+      expect(coordinator.markDelivered).toHaveBeenCalledWith('client2', 'sub1', sampleEvent.id);
     });
 
     it('opens an upstream subscription on REQ and delegates EOSE to the coordinator', async () => {

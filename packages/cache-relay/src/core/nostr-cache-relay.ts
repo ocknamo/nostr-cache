@@ -400,8 +400,15 @@ export class NostrCacheRelay {
 
       // Notify local subscribers whose filters match the published event
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-      if (matches.has(LOCAL_CLIENT_ID)) {
+      const localSubs = matches.get(LOCAL_CLIENT_ID);
+      if (localSubs && localSubs.length > 0) {
         this.emit('event', event);
+        // ライトスルーで上流へ転送するイベントは上流からエコーバックされる。
+        // ローカル配信済みの id を coordinator の重複排除集合に記録し、
+        // エコーの二重配信（emit の再発火）を防ぐ
+        for (const subscription of localSubs) {
+          this.upstreamCoordinator?.markDelivered(LOCAL_CLIENT_ID, subscription.id, event.id);
+        }
       }
 
       // ライトスルー: 保存に成功したイベントを上流リレーへも転送する（fire-and-forget）
