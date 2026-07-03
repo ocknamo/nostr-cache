@@ -36,7 +36,8 @@ npm install @nostr-cache/cache-relay
 **① 透過型: `WebSocketServerEmulator` で WebSocket を横取り**
 
 既存の Nostr クライアント実装（素の `WebSocket` で NIP-01 を話すもの）を変更せずに、
-対象 URL への接続をブラウザ内リレーへ差し替えます。
+対象 URL への接続をブラウザ内リレーへ差し替えます。手順の詳細は
+[doc/transparent-cache.md](../../doc/transparent-cache.md) を参照してください。
 
 ```typescript
 // ブラウザでは Node.js 専用 WebSocketServer を含まない /browser エントリを使う

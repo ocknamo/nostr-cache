@@ -70,6 +70,7 @@ npm run test
 
 ## ドキュメント
 
+- [doc/transparent-cache.md](./doc/transparent-cache.md): 透過型キャッシュをクライアントに埋め込む手順
 - [doc/api.md](./doc/api.md): 主要パッケージ（shared / cache-relay / server）の API リファレンス
 - [examples/](./examples/README.md): 実行可能なサンプル（`@nostr-cache/cache-relay` を使った Node.js E2E デモ）
 - [doc/concept.md](./doc/concept.md): 背景・全体像
