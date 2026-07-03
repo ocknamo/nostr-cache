@@ -101,6 +101,10 @@ new WebSocketServerEmulator('ws://nostr-cache.invalid');
 new WebSocketServerEmulator(['wss://relay.example.com', 'wss://nos.lol']);
 ```
 
+対象 URL は**コンストラクタ引数で確定**します。`relay.connect()` は内部で
+`transport.start()` を引数なしで呼ぶため、connect 経由で対象 URL が変わることは
+ありません（エミュレータを直接使う場合のみ `start(url)` で上書き可能）。
+
 パターン B を使うと、既存クライアントの接続先設定を変えることなくキャッシュを
 挟めます。ただし**次節の制約**に注意してください。
 
