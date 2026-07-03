@@ -318,6 +318,22 @@ export class WebSocketServerEmulator implements TransportAdapter {
   }
 
   /**
+   * Return the original `WebSocket` constructor captured when the emulator was
+   * started (before it replaced the global). Used by the upstream relay
+   * connector so that connections to real relays are never routed back through
+   * the patched global — which would turn an intercepted upstream URL into a
+   * self-connection loop.
+   *
+   * Falls back to the current `globalThis.WebSocket` when called before
+   * `start()`, so the connector always gets a usable constructor.
+   *
+   * @returns The pre-patch `WebSocket` constructor
+   */
+  getOriginalWebSocket(): typeof WebSocket | undefined {
+    return this.originalWebSocket ?? globalThis.WebSocket;
+  }
+
+  /**
    * Whether the given URL should be intercepted by the emulator.
    */
   private isTargetUrl(url: string): boolean {

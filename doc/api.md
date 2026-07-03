@@ -106,11 +106,21 @@ interface NostrRelayOptions {
   lazyValidateInterval?: number;    // LAZY のバックグラウンド検証間隔 秒 (default: 60)
   lazyValidateBatchSize?: number;   // LAZY の1回あたり検証件数 (default: 100)
   port?: number;                    // WebSocket ポート (Node.js)
+  upstreamRelays?: string[];        // 上流実リレー URL。指定時のみリード/ライトスルー有効（未指定で独立リレー）
+  upstreamEoseTimeout?: number;     // 上流 EOSE を待ってクライアントへ EOSE を返す上限 ms (default: 3000)
+  upstreamConnectionTimeout?: number; // 上流への接続タイムアウト ms (default: 5000)
+  upstreamPool?: UpstreamPool;      // テスト・高度用途: 上流プール実装の差し替え（upstreamRelays より優先）
 }
 ```
 
 > `※未実装` の項目は型としては存在しますが、現状フルにはサポートされていません。
 > Options marked `※未実装` exist in the type but are not fully implemented yet.
+
+`upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
+動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /
+`UpstreamConnection` / `UpstreamCoordinator` と型 `UpstreamPool` / `UpstreamPoolOptions` が
+`@nostr-cache/cache-relay`（および `/browser`）から公開されています。設計は
+[doc/cache-relay/upstream.md](./cache-relay/upstream.md) を参照してください。
 
 ### `interface StorageAdapter`
 
@@ -175,6 +185,17 @@ const server = new NostrRelayServer({
 await server.start();
 // ...
 await server.stop();
+```
+
+`relay.upstreamRelays`（+ `upstreamEoseTimeout` / `upstreamConnectionTimeout`）を
+指定すると、このサーバーは上流実リレー群の手前に挟まる透過キャッシュ（リード/ライト
+スルー）として動作します。
+
+```typescript
+const cache = new NostrRelayServer({
+  port: 8008,
+  relay: { upstreamRelays: ['wss://nos.lol'] },
+});
 ```
 
 | メソッド / Method | 説明 / Description |

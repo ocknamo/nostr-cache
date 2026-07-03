@@ -120,13 +120,39 @@ new WebSocketServerEmulator(['wss://relay.example.com', 'wss://nos.lol']);
 | `storageMaxSize` | 保存イベント数の上限（超過時は `cacheStrategy` で退避） | 無効 |
 | `cacheStrategy` | 退避戦略（`FIFO` / `LRU` / `LFU`） | `FIFO` |
 | `ttl` | キャッシュ投入からの生存秒数（バックグラウンドスイープで削除） | 無効 |
+| `upstreamRelays` | 上流実リレーの URL 群。指定するとリード/ライトスルーが有効 | 無効（独立リレー） |
+| `upstreamEoseTimeout` | 上流 EOSE を待ってクライアントへ EOSE を返す上限（ms） | 3000 |
+| `upstreamConnectionTimeout` | 上流リレーへの接続タイムアウト（ms） | 5000 |
+
+## 上流リレーへのリードスルー / ライトスルー（透過キャッシュ）
+
+`upstreamRelays` を指定すると、ローカルリレーが上流実リレー群の手前に挟まる
+**透過キャッシュ**として動作します（設計詳細は
+[doc/cache-relay/upstream.md](./cache-relay/upstream.md)）。
+
+- **リードスルー**: `REQ` を上流へも転送し、得たイベントを重複排除してローカルへ充填
+  しつつクライアントへ返します。上流購読は CLOSE / 切断まで維持され、EOSE 後の新着も
+  透過的に届きます。
+- **ライトスルー**: `EVENT` をローカル保存後、上流へも転送します（fire-and-forget）。
+
+```ts
+const relay = new NostrCacheRelay(storage, transport, {
+  upstreamRelays: ['wss://nos.lol', 'wss://relay.damus.io'],
+  upstreamEoseTimeout: 3000,
+});
+```
+
+パターン B（実リレー URL を横取り）でも、上流コネクタは差し替え前の
+`WebSocket`（`getOriginalWebSocket()`）を使って実リレーへ接続するため、
+横取り URL を上流に指定しても自己接続ループにはなりません。ただし横取り URL と
+上流 URL が同一だと同じリレーへ往復するため、通常は横取り URL（`.invalid` など）と
+実在する上流 URL を分けて指定してください。
 
 ## 制約・注意点
 
-- **上流リレーへのリードスルー / ライトスルーは未実装**（[doc/TODO.md](./TODO.md) の残タスク）。
-  現状のローカルリレーは「自分に保存されたイベントだけを返す独立リレー」です。
-  パターン B で実リレー URL を横取りした場合、そのリレーの実データは取得**されません**。
-  投稿も上流へ転送されず、ローカルに保存されるだけです。
+- **上流全滅中の投稿は失われます**（再送キューは未実装）。クライアントへの `OK` は
+  ローカル保存の成否で返るため `true` になりますが、上流へは転送されません。
+- **上流 AUTH（NIP-42）は未対応**です。認証が必要な上流リレーには接続できません。
 - **差し替えのタイミング**: `relay.connect()` より前に生成された `WebSocket` は
   横取りできません。アプリの初期化順に注意してください。
 - **グローバル差し替えの影響範囲**: `globalThis.WebSocket` を置き換えるため、

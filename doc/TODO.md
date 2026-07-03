@@ -41,13 +41,26 @@ web-client は 2026-07 に廃棄した）
       複数同時接続に対応
     - [x] 対象 URL をコンストラクタで指定可能に（単数または配列、URL 正規化で末尾スラッシュ差異を
       吸収）。`TransportAdapter.start()` の引数なしのままリレー経由で任意 URL を横取りできる
-- [ ] **上流リレーへの透過キャッシュ化（リードスルー / ライトスルー）**（目的① — 「完全な Cache」の本丸）
-  - 現状のローカルリレーは「自分が保存済みのイベントしか返さない独立リレー」であり、
-    実リレー群の手前に挟まる透過キャッシュにはなっていない
-  - リードスルー: `REQ` 受信時にローカルで結果が不足する場合、上流の実リレーへ問い合わせ、
-    取得したイベントをローカルへ充填してからクライアントへ返す
-  - ライトスルー: `EVENT`（投稿）をローカルへ保存しつつ、上流リレーへも転送する
-  - 上流リレーへの接続管理・フォワーディング機構の設計が前提
+- [x] **上流リレーへの透過キャッシュ化（リードスルー / ライトスルー）**（目的① — 「完全な Cache」の本丸）
+  - `packages/cache-relay/src/upstream/` に上流接続・フォワーディング機構を新設
+    （`UpstreamConnection`（1リレー1ソケット・指数バックオフ再接続・購読再確立）/
+    `UpstreamRelayPool`（複数リレーへのファンアウトと EOSE 集約）/
+    `UpstreamCoordinator`（購読対応表・重複排除・backfill・EOSE 保留・クリーンアップ））。
+    設計詳細は [doc/cache-relay/upstream.md](./cache-relay/upstream.md)
+  - リードスルー: `REQ` を常に上流へ転送。ローカル結果は即返しつつ、上流イベントを
+    `event.id` で重複排除し、`MessageHandler.ingestUpstreamEvent`（通常 EVENT と同じ検証・
+    保存・置換・遅延検証・上限退避）でローカルへ充填してからクライアントへ配信。
+    上流購読はクライアントの CLOSE / 切断まで維持し、EOSE 後のライブイベントも透過配信する
+  - ライトスルー: `EVENT` をローカル保存後、上流へ fire-and-forget で転送
+    （クライアントへの `OK` はローカル保存の成否で即応答）
+  - オプトイン: `NostrRelayOptions.upstreamRelays`（+ `upstreamEoseTimeout` /
+    `upstreamConnectionTimeout` / テスト用 `upstreamPool`）。未指定なら従来どおり独立リレー。
+    server（`relay.upstreamRelays`）・web-client（`startLocalRelay(url, { upstreamRelays })`）へも素通し
+  - 上流クライアントは Node 22 ネイティブ / ブラウザの `WebSocket` のみ使用（`ws` 非依存）。
+    ブラウザではエミュレータの差し替え前 `WebSocket`（`getOriginalWebSocket()`）を遅延取得し、
+    横取り URL を上流指定した場合の自己接続ループを防ぐ
+  - 付随修正: クライアント切断時にローカル購読が削除されていなかった既存のリークを、
+    `MessageHandler.handleClientDisconnect`（`removeAllSubscriptions` + 上流購読クローズ）で解消
 
 ## 優先度: 高（ビルド / CI 復旧）
 

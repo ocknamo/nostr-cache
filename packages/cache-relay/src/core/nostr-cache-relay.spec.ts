@@ -388,6 +388,105 @@ describe('NostrCacheRelay', () => {
     });
   });
 
+  describe('upstream read/write-through', () => {
+    // Records calls and lets the test fire onEvent/onEose.
+    class MockPool {
+      eventCb?: (subId: string, event: NostrEvent, relayUrl: string) => void;
+      eoseCb?: (subId: string) => void;
+      readonly opened: Array<{ subId: string; filters: Filter[] }> = [];
+      readonly closed: string[] = [];
+      readonly published: NostrEvent[] = [];
+      started = false;
+      stopped = false;
+      async start(): Promise<void> {
+        this.started = true;
+      }
+      async stop(): Promise<void> {
+        this.stopped = true;
+      }
+      publish(event: NostrEvent): void {
+        this.published.push(event);
+      }
+      openSubscription(subId: string, filters: Filter[]): void {
+        this.opened.push({ subId, filters });
+      }
+      closeSubscription(subId: string): void {
+        this.closed.push(subId);
+      }
+      onEvent(cb: (subId: string, event: NostrEvent, relayUrl: string) => void): void {
+        this.eventCb = cb;
+      }
+      onEose(cb: (subId: string) => void): void {
+        this.eoseCb = cb;
+      }
+      getConnectedCount(): number {
+        return 1;
+      }
+      fireEose(): void {
+        this.eoseCb?.(this.opened[this.opened.length - 1].subId);
+      }
+    }
+
+    let pool: MockPool;
+    let upstreamRelay: NostrCacheRelay;
+
+    beforeEach(() => {
+      pool = new MockPool();
+      upstreamRelay = new NostrCacheRelay(mockStorage, mockTransport, { upstreamPool: pool });
+    });
+
+    it('starts the upstream pool on connect and stops it on disconnect', async () => {
+      await upstreamRelay.connect();
+      expect(pool.started).toBe(true);
+
+      await upstreamRelay.disconnect();
+      expect(pool.stopped).toBe(true);
+    });
+
+    it('forwards published events upstream (write-through)', async () => {
+      await upstreamRelay.publishEvent(sampleEvent);
+      expect(pool.published).toContainEqual(sampleEvent);
+    });
+
+    it('does not forward upstream when the event fails to save', async () => {
+      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
+      await upstreamRelay.publishEvent(sampleEvent);
+      expect(pool.published).toHaveLength(0);
+    });
+
+    it('opens an upstream subscription and defers eose to the pool (read-through)', async () => {
+      const eoseHandler = vi.fn();
+      upstreamRelay.on('eose', eoseHandler);
+
+      await upstreamRelay.subscribe('sub1', [sampleFilter]);
+
+      // The upstream subscription is opened...
+      expect(pool.opened).toHaveLength(1);
+      expect(pool.opened[0].filters).toEqual([sampleFilter]);
+      // ...and eose is NOT emitted until the pool reports its aggregated EOSE.
+      expect(eoseHandler).not.toHaveBeenCalled();
+
+      pool.fireEose();
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
+
+    it('closes the upstream subscription on unsubscribe', async () => {
+      await upstreamRelay.subscribe('sub1', [sampleFilter]);
+      const subId = pool.opened[0].subId;
+      upstreamRelay.unsubscribe('sub1');
+      expect(pool.closed).toContain(subId);
+    });
+
+    it('does not create a coordinator without upstream config (opt-in)', async () => {
+      // The default `relay` has no upstream configured: subscribe emits eose
+      // synchronously, exactly as before this feature existed.
+      const eoseHandler = vi.fn();
+      relay.on('eose', eoseHandler);
+      await relay.subscribe('sub1', [sampleFilter]);
+      expect(eoseHandler).toHaveBeenCalledWith('sub1');
+    });
+  });
+
   describe('ttl background sweep', () => {
     beforeEach(() => {
       vi.useFakeTimers();

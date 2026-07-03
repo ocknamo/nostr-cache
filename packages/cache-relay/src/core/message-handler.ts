@@ -23,6 +23,7 @@ import { EventHandler, type ValidateEventsType } from '../event/event-handler.js
 import { EventValidator } from '../event/event-validator.js';
 import type { LazyValidator } from '../event/lazy-validator.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
+import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { capEvents } from '../utils/filter-utils.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
@@ -36,6 +37,12 @@ export class MessageHandler {
   private subscriptionManager: SubscriptionManager;
   private responseCallbacks: ((clientId: string, message: NostrWireMessage) => void)[] = [];
   private eventValidator: EventValidator;
+  /**
+   * Present only when upstream read/write-through is enabled. Injected after
+   * construction (see {@link setUpstreamCoordinator}) to break the wiring cycle
+   * with {@link NostrCacheRelay}.
+   */
+  private upstreamCoordinator?: UpstreamCoordinator;
 
   /**
    * Create a new MessageHandler instance
@@ -173,41 +180,16 @@ export class MessageHandler {
   private async handleEventMessage(clientId: string, message: EventMessage): Promise<void> {
     const event = message.event;
 
-    // Synchronous validation only in IMMEDIATELY mode. In LAZY the event is
-    // accepted and stored now, then validated by the background pass; in NONE
-    // it is never validated. (EventHandler honours the same mode internally.)
-    if (this.validateEventsType === 'IMMEDIATELY' && !(await this.validateEvent(event))) {
-      this.sendOK(clientId, event.id, false, 'invalid: event validation failed');
-      return;
-    }
-
     try {
-      const { success, stored, message, matches } = await this.eventHandler.handleEvent(event);
+      const { success, message: resultMessage, matches } = await this.ingestEvent(event);
 
       if (!success) {
-        this.sendOK(clientId, event.id, false, message);
+        this.sendOK(clientId, event.id, false, resultMessage);
         return;
       }
 
       // OK レスポンスの送信
       this.sendOK(clientId, event.id, true);
-
-      // LAZY モードでは、実際に保存されたイベントだけをバックグラウンド検証へ回す。
-      // ephemeral など未保存のものは検証しても削除対象がなく、キューを浪費するため除外。
-      // 不正なら後続の検証パスでストレージから削除される
-      if (this.validateEventsType === 'LAZY' && stored) {
-        this.lazyValidator?.enqueue(event);
-      }
-
-      // 保存されたイベントについてはストレージ上限の退避を行う。
-      // 退避は保存後の付随処理であり、失敗してもレスポンス/配信に影響させない
-      if (stored && this.storageMaxSize !== undefined && this.storageMaxSize > 0) {
-        try {
-          await this.storage.enforceLimit?.(this.storageMaxSize, this.cacheStrategy);
-        } catch (error) {
-          logger.error('Failed to enforce storage limit:', error);
-        }
-      }
 
       // マッチするサブスクリプションへのブロードキャスト
       if (matches) {
@@ -217,10 +199,93 @@ export class MessageHandler {
           }
         }
       }
+
+      // ライトスルー: 受理したイベントを上流リレーへも転送する（fire-and-forget）。
+      // クライアントへの OK はローカル保存の成否で既に返しており、上流の結果は待たない。
+      // ephemeral（stored=false）も success なら転送対象。
+      this.upstreamCoordinator?.publish(event);
     } catch (error) {
       logger.error('Error handling event:', error);
       this.sendOK(clientId, event.id, false, 'error: failed to save event');
     }
+  }
+
+  /**
+   * Validate (per the configured mode), store, and post-process one event —
+   * the storage-side work shared by the transport EVENT path and by upstream
+   * backfill ({@link ingestUpstreamEvent}). Does NOT send OK or broadcast.
+   *
+   * - IMMEDIATELY: validate synchronously up front (invalid → not stored).
+   * - LAZY: store now, enqueue for background validation (only if stored).
+   * - NONE: no validation.
+   * After a successful store, enforces the storage limit (a post-save side
+   * effect whose failure never affects the result).
+   *
+   * @param event Event to ingest
+   * @returns handleEvent's result (success / stored / message / matches)
+   */
+  private async ingestEvent(
+    event: NostrEvent
+  ): Promise<Awaited<ReturnType<EventHandler['handleEvent']>>> {
+    // Synchronous validation only in IMMEDIATELY mode. In LAZY the event is
+    // accepted and stored now, then validated by the background pass; in NONE
+    // it is never validated. (EventHandler honours the same mode internally.)
+    if (this.validateEventsType === 'IMMEDIATELY' && !(await this.validateEvent(event))) {
+      return { success: false, stored: false, message: 'invalid: event validation failed' };
+    }
+
+    const result = await this.eventHandler.handleEvent(event);
+    if (!result.success) {
+      return result;
+    }
+
+    // LAZY モードでは、実際に保存されたイベントだけをバックグラウンド検証へ回す。
+    // ephemeral など未保存のものは検証しても削除対象がなく、キューを浪費するため除外。
+    if (this.validateEventsType === 'LAZY' && result.stored) {
+      this.lazyValidator?.enqueue(event);
+    }
+
+    // 保存されたイベントについてはストレージ上限の退避を行う。
+    // 退避は保存後の付随処理であり、失敗してもレスポンス/配信に影響させない
+    if (result.stored && this.storageMaxSize !== undefined && this.storageMaxSize > 0) {
+      try {
+        await this.storage.enforceLimit?.(this.storageMaxSize, this.cacheStrategy);
+      } catch (error) {
+        logger.error('Failed to enforce storage limit:', error);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Backfill one event received from an upstream relay. Runs the same
+   * validation / storage / post-processing as a client EVENT but sends no OK
+   * and broadcasts to no subscriptions — the {@link UpstreamCoordinator}
+   * decides delivery (dedup, routing to the owning subscription).
+   *
+   * @param event Event fetched from upstream
+   * @returns Whether it was accepted (success) and persisted (stored)
+   */
+  async ingestUpstreamEvent(event: NostrEvent): Promise<{ success: boolean; stored: boolean }> {
+    try {
+      const { success, stored } = await this.ingestEvent(event);
+      return { success, stored };
+    } catch (error) {
+      logger.error('Error ingesting upstream event:', error);
+      return { success: false, stored: false };
+    }
+  }
+
+  /**
+   * Inject the upstream coordinator that enables read/write-through. Called by
+   * {@link NostrCacheRelay} after construction (the coordinator needs a
+   * reference to this handler's {@link ingestUpstreamEvent}).
+   *
+   * @param coordinator Coordinator orchestrating upstream relays
+   */
+  setUpstreamCoordinator(coordinator: UpstreamCoordinator): void {
+    this.upstreamCoordinator = coordinator;
   }
 
   /**
@@ -263,6 +328,11 @@ export class MessageHandler {
     }
 
     try {
+      // 同一 subscriptionId での REQ 再発行に備え、先に旧上流購読を閉じる。
+      // SubscriptionManager.createSubscription はローカルの旧購読を内部で削除するが、
+      // 上流側は関知しないため、ここで明示的に閉じないと上流購読がリークする。
+      this.upstreamCoordinator?.closeForSubscription(clientId, subscriptionId);
+
       // サブスクリプションの作成
       const subscription = this.subscriptionManager.createSubscription(
         clientId,
@@ -275,6 +345,9 @@ export class MessageHandler {
         `Created subscription ${subscriptionId} for client ${clientId} with ${filters.length} filters`
       );
 
+      // ローカルから送信済みのイベント id。上流由来イベントの重複排除に使う。
+      const sentIds: string[] = [];
+
       // 既存の一致するイベントの取得と送信
       try {
         // 各フィルタに一致するイベントを取得（TTL の期限切れは
@@ -286,10 +359,9 @@ export class MessageHandler {
         const limitedEvents = capEvents(events, this.maxEventsPerRequest);
 
         // イベントをクライアントに送信
-        let eventCount = 0;
         for (const event of limitedEvents) {
           this.sendEvent(clientId, subscriptionId, event);
-          eventCount++;
+          sentIds.push(event.id);
         }
 
         if (events.length > limitedEvents.length) {
@@ -298,18 +370,24 @@ export class MessageHandler {
           );
         }
 
-        logger.info(`Sent ${eventCount} events for subscription ${subscriptionId}`);
+        logger.info(`Sent ${sentIds.length} events for subscription ${subscriptionId}`);
       } catch (error) {
         // ストレージエラーの処理
         logger.error(`Failed to get events for subscription ${subscriptionId}:`, error);
         this.sendNotice(clientId, 'Failed to get events: storage error');
-        // エラー発生時はEOSEを送信しない
+        // エラー発生時はEOSEを送信せず、上流購読も開かない
         return;
       }
 
-      // EOSE（End of Stored Events）の送信
-      // すべての保存されたイベントが送信されたことをクライアントに通知
-      this.sendEOSE(clientId, subscriptionId);
+      // リードスルー有効時は上流へ REQ を展開し、EOSE の送出は coordinator に委譲する
+      // （上流 EOSE の集約 or タイムアウトで送られる）。無効時は従来どおり即 EOSE。
+      if (this.upstreamCoordinator) {
+        this.upstreamCoordinator.openForSubscription(clientId, subscriptionId, filters, sentIds);
+      } else {
+        // EOSE（End of Stored Events）の送信
+        // すべての保存されたイベントが送信されたことをクライアントに通知
+        this.sendEOSE(clientId, subscriptionId);
+      }
     } catch (error) {
       // サブスクリプション作成エラーの処理
       logger.error(`Failed to create subscription ${subscriptionId}:`, error);
@@ -337,6 +415,9 @@ export class MessageHandler {
       // サブスクリプションの削除
       const removed = this.subscriptionManager.removeSubscription(clientId, subscriptionId);
 
+      // 対応する上流購読も閉じる（開いていなければ no-op）
+      this.upstreamCoordinator?.closeForSubscription(clientId, subscriptionId);
+
       if (!removed) {
         // 存在しないサブスクリプションの場合はログだけ残す
         logger.debug(`Subscription ${subscriptionId} not found for client ${clientId}`);
@@ -344,6 +425,26 @@ export class MessageHandler {
     } catch (error) {
       logger.error('Failed to remove subscription:', error);
       this.sendNotice(clientId, 'Failed to close subscription: Unknown error');
+    }
+  }
+
+  /**
+   * Handle a client disconnecting: remove all of its subscriptions and close
+   * the matching upstream subscriptions. Without this, disconnected clients
+   * leak local subscriptions (a pre-existing gap) and, with upstream enabled,
+   * leak real upstream connections' REQs.
+   *
+   * @param clientId ID of the client that disconnected
+   */
+  handleClientDisconnect(clientId: string): void {
+    try {
+      this.upstreamCoordinator?.closeAllForClient(clientId);
+      const removed = this.subscriptionManager.removeAllSubscriptions(clientId);
+      if (removed > 0) {
+        logger.debug(`Removed ${removed} subscriptions for disconnected client ${clientId}`);
+      }
+    } catch (error) {
+      logger.error('Failed to clean up subscriptions on disconnect:', error);
     }
   }
 

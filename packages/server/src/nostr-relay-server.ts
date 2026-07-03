@@ -56,6 +56,14 @@ interface NostrRelayServerOptions {
     ttl?: number;
     // TTL スイープの実行間隔（秒）。既定 60
     ttlSweepInterval?: number;
+    // 上流リレーの URL リスト。指定するとリードスルー / ライトスルーが有効になり、
+    // このサーバーは上流リレー群の手前に挟まる透過キャッシュとして動作する。
+    // 未指定なら従来どおり自分が保存したイベントのみ返す独立リレー。
+    upstreamRelays?: string[];
+    // 上流の EOSE を待ってクライアントへ EOSE を返す上限（ミリ秒）
+    upstreamEoseTimeout?: number;
+    // 上流リレーへの接続タイムアウト（ミリ秒）
+    upstreamConnectionTimeout?: number;
   };
 
   // ヘルスチェック設定
@@ -118,6 +126,10 @@ export class NostrRelayServer {
       ttl: this.options.relay?.ttl,
       ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',
+      // 上流リレー（リード/ライトスルー）。未指定なら独立リレーのまま
+      upstreamRelays: this.options.relay?.upstreamRelays,
+      upstreamEoseTimeout: this.options.relay?.upstreamEoseTimeout,
+      upstreamConnectionTimeout: this.options.relay?.upstreamConnectionTimeout,
     });
   }
 

@@ -99,4 +99,35 @@ describe('startLocalRelay (integration)', () => {
 
     connection.disconnect();
   });
+
+  it('still serves local publish/REQ when an upstream relay is unreachable', async () => {
+    // A `.invalid` upstream never resolves; the local cache must keep working
+    // (write-through / read-through degrade gracefully, opt-in still local).
+    handle = await startLocalRelay(TEST_URL, {
+      upstreamRelays: ['wss://upstream.invalid'],
+    });
+
+    const okResults: Array<{ eventId: string; accepted: boolean }> = [];
+    const connection = new RelayConnection({
+      onOk: (eventId, accepted) => okResults.push({ eventId, accepted }),
+    });
+    await connection.connect(TEST_URL);
+
+    const signer = new EventSigner();
+    const event = await signer.signTextNote('note with unreachable upstream');
+    connection.publish(event);
+    await waitFor(() => okResults.length > 0, 'OK response');
+    expect(okResults[0]).toEqual({ eventId: event.id, accepted: true });
+
+    // A short EOSE timeout keeps the read-through from stalling on the dead
+    // upstream; the locally-stored event is still returned.
+    const received: NostrEvent[] = [];
+    connection.subscribe('offline-sub', [{ kinds: [1], authors: [event.pubkey] }], {
+      onEvent: (incoming) => received.push(incoming),
+      onEose: () => {},
+    });
+    await waitFor(() => received.some((e) => e.id === event.id), 'local EVENT');
+
+    connection.disconnect();
+  });
 });
