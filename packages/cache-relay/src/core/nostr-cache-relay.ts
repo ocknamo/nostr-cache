@@ -20,6 +20,9 @@ import { LazyValidator } from '../event/lazy-validator.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
+import { UpstreamRelayPool } from '../upstream/upstream-relay-pool.js';
+import type { UpstreamPool } from '../upstream/upstream-types.js';
 import { capEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
 import { SubscriptionManager } from './subscription-manager.js';
@@ -119,6 +122,44 @@ export interface NostrRelayOptions {
    * Port for WebSocket server (Node.js only)
    */
   port?: number;
+
+  /**
+   * 上流リレーの URL リスト。指定したときだけリードスルー / ライトスルーが有効になる。
+   * 未指定（または空配列）の場合は従来どおり「自分が保存済みのイベントのみ返す独立
+   * リレー」として動作する。
+   *
+   * List of upstream relay URLs. When set (non-empty), the relay becomes a
+   * transparent cache: REQ is read-through (forwarded upstream, results
+   * backfilled) and EVENT is write-through (forwarded upstream). When unset,
+   * behaviour is unchanged (an independent relay).
+   */
+  upstreamRelays?: string[];
+
+  /**
+   * リードスルー時、上流の EOSE を待ってクライアントへ EOSE を返す上限 (ms)。
+   * 既定は `DEFAULT_SUBSCRIPTION_TIMEOUT`。上流が全滅していても、この時間で EOSE を返す。
+   *
+   * Max time (ms) to hold the client's EOSE waiting for the aggregated upstream
+   * EOSE. Defaults to `DEFAULT_SUBSCRIPTION_TIMEOUT`.
+   */
+  upstreamEoseTimeout?: number;
+
+  /**
+   * 上流リレーへの接続タイムアウト (ms)。既定は `DEFAULT_CONNECTION_TIMEOUT`。
+   *
+   * Connect timeout (ms) for each upstream relay. Defaults to
+   * `DEFAULT_CONNECTION_TIMEOUT`.
+   */
+  upstreamConnectionTimeout?: number;
+
+  /**
+   * テスト・高度用途向け: 上流プールの実装を差し替える。指定時は `upstreamRelays`
+   * より優先され、リード/ライトスルーが有効になる。
+   *
+   * Test / advanced hook: inject a custom upstream pool. Takes precedence over
+   * `upstreamRelays` and enables read/write-through when present.
+   */
+  upstreamPool?: UpstreamPool;
 }
 
 /**
@@ -136,6 +177,11 @@ export class NostrCacheRelay {
   private lazyValidator?: LazyValidator;
   /** Background TTL sweeper, present only when `ttl` is configured. */
   private expiryReaper?: ExpiryReaper;
+  /**
+   * Upstream read/write-through orchestrator, present only when upstream relays
+   * (or a custom pool) are configured.
+   */
+  private upstreamCoordinator?: UpstreamCoordinator;
   private eventListeners: Map<
     string,
     Array<
@@ -208,6 +254,42 @@ export class NostrCacheRelay {
       });
     }
 
+    // 上流リレーが設定されていればリード/ライトスルーの orchestrator を用意する。
+    // 未設定なら coordinator を作らず、従来どおりの独立リレーとして動作する（opt-in）。
+    if (this.options.upstreamPool || (this.options.upstreamRelays?.length ?? 0) > 0) {
+      const pool =
+        this.options.upstreamPool ??
+        new UpstreamRelayPool(this.options.upstreamRelays as string[], {
+          connectionTimeout: this.options.upstreamConnectionTimeout,
+          // WebSocket コンストラクタは接続時に評価する（遅延ファクトリ）。ブラウザで
+          // エミュレータがグローバル WebSocket を差し替えても、上流には差し替え前の
+          // オリジナルを使うことで自己接続ループを防ぐ。
+          webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
+        });
+      this.upstreamCoordinator = new UpstreamCoordinator(
+        {
+          pool,
+          ingest: (event) => this.messageHandler.ingestUpstreamEvent(event),
+          deliver: (clientId, subscriptionId, event) => {
+            if (clientId === LOCAL_CLIENT_ID) {
+              this.emit('event', event);
+            } else {
+              this.messageHandler.sendEvent(clientId, subscriptionId, event);
+            }
+          },
+          sendEose: (clientId, subscriptionId) => {
+            if (clientId === LOCAL_CLIENT_ID) {
+              this.emit('eose', subscriptionId);
+            } else {
+              this.messageHandler.sendEOSE(clientId, subscriptionId);
+            }
+          },
+        },
+        { eoseTimeout: this.options.upstreamEoseTimeout }
+      );
+      this.messageHandler.setUpstreamCoordinator(this.upstreamCoordinator);
+    }
+
     // メッセージハンドラからの応答をトランスポートに送信するコールバックを設定
     this.messageHandler.onResponse((clientId, message) => {
       this.transport.send(clientId, message);
@@ -228,6 +310,8 @@ export class NostrCacheRelay {
 
     this.transport.onDisconnect((clientId: string) => {
       logger.info(`Client disconnected: ${clientId}`);
+      // 切断したクライアントのローカル購読を破棄し、対応する上流購読も閉じる
+      this.messageHandler.handleClientDisconnect(clientId);
     });
 
     this.transport.onMessage((clientId: string, message: NostrWireMessage) => {
@@ -258,6 +342,15 @@ export class NostrCacheRelay {
     this.lazyValidator?.start();
     // TTL の定期パージを開始
     this.expiryReaper?.start();
+    // 上流リレーへの接続を開始する。接続失敗はログのみで connect 自体は成功させる
+    // （キャッシュはオフラインでも従来動作で機能すべき）
+    if (this.upstreamCoordinator) {
+      try {
+        await this.upstreamCoordinator.start();
+      } catch (error) {
+        logger.error('Failed to start upstream coordinator:', error);
+      }
+    }
     this.emit('connect');
   }
 
@@ -268,6 +361,8 @@ export class NostrCacheRelay {
    */
   async disconnect(): Promise<void> {
     await this.transport.stop();
+    // 上流リレーとの接続・購読を閉じ、保留中の EOSE タイマーも解除する
+    await this.upstreamCoordinator?.stop();
     // 遅延バリデーションの定期実行を停止し、未処理キューを検証しきってから終了
     // （未検証イベントの取りこぼしを防ぐ）
     this.lazyValidator?.stop();
@@ -305,9 +400,19 @@ export class NostrCacheRelay {
 
       // Notify local subscribers whose filters match the published event
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
-      if (matches.has(LOCAL_CLIENT_ID)) {
+      const localSubs = matches.get(LOCAL_CLIENT_ID);
+      if (localSubs && localSubs.length > 0) {
         this.emit('event', event);
+        // ライトスルーで上流へ転送するイベントは上流からエコーバックされる。
+        // ローカル配信済みの id を coordinator の重複排除集合に記録し、
+        // エコーの二重配信（emit の再発火）を防ぐ
+        for (const subscription of localSubs) {
+          this.upstreamCoordinator?.markDelivered(LOCAL_CLIENT_ID, subscription.id, event.id);
+        }
       }
+
+      // ライトスルー: 保存に成功したイベントを上流リレーへも転送する（fire-and-forget）
+      this.upstreamCoordinator?.publish(event);
     }
 
     return saved;
@@ -353,6 +458,7 @@ export class NostrCacheRelay {
 
     // Replay the matching stored events to the listeners.
     // TTL expiry is handled by the background sweep, not filtered here.
+    const sentIds: string[] = [];
     try {
       const events = await this.storage.getEvents(filters);
       const limitedEvents = capEvents(
@@ -361,14 +467,26 @@ export class NostrCacheRelay {
       );
       for (const event of limitedEvents) {
         this.emit('event', event);
+        sentIds.push(event.id);
       }
     } catch (error) {
       logger.error(`Failed to load stored events for subscription ${subscriptionId}:`, error);
       this.emit('error', error instanceof Error ? error : new Error(String(error)));
     }
 
-    // Signal the end of stored events
-    this.emit('eose', subscriptionId);
+    // リードスルー有効時は上流へも問い合わせ、EOSE は coordinator が
+    // （上流 EOSE の集約 or タイムアウトで）発火する。無効時は従来どおり即 EOSE。
+    if (this.upstreamCoordinator) {
+      this.upstreamCoordinator.openForSubscription(
+        LOCAL_CLIENT_ID,
+        subscriptionId,
+        filters,
+        sentIds
+      );
+    } else {
+      // Signal the end of stored events
+      this.emit('eose', subscriptionId);
+    }
   }
 
   /**
@@ -379,6 +497,9 @@ export class NostrCacheRelay {
    */
   unsubscribe(subscriptionId: string): boolean {
     const removed = this.subscriptionManager.removeSubscription(LOCAL_CLIENT_ID, subscriptionId);
+
+    // 対応する上流購読も閉じる（開いていなければ no-op）
+    this.upstreamCoordinator?.closeForSubscription(LOCAL_CLIENT_ID, subscriptionId);
 
     if (removed) {
       logger.info(`Removed subscription ${subscriptionId}`);

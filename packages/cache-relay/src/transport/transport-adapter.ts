@@ -58,4 +58,19 @@ export interface TransportAdapter {
    * @returns The number of active client connections
    */
   getConnectionCount(): number;
+
+  /**
+   * Return the original `WebSocket` constructor for transports that replace the
+   * global one (i.e. the browser emulator). The upstream relay connector uses
+   * this to reach real relays without going through the patched global — which
+   * would otherwise route an upstream URL that the emulator also intercepts
+   * back into the local relay (a self-connection loop).
+   *
+   * Optional: transports that never patch the global (e.g. the Node.js
+   * `WebSocketServer`) may omit it, and callers should fall back to
+   * `globalThis.WebSocket`.
+   *
+   * @returns The pre-patch `WebSocket` constructor, or undefined when unknown
+   */
+  getOriginalWebSocket?(): typeof WebSocket | undefined;
 }

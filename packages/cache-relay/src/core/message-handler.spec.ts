@@ -572,4 +572,125 @@ describe('MessageHandler', () => {
       expect(mockStorage.getEvents).not.toHaveBeenCalled();
     });
   });
+
+  describe('upstream coordinator hooks', () => {
+    // Minimal stand-in for UpstreamCoordinator; only the methods MessageHandler
+    // calls are needed.
+    function makeCoordinator() {
+      return {
+        publish: vi.fn(),
+        openForSubscription: vi.fn(),
+        closeForSubscription: vi.fn(),
+        closeAllForClient: vi.fn(),
+        markDelivered: vi.fn(),
+        // Unused by MessageHandler but part of the type surface.
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+    }
+
+    it('forwards accepted EVENTs upstream (write-through)', async () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+
+      await messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+      expect(responseCallback).toHaveBeenCalledWith('client1', ['OK', sampleEvent.id, true, '']);
+      expect(coordinator.publish).toHaveBeenCalledWith(sampleEvent);
+    });
+
+    it('does not forward EVENTs that fail validation', async () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+      const invalidEvent: NostrEvent = { ...sampleEvent, id: 'invalid-event', sig: 'deadbeef' };
+
+      await messageHandler.handleMessage('client1', ['EVENT', invalidEvent]);
+
+      expect(coordinator.publish).not.toHaveBeenCalled();
+    });
+
+    it('records locally-broadcast events so upstream echoes are deduped', async () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+      const subscriptions = new Map([['client2', [{ id: 'sub1', filters: [sampleFilter] }]]]);
+      (mockSubscriptionManager.findMatchingSubscriptions as Mock).mockReturnValueOnce(
+        subscriptions
+      );
+
+      await messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+      expect(responseCallback).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
+      expect(coordinator.markDelivered).toHaveBeenCalledWith('client2', 'sub1', sampleEvent.id);
+    });
+
+    it('opens an upstream subscription on REQ and delegates EOSE to the coordinator', async () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+      (mockStorage.getEvents as Mock).mockResolvedValueOnce([sampleEvent]);
+
+      await messageHandler.handleMessage('client1', ['REQ', 'sub1', sampleFilter]);
+
+      // Local events are still sent immediately.
+      expect(responseCallback).toHaveBeenCalledWith('client1', ['EVENT', 'sub1', sampleEvent]);
+      // But EOSE is NOT sent directly — the coordinator owns it now.
+      expect(responseCallback).not.toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+      // The coordinator is handed the locally-sent ids for dedup.
+      expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+        'client1',
+        'sub1',
+        [sampleFilter],
+        [sampleEvent.id]
+      );
+    });
+
+    it('closes the previous upstream sub when a REQ reuses a subscription id', async () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+
+      await messageHandler.handleMessage('client1', ['REQ', 'sub1', sampleFilter]);
+
+      expect(coordinator.closeForSubscription).toHaveBeenCalledWith('client1', 'sub1');
+    });
+
+    it('closes the upstream sub on CLOSE', () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+
+      messageHandler.handleMessage('client1', ['CLOSE', 'sub1']);
+
+      expect(coordinator.closeForSubscription).toHaveBeenCalledWith('client1', 'sub1');
+    });
+
+    it('handleClientDisconnect removes local subs and closes all upstream subs', () => {
+      const coordinator = makeCoordinator();
+      messageHandler.setUpstreamCoordinator(coordinator as never);
+
+      messageHandler.handleClientDisconnect('client1');
+
+      expect(mockSubscriptionManager.removeAllSubscriptions).toHaveBeenCalledWith('client1');
+      expect(coordinator.closeAllForClient).toHaveBeenCalledWith('client1');
+    });
+
+    it('sends EOSE directly when no coordinator is set (opt-in unchanged)', async () => {
+      await messageHandler.handleMessage('client1', ['REQ', 'sub1', sampleFilter]);
+      expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+    });
+
+    it('ingestUpstreamEvent stores without sending OK or broadcasting', async () => {
+      const result = await messageHandler.ingestUpstreamEvent(sampleEvent);
+
+      expect(result).toEqual({ success: true, stored: true });
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent);
+      // No OK / EVENT broadcast is emitted for a backfilled event.
+      expect(responseCallback).not.toHaveBeenCalled();
+    });
+
+    it('ingestUpstreamEvent rejects an invalid event in IMMEDIATELY mode', async () => {
+      const invalidEvent: NostrEvent = { ...sampleEvent, id: 'invalid-event', sig: 'deadbeef' };
+      const result = await messageHandler.ingestUpstreamEvent(invalidEvent);
+
+      expect(result).toEqual({ success: false, stored: false });
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+  });
 });

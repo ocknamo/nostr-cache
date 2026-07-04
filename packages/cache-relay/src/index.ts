@@ -22,6 +22,12 @@ import { TransportAdapter } from './transport/transport-adapter.js';
 import { WebSocketServerEmulator } from './transport/web-socket-server-emulator.js';
 import { WebSocketServer } from './transport/web-socket-server.js';
 
+// Upstream (read-through / write-through)
+import { UpstreamConnection } from './upstream/upstream-connection.js';
+import { UpstreamCoordinator } from './upstream/upstream-coordinator.js';
+import { UpstreamRelayPool } from './upstream/upstream-relay-pool.js';
+import type { UpstreamPool, UpstreamPoolOptions } from './upstream/upstream-types.js';
+
 // Utils
 import * as filterUtils from './utils/filter-utils.js';
 
@@ -42,6 +48,12 @@ export {
   TransportAdapter,
   WebSocketServer,
   WebSocketServerEmulator,
+  // Upstream
+  UpstreamRelayPool,
+  UpstreamConnection,
+  UpstreamCoordinator,
+  type UpstreamPool,
+  type UpstreamPoolOptions,
   // Utils
   filterUtils,
 };

@@ -14,6 +14,11 @@
   const DEFAULT_FILTER: Filter = { kinds: [1], limit: 100 };
   const MAX_NOTICES = 5;
 
+  // 上流実リレー（例: ['wss://nos.lol']）。空なら従来どおりローカル保存分のみ返す
+  // 独立キャッシュとして動作する。URL を入れるとリード/ライトスルーの透過キャッシュ
+  // （上流の手前に挟まる本来の姿）になる。
+  const UPSTREAM_RELAYS: string[] = [];
+
   let status = $state<ConnectionStatus>('disconnected');
   let relayUrl = $state(LOCAL_RELAY_URL);
   let events = $state<NostrEvent[]>([]);
@@ -105,7 +110,7 @@
     let handle: Awaited<ReturnType<typeof startLocalRelay>> | undefined;
     (async () => {
       try {
-        handle = await startLocalRelay();
+        handle = await startLocalRelay(LOCAL_RELAY_URL, { upstreamRelays: UPSTREAM_RELAYS });
         localRelayReady = true;
         await connectTo(LOCAL_RELAY_URL);
       } catch (error) {

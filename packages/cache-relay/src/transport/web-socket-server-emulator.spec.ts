@@ -301,6 +301,21 @@ describe('WebSocketServerEmulator', () => {
     });
   });
 
+  describe('getOriginalWebSocket()', () => {
+    it('returns the current global before start()', () => {
+      expect(emulator.getOriginalWebSocket()).toBe(originalWebSocket);
+    });
+
+    it('returns the pre-patch constructor after start(), not the patched global', async () => {
+      await emulator.start();
+      // The global has been replaced by the patched constructor...
+      expect(globalThis.WebSocket).not.toBe(originalWebSocket);
+      // ...but the upstream connector must still get the original, otherwise an
+      // intercepted upstream URL would loop back into the local relay.
+      expect(emulator.getOriginalWebSocket()).toBe(originalWebSocket);
+    });
+  });
+
   describe('getConnectionCount()', () => {
     it('should be 0 before any connection', () => {
       expect(emulator.getConnectionCount()).toBe(0);
