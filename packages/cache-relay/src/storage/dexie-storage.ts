@@ -2,7 +2,12 @@ import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
 import { eventMatchesFilter } from '../utils/filter-utils.js';
-import type { CacheStrategy, StorageAdapter } from './storage-adapter.js';
+import type {
+  CacheStrategy,
+  SaveEventOptions,
+  StorageAdapter,
+  ValidationStatus,
+} from './storage-adapter.js';
 
 /**
  * NostrEvent table schema
@@ -19,6 +24,7 @@ interface NostrEventTable {
   last_accessed_at: number; // 最終アクセス時刻（ミリ秒）。LRU 退避に使用
   access_count: number; // 読み出し回数。LFU 退避に使用
   cached_at: number; // キャッシュ投入（保存）時刻（ミリ秒）。保存時刻ベース TTL に使用
+  validated: number; // 署名検証済みなら 1、未検証なら 0（boolean はインデックス不可のため数値）
 }
 
 /**
@@ -35,7 +41,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     // Define database schema with improved index definitions.
     // last_accessed_at / [access_count+last_accessed_at] は LRU / LFU 退避用の
     // アクセスメタデータインデックス、cached_at は保存時刻ベース TTL 用の
-    // スイープインデックス（いずれも未リリースのため v1 に直接定義）
+    // スイープインデックス。[validated+cached_at] は遅延検証の永続キュー用で、
+    // 「validated=0 を cached_at 昇順（古い順）」で効率よくスキャンできる。
+    // id → 検証状態の参照は主キー（bulkGet）で行うため専用インデックスは不要。
+    // （いずれも未リリースのため v1 に直接定義）
     this.version(1).stores({
       events: `
         id,
@@ -49,7 +58,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         [pubkey+kind+created_at],
         last_accessed_at,
         [access_count+last_accessed_at],
-        cached_at
+        cached_at,
+        [validated+cached_at]
       `,
     });
   }
@@ -104,26 +114,34 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     return formattedTags;
   }
 
-  async saveEvent(event: NostrEvent): Promise<boolean> {
+  async saveEvent(event: NostrEvent, options?: SaveEventOptions): Promise<boolean> {
     try {
       const now = Date.now();
-      await this.events.put({
-        id: event.id,
-        pubkey: event.pubkey,
-        created_at: event.created_at,
-        kind: event.kind,
-        tags: event.tags,
-        indexed_tags: this.getIndexedTags(event.tags),
-        content: event.content,
-        sig: event.sig,
-        // 挿入も1回のアクセスとみなす（access_count: 1）。これにより LFU で
-        // 挿入直後のイベントが「未読イベントより不利」にならない（既読 >=2 の
-        // イベントよりは退避されやすい、標準的な LFU の挙動は残る）。
-        // 置換可能イベント等の再 put ではメタデータがリセットされ、頻度履歴を
-        // 失い、cached_at も更新される（TTL が保存し直しから数え直しになる）
-        last_accessed_at: now,
-        access_count: 1,
-        cached_at: now,
+      // 既存行の取得と put を単一の rw トランザクションで行い、検証状態の
+      // 1 → 0 ダウングレードを防ぐ。同じ id は同じ内容ハッシュなので、一度
+      // 検証済みになったイベントは再保存（上流エコー・再 ingest 等）でも
+      // 検証済みのままにする
+      await this.transaction('rw', this.events, async () => {
+        const existing = await this.events.get(event.id);
+        await this.events.put({
+          id: event.id,
+          pubkey: event.pubkey,
+          created_at: event.created_at,
+          kind: event.kind,
+          tags: event.tags,
+          indexed_tags: this.getIndexedTags(event.tags),
+          content: event.content,
+          sig: event.sig,
+          // 挿入も1回のアクセスとみなす（access_count: 1）。これにより LFU で
+          // 挿入直後のイベントが「未読イベントより不利」にならない（既読 >=2 の
+          // イベントよりは退避されやすい、標準的な LFU の挙動は残る）。
+          // 置換可能イベント等の再 put ではメタデータがリセットされ、頻度履歴を
+          // 失い、cached_at も更新される（TTL が保存し直しから数え直しになる）
+          last_accessed_at: now,
+          access_count: 1,
+          cached_at: now,
+          validated: options?.validated || existing?.validated === 1 ? 1 : 0,
+        });
       });
       return true;
     } catch (error) {
@@ -132,6 +150,107 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       );
       return false;
     }
+  }
+
+  /**
+   * Get stored events that have not been validated yet, oldest first.
+   *
+   * Uses the `[validated+cached_at]` compound index: equality on the
+   * `validated=0` prefix yields results already ordered by `cached_at`
+   * ascending, so the persistent lazy-validation queue is drained FIFO
+   * without an explicit sort. Does NOT track access (background work must
+   * not perturb LRU/LFU eviction).
+   *
+   * @param limit Maximum number of events to return
+   * @returns Promise resolving to the unvalidated events, oldest first
+   */
+  async getUnvalidatedEvents(limit: number): Promise<NostrEvent[]> {
+    if (!(limit > 0)) {
+      return [];
+    }
+    try {
+      const rows = await this.events
+        .where('[validated+cached_at]')
+        .between([0, Dexie.minKey], [0, Dexie.maxKey])
+        .limit(limit)
+        .toArray();
+      return rows.map((row) => ({
+        id: row.id,
+        pubkey: row.pubkey,
+        created_at: row.created_at,
+        kind: row.kind,
+        tags: row.tags,
+        content: row.content,
+        sig: row.sig,
+      }));
+    } catch (error) {
+      logger.error(
+        `Failed to get unvalidated events: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Mark the given events as validated. IDs no longer stored (deleted or
+   * evicted meanwhile) are silently ignored.
+   *
+   * @param ids IDs of the events to mark as validated
+   */
+  async markValidated(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    try {
+      await this.events
+        .where('id')
+        .anyOf(ids)
+        .modify((event) => {
+          event.validated = 1;
+        });
+    } catch (error) {
+      logger.error(
+        `Failed to mark events validated: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+    }
+  }
+
+  /**
+   * Get the persisted validation status for the given event ids.
+   *
+   * Primary-key `bulkGet` — the fastest lookup path; no extra index is
+   * needed for id → status queries. Does NOT track access, since clients
+   * may poll this frequently (e.g. verification badges in a UI).
+   *
+   * @param ids Event IDs to look up
+   * @returns Promise resolving to a map with one entry per requested id
+   */
+  async getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>> {
+    const statuses = new Map<string, ValidationStatus>();
+    if (ids.length === 0) {
+      return statuses;
+    }
+    try {
+      const rows = await this.events.bulkGet(ids);
+      ids.forEach((id, index) => {
+        const row = rows[index];
+        statuses.set(id, row === undefined ? 'unknown' : row.validated === 1 ? 'validated' : 'pending');
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to get validation status: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      for (const id of ids) {
+        statuses.set(id, 'unknown');
+      }
+    }
+    return statuses;
   }
 
   /**

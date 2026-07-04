@@ -176,7 +176,7 @@ relay.unsubscribe('sub1');
 | オプション | 型 | 状況 |
 |---|---|---|
 | `maxSubscriptions` | `number` | 実装済み（デフォルト 20） |
-| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では保存されたイベントが最大 `lazyValidateInterval` 秒ぶん一時的に未検証で配信され得る。なお **ephemeral（kind 20000–29999）など保存されないイベントは、後から削除できないため `LAZY` でも同期検証**して不正を即拒否する |
+| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では保存されたイベントが最大 `lazyValidateInterval` 秒ぶん一時的に未検証で配信され得る。なお **ephemeral（kind 20000–29999）など保存されないイベントは、後から削除できないため `LAZY` でも同期検証**して不正を即拒否する。検証キューは**ストレージ自体に永続化**される（`validated` カラム。メモリキュー・キュー上限なし）ため、リロード/クラッシュ後も次回 `connect()` 時に未検証分の検証を自動再開する。検証結果は `relay.getValidationStatus(ids)` で参照でき、組み込みクライアントが自前の署名検証を省略できる |
 | `port` | `number` | Node.js の WebSocket サーバ用 |
 | `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
 | `storageMaxSize` | `number` | 実装済み。保存後に relay が `storage.enforceLimit()` を呼び、この件数を超えたら古い順に退避（未指定で無効。`enforceLimit` 対応ストレージが必要） |

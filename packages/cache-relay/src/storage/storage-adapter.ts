@@ -16,6 +16,28 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 export type CacheStrategy = 'LRU' | 'FIFO' | 'LFU';
 
 /**
+ * Persisted validation state of a stored event.
+ *
+ * - `validated`: the event's signature has been verified (either up front in
+ *   `IMMEDIATELY` mode or by a background pass in `LAZY` mode).
+ * - `pending`: the event is stored but not yet verified.
+ * - `unknown`: no event with that id is stored (never stored, deleted as
+ *   invalid, or evicted).
+ */
+export type ValidationStatus = 'validated' | 'pending' | 'unknown';
+
+/**
+ * Options for {@link StorageAdapter.saveEvent}.
+ */
+export interface SaveEventOptions {
+  /**
+   * Whether the event has already been validated (signature verified) before
+   * being saved. Defaults to false (stored as pending validation).
+   */
+  validated?: boolean;
+}
+
+/**
  * Storage adapter interface
  * Defines the contract for storage implementations
  */
@@ -24,9 +46,42 @@ export interface StorageAdapter {
    * Save an event to storage
    *
    * @param event Nostr event to save
+   * @param options Save options (e.g. whether the event is already validated)
    * @returns Promise resolving to true if successful, false otherwise
    */
-  saveEvent(event: NostrEvent): Promise<boolean>;
+  saveEvent(event: NostrEvent, options?: SaveEventOptions): Promise<boolean>;
+
+  /**
+   * Get stored events that have not been validated yet, oldest (by storage
+   * insertion time) first. Backs the persistent lazy-validation queue: the
+   * background validator drains events from here in batches.
+   *
+   * Must not count as a read access for LRU/LFU eviction purposes.
+   *
+   * @param limit Maximum number of events to return
+   * @returns Promise resolving to the unvalidated events, oldest first
+   */
+  getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
+
+  /**
+   * Mark the given events as validated (signature verified). IDs that are no
+   * longer stored are ignored.
+   *
+   * @param ids IDs of the events to mark as validated
+   */
+  markValidated(ids: string[]): Promise<void>;
+
+  /**
+   * Get the persisted validation status for the given event ids.
+   *
+   * Must not count as a read access for LRU/LFU eviction purposes, since
+   * clients may poll this frequently (e.g. to render verification badges).
+   *
+   * @param ids Event IDs to look up
+   * @returns Promise resolving to a map with one entry per requested id
+   *   (`unknown` for ids that are not stored)
+   */
+  getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
 
   /**
    * Get events matching the given filters

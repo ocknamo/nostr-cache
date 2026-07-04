@@ -44,6 +44,97 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('validation status', () => {
+    const eventWithId = (id: string): NostrEvent => ({ ...mockEvent, id });
+
+    it('should save events as pending by default', async () => {
+      await storage.saveEvent(mockEvent);
+
+      const statuses = await storage.getValidationStatus([mockEvent.id]);
+      expect(statuses.get(mockEvent.id)).toBe('pending');
+    });
+
+    it('should save events as validated when the option is set', async () => {
+      await storage.saveEvent(mockEvent, { validated: true });
+
+      const statuses = await storage.getValidationStatus([mockEvent.id]);
+      expect(statuses.get(mockEvent.id)).toBe('validated');
+    });
+
+    it('should not downgrade a validated event on re-save', async () => {
+      await storage.saveEvent(mockEvent, { validated: true });
+      // Same id re-ingested without the flag (e.g. upstream echo)
+      await storage.saveEvent(mockEvent);
+
+      const statuses = await storage.getValidationStatus([mockEvent.id]);
+      expect(statuses.get(mockEvent.id)).toBe('validated');
+    });
+
+    it('should report unknown for ids that are not stored', async () => {
+      await storage.saveEvent(mockEvent, { validated: true });
+
+      const statuses = await storage.getValidationStatus([mockEvent.id, 'missing-id']);
+      expect(statuses.get(mockEvent.id)).toBe('validated');
+      expect(statuses.get('missing-id')).toBe('unknown');
+      expect(statuses.size).toBe(2);
+    });
+
+    it('should mark events as validated in bulk, ignoring missing ids', async () => {
+      await storage.saveEvent(eventWithId('a'));
+      await storage.saveEvent(eventWithId('b'));
+
+      await storage.markValidated(['a', 'b', 'missing-id']);
+
+      const statuses = await storage.getValidationStatus(['a', 'b', 'missing-id']);
+      expect(statuses.get('a')).toBe('validated');
+      expect(statuses.get('b')).toBe('validated');
+      expect(statuses.get('missing-id')).toBe('unknown');
+    });
+
+    it('should return unvalidated events oldest-first and respect the limit', async () => {
+      // Control cached_at ordering via a mocked clock
+      const nowSpy = vi.spyOn(Date, 'now');
+      nowSpy.mockReturnValue(1000);
+      await storage.saveEvent(eventWithId('oldest'));
+      nowSpy.mockReturnValue(2000);
+      await storage.saveEvent(eventWithId('middle'));
+      nowSpy.mockReturnValue(3000);
+      await storage.saveEvent(eventWithId('newest'));
+      nowSpy.mockRestore();
+
+      const firstTwo = await storage.getUnvalidatedEvents(2);
+      expect(firstTwo.map((event) => event.id)).toEqual(['oldest', 'middle']);
+
+      const all = await storage.getUnvalidatedEvents(10);
+      expect(all.map((event) => event.id)).toEqual(['oldest', 'middle', 'newest']);
+    });
+
+    it('should exclude validated events from the unvalidated scan', async () => {
+      await storage.saveEvent(eventWithId('pending-one'));
+      await storage.saveEvent(eventWithId('done'), { validated: true });
+
+      const unvalidated = await storage.getUnvalidatedEvents(10);
+      expect(unvalidated.map((event) => event.id)).toEqual(['pending-one']);
+    });
+
+    it('should return full events from the unvalidated scan', async () => {
+      await storage.saveEvent(mockEvent);
+
+      const [event] = await storage.getUnvalidatedEvents(1);
+      expect(event).toEqual(mockEvent);
+    });
+
+    it('should not track access on status reads or unvalidated scans', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.getValidationStatus([mockEvent.id]);
+      await storage.getUnvalidatedEvents(10);
+
+      const row = await storage.table('events').get(mockEvent.id);
+      // Insertion counts as the single access; reads above must not add more
+      expect(row.access_count).toBe(1);
+    });
+  });
+
   describe('getEvents', () => {
     beforeEach(async () => {
       await storage.saveEvent(mockEvent);

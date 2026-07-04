@@ -31,6 +31,21 @@ export interface StartLocalRelayOptions {
    * go out over the real (pre-patch) WebSocket, so they never loop back here.
    */
   upstreamRelays?: string[];
+
+  /**
+   * How the local relay validates events. `LAZY` accepts events immediately
+   * and verifies signatures in the background; results are persisted and can
+   * be read via `relay.getValidationStatus()` (e.g. for verification badges),
+   * letting the client skip its own heavy signature verification.
+   * Defaults to `IMMEDIATELY`.
+   */
+  validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
+
+  /**
+   * Seconds between background validation passes when `validateEventsType`
+   * is `LAZY`.
+   */
+  lazyValidateInterval?: number;
 }
 
 /**
@@ -48,7 +63,8 @@ export async function startLocalRelay(
   const storage = new DexieStorage('nostr-cache-web-client');
   const transport = new WebSocketServerEmulator(url);
   const relay = new NostrCacheRelay(storage, transport, {
-    validateEventsType: 'IMMEDIATELY',
+    validateEventsType: options.validateEventsType ?? 'IMMEDIATELY',
+    lazyValidateInterval: options.lazyValidateInterval,
     maxSubscriptions: 20,
     upstreamRelays: options.upstreamRelays,
   });

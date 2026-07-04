@@ -21,6 +21,9 @@ describe('ExpiryReaper', () => {
       deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
       deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
       deleteExpired: vi.fn().mockResolvedValue(0),
+      getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
+      markValidated: vi.fn().mockResolvedValue(undefined),
+      getValidationStatus: vi.fn().mockResolvedValue(new Map()),
     } as StorageAdapter;
   });
 

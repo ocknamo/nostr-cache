@@ -1,13 +1,15 @@
 /**
  * Lazy event validator for Nostr Cache Relay
  *
- * Defers event validation: events are accepted and stored immediately, then
- * validated asynchronously in batches on a timer. Events that fail validation
- * are removed from storage.
+ * Defers event validation: events are accepted and stored immediately (as
+ * pending), then validated asynchronously in batches on a timer. The pending
+ * queue lives in storage itself (the `validated` column), so it survives
+ * reloads/crashes and needs no in-memory bound: on start the validator simply
+ * resumes draining whatever is still unvalidated. Events that fail validation
+ * are removed from storage; events that pass are marked validated.
  */
 
 import { logger } from '@nostr-cache/shared';
-import type { NostrEvent } from '@nostr-cache/shared';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventValidator } from './event-validator.js';
 
@@ -18,13 +20,6 @@ export const DEFAULT_LAZY_VALIDATE_INTERVAL = 60;
 export const DEFAULT_LAZY_VALIDATE_BATCH_SIZE = 100;
 
 /**
- * Default upper bound on the pending-validation queue. When exceeded, the
- * oldest queued events are dropped (they remain stored but unvalidated) to
- * bound memory use.
- */
-export const DEFAULT_LAZY_VALIDATE_MAX_QUEUE_SIZE = 10_000;
-
-/**
  * Options controlling the lazy validation cadence.
  */
 export interface LazyValidatorOptions {
@@ -32,25 +27,33 @@ export interface LazyValidatorOptions {
   intervalSeconds?: number;
   /** Maximum number of events validated per pass. */
   batchSize?: number;
-  /** Upper bound on the pending-validation queue (drops oldest when exceeded). */
-  maxQueueSize?: number;
 }
 
 /**
- * Validates queued events in the background and evicts invalid ones.
+ * Result of a single validation pass.
+ */
+export interface LazyValidationPassResult {
+  /** Number of events verified and marked validated in this pass. */
+  validated: number;
+  /** Number of invalid events removed from storage in this pass. */
+  removed: number;
+}
+
+/**
+ * Validates pending (unvalidated) stored events in the background, marking
+ * valid ones and evicting invalid ones. Storage is the queue.
  */
 export class LazyValidator {
   private readonly validator: EventValidator;
   private readonly intervalSeconds: number;
   private readonly batchSize: number;
-  private readonly maxQueueSize: number;
-  private queue: NostrEvent[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
-  /** Guards against overlapping validation passes from the timer. */
+  /** Guards against overlapping validation passes. */
   private processing = false;
 
   /**
-   * @param storage Storage adapter used to evict invalid events
+   * @param storage Storage adapter holding the pending events and receiving
+   *   the validation results
    * @param options Validation cadence options
    * @param validator Event validator (injectable for testing)
    */
@@ -68,38 +71,12 @@ export class LazyValidator {
       options.batchSize && options.batchSize > 0
         ? options.batchSize
         : DEFAULT_LAZY_VALIDATE_BATCH_SIZE;
-    this.maxQueueSize =
-      options.maxQueueSize && options.maxQueueSize > 0
-        ? options.maxQueueSize
-        : DEFAULT_LAZY_VALIDATE_MAX_QUEUE_SIZE;
   }
 
   /**
-   * Queue an already-stored event for later validation.
-   *
-   * @param event Event to validate on a subsequent pass
-   */
-  enqueue(event: NostrEvent): void {
-    if (this.queue.length >= this.maxQueueSize) {
-      // Drop the oldest queued event to bound memory. It stays in storage but
-      // unvalidated; this is the documented best-effort nature of LAZY mode.
-      const dropped = this.queue.shift();
-      logger.warn(
-        `Lazy validation queue full (${this.maxQueueSize}); dropping unvalidated event ${dropped?.id}`
-      );
-    }
-    this.queue.push(event);
-  }
-
-  /**
-   * Number of events still awaiting validation.
-   */
-  get pendingCount(): number {
-    return this.queue.length;
-  }
-
-  /**
-   * Start the periodic validation timer. Idempotent.
+   * Start the periodic validation timer and kick one immediate pass so
+   * events left pending by a previous session (reload/crash) are picked up
+   * without waiting a full interval. Idempotent.
    */
   start(): void {
     if (this.timer !== undefined) {
@@ -107,27 +84,39 @@ export class LazyValidator {
     }
 
     this.timer = setInterval(() => {
-      // Skip if a previous pass is still running to avoid overlapping passes
-      if (this.processing) {
-        return;
-      }
-      this.processing = true;
-      // Errors are handled inside processBatch; guard against unhandled rejections
-      this.processBatch()
-        .catch((error) => {
-          logger.error('Lazy validation pass failed:', error);
-        })
-        .finally(() => {
-          this.processing = false;
-        });
+      this.runGuardedPass();
     }, this.intervalSeconds * 1000);
 
     // Avoid keeping the Node.js event loop alive solely for this timer
     this.timer.unref?.();
+
+    // 前セッションからの持ち越し分（リロード復帰）を即座に処理し始める
+    this.runGuardedPass();
   }
 
   /**
-   * Stop the periodic validation timer. Idempotent.
+   * Run one validation pass unless another is still in flight.
+   *
+   * @private
+   */
+  private runGuardedPass(): void {
+    if (this.processing) {
+      return;
+    }
+    this.processing = true;
+    // Errors are handled inside processBatch; guard against unhandled rejections
+    this.processBatch()
+      .catch((error) => {
+        logger.error('Lazy validation pass failed:', error);
+      })
+      .finally(() => {
+        this.processing = false;
+      });
+  }
+
+  /**
+   * Stop the periodic validation timer. Idempotent. Any still-pending events
+   * remain marked unvalidated in storage and are resumed on the next start.
    */
   stop(): void {
     if (this.timer !== undefined) {
@@ -137,28 +126,14 @@ export class LazyValidator {
   }
 
   /**
-   * Validate and drain all currently queued events.
+   * Validate up to `batchSize` pending events from storage, marking the valid
+   * ones and deleting the invalid ones.
    *
-   * Intended to be called on shutdown (after {@link stop}) so that pending
-   * events are not silently discarded with the in-memory queue.
-   *
-   * @returns Total number of events removed from storage
+   * @returns Counts of events validated and removed in this pass
    */
-  async flush(): Promise<number> {
-    let total = 0;
-    while (this.queue.length > 0) {
-      total += await this.processBatch();
-    }
-    return total;
-  }
-
-  /**
-   * Validate up to `batchSize` queued events, deleting any that are invalid.
-   *
-   * @returns Number of events removed from storage in this pass
-   */
-  async processBatch(): Promise<number> {
-    const batch = this.queue.splice(0, this.batchSize);
+  async processBatch(): Promise<LazyValidationPassResult> {
+    const batch = await this.storage.getUnvalidatedEvents(this.batchSize);
+    const validIds: string[] = [];
     let removed = 0;
 
     for (const event of batch) {
@@ -170,7 +145,9 @@ export class LazyValidator {
         valid = false;
       }
 
-      if (!valid) {
+      if (valid) {
+        validIds.push(event.id);
+      } else {
         try {
           const deleted = await this.storage.deleteEvent(event.id);
           if (deleted) {
@@ -183,6 +160,16 @@ export class LazyValidator {
       }
     }
 
-    return removed;
+    if (validIds.length > 0) {
+      try {
+        await this.storage.markValidated(validIds);
+      } catch (error) {
+        // 失敗しても pending のまま残るだけで、次のパスで再検証される
+        logger.error('Failed to mark events validated:', error);
+        return { validated: 0, removed };
+      }
+    }
+
+    return { validated: validIds.length, removed };
   }
 }
