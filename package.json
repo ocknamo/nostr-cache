@@ -6,7 +6,8 @@
     "packages/shared",
     "packages/cache-relay",
     "packages/server",
-    "packages/web-client"
+    "packages/web-client",
+    "e2e"
   ],
   "engines": {
     "node": "22.x"
@@ -17,6 +18,9 @@
     "test": "npm run test --workspaces",
     "test:server": "npm run test -w packages/server",
     "test:cache-relay": "npm run test -w packages/cache-relay",
+    "test:e2e": "npm run test:e2e -w e2e",
+    "test:e2e:node": "npm run test:e2e:node -w e2e",
+    "test:e2e:browser": "npm run test:e2e:browser -w e2e",
     "lint": "npm run lint --workspaces",
     "lint:fix": "npm run lint:fix --workspaces",
     "format": "npm run format --workspaces",
