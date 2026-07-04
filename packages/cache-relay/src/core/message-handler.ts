@@ -21,7 +21,6 @@ import {
 } from '@nostr-cache/shared';
 import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
 import { EventValidator } from '../event/event-validator.js';
-import type { LazyValidator } from '../event/lazy-validator.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { capEvents } from '../utils/filter-utils.js';
@@ -53,9 +52,8 @@ export class MessageHandler {
    * @param maxEventsPerRequest Maximum number of stored events returned per REQ
    * @param validateEventsType How incoming EVENTs are validated. `IMMEDIATELY`
    *   rejects invalid events synchronously; `NONE` skips validation; `LAZY`
-   *   accepts and stores immediately, then validates in the background.
-   * @param lazyValidator Background validator used to enqueue stored events
-   *   when `validateEventsType` is `LAZY`
+   *   accepts and stores immediately (as pending), then the background
+   *   validator drains unvalidated events straight from storage.
    * @param storageMaxSize When set (> 0), evict down to this size after each
    *   stored event via `storage.enforceLimit`
    * @param cacheStrategy Eviction strategy used with `storageMaxSize`
@@ -66,7 +64,6 @@ export class MessageHandler {
     private maxSubscriptions = 20,
     private maxEventsPerRequest = 500,
     private validateEventsType: ValidateEventsType = 'IMMEDIATELY',
-    private lazyValidator?: LazyValidator,
     private storageMaxSize?: number,
     private cacheStrategy?: CacheStrategy
   ) {
@@ -74,14 +71,6 @@ export class MessageHandler {
     this.subscriptionManager = subscriptionManager;
     this.eventHandler = new EventHandler(storage, subscriptionManager, validateEventsType);
     this.eventValidator = new EventValidator();
-
-    // Guard against silent no-validation: LAZY without a validator would accept
-    // and store every event and never validate it.
-    if (validateEventsType === 'LAZY' && !lazyValidator) {
-      logger.warn(
-        "validateEventsType is 'LAZY' but no LazyValidator was provided; events will be accepted without any validation"
-      );
-    }
   }
 
   /**
@@ -220,7 +209,7 @@ export class MessageHandler {
    * backfill ({@link ingestUpstreamEvent}). Does NOT send OK or broadcast.
    *
    * - IMMEDIATELY: validate synchronously up front (invalid → not stored).
-   * - LAZY: store now, enqueue for background validation (only if stored).
+   * - LAZY: store now as pending; the background validator drains it later.
    * - NONE: no validation.
    * After a successful store, enforces the storage limit (a post-save side
    * effect whose failure never affects the result).
@@ -243,11 +232,9 @@ export class MessageHandler {
       return result;
     }
 
-    // LAZY モードでは、実際に保存されたイベントだけをバックグラウンド検証へ回す。
-    // ephemeral など未保存のものは検証しても削除対象がなく、キューを浪費するため除外。
-    if (this.validateEventsType === 'LAZY' && result.stored) {
-      this.lazyValidator?.enqueue(event);
-    }
+    // LAZY モードで保存されたイベントは validated=0（pending）で永続化されて
+    // おり、バックグラウンド検証器がストレージから直接取り出して検証する。
+    // ここでの enqueue は不要（DB 自体が検証キュー）。
 
     // 保存されたイベントについてはストレージ上限の退避を行う。
     // 退避は保存後の付随処理であり、失敗してもレスポンス/配信に影響させない

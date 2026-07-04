@@ -1,13 +1,16 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
+  import type { ValidationStatus } from '../validation-status.ts';
   import EventCard from './EventCard.svelte';
 
   interface Props {
     events: NostrEvent[];
     eose: boolean;
+    /** イベント id → ローカルリレーの署名検証結果 */
+    validationStatuses?: Map<string, ValidationStatus>;
   }
 
-  const { events, eose }: Props = $props();
+  const { events, eose, validationStatuses }: Props = $props();
 </script>
 
 <section class="timeline" aria-label="タイムライン">
@@ -17,7 +20,7 @@
     </p>
   {:else}
     {#each events as event (event.id)}
-      <EventCard {event} />
+      <EventCard {event} status={validationStatuses?.get(event.id)} />
     {/each}
   {/if}
 </section>

@@ -132,7 +132,7 @@ export class EventHandler {
 
     // Store the event
     try {
-      const saved = await this.storage.saveEvent(event);
+      const saved = await this.storage.saveEvent(event, this.saveOptions());
       if (!saved) {
         logger.info('Event storage failed');
         return { success: false, stored: false, message: 'error: failed to save event' };
@@ -159,6 +159,17 @@ export class EventHandler {
         message: 'error: subscription matching failed',
       };
     }
+  }
+
+  /**
+   * Save options recording the persisted validation state: only IMMEDIATELY
+   * mode has verified the event before it reaches storage. LAZY / NONE save
+   * as pending (LAZY's background pass marks them validated later).
+   *
+   * @private
+   */
+  private saveOptions(): { validated: boolean } {
+    return { validated: this.validateEventsType === 'IMMEDIATELY' };
   }
 
   /**
@@ -223,7 +234,7 @@ export class EventHandler {
       await this.storage.deleteEventsByPubkeyAndKind(event.pubkey, event.kind);
 
       // 新しいイベントを保存
-      return await this.storage.saveEvent(event);
+      return await this.storage.saveEvent(event, this.saveOptions());
     } catch (error) {
       logger.info('Error handling replaceable event:', error);
       throw error;
@@ -251,7 +262,7 @@ export class EventHandler {
       await this.storage.deleteEventsByPubkeyKindAndDTag(event.pubkey, event.kind, dTagValue);
 
       // 新しいイベントを保存
-      return await this.storage.saveEvent(event);
+      return await this.storage.saveEvent(event, this.saveOptions());
     } catch (error) {
       logger.info('Error handling addressable event:', error);
       throw error;

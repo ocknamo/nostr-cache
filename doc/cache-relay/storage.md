@@ -20,13 +20,18 @@
 - テーブル構成: events
   - 主要フィールド：id, pubkey, created_at, kind, tags, content, sig
   - インデックス用フィールド：indexed_tags
+  - 検証状態フィールド：validated（0=未検証, 1=署名検証済み。boolean は
+    IndexedDB でインデックス化できないため数値で保持）
 
 ### 2.3. インターフェース仕様
 StorageAdapterインターフェースの実装
-- saveEvent(): イベントの保存機能
+- saveEvent(event, options?): イベントの保存機能（`options.validated` で検証済みとして保存。省略時は未検証。既存行が検証済みの場合、再保存で未検証へ**ダウングレードしない**）
 - getEvents(): フィルタに基づくイベント取得機能
 - deleteEvent(): イベント削除機能
 - clear(): ストレージクリア機能
+- getUnvalidatedEvents(limit): 未検証イベントを保存時刻の古い順に取得（遅延検証の永続キュー。アクセス追跡しない）
+- markValidated(ids): 検証済みフラグの一括付与（存在しない id は no-op）
+- getValidationStatus(ids): id ごとの検証状態（`validated` / `pending` / `unknown`）を一括取得（主キー bulkGet。アクセス追跡しない）
 
 ## 3. データベース設計
 
@@ -43,6 +48,12 @@ StorageAdapterインターフェースの実装
 - [kind+created_at]: イベント種別と時間範囲の検索用
 - [pubkey+created_at]: 著者と時間範囲の検索用
 - [pubkey+kind+created_at]: 複合条件での検索用
+- [validated+cached_at]: 遅延検証の永続キュー用。`validated=0` の等値プレフィックスで未検証イベントを `cached_at` 昇順（古い順）にスキャンできるため、FIFO バッチ処理に並び替えが不要
+
+#### 3.1.3. 検証状態のインデックス戦略
+- **id → 検証状態の参照**（クライアントのバッジ表示などで高頻度）は、`id` が主キーであるため **追加インデックス不要**。`bulkGet` による主キー直接参照が最速経路
+- **未検証イベントのスキャン**（バックグラウンド検証）だけが `[validated+cached_at]` を使う
+- 検証状態の読み取り（getValidationStatus / getUnvalidatedEvents）は LRU/LFU 用のアクセスメタデータを更新しない（ポーリングが退避順序を乱さないため）
 
 ### 3.2. タグインデックス仕様
 - indexed_tagsフィールドの実装

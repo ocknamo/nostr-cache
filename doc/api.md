@@ -66,6 +66,7 @@ new NostrCacheRelay(
 | `publishEvent(event: NostrEvent): Promise<boolean>` | イベントを検証・保存し、一致するローカル購読へ `event` を通知。保存成功で `true` / Validates, stores, and notifies matching local subscriptions; resolves `true` on success |
 | `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` | インプロセス購読を作成し、保存済みイベントを `event` リスナへ再生してから `eose` を発火 / Creates an in-process subscription, replays stored events to `event` listeners, then emits `eose` |
 | `unsubscribe(subscriptionId: string): boolean` | 購読を削除。存在して削除できたら `true` / Removes a subscription; `true` if it existed |
+| `getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>` | イベント id ごとの永続化された署名検証状態（`'validated'` / `'pending'` / `'unknown'`）を一括取得。主キー参照のため高頻度呼び出し可・LRU/LFU のアクセス追跡に影響しない。組み込みクライアントが自前の署名検証を省略してバッジ表示等に使える / Bulk-fetches the persisted signature-verification status per event id. Primary-key lookup — cheap to poll and never counts as a read for LRU/LFU. Lets an embedding client reuse the relay's verification instead of re-verifying |
 | `on(event, callback): void` | イベントリスナを登録 / Registers an event listener |
 | `off(event, callback): void` | イベントリスナを解除 / Removes an event listener |
 
@@ -102,7 +103,11 @@ interface NostrRelayOptions {
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
                                     // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
+                                    //         検証キューはストレージ自体（validated カラム）に永続化され、
+                                    //         リロード/クラッシュ後も次回 connect() 時に検証を自動再開する
                                     //         ※ ephemeral 等の未保存イベントは LAZY でも同期検証して即拒否
+                                    // 検証結果は IMMEDIATELY=検証済み / NONE・LAZY=未検証として保存され、
+                                    // getValidationStatus() で参照できる（LAZY は検証後に検証済みへ更新）
   lazyValidateInterval?: number;    // LAZY のバックグラウンド検証間隔 秒 (default: 60)
   lazyValidateBatchSize?: number;   // LAZY の1回あたり検証件数 (default: 100)
   port?: number;                    // WebSocket ポート (Node.js)
@@ -127,8 +132,10 @@ interface NostrRelayOptions {
 イベントの永続化を担う抽象。`DexieStorage`（IndexedDB / fake-indexeddb）が標準実装です。
 
 ```typescript
+type ValidationStatus = 'validated' | 'pending' | 'unknown';
+
 interface StorageAdapter {
-  saveEvent(event: NostrEvent): Promise<boolean>;
+  saveEvent(event: NostrEvent, options?: { validated?: boolean }): Promise<boolean>;
   getEvents(filters: Filter[]): Promise<NostrEvent[]>;
   deleteEvent(id: string): Promise<boolean>;
   clear(): Promise<void>;
@@ -139,8 +146,22 @@ interface StorageAdapter {
     kind: number,
     dTagValue: string,
   ): Promise<boolean>;
+  getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
+  markValidated(ids: string[]): Promise<void>;
+  getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
 }
 ```
+
+- `saveEvent` の `options.validated`（省略時 `false`）で検証済みとして保存できます。既存行が
+  検証済みの場合、再保存しても未検証へはダウングレードされません（同一 id = 同一内容のため）。
+  / `options.validated` (default `false`) stores the event as verified. Re-saving never
+  downgrades an already-verified row (same id = same content hash).
+- `getUnvalidatedEvents` は未検証イベントを保存時刻の古い順に返します。遅延検証の
+  永続キューであり、リロード後の検証再開を支えます。
+  / Returns unvalidated events oldest-first — the persistent lazy-validation queue.
+- `getValidationStatus` は id ごとに `'validated'` / `'pending'` / `'unknown'`（未保存・削除済み）を
+  返します。これらの読み取りは LRU/LFU のアクセス追跡に影響しません。
+  / Per-id status lookup; these reads never affect LRU/LFU access tracking.
 
 ### `interface TransportAdapter`
 

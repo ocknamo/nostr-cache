@@ -4,7 +4,6 @@
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
-import type { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { MessageHandler } from './message-handler.js';
 import type { SubscriptionManager } from './subscription-manager.js';
@@ -20,6 +19,9 @@ describe('MessageHandler', () => {
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
     count: vi.fn().mockResolvedValue(0),
     enforceLimit: vi.fn().mockResolvedValue(0),
+    getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
+    markValidated: vi.fn().mockResolvedValue(undefined),
+    getValidationStatus: vi.fn().mockResolvedValue(new Map()),
   } as StorageAdapter;
 
   // Mock subscription manager
@@ -144,7 +146,7 @@ describe('MessageHandler', () => {
         const message: NostrWireMessage = ['EVENT', sampleEvent];
         await messageHandler.handleMessage('client1', message);
 
-        expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent);
+        expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: true });
         expect(responseCallback).toHaveBeenCalledWith('client1', ['OK', sampleEvent.id, true, '']);
       });
 
@@ -160,7 +162,7 @@ describe('MessageHandler', () => {
           false,
           'error: storage operation failed',
         ]);
-        expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent);
+        expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: true });
       });
 
       it('should broadcast event to matching subscriptions', async () => {
@@ -192,57 +194,51 @@ describe('MessageHandler', () => {
           ]);
         });
 
-        it('LAZY: accepts and stores an invalid event, enqueuing it for background validation', async () => {
-          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+        it('LAZY: accepts and stores an invalid event as pending validation', async () => {
           const lazyHandler = new MessageHandler(
             mockStorage,
             mockSubscriptionManager,
             20,
             500,
-            'LAZY',
-            lazyValidator
+            'LAZY'
           );
           const cb = vi.fn();
           lazyHandler.onResponse(cb);
 
           await lazyHandler.handleMessage('client1', ['EVENT', invalidEvent]);
 
-          expect(mockStorage.saveEvent).toHaveBeenCalledWith(invalidEvent);
+          // Stored as validated=false: the persistent queue (validated=0 rows)
+          // is what the background validator drains later.
+          expect(mockStorage.saveEvent).toHaveBeenCalledWith(invalidEvent, { validated: false });
           expect(cb).toHaveBeenCalledWith('client1', ['OK', invalidEvent.id, true, '']);
-          expect(lazyValidator.enqueue).toHaveBeenCalledWith(invalidEvent);
         });
 
-        it('NONE: accepts and stores without validating and without enqueuing', async () => {
-          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+        it('NONE: accepts and stores without validating, as unvalidated', async () => {
           const noneHandler = new MessageHandler(
             mockStorage,
             mockSubscriptionManager,
             20,
             500,
-            'NONE',
-            lazyValidator
+            'NONE'
           );
           const cb = vi.fn();
           noneHandler.onResponse(cb);
 
           await noneHandler.handleMessage('client1', ['EVENT', invalidEvent]);
 
-          expect(mockStorage.saveEvent).toHaveBeenCalledWith(invalidEvent);
+          expect(mockStorage.saveEvent).toHaveBeenCalledWith(invalidEvent, { validated: false });
           expect(cb).toHaveBeenCalledWith('client1', ['OK', invalidEvent.id, true, '']);
-          expect(lazyValidator.enqueue).not.toHaveBeenCalled();
         });
 
         it('LAZY: validates ephemeral events synchronously and rejects invalid ones', async () => {
           // Ephemeral events are never stored, so lazy/background validation
           // can never check them; they must be validated up front even in LAZY.
-          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
           const lazyHandler = new MessageHandler(
             mockStorage,
             mockSubscriptionManager,
             20,
             500,
-            'LAZY',
-            lazyValidator
+            'LAZY'
           );
           const cb = vi.fn();
           lazyHandler.onResponse(cb);
@@ -262,7 +258,6 @@ describe('MessageHandler', () => {
             'invalid: event validation failed',
           ]);
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
-          expect(lazyValidator.enqueue).not.toHaveBeenCalled();
         });
 
         it('enforces the storage limit after a stored transport EVENT', async () => {
@@ -272,7 +267,6 @@ describe('MessageHandler', () => {
             20,
             500,
             'IMMEDIATELY',
-            undefined,
             100,
             'FIFO'
           );
@@ -295,7 +289,6 @@ describe('MessageHandler', () => {
             20,
             500,
             'IMMEDIATELY',
-            undefined,
             100,
             'FIFO'
           );
@@ -312,21 +305,18 @@ describe('MessageHandler', () => {
           expect(cb).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
         });
 
-        it('LAZY: does not enqueue events that were not stored', async () => {
-          const lazyValidator = { enqueue: vi.fn() } as unknown as LazyValidator;
+        it('LAZY: accepts unstorable events without persisting anything', async () => {
           const lazyHandler = new MessageHandler(
             mockStorage,
             mockSubscriptionManager,
             20,
             500,
-            'LAZY',
-            lazyValidator
+            'LAZY'
           );
           const cb = vi.fn();
           lazyHandler.onResponse(cb);
           // Addressable (kind 30000-39999) without a `d` tag is not persisted;
-          // LAZY skips up-front validation for it, but it must not be enqueued
-          // since there is nothing stored to later delete.
+          // nothing enters the pending-validation queue for it.
           const addressableNoDTag: NostrEvent = {
             ...sampleEvent,
             id: 'addr-no-d',
@@ -338,7 +328,6 @@ describe('MessageHandler', () => {
 
           expect(cb).toHaveBeenCalledWith('client1', ['OK', 'addr-no-d', true, '']);
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
-          expect(lazyValidator.enqueue).not.toHaveBeenCalled();
         });
       });
     });
@@ -680,7 +669,7 @@ describe('MessageHandler', () => {
       const result = await messageHandler.ingestUpstreamEvent(sampleEvent);
 
       expect(result).toEqual({ success: true, stored: true });
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: true });
       // No OK / EVENT broadcast is emitted for a backfilled event.
       expect(responseCallback).not.toHaveBeenCalled();
     });

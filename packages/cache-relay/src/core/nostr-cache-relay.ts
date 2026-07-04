@@ -18,7 +18,11 @@ import type {
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
-import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
+import type {
+  CacheStrategy,
+  StorageAdapter,
+  ValidationStatus,
+} from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from '../upstream/upstream-relay-pool.js';
@@ -237,9 +241,9 @@ export class NostrCacheRelay {
       this.subscriptionManager,
       this.options.maxSubscriptions,
       this.options.maxEventsPerRequest,
-      // トランスポート経由 EVENT の検証モードと、LAZY 時の検証キューを委譲
+      // トランスポート経由 EVENT の検証モード。LAZY の検証キューはストレージ
+      // 自体（validated カラム）なので、ここで検証器を渡す必要はない
       this.options.validateEventsType ?? 'IMMEDIATELY',
-      this.lazyValidator,
       // 保存後のストレージ上限退避（transport 経由 EVENT）
       this.options.storageMaxSize,
       this.options.cacheStrategy
@@ -363,10 +367,9 @@ export class NostrCacheRelay {
     await this.transport.stop();
     // 上流リレーとの接続・購読を閉じ、保留中の EOSE タイマーも解除する
     await this.upstreamCoordinator?.stop();
-    // 遅延バリデーションの定期実行を停止し、未処理キューを検証しきってから終了
-    // （未検証イベントの取りこぼしを防ぐ）
+    // 遅延バリデーションの定期実行を停止する。未検証イベントは validated=0 の
+    // ままストレージに永続化されており、次回 connect 時に検証が再開される
     this.lazyValidator?.stop();
-    await this.lazyValidator?.flush();
     // TTL の定期パージを停止
     this.expiryReaper?.stop();
     this.emit('disconnect');
@@ -387,14 +390,14 @@ export class NostrCacheRelay {
       return false;
     }
 
-    // Save the event to storage
-    const saved = await this.storage.saveEvent(event);
+    // Save the event to storage. IMMEDIATELY で事前検証を通過した場合のみ
+    // 検証済みとして永続化する。LAZY では pending（validated=0）で保存され、
+    // バックグラウンド検証パスが後から検証・マーク（不正なら削除）する
+    const saved = await this.storage.saveEvent(event, {
+      validated: this.options.validateEventsType === 'IMMEDIATELY',
+    });
 
     if (saved) {
-      // 'LAZY' モードでは保存後にバックグラウンド検証へ回す。
-      // 不正なイベントは後続の検証パスでストレージから削除される
-      this.lazyValidator?.enqueue(event);
-
       // ストレージ上限を超えた場合は古いイベントを退避する
       await this.enforceStorageLimit();
 
@@ -436,6 +439,23 @@ export class NostrCacheRelay {
     } catch (error) {
       logger.error('Failed to enforce storage limit:', error);
     }
+  }
+
+  /**
+   * Get the persisted validation status for the given event ids.
+   *
+   * Lets an embedding client reuse this relay's (potentially lazy) signature
+   * verification instead of re-verifying events itself — e.g. to render
+   * "verified" badges. Lookup is by primary key, so it is cheap to call
+   * frequently and never counts as a read for LRU/LFU eviction.
+   *
+   * @param ids Event IDs to look up
+   * @returns Promise resolving to a map with one entry per requested id:
+   *   `validated` (signature verified), `pending` (stored, not yet verified —
+   *   possible in `LAZY` / `NONE` modes), or `unknown` (not stored)
+   */
+  getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>> {
+    return this.storage.getValidationStatus(ids);
   }
 
   /**

@@ -21,6 +21,9 @@ describe('NostrCacheRelay', () => {
     count: vi.fn().mockResolvedValue(0),
     deleteExpired: vi.fn().mockResolvedValue(0),
     enforceLimit: vi.fn().mockResolvedValue(0),
+    getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
+    markValidated: vi.fn().mockResolvedValue(undefined),
+    getValidationStatus: vi.fn().mockResolvedValue(new Map()),
   };
 
   // Mock transport adapter
@@ -109,10 +112,11 @@ describe('NostrCacheRelay', () => {
   });
 
   describe('publishEvent', () => {
-    it('should validate and save the event', async () => {
+    it('should validate and save the event as validated', async () => {
       await relay.publishEvent(sampleEvent);
 
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent);
+      // Default mode is IMMEDIATELY: verified before save → persisted as validated
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: true });
     });
 
     it('should return true if the event was saved', async () => {
@@ -299,7 +303,7 @@ describe('NostrCacheRelay', () => {
     // Track prototype spies so we can restore only them — restoring all mocks
     // would wipe the shared mockStorage implementations.
     let spies: ReturnType<typeof vi.spyOn>[] = [];
-    const spyOnLazy = (method: 'enqueue' | 'start' | 'stop' | 'flush') => {
+    const spyOnLazy = (method: 'start' | 'stop') => {
       const spy = vi.spyOn(LazyValidator.prototype, method);
       spies.push(spy);
       return spy;
@@ -312,40 +316,38 @@ describe('NostrCacheRelay', () => {
       spies = [];
     });
 
-    it('should not create a lazy validator unless validateEventsType is LAZY', async () => {
-      const enqueueSpy = spyOnLazy('enqueue');
-      const immediate = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEventsType: 'NONE',
-      });
-
-      // No lazy validator is wired, so publishing never enqueues
-      await immediate.publishEvent(sampleEvent);
-      expect(enqueueSpy).not.toHaveBeenCalled();
-    });
-
-    it('should enqueue saved events for background validation in LAZY mode', async () => {
-      const enqueueSpy = spyOnLazy('enqueue');
+    it('should save published events as unvalidated (pending) in LAZY mode', async () => {
       const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         validateEventsType: 'LAZY',
       });
 
       const result = await lazyRelay.publishEvent(sampleEvent);
 
-      // Event is accepted/saved without synchronous validation, then enqueued
+      // Accepted/saved without synchronous validation; the persisted
+      // validated=false row is the background validator's queue entry
       expect(result).toBe(true);
-      expect(enqueueSpy).toHaveBeenCalledWith(sampleEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: false });
     });
 
-    it('should not enqueue when the event fails to save in LAZY mode', async () => {
-      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
-      const enqueueSpy = spyOnLazy('enqueue');
-      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEventsType: 'LAZY',
+    it('should save published events as unvalidated in NONE mode', async () => {
+      const noneRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
       });
 
-      await lazyRelay.publishEvent(sampleEvent);
+      await noneRelay.publishEvent(sampleEvent);
 
-      expect(enqueueSpy).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: false });
+    });
+
+    it('should not start a background validator unless validateEventsType is LAZY', async () => {
+      const startSpy = spyOnLazy('start');
+      const immediate = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
+      });
+
+      await immediate.connect();
+
+      expect(startSpy).not.toHaveBeenCalled();
     });
 
     it('should start and stop the background validator on connect/disconnect', async () => {
@@ -362,18 +364,6 @@ describe('NostrCacheRelay', () => {
       expect(stopSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('should flush the pending queue on disconnect', async () => {
-      const flushSpy = spyOnLazy('flush').mockResolvedValue(0);
-      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEventsType: 'LAZY',
-      });
-
-      await lazyRelay.connect();
-      await lazyRelay.disconnect();
-
-      expect(flushSpy).toHaveBeenCalledTimes(1);
-    });
-
     it('should keep a single background validator across repeated connects', async () => {
       const startSpy = spyOnLazy('start');
       const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
@@ -385,6 +375,22 @@ describe('NostrCacheRelay', () => {
 
       // start() is idempotent (guards its own timer), so repeated connects are safe
       expect(startSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('getValidationStatus', () => {
+    it('should delegate to the storage adapter', async () => {
+      const statuses = new Map([
+        ['id-1', 'validated'],
+        ['id-2', 'pending'],
+        ['id-3', 'unknown'],
+      ]);
+      (mockStorage.getValidationStatus as Mock).mockResolvedValueOnce(statuses);
+
+      const result = await relay.getValidationStatus(['id-1', 'id-2', 'id-3']);
+
+      expect(mockStorage.getValidationStatus).toHaveBeenCalledWith(['id-1', 'id-2', 'id-3']);
+      expect(result).toBe(statuses);
     });
   });
 

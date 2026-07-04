@@ -101,7 +101,7 @@ describe('EventHandler', () => {
       const result = await eventHandler.handleEvent(regularEvent);
 
       expect(result.success).toBe(true);
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent, { validated: true });
       expect(mockSubscriptionManager.findMatchingSubscriptions).toHaveBeenCalledWith(regularEvent);
     });
 
@@ -113,7 +113,7 @@ describe('EventHandler', () => {
         replaceableEvent.pubkey,
         replaceableEvent.kind
       );
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(replaceableEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(replaceableEvent, { validated: true });
       expect(mockSubscriptionManager.findMatchingSubscriptions).toHaveBeenCalledWith(
         replaceableEvent
       );
@@ -138,7 +138,7 @@ describe('EventHandler', () => {
         addressableEvent.kind,
         'address-value'
       );
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(addressableEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(addressableEvent, { validated: true });
       expect(mockSubscriptionManager.findMatchingSubscriptions).toHaveBeenCalledWith(
         addressableEvent
       );
@@ -190,7 +190,7 @@ describe('EventHandler', () => {
       const result = await eventHandler.handleEvent(regularEvent);
 
       expect(result.success).toBe(false);
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent, { validated: true });
     });
 
     it('should handle validation errors gracefully', async () => {
@@ -214,7 +214,7 @@ describe('EventHandler', () => {
       const result = await eventHandler.handleEvent(regularEvent);
 
       expect(result.success).toBe(false);
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent, { validated: true });
     });
   });
 
@@ -282,7 +282,7 @@ describe('EventHandler', () => {
         replaceableEvent.pubkey,
         replaceableEvent.kind
       );
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(replaceableEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(replaceableEvent, { validated: true });
     });
 
     it('should handle errors during old event deletion', async () => {
@@ -309,7 +309,7 @@ describe('EventHandler', () => {
         addressableEvent.kind,
         'address-value'
       );
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(addressableEvent);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(addressableEvent, { validated: true });
     });
 
     it('should fail when d tag is missing', async () => {
