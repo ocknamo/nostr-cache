@@ -1,7 +1,7 @@
 import type { NostrCacheRelay } from '@nostr-cache/cache-relay/browser';
 import { describe, expect, it, vi } from 'vitest';
 import type { ValidationStatus } from './validation-status.ts';
-import { fetchValidationStatuses, hasUndecided } from './validation-status.ts';
+import { fetchValidationStatuses, hasPending } from './validation-status.ts';
 
 describe('fetchValidationStatuses', () => {
   function fakeRelay(statuses: Map<string, ValidationStatus>) {
@@ -41,13 +41,13 @@ describe('fetchValidationStatuses', () => {
   });
 });
 
-describe('hasUndecided', () => {
+describe('hasPending', () => {
   it('returns false when every status is validated', () => {
     const statuses = new Map<string, ValidationStatus>([
       ['a', 'validated'],
       ['b', 'validated'],
     ]);
-    expect(hasUndecided(statuses)).toBe(false);
+    expect(hasPending(statuses)).toBe(false);
   });
 
   it('returns true when a status is pending', () => {
@@ -55,15 +55,15 @@ describe('hasUndecided', () => {
       ['a', 'validated'],
       ['b', 'pending'],
     ]);
-    expect(hasUndecided(statuses)).toBe(true);
+    expect(hasPending(statuses)).toBe(true);
   });
 
-  it('returns true when a status is unknown', () => {
+  it('returns false when a status is unknown (terminal — must not poll)', () => {
     const statuses = new Map<string, ValidationStatus>([['a', 'unknown']]);
-    expect(hasUndecided(statuses)).toBe(true);
+    expect(hasPending(statuses)).toBe(false);
   });
 
   it('returns false for an empty map', () => {
-    expect(hasUndecided(new Map())).toBe(false);
+    expect(hasPending(new Map())).toBe(false);
   });
 });

@@ -12,7 +12,7 @@
   import { RelayConnection } from './lib/relay-connection.ts';
   import { insertEvent } from './lib/timeline-utils.ts';
   import type { ValidationStatus } from './lib/validation-status.ts';
-  import { fetchValidationStatuses, hasUndecided } from './lib/validation-status.ts';
+  import { fetchValidationStatuses, hasPending } from './lib/validation-status.ts';
 
   const DEFAULT_FILTER: Filter = { kinds: [1], limit: 100 };
   const MAX_NOTICES = 5;
@@ -63,8 +63,8 @@
 
   /**
    * 表示中イベントの検証結果をローカルリレー API（エミュレータ WS を介さない
-   * 直接メソッド呼び出し）から一括取得する。pending / unknown が残っている間は
-   * 一定間隔で再取得し、全件 validated になったら止まる。
+   * 直接メソッド呼び出し）から一括取得する。pending が残っている間だけ一定間隔で
+   * 再取得する（unknown は削除・退避済みの確定状態なのでポーリングを駆動しない）。
    */
   async function refreshValidationStatuses() {
     if (!relayHandle || events.length === 0) {
@@ -80,7 +80,7 @@
         clearTimeout(validationPollTimer);
         validationPollTimer = undefined;
       }
-      if (hasUndecided(statuses)) {
+      if (hasPending(statuses)) {
         validationPollTimer = setTimeout(() => {
           validationPollTimer = undefined;
           refreshValidationStatuses();

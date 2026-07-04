@@ -238,7 +238,12 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       const rows = await this.events.bulkGet(ids);
       ids.forEach((id, index) => {
         const row = rows[index];
-        statuses.set(id, row === undefined ? 'unknown' : row.validated === 1 ? 'validated' : 'pending');
+        if (row === undefined) {
+          // 未保存（不正で削除済み・退避済みを含む）
+          statuses.set(id, 'unknown');
+        } else {
+          statuses.set(id, row.validated === 1 ? 'validated' : 'pending');
+        }
       });
     } catch (error) {
       logger.error(

@@ -24,13 +24,14 @@ export async function fetchValidationStatuses(
 }
 
 /**
- * Whether any status is still undecided (`pending` or `unknown`) — i.e. a
- * later refetch may change the display. Used to keep polling only while a
- * lazy validation pass could still flip something to `validated`.
+ * Whether any status is still `pending` — i.e. a later lazy-validation pass
+ * may flip it to `validated`, so a refetch is worthwhile. `unknown` is
+ * terminal (never stored, deleted as invalid, or evicted) and must NOT keep
+ * polling alive: nothing can turn it into `validated`.
  */
-export function hasUndecided(statuses: Map<string, ValidationStatus>): boolean {
+export function hasPending(statuses: Map<string, ValidationStatus>): boolean {
   for (const status of statuses.values()) {
-    if (status !== 'validated') {
+    if (status === 'pending') {
       return true;
     }
   }
