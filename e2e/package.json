@@ -1,0 +1,34 @@
+{
+  "name": "@nostr-cache/e2e",
+  "version": "0.1.0",
+  "description": "End-to-end tests for the Nostr cache relay (Node.js and browser)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo 'E2E tests run via test:e2e'",
+    "test:e2e": "vitest run",
+    "test:e2e:node": "vitest run tests/node",
+    "test:e2e:browser": "vitest run tests/browser",
+    "build": "echo 'no build step for e2e'",
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write ./src ./tests && biome check --write ./src ./tests",
+    "format:check": "biome check ./src ./tests",
+    "lint": "biome check ./src ./tests",
+    "lint:check": "biome check ./src ./tests",
+    "lint:fix": "biome check --write ./src ./tests"
+  },
+  "dependencies": {
+    "@nostr-cache/cache-relay": "^0.1.0",
+    "@nostr-cache/shared": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.0",
+    "@types/ws": "^8.5.5",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.53.0",
+    "rx-nostr-crypto": "^3.1.3",
+    "typescript": "^6.0.0",
+    "vitest": "3.0.9",
+    "ws": "^8.14.2"
+  }
+}

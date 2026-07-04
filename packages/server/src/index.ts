@@ -3,7 +3,9 @@ import { NostrRelayServer } from './nostr-relay-server.js';
 
 // CLIインターフェース
 function main() {
-  const server = new NostrRelayServer();
+  // 環境変数PORTが指定されていればそのポートを使用する
+  const port = process.env.PORT ? Number(process.env.PORT) : undefined;
+  const server = new NostrRelayServer(port !== undefined ? { port } : {});
 
   // シグナルハンドリング
   process.on('SIGINT', async () => {

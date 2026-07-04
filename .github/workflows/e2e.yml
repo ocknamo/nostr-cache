@@ -1,0 +1,30 @@
+# Runs the end-to-end tests (Node.js and browser) in a dedicated workflow so
+# they execute in parallel with the lint-and-test workflow.
+
+name: e2e
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  e2e:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22.x"
+        cache: 'npm'
+    - run: npm ci
+    # The Node E2E suite spawns the built server (packages/server/dist), so a
+    # build is required before running the tests.
+    - run: npm run build
+    - name: Install Playwright browser
+      run: npx playwright install --with-deps chromium
+    - run: npm run test:e2e
