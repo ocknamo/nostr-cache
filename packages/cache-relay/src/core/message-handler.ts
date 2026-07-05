@@ -7,23 +7,17 @@
 import { logger } from '@nostr-cache/shared';
 import {
   type CloseMessage,
-  type ClosedResponse,
-  type EoseResponse,
   type EventMessage,
-  type Filter,
   type NostrEvent,
   NostrMessageType,
   type NostrWireMessage,
-  type NoticeResponse,
-  type OkResponse,
   type ReqMessage,
-  messageToWire,
 } from '@nostr-cache/shared';
 import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
-import { EventValidator } from '../event/event-validator.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
-import { capEvents } from '../utils/filter-utils.js';
+import { capEvents, isValidFilterShape } from '../utils/filter-utils.js';
+import { ClientResponder } from './client-responder.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
 /**
@@ -34,8 +28,7 @@ export class MessageHandler {
   private eventHandler: EventHandler;
   private storage: StorageAdapter;
   private subscriptionManager: SubscriptionManager;
-  private responseCallbacks: ((clientId: string, message: NostrWireMessage) => void)[] = [];
-  private eventValidator: EventValidator;
+  private responder: ClientResponder;
   /**
    * Present only when upstream read/write-through is enabled. Injected after
    * construction (see {@link setUpstreamCoordinator}) to break the wiring cycle
@@ -63,14 +56,14 @@ export class MessageHandler {
     subscriptionManager: SubscriptionManager,
     private maxSubscriptions = 20,
     private maxEventsPerRequest = 500,
-    private validateEventsType: ValidateEventsType = 'IMMEDIATELY',
+    validateEventsType: ValidateEventsType = 'IMMEDIATELY',
     private storageMaxSize?: number,
     private cacheStrategy?: CacheStrategy
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
     this.eventHandler = new EventHandler(storage, subscriptionManager, validateEventsType);
-    this.eventValidator = new EventValidator();
+    this.responder = new ClientResponder();
   }
 
   /**
@@ -124,39 +117,6 @@ export class MessageHandler {
       logger.error('Error handling message:', error);
       this.sendNotice(clientId, 'Internal error: server error');
     }
-  }
-
-  /**
-   * Validate Nostr event data
-   *
-   * @param event Event to validate
-   * @returns Whether the event is valid
-   */
-  private validateEvent(event: NostrEvent): Promise<boolean> {
-    return this.eventValidator.validate(event);
-  }
-
-  /**
-   * Validate filter data
-   *
-   * @param filter Filter to validate
-   * @returns Whether the filter is valid
-   */
-  private validateFilter(filter: Filter): boolean {
-    if (!filter || typeof filter !== 'object') return false;
-
-    // Check for at least one valid filter condition
-    const hasValidCondition =
-      (filter.ids !== undefined && Array.isArray(filter.ids)) ||
-      (filter.authors !== undefined && Array.isArray(filter.authors)) ||
-      (filter.kinds !== undefined && Array.isArray(filter.kinds) && filter.kinds.length > 0) ||
-      (filter['#e'] !== undefined && Array.isArray(filter['#e'])) ||
-      (filter['#p'] !== undefined && Array.isArray(filter['#p'])) ||
-      (filter.since !== undefined && typeof filter.since === 'number') ||
-      (filter.until !== undefined && typeof filter.until === 'number') ||
-      (filter.limit !== undefined && typeof filter.limit === 'number');
-
-    return hasValidCondition;
   }
 
   /**
@@ -220,13 +180,12 @@ export class MessageHandler {
   private async ingestEvent(
     event: NostrEvent
   ): Promise<Awaited<ReturnType<EventHandler['handleEvent']>>> {
-    // Synchronous validation only in IMMEDIATELY mode. In LAZY the event is
-    // accepted and stored now, then validated by the background pass; in NONE
-    // it is never validated. (EventHandler honours the same mode internally.)
-    if (this.validateEventsType === 'IMMEDIATELY' && !(await this.validateEvent(event))) {
-      return { success: false, stored: false, message: 'invalid: event validation failed' };
-    }
-
+    // Validation (per the configured mode) is performed inside
+    // EventHandler.handleEvent: IMMEDIATELY validates synchronously and rejects
+    // invalid events before storing; LAZY stores as pending for the background
+    // pass (but validates ephemeral events up front, since they are never
+    // stored); NONE skips validation. No pre-check here — doing so would verify
+    // the signature twice per EVENT.
     const result = await this.eventHandler.handleEvent(event);
     if (!result.success) {
       return result;
@@ -302,7 +261,7 @@ export class MessageHandler {
 
     // フィルタの検証
     for (const filter of filters) {
-      if (!this.validateFilter(filter)) {
+      if (!isValidFilterShape(filter)) {
         this.sendNotice(clientId, `Invalid filter format in subscription ${subscriptionId}`);
         return;
       }
@@ -440,23 +399,18 @@ export class MessageHandler {
   }
 
   /**
-   * Send an EVENT message to a client
+   * Send an EVENT message to a client. Delegates to {@link ClientResponder}.
    *
    * @param clientId ID of the client to send to
    * @param subscriptionId Subscription ID
    * @param event Event to send
    */
   sendEvent(clientId: string, subscriptionId: string, event: NostrEvent): void {
-    const message: EventMessage = {
-      type: NostrMessageType.EVENT,
-      event,
-      subscriptionId,
-    };
-    this.sendResponse(clientId, message);
+    this.responder.sendEvent(clientId, subscriptionId, event);
   }
 
   /**
-   * Send an OK message to a client
+   * Send an OK message to a client. Delegates to {@link ClientResponder}.
    *
    * @param clientId ID of the client to send to
    * @param eventId ID of the event
@@ -464,82 +418,46 @@ export class MessageHandler {
    * @param message Message to include
    */
   sendOK(clientId: string, eventId: string, success: boolean, message = ''): void {
-    const response: OkResponse = {
-      type: NostrMessageType.OK,
-      eventId,
-      success,
-      message,
-    };
-    this.sendResponse(clientId, response);
+    this.responder.sendOK(clientId, eventId, success, message);
   }
 
   /**
-   * Send an EOSE message to a client
+   * Send an EOSE message to a client. Delegates to {@link ClientResponder}.
    *
    * @param clientId ID of the client to send to
    * @param subscriptionId Subscription ID
    */
   sendEOSE(clientId: string, subscriptionId: string): void {
-    const response: EoseResponse = {
-      type: NostrMessageType.EOSE,
-      subscriptionId,
-    };
-    this.sendResponse(clientId, response);
+    this.responder.sendEOSE(clientId, subscriptionId);
   }
 
   /**
-   * Send a CLOSED message to a client
+   * Send a CLOSED message to a client. Delegates to {@link ClientResponder}.
    *
    * @param clientId ID of the client to send to
    * @param subscriptionId Subscription ID
    * @param message Message to include
    */
   sendClosed(clientId: string, subscriptionId: string, message: string): void {
-    const response: ClosedResponse = {
-      type: NostrMessageType.CLOSED,
-      subscriptionId,
-      message,
-    };
-    this.sendResponse(clientId, response);
+    this.responder.sendClosed(clientId, subscriptionId, message);
   }
 
   /**
-   * Send a NOTICE message to a client
+   * Send a NOTICE message to a client. Delegates to {@link ClientResponder}.
    *
    * @param clientId ID of the client to send to
    * @param message Message to include
    */
   sendNotice(clientId: string, message: string): void {
-    const response: NoticeResponse = {
-      type: NostrMessageType.NOTICE,
-      message,
-    };
-    this.sendResponse(clientId, response);
+    this.responder.sendNotice(clientId, message);
   }
 
   /**
-   * Send a response to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param message Message to send
-   * @private
-   */
-  private sendResponse(
-    clientId: string,
-    message: EventMessage | OkResponse | EoseResponse | ClosedResponse | NoticeResponse
-  ): void {
-    const wireMessage = messageToWire(message);
-    for (const callback of this.responseCallbacks) {
-      callback(clientId, wireMessage);
-    }
-  }
-
-  /**
-   * Register a callback for responses
+   * Register a callback for responses. Delegates to {@link ClientResponder}.
    *
    * @param callback Function to call when a response is sent
    */
   onResponse(callback: (clientId: string, message: NostrWireMessage) => void): void {
-    this.responseCallbacks.push(callback);
+    this.responder.onResponse(callback);
   }
 }

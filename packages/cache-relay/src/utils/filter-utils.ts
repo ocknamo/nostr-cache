@@ -206,3 +206,30 @@ export function mergeFilters(filters: Filter[]): Filter {
 
   return merged;
 }
+
+/**
+ * Whether an incoming REQ filter has at least one recognised, well-typed
+ * condition.
+ *
+ * This is a shape check for subscription filters supplied by clients — "is
+ * there something here we can match events against?" — as opposed to
+ * {@link eventMatchesFilter}, which tests a concrete event against a filter.
+ *
+ * @param filter Filter to validate
+ * @returns Whether the filter carries at least one valid condition
+ */
+export function isValidFilterShape(filter: Filter): boolean {
+  if (!filter || typeof filter !== 'object') return false;
+
+  // Check for at least one valid filter condition
+  return (
+    (filter.ids !== undefined && Array.isArray(filter.ids)) ||
+    (filter.authors !== undefined && Array.isArray(filter.authors)) ||
+    (filter.kinds !== undefined && Array.isArray(filter.kinds) && filter.kinds.length > 0) ||
+    (filter['#e'] !== undefined && Array.isArray(filter['#e'])) ||
+    (filter['#p'] !== undefined && Array.isArray(filter['#p'])) ||
+    (filter.since !== undefined && typeof filter.since === 'number') ||
+    (filter.until !== undefined && typeof filter.until === 'number') ||
+    (filter.limit !== undefined && typeof filter.limit === 'number')
+  );
+}

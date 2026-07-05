@@ -4,6 +4,7 @@
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
+import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { MessageHandler } from './message-handler.js';
 import type { SubscriptionManager } from './subscription-manager.js';
@@ -192,6 +193,18 @@ describe('MessageHandler', () => {
             false,
             'invalid: event validation failed',
           ]);
+        });
+
+        it('IMMEDIATELY: verifies a valid event exactly once (no duplicate verification)', async () => {
+          // Regression guard: the EVENT path must not validate the signature
+          // twice. EventHandler already validates synchronously in IMMEDIATELY
+          // mode, so MessageHandler must not run its own pre-check on top.
+          const validateSpy = vi.spyOn(EventValidator.prototype, 'validate');
+
+          await messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          expect(validateSpy).toHaveBeenCalledTimes(1);
+          validateSpy.mockRestore();
         });
 
         it('LAZY: accepts and stores an invalid event as pending validation', async () => {
