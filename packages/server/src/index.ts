@@ -1,3 +1,8 @@
+// fake-indexeddb の polyfill は @nostr-cache/cache-relay より前に評価される必要がある。
+// Dexie はモジュール評価時に global の indexedDB をキャプチャするため、この副作用 import
+// を最初に置かないと、Node 実行時に "IndexedDB API missing" で保存が失敗する。
+// （現状サーバーストレージはインメモリ。詳細は ./storage.ts）
+import 'fake-indexeddb/auto';
 import { logger } from '@nostr-cache/shared';
 import { NostrRelayServer } from './nostr-relay-server.js';
 

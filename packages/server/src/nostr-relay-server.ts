@@ -4,30 +4,16 @@
  * NIP-01準拠のNostrリレーサーバー実装
  */
 
-// fake-indexeddbの自動セットアップ
-import 'fake-indexeddb/auto';
-import { type Server as HttpServer, createServer } from 'node:http';
 import {
   type CacheStrategy,
-  DexieStorage,
   NostrCacheRelay,
   type StorageAdapter,
   type TransportAdapter,
   WebSocketServer,
 } from '@nostr-cache/cache-relay';
 import { logger } from '@nostr-cache/shared';
-
-/**
- * ヘルスチェックエンドポイントの設定
- */
-interface HealthCheckOptions {
-  // ヘルスチェックを有効にするか（デフォルト: true）
-  enabled?: boolean;
-  // ヘルスチェック用 HTTP ポート（デフォルト: WebSocket ポート + 1）
-  port?: number;
-  // ヘルスチェックのパス（デフォルト: '/health'）
-  path?: string;
-}
+import { type HealthCheckOptions, HealthServer } from './health-server.js';
+import { createStorage } from './storage.js';
 
 /**
  * Nostrリレーサーバーの設定オプション
@@ -71,19 +57,6 @@ interface NostrRelayServerOptions {
 }
 
 /**
- * ヘルスチェックのレスポンスボディ
- */
-interface HealthCheckResponse {
-  status: 'ok';
-  // プロセスの稼働秒数
-  uptime: number;
-  // 現在の WebSocket 接続数
-  connections: number;
-  // 保存済みイベント数
-  events: number;
-}
-
-/**
  * Nostrリレーサーバークラス
  * NIP-01準拠のNostrリレーサーバーを実装
  */
@@ -95,8 +68,8 @@ export class NostrRelayServer {
   private relay: NostrCacheRelay;
   private storage: StorageAdapter;
   private options: NostrRelayServerOptions;
-  // ヘルスチェック用 HTTP サーバー（無効時 / 起動失敗時は null）
-  private healthServer: HttpServer | null = null;
+  // ヘルスチェック用 HTTP サーバー（補助エンドポイント）
+  private healthServer: HealthServer;
 
   /**
    * NostrRelayServerのインスタンスを作成
@@ -110,8 +83,8 @@ export class NostrRelayServer {
       ...options,
     };
 
-    // fake-indexeddbを使用したDexieStorageの初期化
-    this.storage = new DexieStorage(this.options.storageOptions?.dbName || 'NostrRelay');
+    // ストレージアダプタの初期化（現状は fake-indexeddb ベース。詳細は storage.ts）
+    this.storage = createStorage(this.options.storageOptions?.dbName || 'NostrRelay');
 
     // WebSocketサーバーの作成
     this.server = new WebSocketServer(this.options.port);
@@ -131,6 +104,19 @@ export class NostrRelayServer {
       upstreamEoseTimeout: this.options.relay?.upstreamEoseTimeout,
       upstreamConnectionTimeout: this.options.relay?.upstreamConnectionTimeout,
     });
+
+    // ヘルスチェック用 HTTP サーバー。稼働状況のスナップショットは本サーバーから注入する
+    this.healthServer = new HealthServer(
+      this.options.healthCheck,
+      this.options.port,
+      this.options.host,
+      async () => ({
+        status: 'ok',
+        uptime: process.uptime(),
+        connections: this.getConnectionCount(),
+        events: await this.getEventCount(),
+      })
+    );
   }
 
   /**
@@ -140,7 +126,7 @@ export class NostrRelayServer {
    */
   async start(): Promise<void> {
     await this.relay.connect();
-    await this.startHealthServer();
+    await this.healthServer.start();
     logger.info(`Nostr relay server started on port ${this.options.port}`);
   }
 
@@ -150,7 +136,7 @@ export class NostrRelayServer {
    * @returns Promise resolving when the server is stopped
    */
   async stop(): Promise<void> {
-    await this.stopHealthServer();
+    await this.healthServer.stop();
     await this.relay.disconnect();
     // ストレージのクリーンアップ
     await this.storage.clear();
@@ -158,132 +144,12 @@ export class NostrRelayServer {
   }
 
   /**
-   * ヘルスチェックが有効かどうか
-   *
-   * @returns 有効なら true（明示的に false が指定されない限り有効）
-   */
-  private isHealthCheckEnabled(): boolean {
-    return this.options.healthCheck?.enabled !== false;
-  }
-
-  /**
-   * ヘルスチェック用ポートを取得（デフォルトは WebSocket ポート + 1）
-   *
-   * @returns ヘルスチェック用ポート番号
-   */
-  private getHealthCheckPort(): number {
-    return this.options.healthCheck?.port ?? this.options.port + 1;
-  }
-
-  /**
-   * ヘルスチェックのパスを取得（デフォルトは '/health'）
-   *
-   * @returns ヘルスチェックのパス
-   */
-  private getHealthCheckPath(): string {
-    return this.options.healthCheck?.path ?? '/health';
-  }
-
-  /**
-   * ヘルスチェック用 HTTP サーバーを起動する。
-   *
-   * 補助機能のため、ポート確保に失敗しても警告ログを残すだけでリレー本体は停止しない
-   * （ヘルスチェックの障害がリレーの稼働を妨げないようにする）。
-   *
-   * @returns Promise resolving when the health server is started (or skipped)
-   */
-  private async startHealthServer(): Promise<void> {
-    if (!this.isHealthCheckEnabled()) {
-      return;
-    }
-
-    const path = this.getHealthCheckPath();
-    const server = createServer((req, res) => {
-      if (req.method !== 'GET' || req.url !== path) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not Found' }));
-        return;
-      }
-
-      this.getEventCount()
-        .then((events) => {
-          const body: HealthCheckResponse = {
-            status: 'ok',
-            uptime: process.uptime(),
-            connections: this.getConnectionCount(),
-            events,
-          };
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(body));
-        })
-        .catch((error) => {
-          logger.error('Health check handler failed:', error);
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ status: 'error' }));
-        });
-    });
-
-    // 補助エンドポイントを Slowloris 等の接続保持型攻撃から守るためのタイムアウト。
-    // ヘッダ／リクエスト全体を短時間で受け切れない接続は切断する。
-    server.headersTimeout = 5000;
-    server.requestTimeout = 10000;
-
-    const port = this.getHealthCheckPort();
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const onError = (error: Error): void => reject(error);
-        server.once('error', onError);
-        server.listen(port, this.options.host, () => {
-          server.removeListener('error', onError);
-          resolve();
-        });
-      });
-
-      this.healthServer = server;
-      logger.info(`Health check endpoint listening on port ${this.getHealthPort()} (path ${path})`);
-    } catch (error) {
-      logger.error(`Failed to start health check endpoint on port ${port}:`, error);
-      // リレー本体には影響させない
-      this.healthServer = null;
-    }
-  }
-
-  /**
-   * ヘルスチェック用 HTTP サーバーを停止する。
-   *
-   * @returns Promise resolving when the health server is stopped
-   */
-  private async stopHealthServer(): Promise<void> {
-    if (!this.healthServer) {
-      return;
-    }
-
-    const server = this.healthServer;
-    this.healthServer = null;
-
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-    });
-  }
-
-  /**
    * 稼働中のヘルスチェックエンドポイントのポート番号を取得する。
-   *
-   * 設定値ではなく実際にバインドされたポートを返すため、`healthCheck.port: 0`
-   * （動的割り当て）にも対応する。
    *
    * @returns リッスン中のポート番号。無効化されている、または起動に失敗した場合は null
    */
   getHealthPort(): number | null {
-    const address = this.healthServer?.address();
-    return typeof address === 'object' && address !== null ? address.port : null;
+    return this.healthServer.getBoundPort();
   }
 
   /**
