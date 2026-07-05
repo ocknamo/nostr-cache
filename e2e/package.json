@@ -22,7 +22,7 @@
     "@nostr-cache/shared": "^0.1.0"
   },
   "devDependencies": {
-    "@types/node": "^18.15.0",
+    "@types/node": "^22.0.0",
     "@types/ws": "^8.5.5",
     "esbuild": "^0.25.0",
     "playwright": "^1.53.0",

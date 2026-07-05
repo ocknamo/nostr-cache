@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFilter, parseFilterJson } from './filter-utils.ts';
+import { buildFilter, parseFilterJson } from './filter-form.ts';
 
 describe('buildFilter', () => {
   it('parses comma-separated kinds into numbers', () => {

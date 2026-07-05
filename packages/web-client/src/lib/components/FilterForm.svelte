@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Filter } from '@nostr-cache/shared';
-  import { buildFilter, parseFilterJson } from '../filter-utils.ts';
+  import { buildFilter, parseFilterJson } from '../filter-form.ts';
 
   interface Props {
     onSubmit: (filter: Filter) => void;
