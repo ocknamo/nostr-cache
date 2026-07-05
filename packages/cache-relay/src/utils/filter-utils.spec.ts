@@ -7,6 +7,7 @@ import {
   capEvents,
   createFilterKey,
   eventMatchesFilter,
+  isValidFilterShape,
   mergeFilters,
   normalizeFilter,
 } from './filter-utils.js';
@@ -338,6 +339,32 @@ describe('filterUtils', () => {
       const snapshot = events.map((e) => e.id);
       capEvents(events, 1);
       expect(events.map((e) => e.id)).toEqual(snapshot);
+    });
+  });
+
+  describe('isValidFilterShape', () => {
+    it('accepts a filter with at least one valid condition', () => {
+      expect(isValidFilterShape({ kinds: [1] })).toBe(true);
+      expect(isValidFilterShape({ ids: ['abc'] })).toBe(true);
+      expect(isValidFilterShape({ authors: [] })).toBe(true);
+      expect(isValidFilterShape({ '#e': ['evt'] })).toBe(true);
+      expect(isValidFilterShape({ '#p': ['pk'] })).toBe(true);
+      expect(isValidFilterShape({ since: 100 })).toBe(true);
+      expect(isValidFilterShape({ until: 200 })).toBe(true);
+      expect(isValidFilterShape({ limit: 10 })).toBe(true);
+    });
+
+    it('rejects an empty filter or one with no recognised condition', () => {
+      expect(isValidFilterShape({})).toBe(false);
+      expect(isValidFilterShape({ kinds: [] })).toBe(false); // kinds must be non-empty
+      expect(isValidFilterShape(null as unknown as Filter)).toBe(false);
+      expect(isValidFilterShape('nope' as unknown as Filter)).toBe(false);
+    });
+
+    it('rejects conditions of the wrong type', () => {
+      expect(isValidFilterShape({ ids: 'abc' } as unknown as Filter)).toBe(false);
+      expect(isValidFilterShape({ since: '100' } as unknown as Filter)).toBe(false);
+      expect(isValidFilterShape({ limit: '10' } as unknown as Filter)).toBe(false);
     });
   });
 });
