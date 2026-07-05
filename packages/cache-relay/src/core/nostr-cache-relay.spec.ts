@@ -286,14 +286,15 @@ describe('NostrCacheRelay', () => {
       const handler = vi.fn();
 
       relay.on('connect', handler);
-      relay['emit']('connect');
+      // Dispatch through the composed emitter to verify on/off delegate to it.
+      relay['emitter'].emit('connect');
 
       expect(handler).toHaveBeenCalled();
 
       relay.off('connect', handler);
       handler.mockClear();
 
-      relay['emit']('connect');
+      relay['emitter'].emit('connect');
 
       expect(handler).not.toHaveBeenCalled();
     });
