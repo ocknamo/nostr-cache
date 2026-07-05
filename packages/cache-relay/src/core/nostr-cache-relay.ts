@@ -24,7 +24,7 @@ import { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from '../upstream/upstream-relay-pool.js';
 import { capEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
-import { RelayEventEmitter } from './relay-event-emitter.js';
+import { RelayEventEmitter, type RelayEventName } from './relay-event-emitter.js';
 import {
   DEFAULT_MAX_EVENTS,
   LOCAL_CLIENT_ID,
@@ -416,7 +416,7 @@ export class NostrCacheRelay {
       | RelayEventHandler
       | RelayEoseHandler
   ): void {
-    this.emitter.on(event as never, callback);
+    this.emitter.on(event as RelayEventName, callback);
   }
 
   /**
@@ -439,6 +439,6 @@ export class NostrCacheRelay {
       | RelayEventHandler
       | RelayEoseHandler
   ): void {
-    this.emitter.off(event as never, callback);
+    this.emitter.off(event as RelayEventName, callback);
   }
 }
