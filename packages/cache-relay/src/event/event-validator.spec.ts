@@ -24,7 +24,7 @@ describe('EventValidator', () => {
   });
 
   describe('validate', () => {
-    it('should return true for any event (placeholder implementation)', async () => {
+    it('should return true for a validly signed event', async () => {
       const result = await validator.validate(sampleEvent);
 
       expect(result).toBe(true);
