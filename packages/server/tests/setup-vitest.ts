@@ -11,14 +11,9 @@ beforeAll(() => {
   logger.setTestEnvironment(true);
 });
 
-// 各テスト後にIndexedDBをリセット
+// 各テスト後に IndexedDB をリセット。
+// fake-indexeddb v6 では旧 `FDBFactory.reset()` が廃止されたため、
+// グローバルの indexedDB を新しい IDBFactory インスタンスに差し替えて全 DB を破棄する。
 afterEach(() => {
-  try {
-    const resetMethod = require('fake-indexeddb/lib/FDBFactory').reset;
-    if (typeof resetMethod === 'function') {
-      resetMethod();
-    }
-  } catch (error) {
-    console.warn('Failed to reset IndexedDB:', error);
-  }
+  globalThis.indexedDB = new globalThis.IDBFactory();
 });
