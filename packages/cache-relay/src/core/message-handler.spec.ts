@@ -45,11 +45,6 @@ describe('MessageHandler', () => {
       .mockImplementation((clientId, subscriptionId) => `${clientId}:${subscriptionId}`),
   } as unknown as SubscriptionManager;
 
-  // // Mock event validator
-  const mockEventValidator = {
-    validate: vi.fn().mockResolvedValue(true),
-  };
-
   // Sample events
   const sampleEvent: NostrEvent = {
     content: 'sample',
@@ -201,10 +196,14 @@ describe('MessageHandler', () => {
           // mode, so MessageHandler must not run its own pre-check on top.
           const validateSpy = vi.spyOn(EventValidator.prototype, 'validate');
 
-          await messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
-
-          expect(validateSpy).toHaveBeenCalledTimes(1);
-          validateSpy.mockRestore();
+          try {
+            await messageHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+            expect(validateSpy).toHaveBeenCalledTimes(1);
+          } finally {
+            // Restore even if the assertion throws, so the spy never leaks
+            // into subsequent tests (no global restoreMocks is configured).
+            validateSpy.mockRestore();
+          }
         });
 
         it('LAZY: accepts and stores an invalid event as pending validation', async () => {
@@ -539,9 +538,7 @@ describe('MessageHandler', () => {
     });
 
     it('should handle malformed event data', async () => {
-      const mockEventValidator = {
-        validate: vi.fn().mockResolvedValueOnce(false),
-      };
+      // An empty pubkey makes the real signature verification fail.
       const invalidEvent = {
         ...sampleEvent,
         pubkey: '', // Empty string
