@@ -110,12 +110,16 @@ export class NostrRelayServer {
       this.options.healthCheck,
       this.options.port,
       this.options.host,
-      async () => ({
-        status: 'ok',
-        uptime: process.uptime(),
-        connections: this.getConnectionCount(),
-        events: await this.getEventCount(),
-      })
+      async () => {
+        // 元実装と同じく、まずイベント数を取得してから uptime / connections を読む
+        const events = await this.getEventCount();
+        return {
+          status: 'ok',
+          uptime: process.uptime(),
+          connections: this.getConnectionCount(),
+          events,
+        };
+      }
     );
   }
 
