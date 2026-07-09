@@ -24,6 +24,17 @@ describe('EventCard', () => {
     expect(screen.getByText('short-pubkey')).toBeInTheDocument();
   });
 
+  it('keeps a 16-char pubkey intact but shortens a 17-char one (boundary)', () => {
+    const { unmount } = render(EventCard, {
+      event: makeEvent({ pubkey: '0123456789abcdef' }), // exactly 16
+    });
+    expect(screen.getByText('0123456789abcdef')).toBeInTheDocument();
+    unmount();
+
+    render(EventCard, { event: makeEvent({ pubkey: '0123456789abcdefX' }) }); // 17
+    expect(screen.getByText('01234567…9abcdefX')).toBeInTheDocument();
+  });
+
   it('shows the verified badge only when status is "validated"', () => {
     const { unmount } = render(EventCard, {
       event: makeEvent(),

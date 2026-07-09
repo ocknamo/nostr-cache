@@ -29,6 +29,26 @@ describe('FilterForm', () => {
     expect(onSubmit).toHaveBeenCalledWith({ kinds: [1, 7], limit: 100 });
   });
 
+  it('wires authors and since inputs into the built filter', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(FilterForm, { onSubmit });
+
+    await user.type(screen.getByPlaceholderText('npub… の hex 形式'), 'aa, bb');
+    // "since (unixtime)" is the 5th text input in the simple grid.
+    const since = screen.getByRole('textbox', { name: /since/i });
+    await user.type(since, '1700000000');
+
+    await user.click(screen.getByRole('button', { name: 'フィルタを適用' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      kinds: [1],
+      authors: ['aa', 'bb'],
+      limit: 100,
+      since: 1_700_000_000,
+    });
+  });
+
   it('shows a validation error and does not submit on an invalid kind', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
