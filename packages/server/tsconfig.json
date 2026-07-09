@@ -9,6 +9,7 @@
   "include": [
     "src/**/*"
   ],
+  "exclude": ["src/**/*.spec.ts"],
   "references": [
     {
       "path": "../shared"
