@@ -1022,6 +1022,23 @@ describe('SqliteStorage', () => {
       expect(await persistent.saveEvent(mockEvent)).toBe(true);
       persistent.close();
     });
+
+    it('should reopen the same instance after close via open()', async () => {
+      const dbPath = join(dataDir, 'relay.db');
+      const persistent = new SqliteStorage(dbPath);
+      await persistent.saveEvent(mockEvent);
+      persistent.close();
+
+      // close 後は操作がフォールバック値になるが、open() で同一インスタンスを再利用できる
+      expect(await persistent.count()).toBe(0);
+      persistent.open();
+      try {
+        expect(await persistent.count()).toBe(1);
+        expect(await persistent.saveEvent({ ...mockEvent, id: 'after-reopen' })).toBe(true);
+      } finally {
+        persistent.close();
+      }
+    });
   });
 
   describe('error fallbacks after close (SQLite-specific)', () => {

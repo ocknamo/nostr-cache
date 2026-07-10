@@ -89,6 +89,25 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
     }
   });
 
+  it('supports stop/start on the same instance in persistent mode', async () => {
+    const dbPath = join(dataDir, 'relay.db');
+    const event = await createTestEvent();
+
+    // 同一インスタンスの stop() → start() でも、閉じた DB が再オープンされ
+    // データが保持されていること（既定モードとの lifecycle 対称性）
+    const server = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
+    await server.start();
+    await publish(server.getPort(), event);
+    await server.stop();
+
+    await server.start();
+    try {
+      expect(await server.getEventCount()).toBe(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('clears events on stop in the default in-memory mode', async () => {
     const event = await createTestEvent();
 

@@ -140,6 +140,12 @@ export class NostrRelayServer {
    * @returns Promise resolving when the server is started
    */
   async start(): Promise<void> {
+    if (this.persistent) {
+      // stop() で閉じた永続 DB を再オープンする（初回起動時は no-op）。これにより
+      // 同一インスタンスの stop() → start() の再利用が既定モードと対称になる
+      const storage = this.storage as StorageAdapter & { open?: () => void };
+      storage.open?.();
+    }
     await this.relay.connect();
     await this.healthServer.start();
     logger.info(`Nostr relay server started on port ${this.options.port}`);

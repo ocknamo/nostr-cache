@@ -61,7 +61,8 @@ const server = new NostrRelayServer({
 
 - `dbPath` 未指定なら**従来どおり**インメモリで、`stop()` 時にストレージをクリアします。
   永続モードでは `stop()` はデータを保持したまま DB を閉じます（WAL のチェックポイント +
-  ファイルハンドル解放）
+  ファイルハンドル解放）。同一インスタンスを再度 `start()` すると DB は自動で
+  再オープンされます
 - TTL（`relay.ttl`）・保存上限（`storageOptions.maxSize` / `cacheStrategy` の
   FIFO / LRU / LFU）・遅延バリデーションの永続キューは、永続モードでもインメモリと
   同一のセマンティクスで機能します

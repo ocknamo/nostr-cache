@@ -119,7 +119,10 @@ web-client は 2026-07 に廃棄した）
     E2E（`e2e/tests/node/persistence.e2e.spec.ts`＝実子プロセスを `NOSTR_DB_PATH` 付きで SIGINT 再起動）
   - 既知の差分: Dexie 実装は authors/kinds + 時間範囲の組み合わせで `until` 境界が排他になる
     （Dexie `between()` の上限排他による内部不整合）が、SQLite 実装は NIP-01 と共通判定
-    `eventMatchesFilter` に合わせ全分岐で包含に統一
+    `eventMatchesFilter` に合わせ全分岐で包含に統一。また `filter.limit` での切り詰めは
+    Dexie がインデックス順（任意）の先頭 N 件を返すのに対し、SQLite 実装は NIP-01 の
+    limit セマンティクス（`capEvents` と同じ）どおり新しい順（`created_at` 降順・id
+    タイブレーク）の N 件を返す
 - [x] 同時接続・負荷下の正当性テスト（旧: 同時接続・スループットの性能テスト）
   - `packages/server/tests/integration/performance.spec.ts` として実装済み（#15）。多数の同時接続、単一クライアントからのバースト投入、複数クライアントからの並行投入、並行 REQ の全件応答（取りこぼし無し）を検証
   - 注: 実行時間に依存する閾値アサーションは意図的に行っておらず、スループット（件/秒）やレイテンシの測定・回帰検知はスコープ外。ベンチマークが必要になったら別項目として起こす

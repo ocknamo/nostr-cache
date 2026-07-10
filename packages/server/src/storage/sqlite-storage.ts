@@ -52,8 +52,9 @@ function chunk<T>(items: T[], size: number): T[][] {
  * 同一 DB ファイルを複数プロセスで開くことはサポートしない。
  */
 export class SqliteStorage implements StorageAdapter {
-  private db: nodeSqlite.DatabaseSync;
-  private closed = false;
+  private db!: nodeSqlite.DatabaseSync;
+  private readonly dbPath: string;
+  private closed = true;
 
   /**
    * Open (creating if necessary) the SQLite database at the given path.
@@ -62,19 +63,34 @@ export class SqliteStorage implements StorageAdapter {
    *   `':memory:'` for an in-memory database (used by tests)
    */
   constructor(dbPath: string) {
-    if (dbPath !== ':memory:') {
-      mkdirSync(dirname(dbPath), { recursive: true });
+    this.dbPath = dbPath;
+    this.open();
+  }
+
+  /**
+   * (Re)open the database at the path given to the constructor. No-op while
+   * already open. `close()` 後に呼ぶと同じパスで再オープンできるため、
+   * `NostrRelayServer` の stop() → start() の再利用が既定モードと対称になる
+   * （`:memory:` の再オープンは空の DB から始まる）。
+   */
+  open(): void {
+    if (!this.closed) {
+      return;
+    }
+    if (this.dbPath !== ':memory:') {
+      mkdirSync(dirname(this.dbPath), { recursive: true });
     }
     // ここで初めて node:sqlite がロードされる（ExperimentalWarning もこの時点）
     const { DatabaseSync } = process.getBuiltinModule('node:sqlite') as typeof nodeSqlite;
-    this.db = new DatabaseSync(dbPath);
+    this.db = new DatabaseSync(this.dbPath);
     this.db.exec(SQLITE_PRAGMAS);
     this.db.exec(SQLITE_SCHEMA);
+    this.closed = false;
   }
 
   /**
    * Close the database, checkpointing WAL and releasing file handles.
-   * Safe to call more than once.
+   * Safe to call more than once; reopen with {@link open}.
    */
   close(): void {
     if (this.closed) {
@@ -91,8 +107,7 @@ export class SqliteStorage implements StorageAdapter {
     // validated は MAX により 1→0 にダウングレードしない（Dexie 実装と同じ。
     // 同じ id は同じ内容なので一度検証済みなら再保存でも検証済みのまま）
     try {
-      this.db.exec('BEGIN IMMEDIATE');
-      try {
+      this.inTransaction(() => {
         this.db
           .prepare(
             `INSERT INTO events
@@ -131,11 +146,7 @@ export class SqliteStorage implements StorageAdapter {
         for (const tag of getIndexedTags(event.tags)) {
           insertTag.run(event.id, tag);
         }
-        this.db.exec('COMMIT');
-      } catch (error) {
-        this.rollback();
-        throw error;
-      }
+      });
       return true;
     } catch (error) {
       logger.error(
@@ -183,12 +194,15 @@ export class SqliteStorage implements StorageAdapter {
       return;
     }
     try {
-      for (const part of chunk(ids, ID_CHUNK_SIZE)) {
-        const placeholders = part.map(() => '?').join(', ');
-        this.db
-          .prepare(`UPDATE events SET validated = 1 WHERE id IN (${placeholders})`)
-          .run(...part);
-      }
+      // 複数チャンクでも Dexie の単一 modify と同じく全件原子的に適用する
+      this.inTransaction(() => {
+        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+          const placeholders = part.map(() => '?').join(', ');
+          this.db
+            .prepare(`UPDATE events SET validated = 1 WHERE id IN (${placeholders})`)
+            .run(...part);
+        }
+      });
     } catch (error) {
       logger.error(
         `Failed to mark events validated: ${
@@ -298,16 +312,19 @@ export class SqliteStorage implements StorageAdapter {
     }
     try {
       const now = Date.now();
-      for (const part of chunk(ids, ID_CHUNK_SIZE)) {
-        const placeholders = part.map(() => '?').join(', ');
-        this.db
-          .prepare(
-            `UPDATE events
-             SET last_accessed_at = ?, access_count = access_count + 1
-             WHERE id IN (${placeholders})`
-          )
-          .run(now, ...part);
-      }
+      // 複数チャンクでも Dexie の単一 modify と同じく全件原子的に適用する
+      this.inTransaction(() => {
+        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+          const placeholders = part.map(() => '?').join(', ');
+          this.db
+            .prepare(
+              `UPDATE events
+               SET last_accessed_at = ?, access_count = access_count + 1
+               WHERE id IN (${placeholders})`
+            )
+            .run(now, ...part);
+        }
+      });
     } catch (error) {
       logger.error(
         `Failed to track event access: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -407,28 +424,25 @@ export class SqliteStorage implements StorageAdapter {
       return 0;
     }
     try {
-      this.db.exec('BEGIN IMMEDIATE');
-      let evicted = 0;
-      try {
+      // COUNT と DELETE を単一トランザクションで行い、並行パスの古いカウントに
+      // 基づく過剰/過少退避を防ぐ（Dexie 実装と同じ）
+      const evicted = this.inTransaction(() => {
         const row = this.db.prepare('SELECT COUNT(*) AS count FROM events').get() as {
           count: number;
         };
         const count = Number(row.count);
-        if (count > maxSize) {
-          const { changes } = this.db
-            .prepare(
-              `DELETE FROM events WHERE id IN (
-                 SELECT id FROM events ORDER BY ${EVICTION_ORDER[strategy]} LIMIT ?
-               )`
-            )
-            .run(count - maxSize);
-          evicted = Number(changes);
+        if (count <= maxSize) {
+          return 0;
         }
-        this.db.exec('COMMIT');
-      } catch (error) {
-        this.rollback();
-        throw error;
-      }
+        const { changes } = this.db
+          .prepare(
+            `DELETE FROM events WHERE id IN (
+               SELECT id FROM events ORDER BY ${EVICTION_ORDER[strategy]} LIMIT ?
+             )`
+          )
+          .run(count - maxSize);
+        return Number(changes);
+      });
       if (evicted > 0) {
         logger.info(`Evicted ${evicted} events to respect storageMaxSize ${maxSize}`);
       }
@@ -502,10 +516,13 @@ export class SqliteStorage implements StorageAdapter {
         return false;
       }
 
-      for (const part of chunk(idsToDelete, ID_CHUNK_SIZE)) {
-        const placeholders = part.map(() => '?').join(', ');
-        this.db.prepare(`DELETE FROM events WHERE id IN (${placeholders})`).run(...part);
-      }
+      // 複数チャンクでも Dexie の単一 bulkDelete と同じく全件原子的に削除する
+      this.inTransaction(() => {
+        for (const part of chunk(idsToDelete, ID_CHUNK_SIZE)) {
+          const placeholders = part.map(() => '?').join(', ');
+          this.db.prepare(`DELETE FROM events WHERE id IN (${placeholders})`).run(...part);
+        }
+      });
       return true;
     } catch (error) {
       logger.error(
@@ -514,6 +531,23 @@ export class SqliteStorage implements StorageAdapter {
         }`
       );
       return false;
+    }
+  }
+
+  /**
+   * Run `fn` inside a single write transaction. Commits on success; rolls
+   * back and rethrows on failure (callers translate the error into their
+   * method's safe fallback value).
+   */
+  private inTransaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.rollback();
+      throw error;
     }
   }
 
