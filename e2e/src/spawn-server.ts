@@ -83,12 +83,20 @@ function waitForRelay(port: number, timeoutMs = 10000): Promise<void> {
 }
 
 /**
+ * Options for {@link startServer}.
+ */
+export interface StartServerOptions {
+  /** Extra environment variables for the child process (e.g. NOSTR_DB_PATH). */
+  env?: Record<string, string>;
+}
+
+/**
  * Spawn the built relay server on a free port and wait until it accepts connections.
  */
-export async function startServer(): Promise<RunningServer> {
+export async function startServer(options: StartServerOptions = {}): Promise<RunningServer> {
   const port = await getFreePort();
   const child = spawn(process.execPath, [SERVER_ENTRY], {
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), ...options.env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

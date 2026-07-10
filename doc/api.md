@@ -129,7 +129,9 @@ interface NostrRelayOptions {
 
 ### `interface StorageAdapter`
 
-イベントの永続化を担う抽象。`DexieStorage`（IndexedDB / fake-indexeddb）が標準実装です。
+イベントの保存を担う抽象。`DexieStorage`（IndexedDB / fake-indexeddb）が標準実装です。
+このほか `@nostr-cache/server` 内には Node.js 専用の永続実装 `SqliteStorage`
+（`node:sqlite`。`storageOptions.dbPath` で有効化）があります。
 
 ```typescript
 type ValidationStatus = 'validated' | 'pending' | 'unknown';
@@ -187,11 +189,15 @@ interface TransportAdapter {
 
 ## `@nostr-cache/server`
 
-`@nostr-cache/cache-relay` を `DexieStorage`（fake-indexeddb）+ `WebSocketServer` で
-組み立てた、すぐ起動できる Node.js リレーサーバーです。
+`@nostr-cache/cache-relay` を `WebSocketServer` と組み立てた、すぐ起動できる
+Node.js リレーサーバーです。ストレージは既定で `DexieStorage`（fake-indexeddb・
+インメモリ）、`storageOptions.dbPath`（または環境変数 `NOSTR_DB_PATH`）を指定すると
+`node:sqlite` による永続ストレージ（`SqliteStorage`）にオプトインできます。
 
 A ready-to-run Node.js relay server that wires `@nostr-cache/cache-relay` with
-`DexieStorage` (fake-indexeddb) and `WebSocketServer`.
+`WebSocketServer`. Storage defaults to `DexieStorage` (fake-indexeddb, in-memory);
+setting `storageOptions.dbPath` (or the `NOSTR_DB_PATH` env var) opts in to the
+durable `node:sqlite` backend (`SqliteStorage`).
 
 ### `class NostrRelayServer`
 
@@ -222,7 +228,7 @@ const cache = new NostrRelayServer({
 | メソッド / Method | 説明 / Description |
 |---|---|
 | `start(): Promise<void>` | サーバーを起動 / Starts the server |
-| `stop(): Promise<void>` | サーバーを停止しストレージをクリア / Stops the server and clears storage |
+| `stop(): Promise<void>` | サーバーを停止。既定モードではストレージをクリア、永続モード（`dbPath` 指定時）ではデータを保持したまま DB を閉じる / Stops the server; clears storage in the default mode, keeps data and closes the DB in persistent mode (`dbPath`) |
 | `getConnectionCount(): number` | 現在の WebSocket 接続数 / Current WebSocket connection count |
 | `getEventCount(): Promise<number>` | 保存済みイベント数 / Number of stored events |
 | `getPort(): number` | 待ち受けポート / The configured port |
