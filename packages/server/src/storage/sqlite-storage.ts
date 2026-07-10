@@ -102,42 +102,62 @@ export class SqliteStorage implements StorageAdapter {
 
   async saveEvent(event: NostrEvent, options?: SaveEventOptions): Promise<boolean> {
     const now = Date.now();
-    // upsert + タグ再構築を単一トランザクションで行う。再保存でメタデータは
-    // リセット（access_count=1 / cached_at=now → TTL 数え直し）されるが、
-    // validated は MAX により 1→0 にダウングレードしない（Dexie 実装と同じ。
-    // 同じ id は同じ内容なので一度検証済みなら再保存でも検証済みのまま）
+    // Dexie 実装と同じく、既存行の読み取り → 書き込み → タグ再構築を単一の
+    // トランザクションで行う。再保存でメタデータはリセット
+    // （access_count=1 / cached_at=now → TTL 数え直し）されるが、validated は
+    // 1→0 にダウングレードしない（同じ id は同じ内容なので一度検証済みなら
+    // 再保存でも検証済みのまま）
     try {
       this.inTransaction(() => {
-        this.db
-          .prepare(
-            `INSERT INTO events
-               (id, pubkey, created_at, kind, tags, content, sig,
-                last_accessed_at, access_count, cached_at, validated)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET
-               pubkey = excluded.pubkey,
-               created_at = excluded.created_at,
-               kind = excluded.kind,
-               tags = excluded.tags,
-               content = excluded.content,
-               sig = excluded.sig,
-               last_accessed_at = excluded.last_accessed_at,
-               access_count = 1,
-               cached_at = excluded.cached_at,
-               validated = MAX(events.validated, excluded.validated)`
-          )
-          .run(
-            event.id,
-            event.pubkey,
-            event.created_at,
-            event.kind,
-            JSON.stringify(event.tags),
-            event.content,
-            event.sig,
-            now,
-            now,
-            options?.validated ? 1 : 0
-          );
+        const existing = this.db
+          .prepare('SELECT validated FROM events WHERE id = ?')
+          .get(event.id) as Pick<SqliteEventRow, 'validated'> | undefined;
+        const validated = options?.validated || existing?.validated === 1 ? 1 : 0;
+
+        if (existing) {
+          // 注意: INSERT OR REPLACE は内部的に DELETE + INSERT のため
+          // event_tags の ON DELETE CASCADE が発火してしまう。明示的な
+          // UPDATE / INSERT の分岐で置き換えの副作用を避ける
+          this.db
+            .prepare(
+              `UPDATE events SET
+                 pubkey = ?, created_at = ?, kind = ?, tags = ?, content = ?, sig = ?,
+                 last_accessed_at = ?, access_count = 1, cached_at = ?, validated = ?
+               WHERE id = ?`
+            )
+            .run(
+              event.pubkey,
+              event.created_at,
+              event.kind,
+              JSON.stringify(event.tags),
+              event.content,
+              event.sig,
+              now,
+              now,
+              validated,
+              event.id
+            );
+        } else {
+          this.db
+            .prepare(
+              `INSERT INTO events
+                 (id, pubkey, created_at, kind, tags, content, sig,
+                  last_accessed_at, access_count, cached_at, validated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+            )
+            .run(
+              event.id,
+              event.pubkey,
+              event.created_at,
+              event.kind,
+              JSON.stringify(event.tags),
+              event.content,
+              event.sig,
+              now,
+              now,
+              validated
+            );
+        }
 
         this.db.prepare('DELETE FROM event_tags WHERE event_id = ?').run(event.id);
         const insertTag = this.db.prepare(
