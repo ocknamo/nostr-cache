@@ -131,7 +131,8 @@ interface NostrRelayOptions {
 
 イベントの保存を担う抽象。`DexieStorage`（IndexedDB / fake-indexeddb）が標準実装です。
 このほか `@nostr-cache/server` 内には Node.js 専用の永続実装 `SqliteStorage`
-（`node:sqlite`。`storageOptions.dbPath` で有効化）があります。
+（`node:sqlite` エンジン + Drizzle ORM のクエリ層。`storageOptions.dbPath` で有効化）が
+あります。
 
 ```typescript
 type ValidationStatus = 'validated' | 'pending' | 'unknown';

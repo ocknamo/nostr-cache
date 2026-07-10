@@ -11,8 +11,10 @@ import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
  * `event_tags`（Dexie の multientry `*indexed_tags` 相当）に平坦化して持つ。
  *
  * 注意: DDL は下記 {@link SQLITE_SCHEMA} の手書き SQL で発行する（drizzle-kit が
- * node:sqlite に未対応なため、マイグレーション生成は使わない）。テーブル定義と
- * DDL は必ず同期して変更すること。
+ * node:sqlite に未対応なため、マイグレーション生成は使わない）。列・制約
+ * （NOT NULL / DEFAULT / PK / FK）はこのテーブル定義と DDL で 1:1 に同期して
+ * 変更すること。**インデックスと `WITHOUT ROWID` は DDL 側のみが単一ソース**
+ * （Drizzle 定義には現れないため、DDL の変更を忘れないこと）。
  */
 export const events = sqliteTable('events', {
   id: text('id').primaryKey(),
@@ -59,7 +61,8 @@ export const SQLITE_PRAGMAS = `
 `;
 
 /**
- * DDL for the events store（上記 Drizzle テーブル定義と 1:1 対応）。
+ * DDL for the events store（列・制約は上記 Drizzle テーブル定義と 1:1 対応。
+ * インデックスと WITHOUT ROWID はこの DDL のみで管理）。
  *
  * インデックスは Dexie スキーマ（EVENTS_SCHEMA_V1）の対応物:
  * pubkey / created_at / kind / (pubkey,kind)＝置換可能・アドレサブル削除用 /
