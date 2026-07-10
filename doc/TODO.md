@@ -106,7 +106,7 @@ web-client は 2026-07 に廃棄した）
   - 現状はクライアント毎の購読数上限のみで、単位時間あたりのリクエスト頻度を制限する仕組み（スロットリング）は `message-handler` に存在しない
 - [x] server の実永続化（オプトイン・挙動変更）
   - `packages/server/src/storage/sqlite-storage.ts` に Node 組み込み `node:sqlite`（`DatabaseSync`）による
-    `SqliteStorage` を実装（依存追加ゼロ）。`events` + `event_tags`（Dexie の multientry `*indexed_tags` 相当）
+    `SqliteStorage` を実装。`events` + `event_tags`（Dexie の multientry `*indexed_tags` 相当）
     スキーマで、`StorageAdapter` を optional の `deleteExpired` / `enforceLimit`（FIFO/LRU/LFU）まで完全実装。
     検証状態の 1→0 ダウングレード禁止・`getEvents` のみのアクセス追跡・タグインデックス 100 件キャップ
     （cache-relay の `getIndexedTags` を再利用）など Dexie 実装のセマンティクスをミラー
@@ -117,6 +117,13 @@ web-client は 2026-07 に廃棄した）
   - テスト: 単体（`sqlite-storage.spec.ts`＝dexie spec ミラー 62 件 + ファイル永続化・close 後フォールバック）、
     統合（`tests/integration/persistence.spec.ts`＝stop/再起動でのイベント生存と既定モードのクリア）、
     E2E（`e2e/tests/node/persistence.e2e.spec.ts`＝実子プロセスを `NOSTR_DB_PATH` 付きで SIGINT 再起動）
+  - クエリ層はその後 Drizzle ORM（`drizzle-orm/node-sqlite`・1.0 RC 系）へ移行（エンジンは
+    `node:sqlite` のまま）。クエリ組み立てが型安全になり、値の文字列連結を書ける余地が構造的に
+    消えた。同期 API（`.run()`/`.all()`/`.get()`）のみ使用（トランザクション中の並行割り込み防止の
+    前提条件）。DDL / PRAGMA / BEGIN IMMEDIATE は生 SQL のまま（drizzle-kit が node:sqlite 未対応の
+    ため、テーブル定義と DDL の二重管理はコメントで明示）。ドライバは `createRequire` で遅延ロードし、
+    ExperimentalWarning が永続化有効時のみ出る性質を維持。`saveEvent` の upsert は Dexie 実装と同じ
+    「読み取り → UPDATE / INSERT 分岐」に分割済み（`ON CONFLICT` + `MAX()` を廃止）
   - 既知の差分: Dexie 実装は authors/kinds + 時間範囲の組み合わせで `until` 境界が排他になる
     （Dexie `between()` の上限排他による内部不整合）が、SQLite 実装は NIP-01 と共通判定
     `eventMatchesFilter` に合わせ全分岐で包含に統一。また `filter.limit` での切り詰めは

@@ -15,9 +15,9 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SqliteStorage } from './sqlite-storage.js';
 
-// テストからブックキーピング列を検証するための private db アクセス
-// （dexie spec が storage.table('events') を読むのに相当）
-type WithDb = { db: nodeSqlite.DatabaseSync };
+// テストからブックキーピング列を検証するための private client（生の DatabaseSync）
+// アクセス（dexie spec が storage.table('events') を読むのに相当）
+type WithClient = { client: nodeSqlite.DatabaseSync };
 
 describe('SqliteStorage', () => {
   let storage: SqliteStorage;
@@ -139,7 +139,7 @@ describe('SqliteStorage', () => {
       await storage.getValidationStatus([mockEvent.id]);
       await storage.getUnvalidatedEvents(10);
 
-      const row = (storage as unknown as WithDb).db
+      const row = (storage as unknown as WithClient).client
         .prepare('SELECT access_count FROM events WHERE id = ?')
         .get(mockEvent.id) as { access_count: number };
       // Insertion counts as the single access; reads above must not add more

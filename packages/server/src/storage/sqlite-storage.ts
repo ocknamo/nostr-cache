@@ -1,8 +1,9 @@
 import { mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 // 型のみの import は実行時に消えるため node:sqlite はロードされない。
-// 実モジュールはコンストラクタ内で process.getBuiltinModule により遅延取得し、
-// ExperimentalWarning が「永続化を有効にしたときだけ」表示されるようにする
+// 実モジュールは open() 内で遅延取得し、ExperimentalWarning が
+// 「永続化を有効にしたときだけ」表示されるようにする
 import type * as nodeSqlite from 'node:sqlite';
 import type {
   CacheStrategy,
@@ -13,15 +14,32 @@ import type {
 import { filterUtils, getIndexedTags } from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { logger } from '@nostr-cache/shared';
+// drizzle-orm 本体と sqlite-core は node:sqlite をロードしないため静的 import で安全。
+// ドライバ（drizzle-orm/node-sqlite）だけは node:sqlite を即ロードするため、
+// open() 内で遅延ロードする（下記 requireModule 参照）
+import { type SQL, and, asc, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
 import { buildFilterQuery, hasInvalidTagFilter } from './sqlite/query-builder.js';
-import { SQLITE_PRAGMAS, SQLITE_SCHEMA, type SqliteEventRow, rowToEvent } from './sqlite/schema.js';
+import {
+  events,
+  type EventRow,
+  SQLITE_PRAGMAS,
+  SQLITE_SCHEMA,
+  eventTags,
+  rowToEvent,
+} from './sqlite/schema.js';
+
+// ESM から drizzle ドライバの CJS ビルドを同期・遅延ロードするための require。
+// 静的 import だとモジュール評価時に node:sqlite が読み込まれ、永続化を使わない
+// 既定モードでも ExperimentalWarning が出てしまう
+const requireModule = createRequire(import.meta.url);
 
 // 戦略ごとの退避順序（昇順で先頭から退避）。Dexie 実装の evictionIndex に対応し、
 // Dexie の主キー暗黙タイブレークは明示の `id ASC` で再現する
-const EVICTION_ORDER: Record<CacheStrategy, string> = {
-  FIFO: 'created_at ASC, id ASC',
-  LRU: 'last_accessed_at ASC, id ASC',
-  LFU: 'access_count ASC, last_accessed_at ASC, id ASC',
+const EVICTION_ORDER: Record<CacheStrategy, SQL[]> = {
+  FIFO: [asc(events.createdAt), asc(events.id)],
+  LRU: [asc(events.lastAccessedAt), asc(events.id)],
+  LFU: [asc(events.accessCount), asc(events.lastAccessedAt), asc(events.id)],
 };
 
 // IN 句 1 回あたりの id 数上限（バインド変数上限への防御）
@@ -39,20 +57,26 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * SqliteStorage implements StorageAdapter using the built-in `node:sqlite`
- * (`DatabaseSync`) — a durable, on-disk backend for the Node relay server.
+ * SqliteStorage implements StorageAdapter using Drizzle ORM over the built-in
+ * `node:sqlite` (`DatabaseSync`) — a durable, on-disk backend for the Node
+ * relay server.
  *
  * cache-relay の `DexieStorage` のセマンティクスを忠実にミラーする
  * （検証状態の 1→0 ダウングレード禁止、getEvents のみのアクセス追跡、
  * FIFO/LRU/LFU 退避、cached_at 基準 TTL、タグインデックスの 100 件キャップ等）。
- * スキーマ・クエリ構築はそれぞれ `./sqlite/schema.js` / `./sqlite/query-builder.js`。
+ * テーブル定義・DDL は `./sqlite/schema.js`、フィルタ→条件式の変換は
+ * `./sqlite/query-builder.js`。
  *
- * 同期 API のため各文はイベントループをブロックするが、単一プロセスのリレー +
- * インデックス付きクエリの規模では許容範囲（WAL + synchronous=NORMAL）。
+ * クエリは Drizzle の同期 API（`.run()` / `.all()` / `.get()`）のみを使う。
+ * 非同期化するとトランザクション（BEGIN〜COMMIT）の間に並行タスクの文が
+ * 割り込み得るため、同期実行はこのアダプタの整合性の前提条件。
+ * イベントループはブロックするが、単一プロセスのリレー + インデックス付き
+ * クエリの規模では許容範囲（WAL + synchronous=NORMAL）。
  * 同一 DB ファイルを複数プロセスで開くことはサポートしない。
  */
 export class SqliteStorage implements StorageAdapter {
-  private db!: nodeSqlite.DatabaseSync;
+  private db!: NodeSQLiteDatabase;
+  private client!: nodeSqlite.DatabaseSync;
   private readonly dbPath: string;
   private closed = true;
 
@@ -80,11 +104,16 @@ export class SqliteStorage implements StorageAdapter {
     if (this.dbPath !== ':memory:') {
       mkdirSync(dirname(this.dbPath), { recursive: true });
     }
-    // ここで初めて node:sqlite がロードされる（ExperimentalWarning もこの時点）
+    // ここで初めて node:sqlite と drizzle ドライバがロードされる
+    // （ExperimentalWarning もこの時点）
     const { DatabaseSync } = process.getBuiltinModule('node:sqlite') as typeof nodeSqlite;
-    this.db = new DatabaseSync(this.dbPath);
-    this.db.exec(SQLITE_PRAGMAS);
-    this.db.exec(SQLITE_SCHEMA);
+    const { drizzle } = requireModule('drizzle-orm/node-sqlite') as typeof import(
+      'drizzle-orm/node-sqlite'
+    );
+    this.client = new DatabaseSync(this.dbPath);
+    this.client.exec(SQLITE_PRAGMAS);
+    this.client.exec(SQLITE_SCHEMA);
+    this.db = drizzle({ client: this.client });
     this.closed = false;
   }
 
@@ -97,7 +126,7 @@ export class SqliteStorage implements StorageAdapter {
       return;
     }
     this.closed = true;
-    this.db.close();
+    this.client.close();
   }
 
   async saveEvent(event: NostrEvent, options?: SaveEventOptions): Promise<boolean> {
@@ -110,61 +139,36 @@ export class SqliteStorage implements StorageAdapter {
     try {
       this.inTransaction(() => {
         const existing = this.db
-          .prepare('SELECT validated FROM events WHERE id = ?')
-          .get(event.id) as Pick<SqliteEventRow, 'validated'> | undefined;
+          .select({ validated: events.validated })
+          .from(events)
+          .where(eq(events.id, event.id))
+          .get();
         const validated = options?.validated || existing?.validated === 1 ? 1 : 0;
 
+        const row = {
+          id: event.id,
+          pubkey: event.pubkey,
+          createdAt: event.created_at,
+          kind: event.kind,
+          tags: JSON.stringify(event.tags),
+          content: event.content,
+          sig: event.sig,
+          lastAccessedAt: now,
+          accessCount: 1,
+          cachedAt: now,
+          validated,
+        };
         if (existing) {
-          // 注意: INSERT OR REPLACE は内部的に DELETE + INSERT のため
-          // event_tags の ON DELETE CASCADE が発火してしまう。明示的な
-          // UPDATE / INSERT の分岐で置き換えの副作用を避ける
-          this.db
-            .prepare(
-              `UPDATE events SET
-                 pubkey = ?, created_at = ?, kind = ?, tags = ?, content = ?, sig = ?,
-                 last_accessed_at = ?, access_count = 1, cached_at = ?, validated = ?
-               WHERE id = ?`
-            )
-            .run(
-              event.pubkey,
-              event.created_at,
-              event.kind,
-              JSON.stringify(event.tags),
-              event.content,
-              event.sig,
-              now,
-              now,
-              validated,
-              event.id
-            );
+          this.db.update(events).set(row).where(eq(events.id, event.id)).run();
         } else {
-          this.db
-            .prepare(
-              `INSERT INTO events
-                 (id, pubkey, created_at, kind, tags, content, sig,
-                  last_accessed_at, access_count, cached_at, validated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-            )
-            .run(
-              event.id,
-              event.pubkey,
-              event.created_at,
-              event.kind,
-              JSON.stringify(event.tags),
-              event.content,
-              event.sig,
-              now,
-              now,
-              validated
-            );
+          this.db.insert(events).values(row).run();
         }
 
-        this.db.prepare('DELETE FROM event_tags WHERE event_id = ?').run(event.id);
-        const insertTag = this.db.prepare(
-          'INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)'
-        );
-        for (const tag of getIndexedTags(event.tags)) {
-          insertTag.run(event.id, tag);
+        this.db.delete(eventTags).where(eq(eventTags.eventId, event.id)).run();
+        const tagRows = getIndexedTags(event.tags).map((tag) => ({ eventId: event.id, tag }));
+        if (tagRows.length > 0) {
+          // onConflictDoNothing = INSERT OR IGNORE（同一イベント内の重複タグを吸収）
+          this.db.insert(eventTags).values(tagRows).onConflictDoNothing().run();
         }
       });
       return true;
@@ -190,8 +194,12 @@ export class SqliteStorage implements StorageAdapter {
     }
     try {
       const rows = this.db
-        .prepare('SELECT * FROM events WHERE validated = 0 ORDER BY cached_at ASC, id ASC LIMIT ?')
-        .all(Math.floor(limit)) as unknown as SqliteEventRow[];
+        .select()
+        .from(events)
+        .where(eq(events.validated, 0))
+        .orderBy(asc(events.cachedAt), asc(events.id))
+        .limit(Math.floor(limit))
+        .all();
       return rows.map(rowToEvent);
     } catch (error) {
       logger.error(
@@ -217,10 +225,7 @@ export class SqliteStorage implements StorageAdapter {
       // 複数チャンクでも Dexie の単一 modify と同じく全件原子的に適用する
       this.inTransaction(() => {
         for (const part of chunk(ids, ID_CHUNK_SIZE)) {
-          const placeholders = part.map(() => '?').join(', ');
-          this.db
-            .prepare(`UPDATE events SET validated = 1 WHERE id IN (${placeholders})`)
-            .run(...part);
+          this.db.update(events).set({ validated: 1 }).where(inArray(events.id, part)).run();
         }
       });
     } catch (error) {
@@ -250,10 +255,11 @@ export class SqliteStorage implements StorageAdapter {
     }
     try {
       for (const part of chunk(ids, ID_CHUNK_SIZE)) {
-        const placeholders = part.map(() => '?').join(', ');
         const rows = this.db
-          .prepare(`SELECT id, validated FROM events WHERE id IN (${placeholders})`)
-          .all(...part) as unknown as Pick<SqliteEventRow, 'id' | 'validated'>[];
+          .select({ id: events.id, validated: events.validated })
+          .from(events)
+          .where(inArray(events.id, part))
+          .all();
         for (const row of rows) {
           statuses.set(row.id, row.validated === 1 ? 'validated' : 'pending');
         }
@@ -309,16 +315,26 @@ export class SqliteStorage implements StorageAdapter {
       return [];
     }
     // Stage B: インデックスで候補を絞る
-    const { sql, params } = buildFilterQuery(filter);
-    const rows = this.db.prepare(sql).all(...params) as unknown as SqliteEventRow[];
+    const { where, complete } = buildFilterQuery(this.db, filter);
+    let query = this.db.select().from(events).where(where).$dynamic();
+    if (filter.limit !== undefined) {
+      // 切り詰めは「新しい順」（NIP-01 の limit セマンティクス / capEvents と同じ、
+      // id は決定性のためのタイブレーク）。SQL 段階の LIMIT は絞り込みが最終判定と
+      // 完全等価な場合のみ（そうでない場合は JS 判定後に切り詰める）
+      query = query.orderBy(desc(events.createdAt), asc(events.id));
+      if (complete) {
+        query = query.limit(Math.max(0, filter.limit));
+      }
+    }
+    const rows: EventRow[] = query.all();
     // Stage C: 完全なイベントに対する最終判定（Dexie と同じ共通実装）
-    let events = rows
+    let matched = rows
       .map(rowToEvent)
       .filter((event) => filterUtils.eventMatchesFilter(event, filter));
     if (filter.limit !== undefined) {
-      events = events.slice(0, Math.max(0, filter.limit));
+      matched = matched.slice(0, Math.max(0, filter.limit));
     }
-    return events;
+    return matched;
   }
 
   /**
@@ -335,14 +351,11 @@ export class SqliteStorage implements StorageAdapter {
       // 複数チャンクでも Dexie の単一 modify と同じく全件原子的に適用する
       this.inTransaction(() => {
         for (const part of chunk(ids, ID_CHUNK_SIZE)) {
-          const placeholders = part.map(() => '?').join(', ');
           this.db
-            .prepare(
-              `UPDATE events
-               SET last_accessed_at = ?, access_count = access_count + 1
-               WHERE id IN (${placeholders})`
-            )
-            .run(now, ...part);
+            .update(events)
+            .set({ lastAccessedAt: now, accessCount: sql`${events.accessCount} + 1` })
+            .where(inArray(events.id, part))
+            .run();
         }
       });
     } catch (error) {
@@ -360,7 +373,7 @@ export class SqliteStorage implements StorageAdapter {
    */
   async deleteEvent(id: string): Promise<boolean> {
     try {
-      const { changes } = this.db.prepare('DELETE FROM events WHERE id = ?').run(id);
+      const { changes } = this.db.delete(events).where(eq(events.id, id)).run();
       return Number(changes) > 0;
     } catch (error) {
       logger.error(
@@ -376,7 +389,7 @@ export class SqliteStorage implements StorageAdapter {
   async clear(): Promise<void> {
     try {
       // event_tags は ON DELETE CASCADE で追随する
-      this.db.exec('DELETE FROM events');
+      this.db.delete(events).run();
     } catch (error) {
       logger.error(
         `Failed to clear events: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -397,8 +410,9 @@ export class SqliteStorage implements StorageAdapter {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
       const { changes } = this.db
-        .prepare('DELETE FROM events WHERE cached_at < ?')
-        .run(olderThan * 1000);
+        .delete(events)
+        .where(lt(events.cachedAt, olderThan * 1000))
+        .run();
       return Number(changes);
     } catch (error) {
       logger.error(
@@ -417,10 +431,8 @@ export class SqliteStorage implements StorageAdapter {
    */
   async count(): Promise<number> {
     try {
-      const row = this.db.prepare('SELECT COUNT(*) AS count FROM events').get() as
-        | { count: number }
-        | undefined;
-      return row ? Number(row.count) : 0;
+      const row = this.db.select({ value: count() }).from(events).get();
+      return row ? Number(row.value) : 0;
     } catch (error) {
       logger.error(
         `Failed to count events: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -447,20 +459,17 @@ export class SqliteStorage implements StorageAdapter {
       // COUNT と DELETE を単一トランザクションで行い、並行パスの古いカウントに
       // 基づく過剰/過少退避を防ぐ（Dexie 実装と同じ）
       const evicted = this.inTransaction(() => {
-        const row = this.db.prepare('SELECT COUNT(*) AS count FROM events').get() as {
-          count: number;
-        };
-        const count = Number(row.count);
-        if (count <= maxSize) {
+        const row = this.db.select({ value: count() }).from(events).get();
+        const total = Number(row?.value ?? 0);
+        if (total <= maxSize) {
           return 0;
         }
-        const { changes } = this.db
-          .prepare(
-            `DELETE FROM events WHERE id IN (
-               SELECT id FROM events ORDER BY ${EVICTION_ORDER[strategy]} LIMIT ?
-             )`
-          )
-          .run(count - maxSize);
+        const victims = this.db
+          .select({ id: events.id })
+          .from(events)
+          .orderBy(...EVICTION_ORDER[strategy])
+          .limit(total - maxSize);
+        const { changes } = this.db.delete(events).where(inArray(events.id, victims)).run();
         return Number(changes);
       });
       if (evicted > 0) {
@@ -488,8 +497,9 @@ export class SqliteStorage implements StorageAdapter {
   async deleteEventsByPubkeyAndKind(pubkey: string, kind: number): Promise<boolean> {
     try {
       const { changes } = this.db
-        .prepare('DELETE FROM events WHERE pubkey = ? AND kind = ?')
-        .run(pubkey, kind);
+        .delete(events)
+        .where(and(eq(events.pubkey, pubkey), eq(events.kind, kind)))
+        .run();
       return Number(changes) > 0;
     } catch (error) {
       logger.error(
@@ -521,8 +531,10 @@ export class SqliteStorage implements StorageAdapter {
   ): Promise<boolean> {
     try {
       const rows = this.db
-        .prepare('SELECT id, tags FROM events WHERE pubkey = ? AND kind = ?')
-        .all(pubkey, kind) as unknown as Pick<SqliteEventRow, 'id' | 'tags'>[];
+        .select({ id: events.id, tags: events.tags })
+        .from(events)
+        .where(and(eq(events.pubkey, pubkey), eq(events.kind, kind)))
+        .all();
 
       const idsToDelete = rows
         .filter((row) => {
@@ -539,8 +551,7 @@ export class SqliteStorage implements StorageAdapter {
       // 複数チャンクでも Dexie の単一 bulkDelete と同じく全件原子的に削除する
       this.inTransaction(() => {
         for (const part of chunk(idsToDelete, ID_CHUNK_SIZE)) {
-          const placeholders = part.map(() => '?').join(', ');
-          this.db.prepare(`DELETE FROM events WHERE id IN (${placeholders})`).run(...part);
+          this.db.delete(events).where(inArray(events.id, part)).run();
         }
       });
       return true;
@@ -558,12 +569,15 @@ export class SqliteStorage implements StorageAdapter {
    * Run `fn` inside a single write transaction. Commits on success; rolls
    * back and rethrows on failure (callers translate the error into their
    * method's safe fallback value).
+   *
+   * `fn` は同期でなければならない（await を挟むと並行タスクの文が
+   * トランザクションに割り込み得る）。
    */
   private inTransaction<T>(fn: () => T): T {
-    this.db.exec('BEGIN IMMEDIATE');
+    this.client.exec('BEGIN IMMEDIATE');
     try {
       const result = fn();
-      this.db.exec('COMMIT');
+      this.client.exec('COMMIT');
       return result;
     } catch (error) {
       this.rollback();
@@ -577,7 +591,7 @@ export class SqliteStorage implements StorageAdapter {
    */
   private rollback(): void {
     try {
-      this.db.exec('ROLLBACK');
+      this.client.exec('ROLLBACK');
     } catch {
       // すでにトランザクションが失効している場合は無視
     }

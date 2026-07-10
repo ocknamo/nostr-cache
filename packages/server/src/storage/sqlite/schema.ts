@@ -1,27 +1,46 @@
 import type { NostrEvent } from '@nostr-cache/shared';
+import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
- * SQLite row shape for the `events` table.
+ * Drizzle table definitions for the SQLite storage adapter.
  *
  * cache-relay の Dexie 実装（`dexie/schema.ts` の `NostrEventTable`）と同じ
  * ブックキーピング列（last_accessed_at / access_count / cached_at / validated）を
  * 持つ。`tags` はイベントのタグ配列全体を JSON 文字列で保持し、返却時の情報源
  * （完全ラウンドトリップ）とする。インデックス対象のタグは別テーブル
  * `event_tags`（Dexie の multientry `*indexed_tags` 相当）に平坦化して持つ。
+ *
+ * 注意: DDL は下記 {@link SQLITE_SCHEMA} の手書き SQL で発行する（drizzle-kit が
+ * node:sqlite に未対応なため、マイグレーション生成は使わない）。テーブル定義と
+ * DDL は必ず同期して変更すること。
  */
-export interface SqliteEventRow {
-  id: string;
-  pubkey: string;
-  created_at: number; // 秒（イベント自身のフィールド）
-  kind: number;
-  tags: string; // JSON.stringify(event.tags)
-  content: string;
-  sig: string;
-  last_accessed_at: number; // ミリ秒。LRU 退避に使用
-  access_count: number; // 読み出し回数。LFU 退避に使用
-  cached_at: number; // キャッシュ投入（保存）時刻（ミリ秒）。TTL と遅延検証キュー順に使用
-  validated: number; // 署名検証済みなら 1、未検証なら 0
-}
+export const events = sqliteTable('events', {
+  id: text('id').primaryKey(),
+  pubkey: text('pubkey').notNull(),
+  createdAt: integer('created_at').notNull(), // 秒（イベント自身のフィールド）
+  kind: integer('kind').notNull(),
+  tags: text('tags').notNull(), // JSON.stringify(event.tags)
+  content: text('content').notNull(),
+  sig: text('sig').notNull(),
+  lastAccessedAt: integer('last_accessed_at').notNull(), // ミリ秒。LRU 退避に使用
+  accessCount: integer('access_count').notNull().default(1), // 読み出し回数。LFU 退避に使用
+  cachedAt: integer('cached_at').notNull(), // 保存時刻（ミリ秒）。TTL と遅延検証キュー順に使用
+  validated: integer('validated').notNull().default(0), // 署名検証済みなら 1、未検証なら 0
+});
+
+export const eventTags = sqliteTable(
+  'event_tags',
+  {
+    eventId: text('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    tag: text('tag').notNull(), // "<単一英字キー>:<値>"（getIndexedTags の出力）
+  },
+  (table) => [primaryKey({ columns: [table.eventId, table.tag] })]
+);
+
+/** Row shape of the `events` table as returned by Drizzle selects. */
+export type EventRow = typeof events.$inferSelect;
 
 /**
  * Per-connection pragmas.
@@ -40,15 +59,15 @@ export const SQLITE_PRAGMAS = `
 `;
 
 /**
- * DDL for the events store.
+ * DDL for the events store（上記 Drizzle テーブル定義と 1:1 対応）。
  *
  * インデックスは Dexie スキーマ（EVENTS_SCHEMA_V1）の対応物:
  * pubkey / created_at / kind / (pubkey,kind)＝置換可能・アドレサブル削除用 /
  * last_accessed_at＝LRU / (access_count,last_accessed_at)＝LFU /
  * cached_at＝TTL スイープ / (validated,cached_at)＝遅延検証の永続キュー。
- * `event_tags` は「"<単一英字キー>:<値>"」形式（cache-relay の getIndexedTags の
- * 出力）を 1 行 1 タグで持ち、(tag, event_id) インデックスで #tag フィルタを
- * インデックス検索にする。複合主キーが Dexie multientry の行内デデュープに相当。
+ * `event_tags` は 1 行 1 タグで持ち、(tag, event_id) インデックスで #tag
+ * フィルタをインデックス検索にする。複合主キーが Dexie multientry の
+ * 行内デデュープに相当。
  */
 export const SQLITE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS events (
@@ -88,11 +107,11 @@ export const SQLITE_SCHEMA = `
  * @param row Stored table row
  * @returns The event as exposed to callers
  */
-export function rowToEvent(row: SqliteEventRow): NostrEvent {
+export function rowToEvent(row: EventRow): NostrEvent {
   return {
     id: row.id,
     pubkey: row.pubkey,
-    created_at: row.created_at,
+    created_at: row.createdAt,
     kind: row.kind,
     tags: JSON.parse(row.tags) as string[][],
     content: row.content,

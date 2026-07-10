@@ -1,7 +1,10 @@
 import type { Filter } from '@nostr-cache/shared';
+import { type SQL, and, gte, inArray, lte } from 'drizzle-orm';
+import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
+import { events, eventTags } from './schema.js';
 
 /**
- * NIP-01 filter → SQL translation for the SQLite storage adapter.
+ * NIP-01 filter → Drizzle 条件式の変換（SQLite ストレージアダプタ用）。
  *
  * Dexie 実装（cache-relay の `dexie/query-builder.ts`）と同じ二段構え:
  * SQL（インデックス）は候補を「絞る」だけで、最終判定は共通の
@@ -10,7 +13,7 @@ import type { Filter } from '@nostr-cache/shared';
  *
  * 特にタグ条件（`#e` / `#p` …）は、タグ主導の分岐（ids / authors / kinds が
  * ない場合）でのみ `event_tags` テーブルで絞り込む。それ以外の分岐で
- * `event_tags` への EXISTS を押し込むと、インデックス上限（getIndexedTags の
+ * `event_tags` への絞り込みを押し込むと、インデックス上限（getIndexedTags の
  * 100 件キャップ）で `event_tags` から欠落したタグを持つイベントが誤って
  * 除外される（最終判定は完全な tags 配列に対して行われるため一致し得る）。
  * これは Dexie 実装と同一の設計判断。
@@ -24,11 +27,17 @@ import type { Filter } from '@nostr-cache/shared';
 const MAX_IN_PARAMS = 500;
 
 /**
- * Built SQL query for a single filter.
+ * Built narrowing condition for a single filter.
  */
 export interface BuiltFilterQuery {
-  sql: string;
-  params: (string | number)[];
+  /** WHERE 条件（絞り込み条件が無い場合は undefined = 全件走査） */
+  where: SQL | undefined;
+  /**
+   * SQL の絞り込みが最終判定（eventMatchesFilter）と完全等価なら true。
+   * false の場合、SQL 段階で LIMIT すると取りこぼしが生じるため、
+   * 呼び出し側は JS 判定後にのみ切り詰めてよい
+   */
+  complete: boolean;
 }
 
 /**
@@ -56,25 +65,21 @@ export function hasInvalidTagFilter(filter: Filter): boolean {
 }
 
 /**
- * Stage B: build the narrowing SELECT for a single (well-formed) filter.
+ * Stage B: build the narrowing WHERE condition for a single (well-formed)
+ * filter.
  *
  * 押し込む条件はすべて最終判定（`eventMatchesFilter`）と等価な完全一致 / 範囲
  * 条件のみ: `id IN` / `pubkey IN` / `kind IN` / `created_at >= since` /
  * `created_at <= until`（since / until は truthy のときのみ —
  * `eventMatchesFilter` の `filter.since &&` と同じ挙動）。
  *
- * `filter.limit` は、SQL の結果がそのまま最終結果になる場合（タグ条件が無く
- * SQL 条件が最終判定と完全等価な場合）のみ SQL に押し込む。タグ条件がある
- * 場合は JS 判定で行が落ち得るため、SQL では LIMIT せず新しい順
- * （created_at DESC, id ASC）に並べるだけにし、呼び出し側が判定後に切り詰める。
- *
+ * @param db Drizzle database handle (タグ主導分岐のサブクエリ構築に使用)
  * @param filter Filter conditions (must have passed {@link hasInvalidTagFilter})
- * @returns SQL and bind parameters
+ * @returns Narrowing condition and whether it is complete
  */
-export function buildFilterQuery(filter: Filter): BuiltFilterQuery {
-  const { ids, authors, kinds, since, until, limit, ...rest } = filter;
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
+export function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltFilterQuery {
+  const { ids, authors, kinds, since, until, ...rest } = filter;
+  const conditions: SQL[] = [];
 
   // 単一英字タグフィルタを "k:v" 形式へ平坦化（全 #x キーの合併。
   // キーごとの AND は最終判定が担う — Dexie の anyOf(indexedTagValues) と同じ）
@@ -92,60 +97,48 @@ export function buildFilterQuery(filter: Filter): BuiltFilterQuery {
   }
 
   // SQL の絞り込みが最終判定と完全一致しない（JS 判定で行が落ち得る）場合に
-  // true。この場合 SQL に LIMIT を押し込むと取りこぼしが生じるため、呼び出し側の
-  // JS 判定後の切り詰めに委ねる
+  // true。この場合 SQL 段階の LIMIT は取りこぼしを生む
   let narrowingIncomplete = hasTagFilter;
 
-  const addInCondition = (column: string, values: (string | number)[]) => {
+  const addInCondition = (
+    column: typeof events.id | typeof events.pubkey | typeof events.kind,
+    values: (string | number)[] | undefined
+  ) => {
     // 空配列は条件を押し込まない（最終判定が「何にもマッチしない」を担うため、
     // LIMIT の安全性にも影響しない）
-    if (values.length === 0) return;
+    if (!values || values.length === 0) return;
     // 上限超過時も押し込まず、粗い候補を最終判定に委ねる
     if (values.length > MAX_IN_PARAMS) {
       narrowingIncomplete = true;
       return;
     }
-    const placeholders = values.map(() => '?').join(', ');
-    conditions.push(`${column} IN (${placeholders})`);
-    params.push(...values);
+    conditions.push(inArray(column, values as string[] & number[]));
   };
 
   if (tagValues.length > 0 && !ids?.length && !authors?.length && !kinds?.length) {
     // タグ主導の分岐: event_tags で絞る（Dexie の indexed_tags 分岐に対応）
     if (tagValues.length <= MAX_IN_PARAMS) {
-      const placeholders = tagValues.map(() => '?').join(', ');
-      conditions.push(`id IN (SELECT event_id FROM event_tags WHERE tag IN (${placeholders}))`);
-      params.push(...tagValues);
+      const matchingIds = db
+        .select({ id: eventTags.eventId })
+        .from(eventTags)
+        .where(inArray(eventTags.tag, tagValues));
+      conditions.push(inArray(events.id, matchingIds));
     }
   } else {
-    addInCondition('id', ids ?? []);
-    addInCondition('pubkey', authors ?? []);
-    addInCondition('kind', kinds ?? []);
+    addInCondition(events.id, ids);
+    addInCondition(events.pubkey, authors);
+    addInCondition(events.kind, kinds);
   }
 
   if (since) {
-    conditions.push('created_at >= ?');
-    params.push(since);
+    conditions.push(gte(events.createdAt, since));
   }
   if (until) {
-    conditions.push('created_at <= ?');
-    params.push(until);
+    conditions.push(lte(events.createdAt, until));
   }
 
-  let sql = 'SELECT * FROM events';
-  if (conditions.length > 0) {
-    sql += ` WHERE ${conditions.join(' AND ')}`;
-  }
-
-  if (limit !== undefined) {
-    // 切り詰めは「新しい順」（NIP-01 の limit セマンティクス / capEvents と同じ、
-    // id は決定性のためのタイブレーク）
-    sql += ' ORDER BY created_at DESC, id ASC';
-    if (!narrowingIncomplete) {
-      sql += ' LIMIT ?';
-      params.push(Math.max(0, limit));
-    }
-  }
-
-  return { sql, params };
+  return {
+    where: conditions.length > 0 ? and(...conditions) : undefined,
+    complete: !narrowingIncomplete,
+  };
 }

@@ -73,6 +73,8 @@ const server = new NostrRelayServer({
   ファイルが作られます（`stop()` で本体へチェックポイントされます）
 - 同一 DB ファイルを複数のサーバープロセスで同時に開くことはサポートしません
   （単一プロセス前提。誤操作に対しては `busy_timeout` で防御しています）
+- クエリ層には Drizzle ORM（`drizzle-orm/node-sqlite`）を使用しています（エンジンは
+  `node:sqlite` のまま）。SQL への値の埋め込みはすべて型付きのクエリビルダ経由です
 
 ### 設定オプション
 
