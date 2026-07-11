@@ -10,7 +10,8 @@ NIP-01準拠のNostrリレーサーバー実装。このパッケージは`@nost
 - イベントの保存と取得
 - サブスクリプション管理
 - イベントのバリデーション
-- fake-indexedDBを使用したサーバーサイドでのデータ保存
+- サーバーサイドでのデータ保存（既定: fake-indexedDB によるインメモリ保存 /
+  オプトイン: `node:sqlite` によるファイル永続化。下記「永続化（オプトイン）」参照）
 
 ## インストールと実行
 
@@ -32,6 +33,49 @@ npm run start:server
 
 サーバーはデフォルトで8008ポートで起動します。WebSocketクライアントを使用して接続できます。
 
+## 永続化（オプトイン）
+
+既定ではストレージは fake-indexedDB（インメモリ）で動作し、**プロセス終了で全イベントが
+失われます**。環境変数 `NOSTR_DB_PATH` に SQLite データベースのファイルパスを指定すると、
+Node.js 組み込みの `node:sqlite` による永続ストレージにオプトインでき、再起動をまたいで
+イベントが保持されます（親ディレクトリは自動作成されます）。
+
+```bash
+# 永続化を有効にして起動
+NOSTR_DB_PATH=/var/lib/nostr-cache/relay.db npm run start:server
+
+# イベント投稿 → Ctrl-C（SIGINT）や docker stop（SIGTERM）で停止 → 再起動しても
+# 保存済みイベントは REQ で取得できる
+```
+
+プログラムから利用する場合は `storageOptions.dbPath` を指定します：
+
+```typescript
+const server = new NostrRelayServer({
+  port: 8008,
+  storageOptions: { dbPath: '/var/lib/nostr-cache/relay.db' },
+});
+```
+
+挙動の要点：
+
+- `dbPath` 未指定なら**従来どおり**インメモリで、`stop()` 時にストレージをクリアします。
+  永続モードでは `stop()` はデータを保持したまま DB を閉じます（WAL のチェックポイント +
+  ファイルハンドル解放）。同一インスタンスを再度 `start()` すると DB は自動で
+  再オープンされます
+- TTL（`relay.ttl`）・保存上限（`storageOptions.maxSize` / `cacheStrategy` の
+  FIFO / LRU / LFU）・遅延バリデーションの永続キューは、永続モードでもインメモリと
+  同一のセマンティクスで機能します
+- `node:sqlite` は実験的機能のため、永続化を**有効にしたときだけ** ExperimentalWarning が
+  1 回表示されます（機能には影響ありません。`NODE_OPTIONS=--disable-warning=ExperimentalWarning`
+  で抑制できます）
+- WAL モードで動作するため、DB ファイルの隣に `*.db-wal` / `*.db-shm` のサイドカー
+  ファイルが作られます（`stop()` で本体へチェックポイントされます）
+- 同一 DB ファイルを複数のサーバープロセスで同時に開くことはサポートしません
+  （単一プロセス前提。誤操作に対しては `busy_timeout` で防御しています）
+- クエリ層には Drizzle ORM（`drizzle-orm/node-sqlite`）を使用しています（エンジンは
+  `node:sqlite` のまま）。SQL への値の埋め込みはすべて型付きのクエリビルダ経由です
+
 ### 設定オプション
 
 `NostrRelayServer`クラスは以下の設定オプションをサポートしています：
@@ -44,7 +88,8 @@ interface NostrRelayServerOptions {
 
   // ストレージ設定
   storageOptions?: {
-    dbName?: string;   // データベース名
+    dbName?: string;   // データベース名（既定のインメモリモードのみ）
+    dbPath?: string;   // SQLite ファイルパス。指定すると永続化が有効になる（dbName は無視）
     maxSize?: number;  // 最大サイズ
   };
 

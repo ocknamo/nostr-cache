@@ -14,6 +14,10 @@ import { EventHandler } from './event/event-handler.js';
 import { EventValidator } from './event/event-validator.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
+// タグの平坦化（"k:v" 形式・100 件上限・優先タグソート）。Dexie 非依存の純関数で、
+// server パッケージの SQLite アダプタがタグインデックスのセマンティクスを
+// 単一ソース化するために再利用する
+import { getIndexedTags } from './storage/dexie/tag-index.js';
 // Storage
 import {
   CacheStrategy,
@@ -51,6 +55,7 @@ export {
   SaveEventOptions,
   ValidationStatus,
   DexieStorage,
+  getIndexedTags,
   // Transport
   TransportAdapter,
   WebSocketServer,

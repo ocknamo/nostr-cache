@@ -279,5 +279,8 @@ describe('NostrRelayServer', () => {
    - `maxSize`オプションを適切に設定して、メモリ使用量を制限することを検討してください。
 
 2. **永続性**：
-   - fake-indexeddbはサーバー再起動時にデータが失われるため、永続化が必要な場合は追加の対策が必要です。
-   - 重要なデータを定期的にバックアップする機能を追加することを検討してください。
+   - 既定の fake-indexeddb はサーバー再起動時にデータが失われます。
+   - 永続化が必要な場合は、環境変数 `NOSTR_DB_PATH`（または `storageOptions.dbPath`）で
+     `node:sqlite` によるファイル永続化にオプトインできます（実装済み・2026-07。
+     詳細は [packages/server/README.md](../../packages/server/README.md) の
+     「永続化（オプトイン）」参照）。

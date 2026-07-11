@@ -23,6 +23,7 @@
   "dependencies": {
     "@nostr-cache/cache-relay": "^0.1.0",
     "@nostr-cache/shared": "^0.1.0",
+    "drizzle-orm": "1.0.0-rc.4",
     "fake-indexeddb": "^6.0.0"
   },
   "devDependencies": {

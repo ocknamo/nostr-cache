@@ -26,6 +26,10 @@ interface NostrRelayServerOptions {
   // ストレージ設定
   storageOptions?: {
     dbName?: string;
+    // SQLite データベースのファイルパス。指定すると node:sqlite による永続
+    // ストレージを使用し、再起動をまたいでイベントが保持される（dbName は無視）。
+    // 未指定なら従来どおり fake-indexeddb（インメモリ・非永続）
+    dbPath?: string;
     // 保存イベント数の上限。超過時は古いイベントから退避（未指定で無制限）
     maxSize?: number;
     // 退避戦略（FIFO: 作成が古い順 / LRU: 読み出しが古い順 / LFU: 読み出し頻度が低い順）
@@ -68,6 +72,8 @@ export class NostrRelayServer {
   private relay: NostrCacheRelay;
   private storage: StorageAdapter;
   private options: NostrRelayServerOptions;
+  // 永続ストレージ（dbPath 指定）かどうか。stop() の挙動を分ける
+  private persistent: boolean;
   // ヘルスチェック用 HTTP サーバー（補助エンドポイント）
   private healthServer: HealthServer;
 
@@ -83,8 +89,13 @@ export class NostrRelayServer {
       ...options,
     };
 
-    // ストレージアダプタの初期化（現状は fake-indexeddb ベース。詳細は storage.ts）
-    this.storage = createStorage(this.options.storageOptions?.dbName || 'NostrRelay');
+    // ストレージアダプタの初期化。既定は fake-indexeddb（インメモリ）、
+    // dbPath 指定時は node:sqlite による永続ストレージ（詳細は storage.ts）
+    this.persistent = !!this.options.storageOptions?.dbPath;
+    this.storage = createStorage({
+      dbName: this.options.storageOptions?.dbName || 'NostrRelay',
+      dbPath: this.options.storageOptions?.dbPath,
+    });
 
     // WebSocketサーバーの作成
     this.server = new WebSocketServer(this.options.port);
@@ -129,6 +140,12 @@ export class NostrRelayServer {
    * @returns Promise resolving when the server is started
    */
   async start(): Promise<void> {
+    if (this.persistent) {
+      // stop() で閉じた永続 DB を再オープンする（初回起動時は no-op）。これにより
+      // 同一インスタンスの stop() → start() の再利用が既定モードと対称になる
+      const storage = this.storage as StorageAdapter & { open?: () => void };
+      storage.open?.();
+    }
     await this.relay.connect();
     await this.healthServer.start();
     logger.info(`Nostr relay server started on port ${this.options.port}`);
@@ -142,8 +159,16 @@ export class NostrRelayServer {
   async stop(): Promise<void> {
     await this.healthServer.stop();
     await this.relay.disconnect();
-    // ストレージのクリーンアップ
-    await this.storage.clear();
+    if (this.persistent) {
+      // 永続モードではデータを保持したまま DB を閉じる（WAL のチェックポイント +
+      // ファイルハンドル解放）。close は共有 StorageAdapter 契約外のため
+      // ダックタイピングで呼ぶ
+      const storage = this.storage as StorageAdapter & { close?: () => void };
+      storage.close?.();
+    } else {
+      // インメモリモードは従来どおりストレージをクリーンアップ
+      await this.storage.clear();
+    }
     logger.info('Nostr relay server stopped');
   }
 
