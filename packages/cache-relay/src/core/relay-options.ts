@@ -198,8 +198,9 @@ export function normalizeCachePriority(input?: {
   }
   const pubkeys = [...new Set((input.pubkeys ?? []).map(normalizePubkey))];
   for (const kind of input.kinds ?? []) {
-    if (!Number.isInteger(kind) || kind < 0) {
-      throw new Error(`Invalid cachePriority kind (expected non-negative integer): ${kind}`);
+    // NIP-01 の kind は 0..65535
+    if (!Number.isInteger(kind) || kind < 0 || kind > 65535) {
+      throw new Error(`Invalid cachePriority kind (expected integer 0-65535): ${kind}`);
     }
   }
   const kinds = [...new Set(input.kinds ?? [])];

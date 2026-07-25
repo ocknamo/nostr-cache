@@ -1119,6 +1119,25 @@ describe('DexieStorage', () => {
       expect(await storage.enforceLimit(2, 'FIFO', { pubkeys: [PRIORITY_PUBKEY] })).toBe(0);
       expect(await storage.count()).toBe(2);
     });
+
+    it('should keep priority events under LFU while evicting non-priority ones', async () => {
+      await storage.saveEvent(eventBy('priority-cold', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('plain-warm', 200, 'other-pubkey'));
+      await storage.saveEvent(eventBy('plain-hot', 300, 'other-pubkey'));
+
+      // access_count: priority-cold=1（挿入のみ）, plain-warm=2, plain-hot=3
+      await storage.getEvents([{ ids: ['plain-warm'] }]);
+      await storage.getEvents([{ ids: ['plain-hot'] }]);
+      await storage.getEvents([{ ids: ['plain-hot'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LFU', { pubkeys: [PRIORITY_PUBKEY] });
+
+      // LFU 先頭（access_count 最小）の 'priority-cold' は保護され、非優先で
+      // 最も読まれていない 'plain-warm' が退避される
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['plain-hot', 'priority-cold']);
+    });
   });
 
   describe('deleteExpired', () => {

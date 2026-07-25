@@ -25,6 +25,24 @@ describe('npubToHex', () => {
     ).toThrow(/npub1/);
   });
 
+  it('should not echo an nsec (secret key) in the error message', () => {
+    const nsec = 'nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5';
+    for (const fn of [npubToHex, normalizePubkey]) {
+      try {
+        fn(nsec);
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect((error as Error).message).not.toContain(nsec.slice(5));
+      }
+    }
+  });
+
+  it('should abbreviate long invalid input in the error message', () => {
+    const long = `zzzz${'x'.repeat(60)}`;
+    expect(() => normalizePubkey(long)).toThrow(/zzzz/);
+    expect(() => normalizePubkey(long)).not.toThrow(new RegExp('x'.repeat(60)));
+  });
+
   it('should reject a corrupted checksum', () => {
     const corrupted = OFFICIAL_NPUB.slice(0, -1) + (OFFICIAL_NPUB.endsWith('q') ? 'p' : 'q');
     expect(() => npubToHex(corrupted)).toThrow(/checksum/);

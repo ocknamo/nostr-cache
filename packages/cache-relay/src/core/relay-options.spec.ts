@@ -86,8 +86,9 @@ describe('normalizeCachePriority', () => {
     expect(() => normalizeCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(/npub1invalid/);
   });
 
-  it('throws on non-integer or negative kinds', () => {
+  it('throws on non-integer or out-of-range kinds', () => {
     expect(() => normalizeCachePriority({ kinds: [1.5] })).toThrow(/1\.5/);
     expect(() => normalizeCachePriority({ kinds: [-1] })).toThrow(/-1/);
+    expect(() => normalizeCachePriority({ kinds: [65536] })).toThrow(/65536/);
   });
 });

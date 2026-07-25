@@ -10,8 +10,8 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
 import { createTestEvent } from '../utils/test-events.js';
 

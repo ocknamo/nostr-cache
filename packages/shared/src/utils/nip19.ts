@@ -56,6 +56,23 @@ function convertWordsToBytes(words: number[]): Uint8Array | null {
 }
 
 /**
+ * エラーメッセージ向けに入力を短縮表示する。誤って秘密鍵（nsec）等の秘匿値が
+ * 渡された場合にログへ全文が流出しないよう、長い入力は先頭数文字＋長さのみ示す。
+ */
+function describeInput(input: string): string {
+  return input.length <= 12 ? input : `${input.slice(0, 8)}... (length ${input.length})`;
+}
+
+/** 入力が nsec（秘密鍵）なら、値を一切エコーしないメッセージで即座に拒否する */
+function rejectSecretKey(input: string): void {
+  if (input.toLowerCase().startsWith('nsec1')) {
+    throw new Error(
+      'Invalid input: an nsec (secret key) was provided; expected an npub1... public key or hex. The value is not shown to avoid leaking it'
+    );
+  }
+}
+
+/**
  * Decode an `npub1...` string (NIP-19) into a 64-character lowercase hex
  * public key.
  *
@@ -65,34 +82,37 @@ function convertWordsToBytes(words: number[]): Uint8Array | null {
  *   that is not exactly 32 bytes
  */
 export function npubToHex(npub: string): string {
+  rejectSecretKey(npub);
   if (npub !== npub.toLowerCase() && npub !== npub.toUpperCase()) {
-    throw new Error(`Invalid npub (mixed case): ${npub}`);
+    throw new Error(`Invalid npub (mixed case): ${describeInput(npub)}`);
   }
   const lowered = npub.toLowerCase();
   const separator = lowered.lastIndexOf('1');
   if (!lowered.startsWith('npub1') || separator !== 4) {
-    throw new Error(`Invalid npub (expected npub1... prefix): ${npub}`);
+    throw new Error(`Invalid npub (expected npub1... prefix): ${describeInput(npub)}`);
   }
   const hrp = lowered.slice(0, separator);
   const data = lowered.slice(separator + 1);
   // データ部は 32 バイト分の語 + 6 語のチェックサム
   if (data.length < 6) {
-    throw new Error(`Invalid npub (too short): ${npub}`);
+    throw new Error(`Invalid npub (too short): ${describeInput(npub)}`);
   }
   const words: number[] = [];
   for (const c of data) {
     const value = CHARSET.indexOf(c);
     if (value === -1) {
-      throw new Error(`Invalid npub (invalid character '${c}'): ${npub}`);
+      throw new Error(`Invalid npub (invalid character '${c}'): ${describeInput(npub)}`);
     }
     words.push(value);
   }
   if (polymod([...hrpExpand(hrp), ...words]) !== 1) {
-    throw new Error(`Invalid npub (bad checksum): ${npub}`);
+    throw new Error(`Invalid npub (bad checksum): ${describeInput(npub)}`);
   }
   const bytes = convertWordsToBytes(words.slice(0, -6));
   if (bytes === null || bytes.length !== 32) {
-    throw new Error(`Invalid npub (payload is not 32 bytes): ${npub}`);
+    throw new Error(
+      `Invalid npub (bad padding or payload is not 32 bytes): ${describeInput(npub)}`
+    );
   }
   let hex = '';
   for (const byte of bytes) {
@@ -107,15 +127,17 @@ export function npubToHex(npub: string): string {
  *
  * @param input Hex or npub public key
  * @returns The 64-character lowercase hex public key
- * @throws Error naming the offending input when it is neither valid hex nor
- *   a valid npub
+ * @throws Error naming the offending input (abbreviated, so secrets passed by
+ *   mistake are never echoed in full) when it is neither valid hex nor a
+ *   valid npub
  */
 export function normalizePubkey(input: string): string {
   if (/^[0-9a-fA-F]{64}$/.test(input)) {
     return input.toLowerCase();
   }
+  rejectSecretKey(input);
   if (input.toLowerCase().startsWith('npub1')) {
     return npubToHex(input);
   }
-  throw new Error(`Invalid pubkey (expected 64-char hex or npub1...): ${input}`);
+  throw new Error(`Invalid pubkey (expected 64-char hex or npub1...): ${describeInput(input)}`);
 }
