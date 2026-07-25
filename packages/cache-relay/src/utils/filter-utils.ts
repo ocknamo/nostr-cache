@@ -83,12 +83,14 @@ export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
   }
 
   // Check since
-  if (filter.since && event.created_at < filter.since) {
+  // `!== undefined` で判定する（`since` が truthy かで見ると `since: 0` を
+  // 「指定なし」として無視してしまい、ストレージ側のインデックス絞り込みと割れる）
+  if (filter.since !== undefined && event.created_at < filter.since) {
     return false;
   }
 
   // Check until
-  if (filter.until && event.created_at > filter.until) {
+  if (filter.until !== undefined && event.created_at > filter.until) {
     return false;
   }
 
@@ -113,25 +115,53 @@ export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
 }
 
 /**
+ * Normalize a filter's `limit` into a usable non-negative integer count.
+ *
+ * Filter validation only checks that `limit` is a number, so a client can send
+ * `limit: 1.5` or `limit: NaN`. A fractional count breaks SQL `LIMIT` outright
+ * (the whole query fails and the client gets an empty response), so both
+ * storage adapters normalize through here instead of trusting the raw value.
+ *
+ * @param limit Raw `filter.limit`
+ * @returns A non-negative integer, or `undefined` for "no client-imposed
+ *   limit" (unset / `NaN` / `Infinity`). The relay's own `maxEventsPerRequest`
+ *   cap still applies in that case.
+ */
+export function normalizeLimit(limit: number | undefined): number | undefined {
+  if (limit === undefined || Number.isNaN(limit) || limit === Number.POSITIVE_INFINITY) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(limit));
+}
+
+/**
+ * Sort events newest-first, as NIP-01 requires for `limit` queries:
+ * "Newer events should appear first, and in the case of ties the event with
+ * the lowest id (first in lexical order) should be first."
+ *
+ * @param events Events to sort (not mutated)
+ * @returns A new array sorted by `created_at` descending, `id` ascending
+ */
+export function sortNewestFirst(events: NostrEvent[]): NostrEvent[] {
+  return [...events].sort(
+    (a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+}
+
+/**
  * Apply a relay-imposed cap on the number of events returned.
  *
- * When the number of matching events exceeds the cap, the newest events
- * (highest `created_at`, ties broken by `id` for determinism) are kept,
- * matching NIP-01's `limit` semantics. When the count is within the cap the
- * original array is returned untouched so existing ordering is preserved.
+ * Always sorts newest-first ({@link sortNewestFirst}) — not only when the cap
+ * actually truncates. NIP-01 requires that order for the events returned in an
+ * initial query, so returning "whatever order storage happened to yield"
+ * because the result fits under the cap would still violate it.
  *
  * @param events Events to cap
  * @param maxEvents Maximum number of events to keep
- * @returns The capped (and, when capped, newest-first) list of events
+ * @returns The newest-first list of events, truncated to `maxEvents`
  */
 export function capEvents(events: NostrEvent[], maxEvents: number): NostrEvent[] {
-  if (events.length <= maxEvents) {
-    return events;
-  }
-
-  return [...events]
-    .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .slice(0, maxEvents);
+  return sortNewestFirst(events).slice(0, Math.max(0, maxEvents));
 }
 
 /**

@@ -130,10 +130,12 @@ export function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltF
     addInCondition(events.kind, kinds);
   }
 
-  if (since) {
+  // `!== undefined` で判定する（truthy 判定だと `since: 0` / `until: 0` が
+  // 「指定なし」扱いになり、共通判定 eventMatchesFilter や Dexie 実装と割れる）
+  if (since !== undefined) {
     conditions.push(gte(events.createdAt, since));
   }
-  if (until) {
+  if (until !== undefined) {
     conditions.push(lte(events.createdAt, until));
   }
 

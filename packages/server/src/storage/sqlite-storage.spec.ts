@@ -623,7 +623,36 @@ describe('SqliteStorage', () => {
 
     it('should return the newest events when the limit truncates', async () => {
       const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 2 }]);
-      expect(result.map((e) => e.id).sort()).toEqual(['event4', 'event5']);
+      expect(result.map((e) => e.id)).toEqual(['event5', 'event4']);
+    });
+
+    // 以下は DexieStorage 側と対になる検証（doc/api.md が両実装の一致を宣言しているため）
+    it('should still order newest-first when fewer events match than the limit', async () => {
+      const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 100 }]);
+      expect(result.map((e) => e.id)).toEqual(['event5', 'event4', 'event3', 'event2', 'event1']);
+    });
+
+    it('should normalize a fractional limit instead of failing the query', async () => {
+      const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 2.7 }]);
+      expect(result.map((e) => e.id)).toEqual(['event5', 'event4']);
+    });
+
+    it('should treat a NaN limit as no client-imposed limit', async () => {
+      const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: Number.NaN }]);
+      expect(result).toHaveLength(5);
+    });
+
+    it('should return no events for a negative limit', async () => {
+      expect(await storage.getEvents([{ limit: -1 }])).toEqual([]);
+    });
+
+    it('should treat until: 0 as a real bound, not as unset', async () => {
+      expect(await storage.getEvents([{ until: 0 }])).toEqual([]);
+    });
+
+    it('should treat since: 0 as a real bound, not as unset', async () => {
+      const result = await storage.getEvents([{ since: 0, until: 2000 }]);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event2']);
     });
 
     it('should filter by time range only', async () => {

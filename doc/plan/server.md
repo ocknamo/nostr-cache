@@ -65,11 +65,19 @@ persistence / upstream）に配置。実プロセス相当の E2E は `e2e/tests
 
 ## 実装詳細
 
-> **注意**: 以下は実装着手前に書かれたスケッチであり、現行コードとは API が異なる
-> （`storage: 'indexeddb'` / `storageOptions` / `validateEvents` はいずれも旧オプション名で、
-> 現行は `storageMaxSize` / `validateEventsType` 等。`getConnectionCount()` /
-> `getEventCount()` のスタブも実装済み）。現行の正確な API は
-> [doc/api.md](../api.md) と `packages/server/src/nostr-relay-server.ts` を参照。
+> **注意**: 以下は実装着手前に書かれたスケッチであり、現行コードとは異なる箇所がある。
+>
+> - スケッチが `NostrCacheRelay` へ渡している `storage: 'indexeddb'` / `storageOptions` /
+>   `validateEvents` は、いずれも現行のリレーオプションには存在しない
+>   （現行は `storageMaxSize` / `cacheStrategy` / `validateEventsType` 等）。
+>   一方、**サーバー側**の `NostrRelayServerOptions.storageOptions` と
+>   `relay.validateEvents` は現行 API にも実在する（サーバーが受け取ってから
+>   リレーオプションへ変換している）
+> - `getConnectionCount()` / `getEventCount()` の `return 0` スタブは実装済み
+> - `storageOptions` には現行では `dbPath`（`node:sqlite` 永続化）/ `cacheStrategy` が追加されている
+>
+> 現行の正確な API は [doc/api.md](../api.md) と
+> `packages/server/src/nostr-relay-server.ts` を参照。
 
 ### サーバー実装のメインファイル
 

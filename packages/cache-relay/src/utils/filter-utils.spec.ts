@@ -10,6 +10,7 @@ import {
   isValidFilterShape,
   mergeFilters,
   normalizeFilter,
+  normalizeLimit,
 } from './filter-utils.js';
 
 describe('filterUtils', () => {
@@ -232,6 +233,41 @@ describe('filterUtils', () => {
 
       expect(nonMatchResult).toBe(false);
     });
+
+    // `until: 0` / `since: 0` を truthy 判定で「指定なし」として無視すると、
+    // ストレージ側のインデックス絞り込みと最終判定が割れる
+    it('should treat until: 0 as a real bound rather than unset', () => {
+      expect(eventMatchesFilter(sampleEvent, { until: 0 })).toBe(false);
+      expect(eventMatchesFilter({ ...sampleEvent, created_at: 0 }, { until: 0 })).toBe(true);
+    });
+
+    it('should treat since: 0 as a real bound rather than unset', () => {
+      expect(eventMatchesFilter(sampleEvent, { since: 0 })).toBe(true);
+      expect(eventMatchesFilter({ ...sampleEvent, created_at: -1 }, { since: 0 })).toBe(false);
+    });
+  });
+
+  describe('normalizeLimit', () => {
+    it('should pass through non-negative integers', () => {
+      expect(normalizeLimit(0)).toBe(0);
+      expect(normalizeLimit(20)).toBe(20);
+    });
+
+    it('should floor fractional limits', () => {
+      // SQLite の LIMIT は小数でクエリ全体が失敗するため、境界を整数に丸める
+      expect(normalizeLimit(2.7)).toBe(2);
+    });
+
+    it('should clamp negative limits to zero', () => {
+      expect(normalizeLimit(-1)).toBe(0);
+      expect(normalizeLimit(Number.NEGATIVE_INFINITY)).toBe(0);
+    });
+
+    it('should report unusable counts as no limit', () => {
+      expect(normalizeLimit(undefined)).toBeUndefined();
+      expect(normalizeLimit(Number.NaN)).toBeUndefined();
+      expect(normalizeLimit(Number.POSITIVE_INFINITY)).toBeUndefined();
+    });
   });
 
   describe('mergeFilters', () => {
@@ -313,10 +349,22 @@ describe('filterUtils', () => {
   });
 
   describe('capEvents', () => {
-    it('should return the same array reference when within the cap', () => {
+    // NIP-01 は limit 付きクエリの結果を「新しい順」で返すよう求めており、
+    // 上限に達していない（＝切り詰めが起きない）場合も要件は変わらない
+    it('should order newest-first even when within the cap', () => {
       const events = [makeEvent('a', 1), makeEvent('b', 2)];
-      expect(capEvents(events, 2)).toBe(events);
-      expect(capEvents(events, 5)).toBe(events);
+      expect(capEvents(events, 2).map((e) => e.id)).toEqual(['b', 'a']);
+      expect(capEvents(events, 5).map((e) => e.id)).toEqual(['b', 'a']);
+    });
+
+    it('should not mutate the input array', () => {
+      const events = [makeEvent('a', 1), makeEvent('b', 2)];
+      capEvents(events, 5);
+      expect(events.map((e) => e.id)).toEqual(['a', 'b']);
+    });
+
+    it('should return no events for a negative cap', () => {
+      expect(capEvents([makeEvent('a', 1)], -1)).toEqual([]);
     });
 
     it('should keep the newest events (created_at descending) when over the cap', () => {

@@ -102,16 +102,32 @@ web-client は 2026-07 に廃棄した）
     「任意の 20 件」が返っていた。全件取得後に `capEvents`（`created_at` 降順・id タイブレーク）で
     切り詰める形に変更し、`SqliteStorage` / relay 側の `maxEventsPerRequest` と順序規則を統一
     - トレードオフ: インデックス走査を N 件で打ち切れず、一致イベントをいったん全件
-      materialize する。件数が問題になるようなら「`created_at` インデックスを使う分岐に限り
-      `reverse().limit()` で早期打ち切り」といった最適化を別項目として起こす
+      materialize する（最適化は下記の未着手項目に切り出し）
+  - `capEvents` が「一致件数 ≤ limit のときソートしない」早期 return を持っており、`limit` 付き
+    クエリでも**返却順**が NIP-01（[nip-01.md](./nips/nip-01.md): "Newer events should appear first,
+    and in the case of ties the event with the lowest id ... should be first"）を満たしていなかった。
+    web-client の既定フィルタ `{ kinds: [1], limit: 100 }` は、キャッシュが 100 件未満の間
+    常にこの経路を通るためタイムラインが古い順で表示され得た。早期 return を廃止し、
+    件数によらず新しい順に整列するよう変更（`sortNewestFirst` として切り出し）
+  - `since` / `until` の `0` が無視されていた: 共通判定 `eventMatchesFilter` と
+    `SqliteStorage` のクエリ組み立てが truthy 判定（`if (until)`）だったため、`until: 0` が
+    「指定なし＝全件」になっていた。`!== undefined` 判定に統一し、Dexie のインデックス絞り込みと
+    そろえた（`isValidFilterShape` は `until: 0` を有効なフィルタとして通すため到達可能な経路）
+  - `filter.limit` が整数とは限らない問題: フィルタ検証は `typeof === 'number'` しか見ないため
+    `limit: 1.5` が通り、SQLite では `LIMIT 1.5` でクエリ全体が失敗して常に空応答になっていた。
+    共通の `normalizeLimit`（小数は切り捨て・負値は 0・`NaN`/`Infinity` は「指定なし」）を追加し、
+    両アダプタで共有
   - `since` / `until` の境界が一部分岐で排他だった: `dexie/query-builder.ts` の 3 分岐が
     Dexie `between()` の既定（上限排他）のままで、`created_at === until` のイベントが
     インデックス絞り込みの段階で落ちていた（最終判定の `eventMatchesFilter` は包含なので復活しない）。
     時間範囲の絞り込みを `betweenCreatedAt()` に集約し、全分岐で両端包含に統一。
     時間単独分岐にあった `until + 1` の補正も不要になったため削除
-  - テスト: `dexie-storage.spec.ts` に limit の最新 N 件（bare / kind / pubkey / タグ各インデックス経由・
-    同時刻の id タイブレーク・`limit: 0`・フィルタ毎の適用）と境界包含（各インデックス分岐）の
-    12 件を追加。旧挙動を前提にしていた既存テスト 3 件は NIP-01 準拠の期待値へ修正
+  - テスト: `dexie-storage.spec.ts` に limit（各インデックス経由での最新 N 件・返却順・
+    一致件数 ≤ limit のケース・同時刻の id タイブレーク・`limit: 0` / 負値 / 小数 / `NaN`・
+    フィルタ毎の適用）と境界包含（各インデックス分岐・`since: 0` / `until: 0`）を、
+    `filter-utils.spec.ts` に `capEvents` / `normalizeLimit` / `eventMatchesFilter` の
+    対応ケースを、`sqlite-storage.spec.ts` に同等の対になるケースを追加（計 20 件）。
+    旧挙動を前提にしていた既存テスト 4 件は NIP-01 準拠の期待値へ修正
 
 ## 優先度: 中（server 完成 — `doc/plan/server.md` 参照）
 
@@ -168,6 +184,26 @@ web-client は 2026-07 に廃棄した）
 - [x] API ドキュメント / サンプルコードの整備（設計書フェーズ9）
   - `doc/api.md` に主要パッケージ（shared / cache-relay / server）の公開 API リファレンスを追加
   - `examples/node-relay-demo.mjs` に `@nostr-cache/cache-relay` を使った実行可能な E2E デモ（EVENT/OK・REQ/EVENT/EOSE・CLOSE/CLOSED）と `examples/README.md` を追加
+
+## 優先度: 中（ストレージ実装の追随 — 2026-07 の棚卸しで追加）
+
+- [ ] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
+  - 現状: NIP-01 準拠（最新 N 件・新しい順）を優先し、`limit` の有無にかかわらず一致行を
+    全件 `toArray()` してから `rowToEvent` → 切り詰める。10 万件規模のキャッシュに
+    `{kinds:[1], limit:20}` を投げると 10 万件ぶんのオブジェクト生成が走り、上限もない
+  - `created_at` インデックスを使う分岐（時間範囲の 3 分岐 + 時間単独分岐）は走査順が
+    `created_at` 昇順なので、`.filter(...)` の後に `.reverse().limit(n)` とすれば
+    NIP-01 準拠のまま N 件で打ち切れる。それ以外の分岐（`kind` / `pubkey` / タグ index）は
+    走査順が `created_at` と無関係なため全件走査が必要で、この最適化は使えない
+  - 着手時は「どの分岐で早期打ち切りしたか」がテストから見えるようにすること
+- [ ] `DexieStorage` と `SqliteStorage` の等価性を担保する契約テストを用意する
+  - `doc/api.md` は両実装のフィルタ解釈が一致すると宣言しているが、それを一括で保証する
+    テストが無く、実装ごとの spec に同等ケースを手で並べている状態。実際、返却順・
+    `until: 0`・小数 `limit` の 3 つの差分は既存テストでは検出できず、レビュー時の
+    手動 probe で初めて露見した
+  - 共有フィクスチャに対して同じフィルタ集合を両アダプタへ流し、結果を**順序込み**で
+    比較する形が望ましい（`SqliteStorage` は server パッケージにあるため、テストの
+    置き場所は server 側か新規の共有テストパッケージかを決める必要がある）
 
 ## 優先度: 中（NIP 対応の拡張 — 2026-07 の棚卸しで追加）
 

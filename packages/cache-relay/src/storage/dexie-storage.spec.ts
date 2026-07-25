@@ -663,31 +663,53 @@ describe('DexieStorage', () => {
       expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event4']);
     });
 
-    // NIP-01 の limit は「一致するイベントのうち最新 N 件」。Dexie の
-    // Collection.limit() はインデックス順の先頭 N 件になるため、created_at 降順で
-    // 切り詰めていることを確認する
+    // NIP-01 の limit は「一致するイベントのうち最新 N 件を、新しい順で」。Dexie の
+    // Collection.limit() はインデックス順の先頭 N 件になるため、選ばれる集合と
+    // 返却順の両方を検証する（順序は sort() せず配列のまま比較すること）
     describe('limit returns the newest events (NIP-01)', () => {
       it('should return the newest N events for a bare limit', async () => {
         const result = await storage.getEvents([{ limit: 3 }]);
-        expect(result.map((e) => e.id).sort()).toEqual(['event3', 'event4', 'event5']);
+        expect(result.map((e) => e.id)).toEqual(['event5', 'event4', 'event3']);
       });
 
       it('should return the newest N events when narrowed by the kind index', async () => {
         const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 2 }]);
-        expect(result.map((e) => e.id).sort()).toEqual(['event4', 'event5']);
+        expect(result.map((e) => e.id)).toEqual(['event5', 'event4']);
       });
 
       it('should return the newest N events when narrowed by the pubkey index', async () => {
         const result = await storage.getEvents([
           { authors: ['author1', 'author2', 'author3', 'author4', 'author5'], limit: 2 },
         ]);
-        expect(result.map((e) => e.id).sort()).toEqual(['event4', 'event5']);
+        expect(result.map((e) => e.id)).toEqual(['event5', 'event4']);
       });
 
       it('should return the newest N events when narrowed by the tag index', async () => {
         // event1(1000) / event3(3000) / event5(5000) が #p=user1
         const result = await storage.getEvents([{ '#p': ['user1'], limit: 2 }]);
-        expect(result.map((e) => e.id).sort()).toEqual(['event3', 'event5']);
+        expect(result.map((e) => e.id)).toEqual(['event5', 'event3']);
+      });
+
+      // 一致件数が limit 以下でも「新しい順」の要件は変わらない。web-client の既定
+      // フィルタ（{ kinds: [1], limit: 100 }）はキャッシュが 100 件未満のとき
+      // 常にこの経路を通る
+      it('should still order newest-first when fewer events match than the limit', async () => {
+        const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 100 }]);
+        expect(result.map((e) => e.id)).toEqual(['event5', 'event4', 'event3', 'event2', 'event1']);
+      });
+
+      it('should normalize a fractional limit instead of failing', async () => {
+        const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 2.7 }]);
+        expect(result.map((e) => e.id)).toEqual(['event5', 'event4']);
+      });
+
+      it('should treat a NaN limit as no client-imposed limit', async () => {
+        const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: Number.NaN }]);
+        expect(result).toHaveLength(5);
+      });
+
+      it('should return no events for a negative limit', async () => {
+        expect(await storage.getEvents([{ limit: -1 }])).toEqual([]);
       });
 
       it('should break ties by id so truncation is deterministic', async () => {
@@ -751,6 +773,17 @@ describe('DexieStorage', () => {
           { authors: ['author3'], kinds: [3], since: 3000, until: 3000 },
         ]);
         expect(result.map((e) => e.id)).toEqual(['event3']);
+      });
+
+      // `until: 0` / `since: 0` は「指定なし」ではなく実際の境界として扱う
+      // （truthy 判定で無視すると、インデックス絞り込みと最終判定が割れる）
+      it('should treat until: 0 as a real bound, not as unset', async () => {
+        expect(await storage.getEvents([{ until: 0 }])).toEqual([]);
+      });
+
+      it('should treat since: 0 as a real bound, not as unset', async () => {
+        const result = await storage.getEvents([{ since: 0, until: 2000 }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event2']);
       });
     });
   });

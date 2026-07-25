@@ -1,7 +1,7 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
-import { capEvents } from '../utils/filter-utils.js';
+import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
@@ -77,6 +77,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * ascending, so the persistent lazy-validation queue is drained FIFO
    * without an explicit sort. Does NOT track access (background work must
    * not perturb LRU/LFU eviction).
+   *
+   * Unlike the filter queries this `between()` intentionally keeps Dexie's
+   * default exclusive upper bound: the bound is `Dexie.maxKey`, which sorts
+   * above every real key, so nothing can be excluded by it.
    *
    * @param limit Maximum number of events to return
    * @returns Promise resolving to the unvalidated events, oldest first
@@ -185,14 +189,15 @@ export class DexieStorage extends Dexie implements StorageAdapter {
 
           const events = (await collection.toArray()).map(rowToEvent);
 
-          // NIP-01 の `limit` は「一致するイベントのうち**最新** N 件」。Dexie の
-          // `Collection.limit()` は選ばれたインデックス順（kind 順・pubkey 順など、
-          // created_at とは無関係）の先頭 N 件になり、最新順にならない。そのため
-          // 全件取得してから capEvents（created_at 降順・id タイブレーク）で
-          // 切り詰める。SqliteStorage / relay 側の maxEventsPerRequest と同じ順序規則。
+          // NIP-01 の `limit` は「一致するイベントのうち**最新** N 件を、新しい順で」。
+          // Dexie の `Collection.limit()` は選ばれたインデックス順（kind 順・pubkey 順など、
+          // created_at とは無関係）の先頭 N 件になり最新順にならないため、全件取得してから
+          // capEvents（created_at 降順・id 昇順タイブレーク）で並べ替えつつ切り詰める。
+          // SqliteStorage / relay 側の maxEventsPerRequest と同じ順序規則。
           // トレードオフ: インデックス走査を N 件で打ち切れず、一致イベントを
-          // いったん全件materializeする
-          return filter.limit !== undefined ? capEvents(events, Math.max(0, filter.limit)) : events;
+          // いったん全件 materialize する
+          const limit = normalizeLimit(filter.limit);
+          return limit !== undefined ? capEvents(events, limit) : events;
         })
       );
 
