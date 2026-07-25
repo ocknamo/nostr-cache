@@ -37,6 +37,10 @@ Svelte 製 web-client（`WebSocketServerEmulator` + IndexedDB で動くブラウ
 残作業の詳細は [doc/TODO.md](./doc/TODO.md) を参照してください。
 主な未実装・既知の制約は次のとおりです：
 
+- **対応 NIP は NIP-01 と NIP-02**（kind 3 を replaceable として扱う範囲）のみ。特に
+  **NIP-09（イベント削除・kind 5）は未対応**で、削除イベントを受け取っても対象イベントは
+  ストレージに残り続けます（上流で削除されたイベントをキャッシュが配信し続けます）。
+  NIP-40（`expiration` タグ）・NIP-11（リレー情報ドキュメント）・NIP-42（AUTH）も未対応
 - **時間窓ベースのレート制限**（メッセージ / EVENT 投稿の頻度制限）は未実装
 
 ## 開発環境のセットアップ

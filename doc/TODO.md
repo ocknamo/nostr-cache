@@ -92,6 +92,42 @@ web-client は 2026-07 に廃棄した）
   - [x] `cacheStrategy` の `LRU` / `LFU` の本実装: `DexieStorage` のスキーマに `last_accessed_at`（ミリ秒）/ `access_count` とインデックス（`last_accessed_at` / `[access_count+last_accessed_at]`）を追加（未リリースのためマイグレーションは設けず v1 に直接定義）。`getEvents` のヒット時に両メタデータを一括更新（アクセス追跡。失敗しても読み出しには影響させない）。`enforceLimit` は戦略ごとに退避順を切替（FIFO=`created_at` / LRU=`last_accessed_at` / LFU=参照回数→最終アクセスの複合インデックス）。挿入も1回のアクセス（`access_count: 1`）とみなす
 - [x] フィルタマッチロジックの重複（`subscription-manager.ts` と `utils/filter-utils.ts`）を共通化
   - `subscription-manager.ts` の private `eventMatchesFilter` を削除し、`utils/filter-utils.ts` の共通実装を利用するよう統一
+- [x] Dexie ストレージの NIP-01 準拠フィルタ修正（2026-07）
+  - 経緯: `SqliteStorage` 実装時に「Dexie との既知の差分」として記録していた 2 点を精査したところ、
+    いずれも Dexie 側の NIP-01 違反（バグ）だったため修正した。本命であるブラウザ内キャッシュ経路に
+    出ていた不具合で、`SqliteStorage` が正しい参照実装として機能した形
+  - `filter.limit` の切り詰めが「最新 N 件」になっていなかった: `dexie-storage.ts` の
+    `Collection.limit()` は選ばれたインデックス順（`kind` 順・`pubkey` 順など、`created_at` とは
+    無関係）の先頭 N 件を返すため、`{kinds:[1], limit:20}` のような普通のタイムライン REQ で
+    「任意の 20 件」が返っていた。全件取得後に `capEvents`（`created_at` 降順・id タイブレーク）で
+    切り詰める形に変更し、`SqliteStorage` / relay 側の `maxEventsPerRequest` と順序規則を統一
+    - トレードオフ: インデックス走査を N 件で打ち切れず、一致イベントをいったん全件
+      materialize する（最適化は下記の未着手項目に切り出し）
+  - `capEvents` が「一致件数 ≤ limit のときソートしない」早期 return を持っており、`limit` 付き
+    クエリでも**返却順**が NIP-01（[nip-01.md](./nips/nip-01.md): "Newer events should appear first,
+    and in the case of ties the event with the lowest id ... should be first"）を満たしていなかった。
+    web-client の既定フィルタ `{ kinds: [1], limit: 100 }` は、キャッシュが 100 件未満の間
+    常にこの経路を通るためタイムラインが古い順で表示され得た。早期 return を廃止し、
+    件数によらず新しい順に整列するよう変更（`sortNewestFirst` として切り出し）
+  - `since` / `until` の `0` が無視されていた: 共通判定 `eventMatchesFilter` と
+    `SqliteStorage` のクエリ組み立てが truthy 判定（`if (until)`）だったため、`until: 0` が
+    「指定なし＝全件」になっていた。`!== undefined` 判定に統一し、Dexie のインデックス絞り込みと
+    そろえた（`isValidFilterShape` は `until: 0` を有効なフィルタとして通すため到達可能な経路）
+  - `filter.limit` が整数とは限らない問題: フィルタ検証は `typeof === 'number'` しか見ないため
+    `limit: 1.5` が通り、SQLite では `LIMIT 1.5` でクエリ全体が失敗して常に空応答になっていた。
+    共通の `normalizeLimit`（小数は切り捨て・負値は 0・`NaN`/`Infinity` は「指定なし」）を追加し、
+    両アダプタで共有
+  - `since` / `until` の境界が一部分岐で排他だった: `dexie/query-builder.ts` の 3 分岐が
+    Dexie `between()` の既定（上限排他）のままで、`created_at === until` のイベントが
+    インデックス絞り込みの段階で落ちていた（最終判定の `eventMatchesFilter` は包含なので復活しない）。
+    時間範囲の絞り込みを `betweenCreatedAt()` に集約し、全分岐で両端包含に統一。
+    時間単独分岐にあった `until + 1` の補正も不要になったため削除
+  - テスト: `dexie-storage.spec.ts` に limit（各インデックス経由での最新 N 件・返却順・
+    一致件数 ≤ limit のケース・同時刻の id タイブレーク・`limit: 0` / 負値 / 小数 / `NaN`・
+    フィルタ毎の適用）と境界包含（各インデックス分岐・`since: 0` / `until: 0`）を、
+    `filter-utils.spec.ts` に `capEvents` / `normalizeLimit` / `eventMatchesFilter` の
+    対応ケースを、`sqlite-storage.spec.ts` に同等の対になるケースを追加（計 20 件）。
+    旧挙動を前提にしていた既存テスト 4 件は NIP-01 準拠の期待値へ修正
 
 ## 優先度: 中（server 完成 — `doc/plan/server.md` 参照）
 
@@ -124,26 +160,82 @@ web-client は 2026-07 に廃棄した）
     ため、テーブル定義と DDL の二重管理はコメントで明示）。ドライバは `createRequire` で遅延ロードし、
     ExperimentalWarning が永続化有効時のみ出る性質を維持。`saveEvent` の upsert は Dexie 実装と同じ
     「読み取り → UPDATE / INSERT 分岐」に分割済み（`ON CONFLICT` + `MAX()` を廃止）
-  - 既知の差分: Dexie 実装は authors/kinds + 時間範囲の組み合わせで `until` 境界が排他になる
-    （Dexie `between()` の上限排他による内部不整合）が、SQLite 実装は NIP-01 と共通判定
-    `eventMatchesFilter` に合わせ全分岐で包含に統一。また `filter.limit` での切り詰めは
-    Dexie がインデックス順（任意）の先頭 N 件を返すのに対し、SQLite 実装は NIP-01 の
-    limit セマンティクス（`capEvents` と同じ）どおり新しい順（`created_at` 降順・id
-    タイブレーク）の N 件を返す
+  - 当初 Dexie 実装との差分として記録していた `until` 境界と `filter.limit` の 2 点は、
+    Dexie 側のバグ（NIP-01 違反）と判断して修正済み。現在は両実装とも NIP-01 準拠で一致する
+    （下記「Dexie ストレージの NIP-01 準拠フィルタ修正」を参照）
 - [x] 同時接続・負荷下の正当性テスト（旧: 同時接続・スループットの性能テスト）
   - `packages/server/tests/integration/performance.spec.ts` として実装済み（#15）。多数の同時接続、単一クライアントからのバースト投入、複数クライアントからの並行投入、並行 REQ の全件応答（取りこぼし無し）を検証
   - 注: 実行時間に依存する閾値アサーションは意図的に行っておらず、スループット（件/秒）やレイテンシの測定・回帰検知はスコープ外。ベンチマークが必要になったら別項目として起こす
 
 ## 優先度: 中（設計書 `doc/cache-relay/cache-relay.md` 由来の未完了項目）
 
-設計書の実装計画（フェーズ8・9）にあって未着手の項目。なお主要コンポーネント（イベント種別処理・検証・NIP-01/02・ストレージ・トランスポート・購読管理）は実装済みのため対象外。
+設計書の実装計画（フェーズ8・9）由来の項目。なお主要コンポーネント（イベント種別処理・検証・NIP-01/02・ストレージ・トランスポート・購読管理）は実装済みのため対象外。
 
-- [ ] E2E テストの実装（設計書フェーズ8）
-  - Node.js クライアント–サーバー E2E
-  - ブラウザ クライアント–サーバー E2E（現状は `packages/server/tests/integration` のみ）
+- [x] E2E テストの実装（設計書フェーズ8）
+  - [x] Node.js クライアント–サーバー E2E
+    - `e2e/tests/node/server.e2e.spec.ts`（8 件）: 実サーバーを子プロセスとして起動し、
+      実 WebSocket クライアントから EVENT/OK・REQ/EVENT/EOSE・CLOSE/CLOSED を検証
+    - `e2e/tests/node/persistence.e2e.spec.ts`（2 件）: `NOSTR_DB_PATH` 付きで起動した
+      子プロセスを SIGINT 再起動し、イベントが復元されることを検証
+  - [x] ブラウザ クライアント–サーバー E2E
+    - `e2e/tests/browser/relay-browser.e2e.spec.ts`（7 件）: Playwright（Chromium）で
+      実ブラウザを起動し、`WebSocketServerEmulator` + IndexedDB のブラウザ内リレーを検証
+  - CI ワークフロー `.github/workflows/e2e.yml` で Node / ブラウザとも実行（`npm run test:e2e`）
 - [x] API ドキュメント / サンプルコードの整備（設計書フェーズ9）
   - `doc/api.md` に主要パッケージ（shared / cache-relay / server）の公開 API リファレンスを追加
   - `examples/node-relay-demo.mjs` に `@nostr-cache/cache-relay` を使った実行可能な E2E デモ（EVENT/OK・REQ/EVENT/EOSE・CLOSE/CLOSED）と `examples/README.md` を追加
+
+## 優先度: 中（ストレージ実装の追随 — 2026-07 の棚卸しで追加）
+
+- [ ] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
+  - 現状: NIP-01 準拠（最新 N 件・新しい順）を優先し、`limit` の有無にかかわらず一致行を
+    全件 `toArray()` してから `rowToEvent` → 切り詰める。10 万件規模のキャッシュに
+    `{kinds:[1], limit:20}` を投げると 10 万件ぶんのオブジェクト生成が走り、上限もない
+  - `created_at` インデックスを使う分岐（時間範囲の 3 分岐 + 時間単独分岐）は走査順が
+    `created_at` 昇順なので、`.filter(...)` の後に `.reverse().limit(n)` とすれば
+    NIP-01 準拠のまま N 件で打ち切れる。それ以外の分岐（`kind` / `pubkey` / タグ index）は
+    走査順が `created_at` と無関係なため全件走査が必要で、この最適化は使えない
+  - 着手時は「どの分岐で早期打ち切りしたか」がテストから見えるようにすること
+- [ ] `DexieStorage` と `SqliteStorage` の等価性を担保する契約テストを用意する
+  - `doc/api.md` は両実装のフィルタ解釈が一致すると宣言しているが、それを一括で保証する
+    テストが無く、実装ごとの spec に同等ケースを手で並べている状態。実際、返却順・
+    `until: 0`・小数 `limit` の 3 つの差分は既存テストでは検出できず、レビュー時の
+    手動 probe で初めて露見した
+  - 共有フィクスチャに対して同じフィルタ集合を両アダプタへ流し、結果を**順序込み**で
+    比較する形が望ましい（`SqliteStorage` は server パッケージにあるため、テストの
+    置き場所は server 側か新規の共有テストパッケージかを決める必要がある）
+
+## 優先度: 中（NIP 対応の拡張 — 2026-07 の棚卸しで追加）
+
+現在サポートしているのは NIP-01 と NIP-02（kind 3 を replaceable として扱う範囲）のみ。
+以下はコードを読んで未対応であることを確認した項目で、いずれも「リレーとしての正しさ」
+または「キャッシュとしての正しさ」に効く。
+
+- [ ] **NIP-09（イベント削除・kind 5）の対応**
+  - 現状: `event/event-handler.ts` の分岐は ephemeral（20000番台）/ replaceable（10000番台・0・3）/
+    addressable（30000番台）のみで、kind 5 は通常イベントとしてそのまま保存されるだけ。
+    削除対象イベント（`e` タグ / `a` タグで指す先）はストレージに残り続け、REQ にも応答し続ける
+  - キャッシュ用途では影響が大きい: 上流リレーで削除されたイベントを、ローカルキャッシュが
+    そのまま配信し続けることになる。透過キャッシュとしての正しさに直結する
+  - 実装時の論点: 削除は「同一 `pubkey` のイベントのみ削除可」の制約が必要。削除イベント自体は
+    保存する（再受信時の再適用・上流への転送のため）。上流から流れてきた kind 5
+    （`MessageHandler.ingestUpstreamEvent` 経路）にも同じ処理を通す必要がある
+- [ ] **NIP-40（`expiration` タグ）の対応**
+  - 現状: `expiration` タグは完全に無視され、期限切れイベントも保存・配信され続ける
+  - `ttl` / `ExpiryReaper`（`cached_at` 基準の定期スイープ）という土台があるため、
+    イベント個別の期限として同じスイープに載せられる位置にある
+- [ ] **NIP-11（リレー情報ドキュメント）の対応**
+  - 現状: 未対応。`Accept: application/nostr+json` に対する応答が無く、クライアントが
+    リレーの対応 NIP や制限値（`max_subscriptions` / `max_limit` など）を知る手段がない
+  - server には既にヘルスチェック用の HTTP ポート（`health-server.ts`）があるため、
+    そこに相乗りさせれば低コストで実現できる。「サーバで実行すれば普通のリレー」を
+    名乗る上では実質必須
+- [ ] `RelayEventHandler` に `subscriptionId` を伝える（既知の制約の解消）
+  - `emit('event')` の実装時に別タスク化した項目。`RelayEventHandler` がイベントのみを
+    受け取る型のため、in-process の `subscribe()` を複数使うとどの購読由来のイベントか
+    判別できない（`doc/api.md` にも既知の制約として記載）
+  - 公開 API の破壊的変更になるため、ハンドラのシグネチャ変更（`(event, subscriptionId)`）で
+    進めるかを決めてから着手する
 
 ## 優先度: 低（整備）
 

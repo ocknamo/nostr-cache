@@ -317,13 +317,16 @@ export class SqliteStorage implements StorageAdapter {
     // Stage B: インデックスで候補を絞る
     const { where, complete } = buildFilterQuery(this.db, filter);
     let query = this.db.select().from(events).where(where).$dynamic();
-    if (filter.limit !== undefined) {
+    // 非負整数へ正規化する（SQLite の LIMIT は小数を受け付けずクエリ全体が失敗するため、
+    // クライアントから `limit: 1.5` が来ただけで空応答になってしまう）。Dexie 実装も同じ正規化
+    const limit = filterUtils.normalizeLimit(filter.limit);
+    if (limit !== undefined) {
       // 切り詰めは「新しい順」（NIP-01 の limit セマンティクス / capEvents と同じ、
       // id は決定性のためのタイブレーク）。SQL 段階の LIMIT は絞り込みが最終判定と
       // 完全等価な場合のみ（そうでない場合は JS 判定後に切り詰める）
       query = query.orderBy(desc(events.createdAt), asc(events.id));
       if (complete) {
-        query = query.limit(Math.max(0, filter.limit));
+        query = query.limit(limit);
       }
     }
     const rows: EventRow[] = query.all();
@@ -331,8 +334,8 @@ export class SqliteStorage implements StorageAdapter {
     let matched = rows
       .map(rowToEvent)
       .filter((event) => filterUtils.eventMatchesFilter(event, filter));
-    if (filter.limit !== undefined) {
-      matched = matched.slice(0, Math.max(0, filter.limit));
+    if (limit !== undefined) {
+      matched = matched.slice(0, limit);
     }
     return matched;
   }

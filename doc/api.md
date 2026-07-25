@@ -165,6 +165,22 @@ interface StorageAdapter {
 - `getValidationStatus` は id ごとに `'validated'` / `'pending'` / `'unknown'`（未保存・削除済み）を
   返します。これらの読み取りは LRU/LFU のアクセス追跡に影響しません。
   / Per-id status lookup; these reads never affect LRU/LFU access tracking.
+- `getEvents` のフィルタ解釈は NIP-01 準拠で、`DexieStorage` と `SqliteStorage` で一致します。
+  - `since` / `until` はいずれも境界を含みます（`since <= created_at <= until`）。`0` も
+    「指定なし」ではなく実際の境界として扱います。
+  - `filter.limit` は「一致するイベントのうち**最新** N 件」を返し、**新しい順**
+    （`created_at` 降順、同値は id の昇順でタイブレーク）に並びます。一致件数が `limit` 以下でも
+    並び順は同じです。`limit` はフィルタごとに適用され、複数フィルタの結果は id で
+    重複排除されます（複数フィルタをまたいだ順序は保証しません）。
+  - `limit` を指定しない場合の並び順は未規定です（ストレージの走査順のまま返ります）。
+  - `limit` は非負整数へ正規化されます（小数は切り捨て、負値は 0、`NaN` / `Infinity` は
+    「クライアント指定なし」として無視）。
+  / Filter semantics follow NIP-01 and match across both implementations: `since`/`until` are
+  inclusive bounds (`0` included — it is a real bound, not "unset"); `filter.limit` returns the
+  **newest** N matches, ordered newest-first (`created_at` desc, id asc as tiebreak) even when
+  fewer events match than the limit. `limit` applies per filter and is normalized to a
+  non-negative integer; results across filters are deduplicated by id (order across filters is
+  not guaranteed). Without `limit` the ordering is unspecified.
 
 ### `interface TransportAdapter`
 
