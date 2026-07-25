@@ -1,6 +1,7 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
+import { capEvents } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
@@ -182,18 +183,22 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           // Apply final filter validation
           collection = collection.filter((event) => eventRowMatchesFilter(event, filter));
 
-          // Apply limit before converting to array
-          if (filter.limit !== undefined) {
-            collection = collection.limit(filter.limit);
-          }
+          const events = (await collection.toArray()).map(rowToEvent);
 
-          return await collection.toArray();
+          // NIP-01 の `limit` は「一致するイベントのうち**最新** N 件」。Dexie の
+          // `Collection.limit()` は選ばれたインデックス順（kind 順・pubkey 順など、
+          // created_at とは無関係）の先頭 N 件になり、最新順にならない。そのため
+          // 全件取得してから capEvents（created_at 降順・id タイブレーク）で
+          // 切り詰める。SqliteStorage / relay 側の maxEventsPerRequest と同じ順序規則。
+          // トレードオフ: インデックス走査を N 件で打ち切れず、一致イベントを
+          // いったん全件materializeする
+          return filter.limit !== undefined ? capEvents(events, Math.max(0, filter.limit)) : events;
         })
       );
 
-      // Convert NostrEventTable to NostrEvent and deduplicate results
+      // Deduplicate results across filters
       const results = Array.from(
-        new Map(eventSets.flat().map((event) => [event.id, rowToEvent(event)])).values()
+        new Map(eventSets.flat().map((event) => [event.id, event])).values()
       );
 
       // LRU / LFU 退避のためのアクセス追跡（失敗しても読み出し結果には影響させない）。

@@ -243,6 +243,8 @@ describe('DexieStorage', () => {
       expect(result[0].id).toBe('event1');
     });
 
+    // since / until はいずれも境界を含む（NIP-01）。event2 は until と同時刻なので
+    // 結果に含まれる
     it('should handle multiple authors with time range', async () => {
       const result = await storage.getEvents([
         {
@@ -251,8 +253,8 @@ describe('DexieStorage', () => {
           until: 2000,
         },
       ]);
-      expect(result).toHaveLength(2);
-      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+      expect(result).toHaveLength(3);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event2', 'event3']);
     });
 
     it('should handle multiple kinds with time range', async () => {
@@ -263,8 +265,8 @@ describe('DexieStorage', () => {
           until: 2000,
         },
       ]);
-      expect(result).toHaveLength(2);
-      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+      expect(result).toHaveLength(3);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event2', 'event3']);
     });
 
     it('should handle multiple authors and kinds with time range', async () => {
@@ -276,8 +278,8 @@ describe('DexieStorage', () => {
           until: 2000,
         },
       ]);
-      expect(result).toHaveLength(2);
-      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+      expect(result).toHaveLength(3);
+      expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event2', 'event3']);
     });
   });
 
@@ -659,6 +661,97 @@ describe('DexieStorage', () => {
       ]);
       expect(result).toHaveLength(2);
       expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event4']);
+    });
+
+    // NIP-01 の limit は「一致するイベントのうち最新 N 件」。Dexie の
+    // Collection.limit() はインデックス順の先頭 N 件になるため、created_at 降順で
+    // 切り詰めていることを確認する
+    describe('limit returns the newest events (NIP-01)', () => {
+      it('should return the newest N events for a bare limit', async () => {
+        const result = await storage.getEvents([{ limit: 3 }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event3', 'event4', 'event5']);
+      });
+
+      it('should return the newest N events when narrowed by the kind index', async () => {
+        const result = await storage.getEvents([{ kinds: [1, 2, 3, 4, 5], limit: 2 }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event4', 'event5']);
+      });
+
+      it('should return the newest N events when narrowed by the pubkey index', async () => {
+        const result = await storage.getEvents([
+          { authors: ['author1', 'author2', 'author3', 'author4', 'author5'], limit: 2 },
+        ]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event4', 'event5']);
+      });
+
+      it('should return the newest N events when narrowed by the tag index', async () => {
+        // event1(1000) / event3(3000) / event5(5000) が #p=user1
+        const result = await storage.getEvents([{ '#p': ['user1'], limit: 2 }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event3', 'event5']);
+      });
+
+      it('should break ties by id so truncation is deterministic', async () => {
+        await storage.saveEvent({
+          id: 'aaa-same-time',
+          pubkey: 'author9',
+          created_at: 5000,
+          kind: 9,
+          tags: [],
+          content: 'same time as event5',
+          sig: 'sig9',
+        });
+
+        const result = await storage.getEvents([{ limit: 1 }]);
+        // created_at が同値なら id の辞書順が小さい方を採用
+        expect(result.map((e) => e.id)).toEqual(['aaa-same-time']);
+      });
+
+      it('should return no events for limit 0', async () => {
+        expect(await storage.getEvents([{ limit: 0 }])).toEqual([]);
+      });
+
+      it('should apply limit per filter, not to the merged result', async () => {
+        const result = await storage.getEvents([
+          { kinds: [1, 2], limit: 1 },
+          { kinds: [4, 5], limit: 1 },
+        ]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event2', 'event5']);
+      });
+    });
+
+    // since / until はどちらも境界を含む（NIP-01）。Dexie の between() は既定で
+    // 上限排他なので、時間範囲を使う各インデックス分岐で境界が落ちないことを確認する
+    describe('since / until bounds are inclusive (NIP-01)', () => {
+      it('should include the until boundary on the time-only branch', async () => {
+        const result = await storage.getEvents([{ until: 3000 }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event2', 'event3']);
+      });
+
+      it('should include the until boundary on the authors + time branch', async () => {
+        const result = await storage.getEvents([
+          { authors: ['author2', 'author3'], since: 2000, until: 3000 },
+        ]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event2', 'event3']);
+      });
+
+      it('should include the until boundary on the kinds + time branch', async () => {
+        const result = await storage.getEvents([{ kinds: [2, 3], since: 2000, until: 3000 }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event2', 'event3']);
+      });
+
+      it('should include the until boundary on the authors + kinds + time branch', async () => {
+        const result = await storage.getEvents([
+          { authors: ['author2', 'author3'], kinds: [2, 3], since: 2000, until: 3000 },
+        ]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event2', 'event3']);
+      });
+
+      it('should include events sitting exactly on both bounds', async () => {
+        const result = await storage.getEvents([
+          { authors: ['author3'], kinds: [3], since: 3000, until: 3000 },
+        ]);
+        expect(result.map((e) => e.id)).toEqual(['event3']);
+      });
     });
   });
 

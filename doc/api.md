@@ -165,6 +165,13 @@ interface StorageAdapter {
 - `getValidationStatus` は id ごとに `'validated'` / `'pending'` / `'unknown'`（未保存・削除済み）を
   返します。これらの読み取りは LRU/LFU のアクセス追跡に影響しません。
   / Per-id status lookup; these reads never affect LRU/LFU access tracking.
+- `getEvents` のフィルタ解釈は NIP-01 準拠で、`DexieStorage` と `SqliteStorage` で一致します。
+  `since` / `until` はいずれも境界を含み（`since <= created_at <= until`）、`filter.limit` は
+  「一致するイベントのうち**最新** N 件」（`created_at` 降順、同値は id の昇順でタイブレーク）を
+  返します。`limit` はフィルタごとに適用され、複数フィルタの結果は id で重複排除されます。
+  / Filter semantics follow NIP-01 and match across both implementations: `since`/`until` are
+  inclusive bounds, and `filter.limit` returns the **newest** N matches (`created_at` desc, id
+  asc as tiebreak). `limit` applies per filter; results across filters are deduplicated by id.
 
 ### `interface TransportAdapter`
 

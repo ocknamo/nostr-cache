@@ -5,6 +5,29 @@ import { type NostrEventTable, rowToEvent } from './schema.js';
 import { getIndexedTagValues } from './tag-index.js';
 
 /**
+ * Narrow the events table by the filter's time range on the `created_at` index.
+ *
+ * NIP-01 の `since` / `until` はどちらも境界を含む（`since <= created_at <= until`）。
+ * Dexie の `between()` は既定で上限排他のため、両端を明示的に包含指定する。
+ * 最終判定を行う {@link eventMatchesFilter} も包含なので、ここで境界のイベントを
+ * 落とすと二段構えの絞り込みが不整合になり、そのイベントは復活しない。
+ *
+ * @param table The Dexie events table
+ * @param since Inclusive lower bound (unset = no lower bound)
+ * @param until Inclusive upper bound (unset = no upper bound)
+ * @returns A Dexie collection covering the requested time range
+ */
+function betweenCreatedAt(
+  table: Dexie.Table<NostrEventTable, string>,
+  since: number | undefined,
+  until: number | undefined
+): Dexie.Collection<NostrEventTable, string> {
+  return table
+    .where('created_at')
+    .between(since ?? 0, until ?? Number.POSITIVE_INFINITY, true, true);
+}
+
+/**
  * Build an optimized Dexie query for a single filter.
  *
  * Picks the most selective available index for the filter's combination of
@@ -50,9 +73,8 @@ export function buildOptimizedQuery(
   }
   // authors + kinds + 時間範囲の組み合わせ
   else if (authors?.length && kinds?.length && (since !== undefined || until !== undefined)) {
-    const timeRange = [since || 0, until || Number.POSITIVE_INFINITY];
     // 時間範囲でフィルタリング
-    collection = table.where('created_at').between(timeRange[0], timeRange[1]);
+    collection = betweenCreatedAt(table, since, until);
     // authorsとkindsでフィルタリング
     collection = collection.filter(
       (event) => authors.includes(event.pubkey) && kinds.includes(event.kind)
@@ -61,7 +83,7 @@ export function buildOptimizedQuery(
   // authors + 時間範囲の組み合わせ
   else if (authors?.length && (since !== undefined || until !== undefined)) {
     // 時間範囲でフィルタリング
-    collection = table.where('created_at').between(since || 0, until || Number.POSITIVE_INFINITY);
+    collection = betweenCreatedAt(table, since, until);
     // authorsでフィルタリング
     collection = collection.filter((event) => authors.includes(event.pubkey));
   }
@@ -74,7 +96,7 @@ export function buildOptimizedQuery(
   // kinds + 時間範囲の組み合わせ
   else if (kinds?.length && (since !== undefined || until !== undefined)) {
     // 時間範囲でフィルタリング
-    collection = table.where('created_at').between(since || 0, until || Number.POSITIVE_INFINITY);
+    collection = betweenCreatedAt(table, since, until);
     // kindsでフィルタリング
     collection = collection.filter((event) => kinds.includes(event.kind));
   }
@@ -84,12 +106,7 @@ export function buildOptimizedQuery(
   } else if (authors?.length) {
     collection = table.where('pubkey').anyOf(authors);
   } else if (since !== undefined || until !== undefined) {
-    // untilは指定された時刻を含むように+1する
-    const timeRange = [
-      since || 0,
-      (until || Number.POSITIVE_INFINITY) + (until === Number.POSITIVE_INFINITY ? 0 : 1),
-    ];
-    collection = table.where('created_at').between(timeRange[0], timeRange[1], true, false);
+    collection = betweenCreatedAt(table, since, until);
   } else {
     collection = table.toCollection();
   }

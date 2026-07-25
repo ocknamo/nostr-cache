@@ -1,57 +1,75 @@
 # Node.jsサーバー実装計画（fake-indexeddbを使用）
 
+> **状況（2026-07 時点）**: 本計画の項目はレート制限・認証（NIP-42）・スループット測定を除き
+> 実装済み。以下のチェックボックスは実装状況に合わせて更新してある。永続化は当初計画に
+> 無かったオプトイン機能として別途追加済み（`node:sqlite` / `SqliteStorage`、下記「永続化」節）。
+> 残タスクの一覧は [doc/TODO.md](../TODO.md) を参照。
+
 ## 実装計画
 
 ### 1. サーバーアプリケーションの実装
 
 #### a. 基本サーバー構造
-- [ ] **NostrRelayServer**クラスの作成
-  - [ ] WebSocketServerを使用したサーバー実装
-  - [ ] 設定管理（ポート、ストレージタイプなど）
-  - [ ] 起動/停止メソッド
-  - [ ] ヘルスチェックエンドポイント
+- [x] **NostrRelayServer**クラスの作成（`packages/server/src/nostr-relay-server.ts`）
+  - [x] WebSocketServerを使用したサーバー実装
+  - [x] 設定管理（ポート、ストレージタイプなど）
+  - [x] 起動/停止メソッド
+  - [x] ヘルスチェックエンドポイント（`health-server.ts`。WebSocket とは別ポート（既定 `port + 1`）の `/health`）
 
 #### b. ストレージ実装
-- [ ] **fake-indexeddb**を使用したインメモリストレージ
-  - [ ] Node.js環境でDexieStorageをそのまま使用
-  - [ ] fake-indexeddbを初期化してブラウザのIndexedDBをエミュレート
-  - [ ] 既存のDexieStorageクラスの再利用
+- [x] **fake-indexeddb**を使用したインメモリストレージ
+  - [x] Node.js環境でDexieStorageをそのまま使用
+  - [x] fake-indexeddbを初期化してブラウザのIndexedDBをエミュレート
+  - [x] 既存のDexieStorageクラスの再利用
+- [x] （計画外の追加）`node:sqlite` によるファイル永続化をオプトインで実装
+  - `NOSTR_DB_PATH` / `storageOptions.dbPath` 指定時のみ `SqliteStorage` を使用。未指定なら上記のまま
 
 #### c. リレー機能の統合
-- [ ] **NostrCacheRelay**の完全な統合
-  - [ ] DexieStorageアダプタの初期化
-  - [ ] WebSocketServerトランスポートとの接続
-  - [ ] MessageHandlerとSubscriptionManagerの接続
+- [x] **NostrCacheRelay**の完全な統合
+  - [x] DexieStorageアダプタの初期化
+  - [x] WebSocketServerトランスポートとの接続
+  - [x] MessageHandlerとSubscriptionManagerの接続
 
 ### 2. 統合テストの作成と実行
 
-#### a. サーバー起動/停止テスト
-- [ ] サーバーの正常起動・停止の確認
-- [ ] 設定パラメータの正しい適用の確認
+テストは `packages/server/tests/integration/`（server / nip01 / health-check / performance /
+persistence / upstream）に配置。実プロセス相当の E2E は `e2e/tests/node/` にある。
 
-#### b. NIP-01プロトコル準拠テスト
-- [ ] `EVENT`メッセージ処理テスト
-  - [ ] イベント受信と保存の確認
-  - [ ] `OK`レスポンスの確認
-- [ ] `REQ`メッセージ処理テスト
-  - [ ] フィルタ適用の確認
-  - [ ] イベント返送の確認
-  - [ ] `EOSE`メッセージの確認
-- [ ] `CLOSE`メッセージ処理テスト
-  - [ ] サブスクリプション終了の確認
-  - [ ] `CLOSED`レスポンスの確認
+#### a. サーバー起動/停止テスト
+- [x] サーバーの正常起動・停止の確認（`server.spec.ts`）
+- [x] 設定パラメータの正しい適用の確認（`server.spec.ts` / `health-check.spec.ts` / `upstream.spec.ts`）
+
+#### b. NIP-01プロトコル準拠テスト（`nip01.spec.ts`）
+- [x] `EVENT`メッセージ処理テスト
+  - [x] イベント受信と保存の確認
+  - [x] `OK`レスポンスの確認
+- [x] `REQ`メッセージ処理テスト
+  - [x] フィルタ適用の確認（ids / authors / タグ / limit / since・until の境界包含 / 複数フィルタの重複排除）
+  - [x] イベント返送の確認
+  - [x] `EOSE`メッセージの確認
+- [x] `CLOSE`メッセージ処理テスト
+  - [x] サブスクリプション終了の確認
+  - [x] `CLOSED`レスポンスの確認
 
 #### c. 特殊ケースとエラーハンドリングテスト
-- [ ] 無効なメッセージ形式の処理
-- [ ] 認証失敗の処理
-- [ ] レート制限の処理
-- [ ] 大量リクエスト時の動作
+- [x] 無効なメッセージ形式の処理（不正 JSON / 未知タイプ / フィルタ無し REQ / 不正フィルタ / 署名不正イベント）
+- [ ] 認証失敗の処理 — **未実装**。NIP-42（AUTH）自体が未対応のため、テストも存在しない
+- [ ] レート制限の処理 — **未実装**。クライアント毎の購読数上限（`maxSubscriptions`）のテストはあるが、
+  時間窓ベースの頻度制限は `message-handler` に無い（[doc/TODO.md](../TODO.md) 参照）
+- [x] 大量リクエスト時の動作（`performance.spec.ts` のバースト投入・並行投入）
 
 #### d. パフォーマンステスト
-- [ ] 同時接続処理能力の検証
-- [ ] イベント処理スループットの測定
+- [x] 同時接続処理能力の検証（`performance.spec.ts`。多数同時接続下での正当性を検証）
+- [ ] イベント処理スループットの測定 — **スコープ外**。実行時間に依存する閾値アサーションは
+  意図的に置いていない。ベンチマークが必要になった時点で別項目として起こす
 
 ## 実装詳細
+
+> **注意**: 以下は実装着手前に書かれたスケッチであり、現行コードとは API が異なる
+> （`storage: 'indexeddb'` / `storageOptions` / `validateEvents` はいずれも旧オプション名で、
+> 現行は `storageMaxSize` / `validateEventsType` 等。`getConnectionCount()` /
+> `getEventCount()` のスタブも実装済み）。現行の正確な API は
+> [doc/api.md](../api.md) と `packages/server/src/nostr-relay-server.ts` を参照。
 
 ### サーバー実装のメインファイル
 
