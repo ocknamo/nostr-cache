@@ -246,3 +246,29 @@ describe('NostrRelayServer', () => {
     }
   });
 });
+
+describe('NostrRelayServer cachePriority option', () => {
+  it('should throw at construction time on an invalid cachePriority pubkey', () => {
+    expect(
+      () =>
+        new NostrRelayServer({
+          port: 9999,
+          storageOptions: { cachePriority: { pubkeys: ['npub1invalid'] } },
+        })
+    ).toThrow(/npub1invalid/);
+  });
+
+  it('should accept npub pubkeys and kinds in storageOptions.cachePriority', () => {
+    // NIP-19 公式テストベクタの npub が正規化を通ること（例外を投げない）
+    const server = new NostrRelayServer({
+      port: 9999,
+      storageOptions: {
+        cachePriority: {
+          pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
+          kinds: [0],
+        },
+      },
+    });
+    expect(server).toBeDefined();
+  });
+});

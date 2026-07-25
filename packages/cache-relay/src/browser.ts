@@ -17,6 +17,8 @@ import { EventHandler } from './event/event-handler.js';
 import { EventValidator } from './event/event-validator.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
+// キャッシュ優先度の判定（Dexie 非依存の純関数）
+import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './storage/priority.js';
 // Storage
 import {
   CacheStrategy,
@@ -53,6 +55,9 @@ export {
   SaveEventOptions,
   ValidationStatus,
   DexieStorage,
+  type CachePriority,
+  createPriorityMatcher,
+  hasPriorityRules,
   // Transport
   TransportAdapter,
   WebSocketServerEmulator,

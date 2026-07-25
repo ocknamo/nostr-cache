@@ -222,6 +222,9 @@ interface NostrRelayOptions {
   storageMaxSize?: number;
   // 退避戦略（デフォルト FIFO）。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
+  // キャッシュ優先度。指定 pubkey（npub / hex）の発行イベントと指定 kind のイベントは
+  // storageMaxSize 超過時に最後まで残り（maxSize は厳守）、TTL スイープの対象外になる
+  cachePriority?: { pubkeys?: string[]; kinds?: number[] };
 
   // WebSocket サーバーのポート（Node.js のみ）
   port?: number;

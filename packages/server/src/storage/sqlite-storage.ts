@@ -6,18 +6,19 @@ import { dirname } from 'node:path';
 // 「永続化を有効にしたときだけ」表示されるようにする
 import type * as nodeSqlite from 'node:sqlite';
 import type {
+  CachePriority,
   CacheStrategy,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
 } from '@nostr-cache/cache-relay';
-import { filterUtils, getIndexedTags } from '@nostr-cache/cache-relay';
+import { filterUtils, getIndexedTags, hasPriorityRules } from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { logger } from '@nostr-cache/shared';
 // drizzle-orm 本体と sqlite-core は node:sqlite をロードしないため静的 import で安全。
 // ドライバ（drizzle-orm/node-sqlite）だけは node:sqlite を即ロードするため、
 // open() 内で遅延ロードする（下記 requireModule 参照）
-import { type SQL, and, asc, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { type SQL, and, asc, count, desc, eq, inArray, lt, not, or, sql } from 'drizzle-orm';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
 import { buildFilterQuery, hasInvalidTagFilter } from './sqlite/query-builder.js';
 import {
@@ -44,6 +45,25 @@ const EVICTION_ORDER: Record<CacheStrategy, SQL[]> = {
 
 // IN 句 1 回あたりの id 数上限（バインド変数上限への防御）
 const ID_CHUNK_SIZE = 500;
+
+/**
+ * Build the SQL condition matching priority events (pubkey IN (...) OR kind
+ * IN (...)), or undefined when the config has no effective rules. Empty lists
+ * are guarded so an `IN ()` clause is never emitted.
+ */
+function priorityCondition(priority?: CachePriority): SQL | undefined {
+  if (!hasPriorityRules(priority)) {
+    return undefined;
+  }
+  const conditions: SQL[] = [];
+  if (priority.pubkeys && priority.pubkeys.length > 0) {
+    conditions.push(inArray(events.pubkey, priority.pubkeys));
+  }
+  if (priority.kinds && priority.kinds.length > 0) {
+    conditions.push(inArray(events.kind, priority.kinds));
+  }
+  return or(...conditions);
+}
 
 /**
  * Split an array into chunks of at most `size` elements.
@@ -405,16 +425,22 @@ export class SqliteStorage implements StorageAdapter {
    * Expiry is keyed on `cached_at` (storage insertion time), not the event's
    * own `created_at` — same as the Dexie implementation.
    *
+   * Priority events (matching `priority`) are exempt and retained even when
+   * expired.
+   *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
+   * @param priority Cache priority config; matching events are never deleted
    * @returns Promise resolving to the number of events deleted (0 on error)
    */
-  async deleteExpired(olderThan: number): Promise<number> {
+  async deleteExpired(olderThan: number, priority?: CachePriority): Promise<number> {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
+      const expired = lt(events.cachedAt, olderThan * 1000);
+      const cond = priorityCondition(priority);
       const { changes } = this.db
         .delete(events)
-        .where(lt(events.cachedAt, olderThan * 1000))
+        .where(cond ? and(expired, not(cond)) : expired)
         .run();
       return Number(changes);
     } catch (error) {
@@ -450,11 +476,22 @@ export class SqliteStorage implements StorageAdapter {
    * LFU=`access_count`, ties by least recently read). Count + delete run in
    * a single transaction; soft limit semantics as in the Dexie implementation.
    *
+   * Priority events (matching `priority`) are evicted last: non-priority
+   * events are evicted first in strategy order, and only if the store is
+   * still over `maxSize` are priority events evicted (also in strategy
+   * order), so `maxSize` is always honored — same as the Dexie
+   * implementation.
+   *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)
+   * @param priority Cache priority config; matching events are evicted last
    * @returns Promise resolving to the number of events evicted
    */
-  async enforceLimit(maxSize: number, strategy: CacheStrategy = 'FIFO'): Promise<number> {
+  async enforceLimit(
+    maxSize: number,
+    strategy: CacheStrategy = 'FIFO',
+    priority?: CachePriority
+  ): Promise<number> {
     if (!(maxSize > 0)) {
       return 0;
     }
@@ -467,13 +504,35 @@ export class SqliteStorage implements StorageAdapter {
         if (total <= maxSize) {
           return 0;
         }
+        const excess = total - maxSize;
+        const cond = priorityCondition(priority);
+
+        // パス1: 非優先イベントを戦略順で退避する（優先設定なしなら全件対象）
         const victims = this.db
           .select({ id: events.id })
           .from(events)
+          .where(cond ? not(cond) : undefined)
           .orderBy(...EVICTION_ORDER[strategy])
-          .limit(total - maxSize);
+          .limit(excess);
         const { changes } = this.db.delete(events).where(inArray(events.id, victims)).run();
-        return Number(changes);
+        let deleted = Number(changes);
+
+        // パス2: 非優先だけで excess に満たない場合、残りは全て優先イベント。
+        // フィルタなしの通常順で不足分を退避する（maxSize は常に厳守）
+        const remaining = excess - deleted;
+        if (cond && remaining > 0) {
+          const priorityVictims = this.db
+            .select({ id: events.id })
+            .from(events)
+            .orderBy(...EVICTION_ORDER[strategy])
+            .limit(remaining);
+          const { changes: priorityChanges } = this.db
+            .delete(events)
+            .where(inArray(events.id, priorityVictims))
+            .run();
+          deleted += Number(priorityChanges);
+        }
+        return deleted;
       });
       if (evicted > 0) {
         logger.info(`Evicted ${evicted} events to respect storageMaxSize ${maxSize}`);

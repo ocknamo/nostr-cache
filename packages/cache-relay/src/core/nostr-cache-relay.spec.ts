@@ -143,7 +143,35 @@ describe('NostrCacheRelay', () => {
 
       await boundedRelay.publishEvent(sampleEvent);
 
-      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO');
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', undefined);
+    });
+
+    it('should pass the normalized cachePriority (npub decoded to hex) to enforceLimit', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cacheStrategy: 'FIFO',
+        cachePriority: {
+          // NIP-19 公式テストベクタ
+          pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
+          kinds: [0],
+        },
+      });
+
+      await boundedRelay.publishEvent(sampleEvent);
+
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
+        pubkeys: ['7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e'],
+        kinds: [0],
+      });
+    });
+
+    it('should throw at construction time on an invalid cachePriority pubkey', () => {
+      expect(
+        () =>
+          new NostrCacheRelay(mockStorage, mockTransport, {
+            cachePriority: { pubkeys: ['npub1invalid'] },
+          })
+      ).toThrow(/npub1invalid/);
     });
 
     it('should not enforce the storage limit when storageMaxSize is unset', async () => {

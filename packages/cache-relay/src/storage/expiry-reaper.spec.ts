@@ -40,6 +40,15 @@ describe('ExpiryReaper', () => {
     expect(removed).toBe(0);
   });
 
+  it('should forward the cache priority config to deleteExpired', async () => {
+    const priority = { pubkeys: ['a'.repeat(64)], kinds: [0] };
+    const reaper = new ExpiryReaper(storage, { ttlSeconds: 100, priority, now: () => 1000 });
+
+    await reaper.sweep();
+
+    expect(storage.deleteExpired).toHaveBeenCalledWith(900, priority);
+  });
+
   it('should be a no-op when ttl is non-positive', async () => {
     const reaper = new ExpiryReaper(storage, { ttlSeconds: 0, now: () => 1000 });
 

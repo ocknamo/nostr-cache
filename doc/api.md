@@ -100,6 +100,10 @@ interface NostrRelayOptions {
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // 退避戦略 (default: 'FIFO')。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順（同数なら古い順）
                                     // ※ 挿入も1回のアクセスとして数える。置換可能イベントは上書きのたびに
                                     //    アクセス履歴がリセットされるため、頻繁に更新されるものは LFU で不利になる
+  cachePriority?: {                 // キャッシュ優先度。指定 pubkey（npub / hex 可）の発行イベント、または指定 kind の
+    pubkeys?: string[];             // イベントを「優先イベント」として扱う。優先イベントは storageMaxSize 超過時に
+    kinds?: number[];               // 最後まで残り（非優先を先に退避。優先だけになったら通常の cacheStrategy 順で退避し
+  };                                // maxSize は常に厳守）、TTL スイープの削除対象外。不正な npub は生成時に例外
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
                                     // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）

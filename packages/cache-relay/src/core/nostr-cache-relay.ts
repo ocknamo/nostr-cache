@@ -100,7 +100,8 @@ export class NostrCacheRelay {
       this.options.validateEventsType ?? 'IMMEDIATELY',
       // 保存後のストレージ上限退避（transport 経由 EVENT）
       this.options.storageMaxSize,
-      this.options.cacheStrategy
+      this.options.cacheStrategy,
+      this.options.cachePriority
     );
 
     // TTL 設定時はバックグラウンドの定期パージを用意する。
@@ -109,6 +110,7 @@ export class NostrCacheRelay {
       this.expiryReaper = new ExpiryReaper(storage, {
         ttlSeconds: this.options.ttl,
         intervalSeconds: this.options.ttlSweepInterval,
+        priority: this.options.cachePriority,
       });
     }
 
@@ -301,7 +303,11 @@ export class NostrCacheRelay {
     // Eviction is a post-save side effect; never let its failure affect the
     // originating save / notification.
     try {
-      await this.storage.enforceLimit?.(maxSize, this.options.cacheStrategy);
+      await this.storage.enforceLimit?.(
+        maxSize,
+        this.options.cacheStrategy,
+        this.options.cachePriority
+      );
     } catch (error) {
       logger.error('Failed to enforce storage limit:', error);
     }

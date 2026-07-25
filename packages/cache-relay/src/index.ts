@@ -18,6 +18,8 @@ import { DexieStorage } from './storage/dexie-storage.js';
 // server パッケージの SQLite アダプタがタグインデックスのセマンティクスを
 // 単一ソース化するために再利用する
 import { getIndexedTags } from './storage/dexie/tag-index.js';
+// キャッシュ優先度の判定。こちらも Dexie 非依存の純関数で SQLite アダプタと共有する
+import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './storage/priority.js';
 // Storage
 import {
   CacheStrategy,
@@ -56,6 +58,9 @@ export {
   ValidationStatus,
   DexieStorage,
   getIndexedTags,
+  type CachePriority,
+  createPriorityMatcher,
+  hasPriorityRules,
   // Transport
   TransportAdapter,
   WebSocketServer,

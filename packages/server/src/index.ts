@@ -7,6 +7,14 @@ import 'fake-indexeddb/auto';
 import { logger } from '@nostr-cache/shared';
 import { NostrRelayServer } from './nostr-relay-server.js';
 
+// カンマ区切りの環境変数値を分解する（空要素は除去）
+function splitCsv(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 // CLIインターフェース
 function main() {
   // 環境変数PORTが指定されていればそのポートを使用する
@@ -14,9 +22,21 @@ function main() {
   // 環境変数 NOSTR_DB_PATH が指定されていれば、そのパスの SQLite ファイルへ
   // 永続化する（オプトイン）。未指定なら従来どおりインメモリで再起動時に消える
   const dbPath = process.env.NOSTR_DB_PATH;
+  // キャッシュ優先度（カンマ区切り）。pubkey は npub / hex どちらでも指定できる。
+  // 不正な値は NostrRelayServer のコンストラクタが例外を投げ、起動時に失敗する
+  const priorityPubkeys = splitCsv(process.env.NOSTR_CACHE_PRIORITY_PUBKEYS);
+  const priorityKinds = splitCsv(process.env.NOSTR_CACHE_PRIORITY_KINDS).map(Number);
+  const cachePriority =
+    priorityPubkeys.length > 0 || priorityKinds.length > 0
+      ? { pubkeys: priorityPubkeys, kinds: priorityKinds }
+      : undefined;
+  const storageOptions =
+    dbPath || cachePriority
+      ? { ...(dbPath ? { dbPath } : {}), ...(cachePriority ? { cachePriority } : {}) }
+      : undefined;
   const server = new NostrRelayServer({
     ...(port !== undefined ? { port } : {}),
-    ...(dbPath ? { storageOptions: { dbPath } } : {}),
+    ...(storageOptions ? { storageOptions } : {}),
   });
 
   // シグナルハンドリング（SIGTERM は docker stop / systemd などからのクリーン終了用）

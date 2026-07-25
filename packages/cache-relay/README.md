@@ -134,6 +134,38 @@ const relay = new NostrCacheRelay(storage, transport, {
 > `maxSize` を超えることがあります（最終的に収束）。また FIFO は `created_at`（秒精度）
 > 基準で、同値のイベントは主キー（id）順で退避されます（厳密な到着順ではない近似）。
 
+### キャッシュ優先度（cachePriority）
+
+特定の pubkey の発行イベントや特定 kind のイベントを優先的にキャッシュに残したい場合は
+`cachePriority` を設定します。指定した pubkey（`npub1...` / hex どちらでも可）**または**
+指定 kind にマッチするイベントは「優先イベント」となり、
+
+- `storageMaxSize` 超過時の退避で**最後まで残ります**（非優先イベントを先に退避）。
+- `ttl` による定期スイープの**削除対象外**になります。
+
+```typescript
+const relay = new NostrCacheRelay(storage, transport, {
+  storageMaxSize: 10000,
+  ttl: 3600,
+  cachePriority: {
+    pubkeys: ['npub1...'], // 自分の npub（hex でも可）を優先的にキャッシュ
+    kinds: [0], // kind 0（プロフィール）は TL 描画で大量参照されるため優先
+  },
+});
+```
+
+kind 0 のような置換可能イベントは上書きのたびにアクセス履歴（`access_count` 等）が
+リセットされ LFU で不利になりますが、優先指定すればこの不利は実質無効化されます。
+
+> **注意:**
+> - 優先は**ソフト**です。キャッシュが優先イベントだけで `maxSize` を超えた場合は、
+>   優先イベントも通常の `cacheStrategy` 順で退避されます（`maxSize` は常に厳守）。
+>   この状態では保存のたびに優先イベントの退避が起きるため、優先リストは
+>   `maxSize` に対して十分小さく保つことを推奨します。
+> - `DexieStorage` の退避は優先イベントを飛ばしながらインデックス順に走査するため、
+>   キャッシュの大半が優先イベントで占められていると退避パスの走査コストが増えます。
+> - 不正な npub / kind は `NostrCacheRelay` 生成時に例外になります。
+
 ### ローカル API による購読 / 発行
 
 トランスポート越しのクライアントとは別に、同一プロセス内から直接購読・発行できます。
@@ -183,6 +215,7 @@ relay.unsubscribe('sub1');
 | `ttl` | `number` | 実装済み。キャッシュ投入（保存）時刻 `cached_at` が `now - ttl` より古いイベントを**バックグラウンドの定期スイープ**でストレージから削除（`created_at` 基準ではなく、読み出し時フィルタでもない）。最大で `ttlSweepInterval` 秒ぶん期限切れイベントを返しうる。未指定で無効。`deleteExpired` 対応ストレージ（`DexieStorage`）が必要 |
 | `ttlSweepInterval` | `number` | 実装済み。TTL スイープの実行間隔（秒、デフォルト 60） |
 | `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | 実装済み（`storageMaxSize` の退避戦略、デフォルト `FIFO`）。`FIFO`=作成が古い順、`LRU`=読み出しが古い順、`LFU`=読み出し頻度が低い順（同数なら古い順） |
+| `cachePriority` | `{ pubkeys?: string[]; kinds?: number[] }` | 実装済み。指定 pubkey（npub / hex）の発行イベントまたは指定 kind のイベントを優先イベントとして扱う。優先イベントは `storageMaxSize` 超過時に最後まで残り（非優先を先に退避。優先だけになったら通常の `cacheStrategy` 順で退避し `maxSize` は厳守）、`ttl` スイープの削除対象外。不正な npub は生成時に例外 |
 | `lazyValidateInterval` | `number` | 実装済み。`LAZY` 時のバックグラウンド検証の実行間隔（秒、デフォルト 60） |
 | `lazyValidateBatchSize` | `number` | 実装済み。`LAZY` 時の 1 回の検証で処理するイベント数（デフォルト 100） |
 

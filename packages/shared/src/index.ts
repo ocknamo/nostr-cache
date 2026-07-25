@@ -8,6 +8,7 @@ export * from './constants/relays.js';
 // Export utilities
 export { logger, LogLevel } from './utils/logger.js';
 export { getRandomSecret } from './utils/crypto.js';
+export { npubToHex, normalizePubkey } from './utils/nip19.js';
 export { messageToWire } from './utils/message-to-wire.js';
 
 // Export all types

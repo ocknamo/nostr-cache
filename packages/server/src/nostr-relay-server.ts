@@ -34,6 +34,10 @@ interface NostrRelayServerOptions {
     maxSize?: number;
     // 退避戦略（FIFO: 作成が古い順 / LRU: 読み出しが古い順 / LFU: 読み出し頻度が低い順）
     cacheStrategy?: CacheStrategy;
+    // キャッシュ優先度。指定 pubkey（npub / hex）の発行イベントと指定 kind の
+    // イベントは maxSize 超過時に最後まで残り、TTL スイープの対象外になる
+    // （maxSize は常に厳守）。不正な npub はコンストラクタで例外を投げる
+    cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
 
   // リレー設定（NostrCacheRelayに渡すオプション）
@@ -107,6 +111,7 @@ export class NostrRelayServer {
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
       storageMaxSize: this.options.storageOptions?.maxSize,
       cacheStrategy: this.options.storageOptions?.cacheStrategy,
+      cachePriority: this.options.storageOptions?.cachePriority,
       ttl: this.options.relay?.ttl,
       ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',

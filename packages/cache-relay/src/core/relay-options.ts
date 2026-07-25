@@ -2,6 +2,8 @@
  * Options and defaults for {@link NostrCacheRelay}.
  */
 
+import { normalizePubkey } from '@nostr-cache/shared';
+import type { CachePriority } from '../storage/priority.js';
 import type { CacheStrategy } from '../storage/storage-adapter.js';
 import type { UpstreamPool } from '../upstream/upstream-types.js';
 
@@ -78,6 +80,21 @@ export interface NostrRelayOptions {
    * frequently read first). Defaults to `FIFO`.
    */
   cacheStrategy?: CacheStrategy;
+
+  /**
+   * キャッシュ優先度。指定した pubkey（npub / hex どちらでも可）の発行イベント、
+   * または指定 kind のイベントを優先イベントとして扱う。
+   *
+   * Cache priority: events authored by any listed pubkey (accepted as
+   * `npub1...` or 64-char hex) OR of any listed kind are treated as priority
+   * events. Priority events are evicted last under {@link storageMaxSize}
+   * (non-priority events are evicted first; once only priority events remain
+   * they are evicted by the normal {@link cacheStrategy}, so `storageMaxSize`
+   * is always honored) and are exempt from the {@link ttl} sweep.
+   *
+   * Invalid pubkeys or kinds throw at relay construction time.
+   */
+  cachePriority?: { pubkeys?: string[]; kinds?: number[] };
 
   /**
    * Whether to validate events
@@ -157,5 +174,37 @@ export function resolveRelayOptions(options: NostrRelayOptions): NostrRelayOptio
     ...options,
     // Guard against an explicit `undefined` clobbering the default
     maxEventsPerRequest: options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS,
+    cachePriority: normalizeCachePriority(options.cachePriority),
   };
+}
+
+/**
+ * Normalize a caller-supplied cache priority config: pubkeys are converted to
+ * 64-char lowercase hex (decoding `npub1...` input), kinds are validated as
+ * non-negative integers, and both lists are deduplicated. Downstream code
+ * (eviction, TTL sweep) only ever sees normalized hex.
+ *
+ * @param input Caller-supplied config (pubkeys as npub or hex)
+ * @returns The normalized config, or undefined when there are no effective
+ *   rules
+ * @throws Error naming the offending entry on an invalid pubkey or kind
+ */
+export function normalizeCachePriority(input?: {
+  pubkeys?: string[];
+  kinds?: number[];
+}): CachePriority | undefined {
+  if (!input) {
+    return undefined;
+  }
+  const pubkeys = [...new Set((input.pubkeys ?? []).map(normalizePubkey))];
+  for (const kind of input.kinds ?? []) {
+    if (!Number.isInteger(kind) || kind < 0) {
+      throw new Error(`Invalid cachePriority kind (expected non-negative integer): ${kind}`);
+    }
+  }
+  const kinds = [...new Set(input.kinds ?? [])];
+  if (pubkeys.length === 0 && kinds.length === 0) {
+    return undefined;
+  }
+  return { pubkeys, kinds };
 }
