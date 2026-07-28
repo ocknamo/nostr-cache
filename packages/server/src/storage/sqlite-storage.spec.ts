@@ -952,6 +952,115 @@ describe('SqliteStorage', () => {
     });
   });
 
+  const PRIORITY_PUBKEY = 'a'.repeat(64);
+  const eventBy = (id: string, created_at: number, pubkey: string, kind = 1): NostrEvent => ({
+    ...mockEvent,
+    id,
+    created_at,
+    pubkey,
+    kind,
+  });
+
+  describe('enforceLimit (cachePriority)', () => {
+    it('should evict non-priority events before priority-pubkey events (FIFO)', async () => {
+      await storage.saveEvent(eventBy('priority-old', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('plain-mid', 200, 'other-pubkey'));
+      await storage.saveEvent(eventBy('plain-new', 300, 'other-pubkey'));
+
+      const removed = await storage.enforceLimit(2, 'FIFO', { pubkeys: [PRIORITY_PUBKEY] });
+
+      // FIFO 順では 'priority-old' が先頭だが、優先設定により 'plain-mid' が退避される
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['plain-new', 'priority-old']);
+    });
+
+    it('should evict non-priority events before priority-kind events (FIFO)', async () => {
+      await storage.saveEvent(eventBy('profile-old', 100, 'any-pubkey', 0));
+      await storage.saveEvent(eventBy('note-mid', 200, 'any-pubkey', 1));
+      await storage.saveEvent(eventBy('note-new', 300, 'any-pubkey', 1));
+
+      const removed = await storage.enforceLimit(2, 'FIFO', { kinds: [0] });
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [0, 1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['note-new', 'profile-old']);
+    });
+
+    it('should evict priority events in strategy order once only they remain', async () => {
+      await storage.saveEvent(eventBy('p-old', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('p-mid', 200, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('p-new', 300, PRIORITY_PUBKEY));
+
+      const removed = await storage.enforceLimit(2, 'FIFO', { pubkeys: [PRIORITY_PUBKEY] });
+
+      // 優先イベントしかないので通常の FIFO 順で退避され、maxSize は厳守される
+      expect(removed).toBe(1);
+      expect(await storage.count()).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['p-mid', 'p-new']);
+    });
+
+    it('should evict all non-priority events first, then fall back to priority events', async () => {
+      await storage.saveEvent(eventBy('p-old', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('p-new', 200, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('plain', 300, 'other-pubkey'));
+
+      const removed = await storage.enforceLimit(1, 'FIFO', { pubkeys: [PRIORITY_PUBKEY] });
+
+      // excess 2: 非優先 'plain' + FIFO 先頭の優先 'p-old' が退避される
+      expect(removed).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id);
+      expect(remaining).toEqual(['p-new']);
+    });
+
+    it('should keep priority events under LRU while evicting non-priority ones', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await storage.saveEvent(eventBy('priority-stale', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('plain-a', 200, 'other-pubkey'));
+      await storage.saveEvent(eventBy('plain-b', 300, 'other-pubkey'));
+
+      // 'plain-a' だけ読み出しておく → LRU 先頭は 'priority-stale'、次点 'plain-b'
+      nowSpy.mockReturnValue(2_000_000);
+      await storage.getEvents([{ ids: ['plain-a'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LRU', { pubkeys: [PRIORITY_PUBKEY] });
+
+      // LRU 先頭の 'priority-stale' は保護され、非優先の 'plain-b' が退避される
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['plain-a', 'priority-stale']);
+      nowSpy.mockRestore();
+    });
+
+    it('should not evict while at or under maxSize even with priority rules', async () => {
+      await storage.saveEvent(eventBy('a', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('b', 200, 'other-pubkey'));
+
+      expect(await storage.enforceLimit(2, 'FIFO', { pubkeys: [PRIORITY_PUBKEY] })).toBe(0);
+      expect(await storage.count()).toBe(2);
+    });
+
+    it('should keep priority events under LFU while evicting non-priority ones', async () => {
+      await storage.saveEvent(eventBy('priority-cold', 100, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('plain-warm', 200, 'other-pubkey'));
+      await storage.saveEvent(eventBy('plain-hot', 300, 'other-pubkey'));
+
+      // access_count: priority-cold=1（挿入のみ）, plain-warm=2, plain-hot=3
+      await storage.getEvents([{ ids: ['plain-warm'] }]);
+      await storage.getEvents([{ ids: ['plain-hot'] }]);
+      await storage.getEvents([{ ids: ['plain-hot'] }]);
+
+      const removed = await storage.enforceLimit(2, 'LFU', { pubkeys: [PRIORITY_PUBKEY] });
+
+      // LFU 先頭（access_count 最小）の 'priority-cold' は保護され、非優先で
+      // 最も読まれていない 'plain-warm' が退避される
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['plain-hot', 'priority-cold']);
+    });
+  });
+
   describe('deleteExpired', () => {
     it('should delete only events cached strictly before the threshold', async () => {
       const nowSpy = vi.spyOn(Date, 'now');
@@ -1007,6 +1116,24 @@ describe('SqliteStorage', () => {
 
       expect(await storage.deleteExpired(100)).toBe(0);
       expect(await storage.count()).toBe(1);
+    });
+
+    it('should retain expired priority events and delete expired non-priority ones', async () => {
+      const nowSpy = vi.spyOn(Date, 'now');
+      nowSpy.mockReturnValue(100_000);
+      await storage.saveEvent(eventBy('priority-expired', 1, PRIORITY_PUBKEY));
+      await storage.saveEvent(eventBy('profile-expired', 2, 'other-pubkey', 0));
+      await storage.saveEvent(eventBy('plain-expired', 3, 'other-pubkey'));
+      nowSpy.mockReturnValue(300_000);
+      await storage.saveEvent(eventBy('plain-fresh', 4, 'other-pubkey'));
+      nowSpy.mockRestore();
+
+      const removed = await storage.deleteExpired(200, { pubkeys: [PRIORITY_PUBKEY], kinds: [0] });
+
+      // 期限切れ 3 件のうち優先（pubkey / kind 0）の 2 件は保持される
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [0, 1] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['plain-fresh', 'priority-expired', 'profile-expired']);
     });
   });
 

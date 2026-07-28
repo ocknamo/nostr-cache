@@ -3,6 +3,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
+import type { CachePriority } from './priority.js';
 
 /**
  * Cache eviction strategy.
@@ -146,11 +147,15 @@ export interface StorageAdapter {
    * not on the event's own `created_at`. Implementations backed by a time
    * index can do this as an efficient bulk range delete.
    *
+   * Priority events (matching `priority`) are exempt from the sweep and are
+   * retained even when expired.
+   *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
+   * @param priority Cache priority config; matching events are never deleted
    * @returns Promise resolving to the number of events deleted
    */
-  deleteExpired?(olderThan: number): Promise<number>;
+  deleteExpired?(olderThan: number, priority?: CachePriority): Promise<number>;
 
   /**
    * Evict events so that no more than `maxSize` remain.
@@ -159,9 +164,19 @@ export interface StorageAdapter {
    * calls this after saving events when `storageMaxSize` is configured.
    * Implementations that cannot evict may omit this method.
    *
+   * Priority events (matching `priority`) are evicted last: non-priority
+   * events are evicted first in strategy order, and only if the store is
+   * still over `maxSize` are priority events evicted (also in strategy
+   * order), so `maxSize` is always honored.
+   *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)
+   * @param priority Cache priority config; matching events are evicted last
    * @returns Promise resolving to the number of events evicted
    */
-  enforceLimit?(maxSize: number, strategy?: CacheStrategy): Promise<number>;
+  enforceLimit?(
+    maxSize: number,
+    strategy?: CacheStrategy,
+    priority?: CachePriority
+  ): Promise<number>;
 }

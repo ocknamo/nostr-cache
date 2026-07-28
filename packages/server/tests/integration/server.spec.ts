@@ -246,3 +246,49 @@ describe('NostrRelayServer', () => {
     }
   });
 });
+
+describe('NostrRelayServer cachePriority option', () => {
+  it('should throw at construction time on an invalid cachePriority pubkey', () => {
+    expect(
+      () =>
+        new NostrRelayServer({
+          port: 9999,
+          storageOptions: { cachePriority: { pubkeys: ['npub1invalid'] } },
+        })
+    ).toThrow(/npub1invalid/);
+  });
+
+  it('should accept npub pubkeys and kinds in storageOptions.cachePriority', () => {
+    // NIP-19 公式テストベクタの npub が正規化を通ること（例外を投げない）
+    const server = new NostrRelayServer({
+      port: 9999,
+      storageOptions: {
+        cachePriority: {
+          pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
+          kinds: [0],
+        },
+      },
+    });
+    expect(server).toBeDefined();
+  });
+
+  it('should allow replacing the priority config at runtime via setCachePriority', () => {
+    const server = new NostrRelayServer({ port: 9999 });
+    // 委譲先の relay まで届くことを検証する（private フィールドへのスパイ）
+    // biome-ignore lint/suspicious/noExplicitAny: テストのため private relay にアクセス
+    const relaySpy = vi.spyOn((server as any).relay, 'setCachePriority');
+
+    // npub / hex を受け付け、不正値は例外（現行設定は維持される）
+    const input = {
+      pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
+      kinds: [0],
+    };
+    server.setCachePriority(input);
+    expect(relaySpy).toHaveBeenCalledWith(input);
+
+    expect(() => server.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(/npub1invalid/);
+
+    server.setCachePriority(undefined);
+    expect(relaySpy).toHaveBeenLastCalledWith(undefined);
+  });
+});

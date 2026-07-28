@@ -6,6 +6,7 @@ import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
+import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './priority.js';
 import type {
   CacheStrategy,
   SaveEventOptions,
@@ -290,17 +291,23 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * recently still gets a full TTL. Uses the `cached_at` index for an
    * efficient bulk range delete, backing the TTL background sweep.
    *
+   * Priority events (matching `priority`) are exempt and retained even when
+   * expired.
+   *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
+   * @param priority Cache priority config; matching events are never deleted
    * @returns Promise resolving to the number of events deleted (0 on error)
    */
-  async deleteExpired(olderThan: number): Promise<number> {
+  async deleteExpired(olderThan: number, priority?: CachePriority): Promise<number> {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
-      return await this.events
-        .where('cached_at')
-        .below(olderThan * 1000)
-        .delete();
+      const expired = this.events.where('cached_at').below(olderThan * 1000);
+      if (hasPriorityRules(priority)) {
+        const isPriority = createPriorityMatcher(priority);
+        return await expired.filter((row) => !isPriority(row)).delete();
+      }
+      return await expired.delete();
     } catch (error) {
       logger.error(
         `Failed to delete expired events: ${
@@ -334,10 +341,15 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    *
    * @param maxSize Maximum number of events to keep (no-op when <= 0)
    * @param strategy Eviction strategy (default `FIFO`)
+   * @param priority Cache priority config; matching events are evicted last
    * @returns Promise resolving to the number of events evicted
    */
-  async enforceLimit(maxSize: number, strategy: CacheStrategy = 'FIFO'): Promise<number> {
-    return enforceLimit(this, this.events, maxSize, strategy);
+  async enforceLimit(
+    maxSize: number,
+    strategy: CacheStrategy = 'FIFO',
+    priority?: CachePriority
+  ): Promise<number> {
+    return enforceLimit(this, this.events, maxSize, strategy, priority);
   }
 
   /**

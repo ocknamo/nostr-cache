@@ -14,6 +14,7 @@ import {
   type ReqMessage,
 } from '@nostr-cache/shared';
 import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
+import type { CachePriority } from '../storage/priority.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { capEvents, isValidFilterShape } from '../utils/filter-utils.js';
@@ -50,6 +51,8 @@ export class MessageHandler {
    * @param storageMaxSize When set (> 0), evict down to this size after each
    *   stored event via `storage.enforceLimit`
    * @param cacheStrategy Eviction strategy used with `storageMaxSize`
+   * @param cachePriority Cache priority config (normalized hex); matching
+   *   events are evicted last
    */
   constructor(
     storage: StorageAdapter,
@@ -58,7 +61,8 @@ export class MessageHandler {
     private maxEventsPerRequest = 500,
     validateEventsType: ValidateEventsType = 'IMMEDIATELY',
     private storageMaxSize?: number,
-    private cacheStrategy?: CacheStrategy
+    private cacheStrategy?: CacheStrategy,
+    private cachePriority?: CachePriority
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -199,7 +203,11 @@ export class MessageHandler {
     // 退避は保存後の付随処理であり、失敗してもレスポンス/配信に影響させない
     if (result.stored && this.storageMaxSize !== undefined && this.storageMaxSize > 0) {
       try {
-        await this.storage.enforceLimit?.(this.storageMaxSize, this.cacheStrategy);
+        await this.storage.enforceLimit?.(
+          this.storageMaxSize,
+          this.cacheStrategy,
+          this.cachePriority
+        );
       } catch (error) {
         logger.error('Failed to enforce storage limit:', error);
       }
@@ -236,6 +244,18 @@ export class MessageHandler {
    */
   setUpstreamCoordinator(coordinator: UpstreamCoordinator): void {
     this.upstreamCoordinator = coordinator;
+  }
+
+  /**
+   * Replace the cache priority config at runtime. Called by
+   * {@link NostrCacheRelay.setCachePriority} with an already-normalized
+   * config; takes effect from the next stored event's eviction pass.
+   *
+   * @param priority New priority config (normalized hex), or undefined to
+   *   clear
+   */
+  setCachePriority(priority?: CachePriority): void {
+    this.cachePriority = priority;
   }
 
   /**

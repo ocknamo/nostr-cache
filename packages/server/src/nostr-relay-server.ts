@@ -34,6 +34,10 @@ interface NostrRelayServerOptions {
     maxSize?: number;
     // 退避戦略（FIFO: 作成が古い順 / LRU: 読み出しが古い順 / LFU: 読み出し頻度が低い順）
     cacheStrategy?: CacheStrategy;
+    // キャッシュ優先度。指定 pubkey（npub / hex）の発行イベントと指定 kind の
+    // イベントは maxSize 超過時に最後まで残り、TTL スイープの対象外になる
+    // （maxSize は常に厳守）。不正な npub はコンストラクタで例外を投げる
+    cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
 
   // リレー設定（NostrCacheRelayに渡すオプション）
@@ -107,6 +111,7 @@ export class NostrRelayServer {
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
       storageMaxSize: this.options.storageOptions?.maxSize,
       cacheStrategy: this.options.storageOptions?.cacheStrategy,
+      cachePriority: this.options.storageOptions?.cachePriority,
       ttl: this.options.relay?.ttl,
       ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',
@@ -206,5 +211,20 @@ export class NostrRelayServer {
    */
   getPort(): number {
     return this.options.port;
+  }
+
+  /**
+   * キャッシュ優先度設定を実行時に差し替える（再起動不要）。
+   * pubkey は npub / hex どちらでも指定でき、不正な値は例外を投げて現行設定を
+   * 維持する。undefined（または空設定）で全ルールを解除。新しいルールは
+   * 次回の退避・TTL スイープから反映される（退避済みイベントは戻らない）。
+   *
+   * @param input 新しい優先度設定。undefined で解除
+   */
+  setCachePriority(input?: { pubkeys?: string[]; kinds?: number[] }): void {
+    // relay 側の検証が通ってから自身の options も同期する（将来 relay を
+    // 再生成するコードが入っても旧設定が復活しないように）
+    this.relay.setCachePriority(input);
+    this.options.storageOptions = { ...this.options.storageOptions, cachePriority: input };
   }
 }

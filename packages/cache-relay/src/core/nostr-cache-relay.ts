@@ -29,6 +29,7 @@ import {
   DEFAULT_MAX_EVENTS,
   LOCAL_CLIENT_ID,
   type NostrRelayOptions,
+  normalizeCachePriority,
   resolveRelayOptions,
 } from './relay-options.js';
 import { SubscriptionManager } from './subscription-manager.js';
@@ -100,7 +101,8 @@ export class NostrCacheRelay {
       this.options.validateEventsType ?? 'IMMEDIATELY',
       // 保存後のストレージ上限退避（transport 経由 EVENT）
       this.options.storageMaxSize,
-      this.options.cacheStrategy
+      this.options.cacheStrategy,
+      this.options.cachePriority
     );
 
     // TTL 設定時はバックグラウンドの定期パージを用意する。
@@ -109,6 +111,7 @@ export class NostrCacheRelay {
       this.expiryReaper = new ExpiryReaper(storage, {
         ttlSeconds: this.options.ttl,
         intervalSeconds: this.options.ttlSweepInterval,
+        priority: this.options.cachePriority,
       });
     }
 
@@ -121,6 +124,30 @@ export class NostrCacheRelay {
     });
 
     this.setupTransportHandlers();
+  }
+
+  /**
+   * Replace the cache priority config at runtime.
+   *
+   * Pubkeys are accepted as `npub1...` or 64-char hex (normalized to hex, as
+   * at construction time); invalid input throws and leaves the current config
+   * unchanged. Pass `undefined` (or an empty config) to clear all rules.
+   *
+   * Because priority is evaluated at eviction / TTL-sweep time (nothing is
+   * persisted per event), the new rules take full effect from the next
+   * eviction pass and the next TTL sweep — no backfill needed. Events already
+   * evicted or expired under the old rules are not restored.
+   *
+   * @param input New priority config (pubkeys as npub or hex), or undefined
+   *   to clear
+   * @throws Error naming the offending entry on an invalid pubkey or kind
+   */
+  setCachePriority(input?: { pubkeys?: string[]; kinds?: number[] }): void {
+    // 正規化が throw した場合は現行設定を維持する（先に検証してから反映）
+    const normalized = normalizeCachePriority(input);
+    this.options.cachePriority = normalized;
+    this.messageHandler.setCachePriority(normalized);
+    this.expiryReaper?.setPriority(normalized);
   }
 
   /**
@@ -301,7 +328,11 @@ export class NostrCacheRelay {
     // Eviction is a post-save side effect; never let its failure affect the
     // originating save / notification.
     try {
-      await this.storage.enforceLimit?.(maxSize, this.options.cacheStrategy);
+      await this.storage.enforceLimit?.(
+        maxSize,
+        this.options.cacheStrategy,
+        this.options.cachePriority
+      );
     } catch (error) {
       logger.error('Failed to enforce storage limit:', error);
     }

@@ -10,6 +10,9 @@
 import { MessageHandler } from './core/message-handler.js';
 // Core components
 import { NostrCacheRelay, NostrRelayOptions } from './core/nostr-cache-relay.js';
+// cachePriority 設定の正規化（npub→hex・検証）。setCachePriority へ渡す前の
+// 事前検証に利用できる
+import { normalizeCachePriority } from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
@@ -17,6 +20,8 @@ import { EventHandler } from './event/event-handler.js';
 import { EventValidator } from './event/event-validator.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
+// キャッシュ優先度の判定（Dexie 非依存の純関数）
+import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './storage/priority.js';
 // Storage
 import {
   CacheStrategy,
@@ -53,6 +58,10 @@ export {
   SaveEventOptions,
   ValidationStatus,
   DexieStorage,
+  type CachePriority,
+  createPriorityMatcher,
+  hasPriorityRules,
+  normalizeCachePriority,
   // Transport
   TransportAdapter,
   WebSocketServerEmulator,

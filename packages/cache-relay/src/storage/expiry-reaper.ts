@@ -8,6 +8,7 @@
  */
 
 import { logger } from '@nostr-cache/shared';
+import type { CachePriority } from './priority.js';
 import type { StorageAdapter } from './storage-adapter.js';
 
 /** Default interval between TTL sweeps, in seconds. */
@@ -21,6 +22,8 @@ export interface ExpiryReaperOptions {
   ttlSeconds: number;
   /** Interval between sweeps, in seconds. Defaults to 60. */
   intervalSeconds?: number;
+  /** Cache priority config; matching events are exempt from the sweep. */
+  priority?: CachePriority;
   /** Clock injection for testing (returns current unix time in seconds). */
   now?: () => number;
 }
@@ -31,6 +34,8 @@ export interface ExpiryReaperOptions {
 export class ExpiryReaper {
   private readonly ttlSeconds: number;
   private readonly intervalSeconds: number;
+  /** 実行時に setPriority で差し替え可能（次回スイープから反映） */
+  private priority: CachePriority | undefined;
   private readonly now: () => number;
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Guards against overlapping sweeps. */
@@ -51,6 +56,7 @@ export class ExpiryReaper {
       options.intervalSeconds && options.intervalSeconds > 0
         ? options.intervalSeconds
         : DEFAULT_TTL_SWEEP_INTERVAL;
+    this.priority = options.priority;
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
   }
 
@@ -90,6 +96,17 @@ export class ExpiryReaper {
   }
 
   /**
+   * Replace the cache priority config. Takes effect from the next sweep
+   * (a sweep already in flight keeps the config it started with).
+   *
+   * @param priority New priority config (normalized hex), or undefined to
+   *   clear the exemption
+   */
+  setPriority(priority?: CachePriority): void {
+    this.priority = priority;
+  }
+
+  /**
    * Delete events cached before `now - ttl`.
    *
    * @returns Promise resolving to the number of events deleted
@@ -108,7 +125,10 @@ export class ExpiryReaper {
     }
 
     const threshold = this.now() - this.ttlSeconds;
-    const removed = await this.storage.deleteExpired(threshold);
+    // 優先設定なしのときは従来どおり 1 引数で呼び、呼び出し形を変えない
+    const removed = this.priority
+      ? await this.storage.deleteExpired(threshold, this.priority)
+      : await this.storage.deleteExpired(threshold);
     if (removed > 0) {
       logger.info(`TTL sweep removed ${removed} expired events (older than ${threshold})`);
     }

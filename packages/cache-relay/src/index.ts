@@ -7,6 +7,9 @@
 import { MessageHandler } from './core/message-handler.js';
 // Core components
 import { NostrCacheRelay, NostrRelayOptions } from './core/nostr-cache-relay.js';
+// cachePriority 設定の正規化（npub→hex・検証）。setCachePriority へ渡す前の
+// 事前検証に利用できる
+import { normalizeCachePriority } from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
@@ -18,6 +21,8 @@ import { DexieStorage } from './storage/dexie-storage.js';
 // server パッケージの SQLite アダプタがタグインデックスのセマンティクスを
 // 単一ソース化するために再利用する
 import { getIndexedTags } from './storage/dexie/tag-index.js';
+// キャッシュ優先度の判定。こちらも Dexie 非依存の純関数で SQLite アダプタと共有する
+import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './storage/priority.js';
 // Storage
 import {
   CacheStrategy,
@@ -56,6 +61,10 @@ export {
   ValidationStatus,
   DexieStorage,
   getIndexedTags,
+  type CachePriority,
+  createPriorityMatcher,
+  hasPriorityRules,
+  normalizeCachePriority,
   // Transport
   TransportAdapter,
   WebSocketServer,

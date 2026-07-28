@@ -286,7 +286,46 @@ describe('MessageHandler', () => {
 
           await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
 
-          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO');
+          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', undefined);
+        });
+
+        it('passes the cache priority config to enforceLimit', async () => {
+          const cachePriority = { pubkeys: ['a'.repeat(64)], kinds: [0] };
+          const boundedHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'IMMEDIATELY',
+            100,
+            'FIFO',
+            cachePriority
+          );
+          boundedHandler.onResponse(vi.fn());
+
+          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', cachePriority);
+        });
+
+        it('uses the config replaced via setCachePriority for later events', async () => {
+          const boundedHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'IMMEDIATELY',
+            100,
+            'FIFO',
+            { kinds: [0] }
+          );
+          boundedHandler.onResponse(vi.fn());
+
+          const replaced = { pubkeys: ['b'.repeat(64)], kinds: [3] };
+          boundedHandler.setCachePriority(replaced);
+          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', replaced);
         });
 
         it('does not let an enforceLimit failure break the OK/broadcast of a stored event', async () => {

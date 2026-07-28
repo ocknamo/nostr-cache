@@ -57,6 +57,25 @@ const server = new NostrRelayServer({
 });
 ```
 
+## キャッシュ優先度（環境変数）
+
+特定の pubkey の発行イベントや特定 kind のイベントを優先的にキャッシュに残したい場合は、
+環境変数で指定できます（カンマ区切り。pubkey は `npub1...` / hex どちらでも可）。
+優先イベントは `storageOptions.maxSize` 超過時に最後まで残り（maxSize は厳守）、TTL
+スイープの削除対象外になります。不正な値を指定した場合は起動時にエラーで停止します。
+
+```bash
+# 自分の npub と kind 0（プロフィール）を優先的にキャッシュして起動
+NOSTR_CACHE_PRIORITY_PUBKEYS=npub1... \
+NOSTR_CACHE_PRIORITY_KINDS=0 \
+npm run start:server
+```
+
+プログラムから利用する場合は `storageOptions.cachePriority` を指定します（下記
+「設定オプション」参照）。実行中の差し替えは `server.setCachePriority(input)` で
+行えます（再起動不要。不正値は例外を投げて現行設定を維持し、`undefined` で解除。
+次回の退避・TTL スイープから反映）。
+
 挙動の要点：
 
 - `dbPath` 未指定なら**従来どおり**インメモリで、`stop()` 時にストレージをクリアします。
@@ -91,6 +110,11 @@ interface NostrRelayServerOptions {
     dbName?: string;   // データベース名（既定のインメモリモードのみ）
     dbPath?: string;   // SQLite ファイルパス。指定すると永続化が有効になる（dbName は無視）
     maxSize?: number;  // 最大サイズ
+    cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // maxSize 超過時の退避戦略（デフォルト FIFO）
+    // キャッシュ優先度。指定 pubkey（npub / hex）の発行イベントと指定 kind のイベントは
+    // maxSize 超過時に最後まで残り（maxSize は厳守）、TTL スイープの削除対象外になる。
+    // 不正な npub はコンストラクタで例外
+    cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
 
   // リレー設定
