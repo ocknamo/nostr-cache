@@ -1,6 +1,8 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
+import { matchesAddressIdentifier } from '../event/deletion.js';
+import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
@@ -9,6 +11,7 @@ import { getIndexedTags } from './dexie/tag-index.js';
 import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './priority.js';
 import type {
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
@@ -415,6 +418,76 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         }`
       );
       return false;
+    }
+  }
+
+  /**
+   * Delete the events with the given ids that belong to `pubkey`
+   * (NIP-09 `e` tags).
+   *
+   * The primary-key lookup is narrowed by a filter rather than trusting the
+   * caller, because both restrictions can only be checked against the stored
+   * row: another author's event must never be deleted, and a deletion request
+   * (kind 5) is never deletable — a kind 5 targeting a kind 5 has no effect.
+   *
+   * @param ids Ids of the events to delete
+   * @param pubkey Author of the deletion request
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    try {
+      return await this.events
+        .where('id')
+        .anyOf(ids)
+        .filter((row) => row.pubkey === pubkey && row.kind !== DELETION_EVENT_KIND)
+        .delete();
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by ids: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Delete every version of the addressed event with `created_at <= until`
+   * (NIP-09 `a` tags).
+   *
+   * The `[pubkey+kind+created_at]` index gives the range directly; the `d`
+   * identifier is applied by the shared predicate so Dexie and SQLite read
+   * coordinates the same way.
+   *
+   * @param address Coordinate of the event to delete
+   * @param until Unix timestamp (seconds); versions at or before it are deleted
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
+    // 座標が指せない kind は呼び出し側で弾いているが、kind 5 の削除だけは
+    // 到達しても効果を持たないことを保証する
+    if (address.kind === DELETION_EVENT_KIND) {
+      return 0;
+    }
+    try {
+      return await this.events
+        .where('[pubkey+kind+created_at]')
+        .between(
+          [address.pubkey, address.kind, Dexie.minKey],
+          [address.pubkey, address.kind, until],
+          true,
+          true
+        )
+        .filter((row) => matchesAddressIdentifier(row.tags, address))
+        .delete();
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by address: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
     }
   }
 }

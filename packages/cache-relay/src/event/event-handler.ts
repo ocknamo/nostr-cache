@@ -8,6 +8,13 @@ import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { applyDeletionRequest } from './deletion.js';
+import {
+  isAddressableKind,
+  isDeletionKind,
+  isEphemeralKind,
+  isReplaceableKind,
+} from './event-kind.js';
 import { EventValidator } from './event-validator.js';
 
 /** How events are validated as they enter the relay. */
@@ -60,14 +67,18 @@ export class EventHandler {
     // Decide whether to validate synchronously now.
     // - IMMEDIATELY: always validate up front.
     // - NONE: never validate.
-    // - LAZY: defer validation to the background pass — but only works for
-    //   events we actually store (invalid ones are deleted later). Ephemeral
-    //   events are never persisted, so there is nothing to delete after the
-    //   fact; they must be validated synchronously or they would be accepted
-    //   and broadcast without ever being checked.
+    // - LAZY: defer validation to the background pass — but deferring only
+    //   works for effects the background pass can still undo. Two kinds cannot
+    //   wait:
+    //   - ephemeral events are never persisted, so there is nothing to delete
+    //     after the fact; they would be accepted and broadcast unchecked;
+    //   - deletion requests (kind 5) destroy other events on arrival, and no
+    //     later pass can bring them back. Verifying the signature late would
+    //     let anyone wipe an author's cached events with a forged request.
     const mustValidateNow =
       this.validateEventsType === 'IMMEDIATELY' ||
-      (this.validateEventsType === 'LAZY' && this.isEphemeralEvent(event));
+      (this.validateEventsType === 'LAZY' &&
+        (this.isEphemeralEvent(event) || isDeletionKind(event.kind)));
     if (mustValidateNow) {
       try {
         if (!(await this.validator.validate(event))) {
@@ -128,6 +139,24 @@ export class EventHandler {
           message: 'error: addressable event handling failed',
         };
       }
+    } else if (isDeletionKind(event.kind)) {
+      try {
+        // NIP-09: 削除リクエスト自体を保存してから、参照先の削除を適用する
+        const stored = await this.handleDeletionEvent(event);
+        if (!stored) {
+          logger.info('Event storage failed');
+          return { success: false, stored: false, message: 'error: failed to save event' };
+        }
+        const matches = this.subscriptionManager.findMatchingSubscriptions(event);
+        return { success: true, stored, message: 'success', matches };
+      } catch (error) {
+        logger.info('Deletion event handling error:', error);
+        return {
+          success: false,
+          stored: false,
+          message: 'error: deletion event handling failed',
+        };
+      }
     }
 
     // Store the event
@@ -180,8 +209,7 @@ export class EventHandler {
    * @private
    */
   private isReplaceableEvent(event: NostrEvent): boolean {
-    const kind = event.kind;
-    return (kind >= 10000 && kind < 20000) || kind === 0 || kind === 3;
+    return isReplaceableKind(event.kind);
   }
 
   /**
@@ -192,8 +220,7 @@ export class EventHandler {
    * @private
    */
   private isEphemeralEvent(event: NostrEvent): boolean {
-    const kind = event.kind;
-    return kind >= 20000 && kind < 30000;
+    return isEphemeralKind(event.kind);
   }
 
   /**
@@ -204,8 +231,7 @@ export class EventHandler {
    * @private
    */
   private isAddressableEvent(event: NostrEvent): boolean {
-    const kind = event.kind;
-    return kind >= 30000 && kind < 40000;
+    return isAddressableKind(event.kind);
   }
 
   /**
@@ -267,5 +293,32 @@ export class EventHandler {
       logger.info('Error handling addressable event:', error);
       throw error;
     }
+  }
+
+  /**
+   * Handle a NIP-09 deletion request (kind 5): store the request, then delete
+   * the events it references.
+   *
+   * The request is stored first and kept indefinitely — clients that have not
+   * seen it yet still need it, and keeping it lets the deletion be re-applied
+   * whenever the same request arrives again (an upstream echo, a rebroadcast).
+   * It cannot delete itself: `parseDeletionRequest` drops `a` tags naming
+   * kind 5, and the storage adapter never deletes a kind 5 event by id.
+   *
+   * A failure while applying the deletion does not fail the event: the request
+   * is already persisted, so the next arrival retries it.
+   *
+   * @param event Deletion request to handle
+   * @returns Promise resolving to whether the request itself was stored
+   * @private
+   */
+  private async handleDeletionEvent(event: NostrEvent): Promise<boolean> {
+    const stored = await this.storage.saveEvent(event, this.saveOptions());
+    if (!stored) {
+      return false;
+    }
+
+    await applyDeletionRequest(this.storage, event);
+    return true;
   }
 }

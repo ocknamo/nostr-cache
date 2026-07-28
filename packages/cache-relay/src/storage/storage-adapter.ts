@@ -28,6 +28,22 @@ export type CacheStrategy = 'LRU' | 'FIFO' | 'LFU';
 export type ValidationStatus = 'validated' | 'pending' | 'unknown';
 
 /**
+ * Coordinate of a replaceable / addressable event, as carried by a NIP-01
+ * `a` tag (`<kind>:<pubkey>:<d-identifier>`).
+ *
+ * For replaceable kinds (0 / 3 / 10000–19999) the identifier is unused and the
+ * coordinate addresses the single newest event per (pubkey, kind).
+ */
+export interface EventAddress {
+  /** Kind of the addressed event. */
+  kind: number;
+  /** Author of the addressed event (64-char lowercase hex). */
+  pubkey: string;
+  /** `d` tag value; empty string for replaceable kinds. */
+  identifier: string;
+}
+
+/**
  * Options for {@link StorageAdapter.saveEvent}.
  */
 export interface SaveEventOptions {
@@ -138,6 +154,44 @@ export interface StorageAdapter {
     kind: number,
     dTagValue: string
   ): Promise<boolean>;
+
+  /**
+   * Delete the events with the given ids, restricted to a single author.
+   * Backs the `e` tags of a NIP-09 deletion request.
+   *
+   * Implementations MUST enforce two rules of the spec themselves, since the
+   * caller cannot see the stored rows:
+   * - only events whose `pubkey` equals `pubkey` are deleted (a deletion
+   *   request may never delete another author's events);
+   * - deletion request events (kind 5) are never deleted — "publishing a
+   *   deletion request event against a deletion request has no effect".
+   *
+   * Ids that are not stored, belong to another author, or name a kind 5 event
+   * are skipped silently.
+   *
+   * @param ids Ids of the events to delete
+   * @param pubkey Author of the deletion request; only their events are deleted
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number>;
+
+  /**
+   * Delete every stored version of a replaceable / addressable event at
+   * `address` whose `created_at` is at or before `until`. Backs the `a` tags
+   * of a NIP-09 deletion request ("relays SHOULD delete all versions of the
+   * replaceable event up to the `created_at` timestamp of the deletion request
+   * event"), so a version published after the request survives.
+   *
+   * For addressable kinds (30000–39999) the `d` tag value must equal
+   * `address.identifier` (a missing `d` tag counts as the empty identifier);
+   * for replaceable kinds the identifier is ignored.
+   *
+   * @param address Coordinate of the event to delete (kind / pubkey / d value)
+   * @param until Unix timestamp (seconds); versions with `created_at <= until`
+   *   are deleted
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  deleteEventsByAddress(address: EventAddress, until: number): Promise<number>;
 
   /**
    * Delete all events cached (saved to storage) before the given timestamp.

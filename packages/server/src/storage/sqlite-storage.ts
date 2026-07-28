@@ -8,17 +8,38 @@ import type * as nodeSqlite from 'node:sqlite';
 import type {
   CachePriority,
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
 } from '@nostr-cache/cache-relay';
-import { filterUtils, getIndexedTags, hasPriorityRules } from '@nostr-cache/cache-relay';
+import {
+  DELETION_EVENT_KIND,
+  filterUtils,
+  getIndexedTags,
+  hasPriorityRules,
+  matchesAddressIdentifier,
+} from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { logger } from '@nostr-cache/shared';
 // drizzle-orm 本体と sqlite-core は node:sqlite をロードしないため静的 import で安全。
 // ドライバ（drizzle-orm/node-sqlite）だけは node:sqlite を即ロードするため、
 // open() 内で遅延ロードする（下記 requireModule 参照）
-import { type SQL, and, asc, count, desc, eq, inArray, lt, not, or, sql } from 'drizzle-orm';
+import {
+  type SQL,
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  lt,
+  lte,
+  ne,
+  not,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
 import { buildFilterQuery, hasInvalidTagFilter } from './sqlite/query-builder.js';
 import {
@@ -624,6 +645,108 @@ export class SqliteStorage implements StorageAdapter {
         }`
       );
       return false;
+    }
+  }
+
+  /**
+   * Delete the events with the given ids that belong to `pubkey`
+   * (NIP-09 `e` tags).
+   *
+   * Both restrictions are enforced in SQL against the stored row, since the
+   * caller cannot see it: another author's event must never be deleted, and a
+   * deletion request (kind 5) is never deletable. Mirrors the Dexie
+   * implementation.
+   *
+   * @param ids Ids of the events to delete
+   * @param pubkey Author of the deletion request
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    try {
+      // 複数チャンクでも Dexie の単一 delete と同じく全件原子的に削除する
+      return this.inTransaction(() => {
+        let deleted = 0;
+        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+          const { changes } = this.db
+            .delete(events)
+            .where(
+              and(
+                inArray(events.id, part),
+                eq(events.pubkey, pubkey),
+                ne(events.kind, DELETION_EVENT_KIND)
+              )
+            )
+            .run();
+          deleted += Number(changes);
+        }
+        return deleted;
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by ids: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Delete every version of the addressed event with `created_at <= until`
+   * (NIP-09 `a` tags).
+   *
+   * The `d` identifier is matched against the full `tags` JSON (not
+   * `event_tags`) so the 100-entry tag index cap cannot change the outcome —
+   * the same reason {@link deleteEventsByPubkeyKindAndDTag} does. The
+   * predicate itself is cache-relay's, shared with the Dexie adapter.
+   *
+   * @param address Coordinate of the event to delete
+   * @param until Unix timestamp (seconds); versions at or before it are deleted
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
+    // 座標が指せない kind は呼び出し側で弾いているが、kind 5 の削除だけは
+    // 到達しても効果を持たないことを保証する
+    if (address.kind === DELETION_EVENT_KIND) {
+      return 0;
+    }
+    try {
+      const rows = this.db
+        .select({ id: events.id, tags: events.tags })
+        .from(events)
+        .where(
+          and(
+            eq(events.pubkey, address.pubkey),
+            eq(events.kind, address.kind),
+            lte(events.createdAt, until)
+          )
+        )
+        .all();
+
+      const idsToDelete = rows
+        .filter((row) => matchesAddressIdentifier(JSON.parse(row.tags) as string[][], address))
+        .map((row) => row.id);
+
+      if (idsToDelete.length === 0) {
+        return 0;
+      }
+
+      return this.inTransaction(() => {
+        let deleted = 0;
+        for (const part of chunk(idsToDelete, ID_CHUNK_SIZE)) {
+          const { changes } = this.db.delete(events).where(inArray(events.id, part)).run();
+          deleted += Number(changes);
+        }
+        return deleted;
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by address: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
     }
   }
 

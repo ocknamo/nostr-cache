@@ -13,7 +13,26 @@ import { normalizeCachePriority } from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
+import {
+  type DeletionRequest,
+  applyDeletionRequest,
+  isDeletionEvent,
+  // 座標の d 識別子判定。Dexie 非依存の純関数で、SQLite アダプタが NIP-09 の
+  // `a` タグ解釈を単一ソース化するために再利用する
+  matchesAddressIdentifier,
+  parseAddress,
+  parseDeletionRequest,
+} from './event/deletion.js';
 import { EventHandler } from './event/event-handler.js';
+// NIP-01 の kind レンジ判定。イベントパイプラインと両ストレージアダプタで共有する
+import {
+  DELETION_EVENT_KIND,
+  isAddressableKind,
+  isCoordinateAddressableKind,
+  isDeletionKind,
+  isEphemeralKind,
+  isReplaceableKind,
+} from './event/event-kind.js';
 import { EventValidator } from './event/event-validator.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
@@ -26,6 +45,7 @@ import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './s
 // Storage
 import {
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
@@ -54,9 +74,24 @@ export {
   // Event
   EventHandler,
   EventValidator,
+  // Event kinds (NIP-01 ranges)
+  DELETION_EVENT_KIND,
+  isReplaceableKind,
+  isEphemeralKind,
+  isAddressableKind,
+  isDeletionKind,
+  isCoordinateAddressableKind,
+  // Deletion requests (NIP-09)
+  type DeletionRequest,
+  isDeletionEvent,
+  parseAddress,
+  parseDeletionRequest,
+  matchesAddressIdentifier,
+  applyDeletionRequest,
   // Storage
   StorageAdapter,
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   ValidationStatus,
   DexieStorage,

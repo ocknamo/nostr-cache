@@ -1061,6 +1061,149 @@ describe('SqliteStorage', () => {
     });
   });
 
+  describe('deleteEventsByIdsForPubkey (NIP-09 e tags)', () => {
+    const AUTHOR = 'a'.repeat(64);
+    const OTHER_AUTHOR = 'b'.repeat(64);
+
+    const event = (id: string, pubkey = AUTHOR, kind = 1): NostrEvent => ({
+      id,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [],
+      content: 'content',
+      sig: 'sig',
+    });
+
+    it('should delete the referenced events of that author', async () => {
+      await storage.saveEvent(event('one'));
+      await storage.saveEvent(event('two'));
+      await storage.saveEvent(event('three'));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['one', 'three'], AUTHOR)).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id);
+      expect(remaining).toEqual(['two']);
+    });
+
+    it('should never delete another author’s event', async () => {
+      await storage.saveEvent(event('mine'));
+      await storage.saveEvent(event('theirs', OTHER_AUTHOR));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['mine', 'theirs'], AUTHOR)).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id);
+      expect(remaining).toEqual(['theirs']);
+    });
+
+    it('should never delete a deletion request', async () => {
+      // NIP-09: 削除リクエストに対する削除リクエストは効果を持たない
+      await storage.saveEvent(event('earlier-deletion', AUTHOR, 5));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['earlier-deletion'], AUTHOR)).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+
+    it('should ignore ids that are not stored', async () => {
+      await storage.saveEvent(event('stored'));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['stored', 'missing'], AUTHOR)).toBe(1);
+    });
+
+    it('should return 0 for an empty id list', async () => {
+      await storage.saveEvent(event('stored'));
+
+      expect(await storage.deleteEventsByIdsForPubkey([], AUTHOR)).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+  });
+
+  describe('deleteEventsByAddress (NIP-09 a tags)', () => {
+    const AUTHOR = 'a'.repeat(64);
+    const OTHER_AUTHOR = 'b'.repeat(64);
+
+    const versioned = (
+      id: string,
+      createdAt: number,
+      kind = 30023,
+      identifier = 'slug',
+      pubkey = AUTHOR
+    ): NostrEvent => ({
+      id,
+      pubkey,
+      created_at: createdAt,
+      kind,
+      tags: [['d', identifier]],
+      content: 'content',
+      sig: 'sig',
+    });
+
+    it('should delete every version up to and including the request time', async () => {
+      await storage.saveEvent(versioned('v1', 100));
+      await storage.saveEvent(versioned('v2', 200));
+      await storage.saveEvent(versioned('v3', 300));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        200
+      );
+
+      // created_at <= until のみ削除。リクエストより後の版 (v3) は残る
+      expect(removed).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [30023] }])).map((e) => e.id);
+      expect(remaining).toEqual(['v3']);
+    });
+
+    it('should only delete versions with a matching d tag', async () => {
+      await storage.saveEvent(versioned('target', 100, 30023, 'slug'));
+      await storage.saveEvent(versioned('other-slug', 100, 30023, 'another'));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [30023] }])).map((e) => e.id);
+      expect(remaining).toEqual(['other-slug']);
+    });
+
+    it('should ignore the d tag for replaceable kinds', async () => {
+      await storage.saveEvent(versioned('profile', 100, 0, 'ignored'));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 0, pubkey: AUTHOR, identifier: '' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+    });
+
+    it('should never delete another author’s versions', async () => {
+      await storage.saveEvent(versioned('mine', 100));
+      await storage.saveEvent(versioned('theirs', 100, 30023, 'slug', OTHER_AUTHOR));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [30023] }])).map((e) => e.id);
+      expect(remaining).toEqual(['theirs']);
+    });
+
+    it('should never delete deletion requests', async () => {
+      await storage.saveEvent(versioned('a-deletion', 100, 5, 'slug'));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 5, pubkey: AUTHOR, identifier: 'slug' },
+        1000
+      );
+
+      expect(removed).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+  });
+
   describe('deleteExpired', () => {
     it('should delete only events cached strictly before the threshold', async () => {
       const nowSpy = vi.spyOn(Date, 'now');

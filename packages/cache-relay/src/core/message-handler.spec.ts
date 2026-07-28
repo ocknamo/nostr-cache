@@ -18,6 +18,8 @@ describe('MessageHandler', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
+    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
     count: vi.fn().mockResolvedValue(0),
     enforceLimit: vi.fn().mockResolvedValue(0),
     getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
@@ -729,6 +731,27 @@ describe('MessageHandler', () => {
 
       expect(result).toEqual({ success: false, stored: false });
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('ingestUpstreamEvent applies a deletion request from upstream (NIP-09)', async () => {
+      // 上流で削除されたイベントを配信し続けないよう、backfill 経路にも
+      // 同じ NIP-09 処理を通す
+      const noneHandler = new MessageHandler(mockStorage, mockSubscriptionManager, 20, 500, 'NONE');
+      const target = 'd'.repeat(64);
+      const deletion: NostrEvent = {
+        ...sampleEvent,
+        id: 'upstream-deletion',
+        kind: 5,
+        tags: [['e', target]],
+      };
+
+      const result = await noneHandler.ingestUpstreamEvent(deletion);
+
+      expect(result).toEqual({ success: true, stored: true });
+      expect(mockStorage.deleteEventsByIdsForPubkey).toHaveBeenCalledWith(
+        [target],
+        deletion.pubkey
+      );
     });
   });
 });

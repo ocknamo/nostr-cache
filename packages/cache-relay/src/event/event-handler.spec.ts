@@ -18,6 +18,8 @@ describe('EventHandler', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
+    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
   } as unknown as Mocked<StorageAdapter>;
 
   // Mock subscription manager
@@ -337,6 +339,93 @@ describe('EventHandler', () => {
 
       await expect(eventHandler['handleAddressableEvent'](addressableEvent)).rejects.toThrow();
       expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalled();
+    });
+  });
+
+  describe('deletion requests (NIP-09)', () => {
+    const AUTHOR = 'a'.repeat(64);
+    const TARGET_ID = '1'.repeat(64);
+
+    const deletionEvent: NostrEvent = {
+      id: 'deletion-id',
+      pubkey: AUTHOR,
+      created_at: 1700000000,
+      kind: 5,
+      tags: [
+        ['e', TARGET_ID],
+        ['a', `30023:${AUTHOR}:slug`],
+        ['k', '1'],
+      ],
+      content: 'published by accident',
+      sig: 'xyz',
+    };
+
+    beforeEach(() => {
+      // 先行する describe が差し替えた実装（例外送出）を戻す
+      mockEventValidator.validate.mockResolvedValue(true);
+      mockStorage.saveEvent.mockResolvedValue(true);
+      mockSubscriptionManager.findMatchingSubscriptions.mockReturnValue(new Map());
+    });
+
+    it('should store the deletion request and apply it', async () => {
+      const result = await eventHandler.handleEvent(deletionEvent);
+
+      expect(result.success).toBe(true);
+      expect(result.stored).toBe(true);
+      // リクエスト自体は保存する（クライアントへの配信と再適用のため）
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(deletionEvent, { validated: true });
+      expect(mockStorage.deleteEventsByIdsForPubkey).toHaveBeenCalledWith([TARGET_ID], AUTHOR);
+      expect(mockStorage.deleteEventsByAddress).toHaveBeenCalledWith(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        deletionEvent.created_at
+      );
+      expect(mockSubscriptionManager.findMatchingSubscriptions).toHaveBeenCalledWith(deletionEvent);
+    });
+
+    it('should not apply the deletion when the request could not be stored', async () => {
+      mockStorage.saveEvent.mockResolvedValueOnce(false);
+
+      const result = await eventHandler.handleEvent(deletionEvent);
+
+      expect(result.success).toBe(false);
+      expect(result.stored).toBe(false);
+      expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
+    });
+
+    it('should still accept the request when applying the deletion fails', async () => {
+      // 削除の適用に失敗してもリクエストは保存済みで、再受信時に再適用される
+      mockStorage.deleteEventsByIdsForPubkey.mockRejectedValueOnce(new Error('Delete error'));
+
+      const result = await eventHandler.handleEvent(deletionEvent);
+
+      expect(result.success).toBe(true);
+      expect(result.stored).toBe(true);
+    });
+
+    it('should verify the signature up front even in LAZY mode', async () => {
+      // 削除は取り消せないため、LAZY でも同期検証する
+      const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+      // @ts-ignore - private field access
+      lazyHandler.validator = mockEventValidator;
+      mockEventValidator.validate.mockResolvedValueOnce(false);
+
+      const result = await lazyHandler.handleEvent(deletionEvent);
+
+      expect(mockEventValidator.validate).toHaveBeenCalledWith(deletionEvent);
+      expect(result.success).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+      expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
+    });
+
+    it('should not validate regular events up front in LAZY mode', async () => {
+      const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+      // @ts-ignore - private field access
+      lazyHandler.validator = mockEventValidator;
+
+      await lazyHandler.handleEvent(regularEvent);
+
+      expect(mockEventValidator.validate).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent, { validated: false });
     });
   });
 });

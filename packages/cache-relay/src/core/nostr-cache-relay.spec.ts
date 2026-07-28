@@ -18,6 +18,8 @@ describe('NostrCacheRelay', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
+    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
     count: vi.fn().mockResolvedValue(0),
     deleteExpired: vi.fn().mockResolvedValue(0),
     enforceLimit: vi.fn().mockResolvedValue(0),
@@ -133,6 +135,62 @@ describe('NostrCacheRelay', () => {
       const result = await relay.publishEvent(sampleEvent);
 
       expect(result).toBe(false);
+    });
+
+    it('should apply a published deletion request (NIP-09)', async () => {
+      // in-process の publishEvent は EventHandler を経由しないため、
+      // transport 経由 EVENT と同じ削除適用がここにも必要
+      const noneRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
+      });
+      const target = 'd'.repeat(64);
+      const deletion: NostrEvent = {
+        ...sampleEvent,
+        id: 'deletion-id',
+        kind: 5,
+        tags: [['e', target]],
+      };
+
+      await noneRelay.publishEvent(deletion);
+
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(deletion, { validated: false });
+      expect(mockStorage.deleteEventsByIdsForPubkey).toHaveBeenCalledWith(
+        [target],
+        deletion.pubkey
+      );
+    });
+
+    it('should not apply a deletion request that failed to save', async () => {
+      const noneRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
+      });
+      (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
+
+      await noneRelay.publishEvent({
+        ...sampleEvent,
+        kind: 5,
+        tags: [['e', 'd'.repeat(64)]],
+      });
+
+      expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
+    });
+
+    it('should verify a deletion request up front even in LAZY mode', async () => {
+      // 削除は取り消せないため、LAZY でも同期検証して不正な署名を弾く
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      // 署名が sampleEvent のままなので kind 5 に書き換えると検証に失敗する
+      const result = await lazyRelay.publishEvent({
+        ...sampleEvent,
+        kind: 5,
+        tags: [['e', 'd'.repeat(64)]],
+      });
+
+      expect(result).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+      expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
     });
 
     it('should enforce the storage limit after a save when storageMaxSize is set', async () => {

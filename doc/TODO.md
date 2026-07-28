@@ -208,19 +208,49 @@ web-client は 2026-07 に廃棄した）
 
 ## 優先度: 中（NIP 対応の拡張 — 2026-07 の棚卸しで追加）
 
-現在サポートしているのは NIP-01 と NIP-02（kind 3 を replaceable として扱う範囲）のみ。
+現在サポートしているのは NIP-01・NIP-02（kind 3 を replaceable として扱う範囲）・NIP-09。
 以下はコードを読んで未対応であることを確認した項目で、いずれも「リレーとしての正しさ」
 または「キャッシュとしての正しさ」に効く。
 
-- [ ] **NIP-09（イベント削除・kind 5）の対応**
-  - 現状: `event/event-handler.ts` の分岐は ephemeral（20000番台）/ replaceable（10000番台・0・3）/
-    addressable（30000番台）のみで、kind 5 は通常イベントとしてそのまま保存されるだけ。
-    削除対象イベント（`e` タグ / `a` タグで指す先）はストレージに残り続け、REQ にも応答し続ける
-  - キャッシュ用途では影響が大きい: 上流リレーで削除されたイベントを、ローカルキャッシュが
-    そのまま配信し続けることになる。透過キャッシュとしての正しさに直結する
-  - 実装時の論点: 削除は「同一 `pubkey` のイベントのみ削除可」の制約が必要。削除イベント自体は
-    保存する（再受信時の再適用・上流への転送のため）。上流から流れてきた kind 5
-    （`MessageHandler.ingestUpstreamEvent` 経路）にも同じ処理を通す必要がある
+- [x] **NIP-09（イベント削除・kind 5）の対応**（2026-07）
+  - NIP-01 の kind レンジ判定を `event/event-kind.ts`（依存なしの純関数）へ切り出し、
+    `EventHandler` の private 判定メソッド 3 つと両ストレージアダプタで単一ソース化。
+    NIP-09 の解析・適用は `event/deletion.ts`（`parseDeletionRequest` / `applyDeletionRequest` /
+    座標判定 `matchesAddressIdentifier`）。仕様は [doc/nips/nip-09.md](./nips/nip-09.md)
+  - `StorageAdapter` に 2 メソッドを追加（`DexieStorage` / `SqliteStorage` の両方で実装）:
+    - `deleteEventsByIdsForPubkey(ids, pubkey)`（`e` タグ）: Dexie は主キー `anyOf` +
+      filter、SQLite は `IN` + `pubkey =` + `kind != 5` を SQL で
+    - `deleteEventsByAddress(address, until)`（`a` タグ）: Dexie は
+      `[pubkey+kind+created_at]` インデックスの範囲削除、SQLite は select → JS 判定 → 削除
+      （`d` タグはタグインデックスの 100 件キャップを避けるため `tags` JSON で照合）
+  - 仕様上の 2 つの制約は**ストレージ側で保証**する。呼び出し側は保存済みの行（対象の
+    pubkey / kind）を見られないため: ①`pubkey` が一致する行のみ削除、②kind 5 は決して
+    削除しない（削除リクエストに対する削除リクエストは効果を持たない）
+  - `a` タグは置換可能 / アドレサブル kind にのみ適用する。`1:<pubkey>:` のような通常 kind の
+    座標を受理すると「この著者の kind 1 を全削除」になるため、解析段階で落とす
+  - `a` タグの削除は `created_at <= 削除リクエストの created_at` の版のみ（リクエスト後に
+    公開された版は残る）。`e` タグには時刻制約は無い
+  - **削除は取り消せないため、`validateEventsType: 'LAZY'` でも kind 5 は同期検証**する
+    （ephemeral と同じ理由。後追いで復元できない破壊的操作を未検証で実行させない）。
+    transport 経由（`EventHandler`）と in-process（`NostrCacheRelay.publishEvent`）の両方に適用
+  - 削除リクエスト自体は保存し、配信し続ける（まだ受け取っていないクライアントのため／
+    再受信時に再適用できるようにするため）。上流へのライトスルー転送も既存経路で機能する
+  - 上流から流れてきた kind 5（`MessageHandler.ingestUpstreamEvent` 経路）も
+    `ingestEvent` → `EventHandler.handleEvent` を通るため同じ処理が適用される
+  - テスト: `event/deletion.spec.ts`（19 件）、`event-handler.spec.ts` / `message-handler.spec.ts` /
+    `nostr-cache-relay.spec.ts` への追加、`dexie-storage.spec.ts` / `sqlite-storage.spec.ts` に
+    対になるストレージテスト（各 10 件）、`packages/server/tests/integration/nip09.spec.ts`
+    （実 WebSocket + 実署名で 9 件）
+- [ ] **削除済みイベントの「復活」防止**（NIP-09 の残課題）
+  - 現状: 削除リクエストを適用した後に、同じイベントが別経路から再び届くと再保存される。
+    具体的には、削除を反映していない上流リレーからのリードスルー充填、クライアントの再送
+  - 対策の方向: 保存時に「その id（または座標 + `created_at`）を対象とする kind 5 が
+    同一 pubkey から保存済みか」を引く。`e` タグはタグインデックス済みなので
+    `{kinds:[5], authors:[pubkey], '#e':[id]}` 相当で引けるが、**保存のホットパスに
+    クエリが 1 回増える**うえ、`getEvents` は LRU/LFU のアクセス追跡を伴うため
+    そのままは使えない（追跡しない専用の参照が要る）
+  - 着手時はコストを測ってから入れること。現実には「クライアントが全リレーへ kind 5 を
+    ブロードキャストする」運用で大半が防げるため、優先度は本体実装より下
 - [ ] **NIP-40（`expiration` タグ）の対応**
   - 現状: `expiration` タグは完全に無視され、期限切れイベントも保存・配信され続ける
   - `ttl` / `ExpiryReaper`（`cached_at` 基準の定期スイープ）という土台があるため、
@@ -231,6 +261,17 @@ web-client は 2026-07 に廃棄した）
   - server には既にヘルスチェック用の HTTP ポート（`health-server.ts`）があるため、
     そこに相乗りさせれば低コストで実現できる。「サーバで実行すれば普通のリレー」を
     名乗る上では実質必須
+- [ ] `NostrCacheRelay.publishEvent()` を `EventHandler` 経由に統一する
+  - NIP-09 実装時に判明した既存の不整合。`publishEvent()` は `storage.saveEvent()` を直接
+    呼ぶため、transport 経由 `EVENT` では `EventHandler` が行っているイベント種別の処理を
+    まるごと飛ばしている。**in-process で kind 0 / 3 / 10000番台を publish しても古い版が
+    削除されず**（replaceable にならない）、30000番台の d タグ置換も効かず、
+    ephemeral（20000番台）も保存されてしまう
+  - NIP-09 については同じ穴を避けるため `publishEvent()` にも削除適用を明示的に追加したが、
+    種別処理そのものを二重に持つのは筋が悪い。`EventHandler.handleEvent()` に寄せて
+    ローカル購読通知だけを `publishEvent()` 側に残すのが本筋
+  - 破壊的変更ではないが、in-process 経路の**挙動が変わる**（上記のとおり現状が間違っている）
+    ため、単独のタスクとして切り出す
 - [ ] `RelayEventHandler` に `subscriptionId` を伝える（既知の制約の解消）
   - `emit('event')` の実装時に別タスク化した項目。`RelayEventHandler` がイベントのみを
     受け取る型のため、in-process の `subscribe()` を複数使うとどの購読由来のイベントか

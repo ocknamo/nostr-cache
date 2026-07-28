@@ -20,6 +20,8 @@ describe('ExpiryReaper', () => {
       count: vi.fn().mockResolvedValue(0),
       deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
       deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+      deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
+      deleteEventsByAddress: vi.fn().mockResolvedValue(0),
       deleteExpired: vi.fn().mockResolvedValue(0),
       getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
       markValidated: vi.fn().mockResolvedValue(undefined),
