@@ -271,4 +271,16 @@ describe('NostrRelayServer cachePriority option', () => {
     });
     expect(server).toBeDefined();
   });
+
+  it('should allow replacing the priority config at runtime via setCachePriority', () => {
+    const server = new NostrRelayServer({ port: 9999 });
+
+    // npub / hex を受け付け、不正値は例外（現行設定は維持される）
+    server.setCachePriority({
+      pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
+      kinds: [0],
+    });
+    expect(() => server.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(/npub1invalid/);
+    server.setCachePriority(undefined);
+  });
 });

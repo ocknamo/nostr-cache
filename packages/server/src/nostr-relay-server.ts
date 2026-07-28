@@ -212,4 +212,16 @@ export class NostrRelayServer {
   getPort(): number {
     return this.options.port;
   }
+
+  /**
+   * キャッシュ優先度設定を実行時に差し替える（再起動不要）。
+   * pubkey は npub / hex どちらでも指定でき、不正な値は例外を投げて現行設定を
+   * 維持する。undefined（または空設定）で全ルールを解除。新しいルールは
+   * 次回の退避・TTL スイープから反映される（退避済みイベントは戻らない）。
+   *
+   * @param input 新しい優先度設定。undefined で解除
+   */
+  setCachePriority(input?: { pubkeys?: string[]; kinds?: number[] }): void {
+    this.relay.setCachePriority(input);
+  }
 }

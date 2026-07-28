@@ -247,6 +247,18 @@ export class MessageHandler {
   }
 
   /**
+   * Replace the cache priority config at runtime. Called by
+   * {@link NostrCacheRelay.setCachePriority} with an already-normalized
+   * config; takes effect from the next stored event's eviction pass.
+   *
+   * @param priority New priority config (normalized hex), or undefined to
+   *   clear
+   */
+  setCachePriority(priority?: CachePriority): void {
+    this.cachePriority = priority;
+  }
+
+  /**
    * Handle REQ message - creates a new subscription and sends matching events
    *
    * @param clientId ID of the client that sent the message

@@ -49,6 +49,24 @@ describe('ExpiryReaper', () => {
     expect(storage.deleteExpired).toHaveBeenCalledWith(900, priority);
   });
 
+  it('should use the config replaced via setPriority from the next sweep', async () => {
+    const reaper = new ExpiryReaper(storage, {
+      ttlSeconds: 100,
+      priority: { kinds: [0] },
+      now: () => 1000,
+    });
+
+    const replaced = { pubkeys: ['b'.repeat(64)], kinds: [] };
+    reaper.setPriority(replaced);
+    await reaper.sweep();
+    expect(storage.deleteExpired).toHaveBeenLastCalledWith(900, replaced);
+
+    // undefined で解除すると従来どおり 1 引数で呼ばれる
+    reaper.setPriority(undefined);
+    await reaper.sweep();
+    expect(storage.deleteExpired).toHaveBeenLastCalledWith(900);
+  });
+
   it('should be a no-op when ttl is non-positive', async () => {
     const reaper = new ExpiryReaper(storage, { ttlSeconds: 0, now: () => 1000 });
 

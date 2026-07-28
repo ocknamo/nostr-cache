@@ -157,6 +157,18 @@ const relay = new NostrCacheRelay(storage, transport, {
 kind 0 のような置換可能イベントは上書きのたびにアクセス履歴（`access_count` 等）が
 リセットされ LFU で不利になりますが、優先指定すればこの不利は実質無効化されます。
 
+設定は実行時にも差し替えられます（再起動不要）。優先判定は退避・TTL スイープの
+実行時に評価されるため、差し替えた設定は次回の退避・スイープから即座に反映されます
+（すでに退避・削除されたイベントは戻りません）。
+
+```typescript
+// 例: ログインユーザの切り替えに追従して優先 npub を差し替える
+relay.setCachePriority({ pubkeys: [currentUserNpub], kinds: [0] });
+
+// 全ルール解除
+relay.setCachePriority(undefined);
+```
+
 > **注意:**
 > - 優先は**ソフト**です。キャッシュが優先イベントだけで `maxSize` を超えた場合は、
 >   優先イベントも通常の `cacheStrategy` 順で退避されます（`maxSize` は常に厳守）。
@@ -203,6 +215,9 @@ relay.unsubscribe('sub1');
 - `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` — ローカル購読を
   登録し、保存済みの一致イベントを `event` で再生後、`eose` を発火。
 - `unsubscribe(subscriptionId: string): boolean` — ローカル購読を削除。削除できれば `true`。
+- `setCachePriority(input?): void` — キャッシュ優先度設定を実行時に差し替え（`cachePriority`
+  オプションと同形式。npub / hex 可。不正値は例外で現行設定を維持、`undefined` で解除。
+  次回の退避・TTL スイープから反映）。
 - `on(event, callback)` / `off(event, callback)` — イベントリスナの登録・解除。
   イベント種別: `'connect' | 'disconnect' | 'error' | 'event' | 'eose'`。
 

@@ -308,6 +308,26 @@ describe('MessageHandler', () => {
           expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', cachePriority);
         });
 
+        it('uses the config replaced via setCachePriority for later events', async () => {
+          const boundedHandler = new MessageHandler(
+            mockStorage,
+            mockSubscriptionManager,
+            20,
+            500,
+            'IMMEDIATELY',
+            100,
+            'FIFO',
+            { kinds: [0] }
+          );
+          boundedHandler.onResponse(vi.fn());
+
+          const replaced = { pubkeys: ['b'.repeat(64)], kinds: [3] };
+          boundedHandler.setCachePriority(replaced);
+          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+
+          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', replaced);
+        });
+
         it('does not let an enforceLimit failure break the OK/broadcast of a stored event', async () => {
           (mockStorage.enforceLimit as Mock).mockRejectedValueOnce(new Error('evict boom'));
           const subscriptions = new Map([['client2', [{ id: 'sub1', filters: [sampleFilter] }]]]);

@@ -34,7 +34,8 @@ export interface ExpiryReaperOptions {
 export class ExpiryReaper {
   private readonly ttlSeconds: number;
   private readonly intervalSeconds: number;
-  private readonly priority: CachePriority | undefined;
+  /** 実行時に setPriority で差し替え可能（次回スイープから反映） */
+  private priority: CachePriority | undefined;
   private readonly now: () => number;
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Guards against overlapping sweeps. */
@@ -92,6 +93,17 @@ export class ExpiryReaper {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+  }
+
+  /**
+   * Replace the cache priority config. Takes effect from the next sweep
+   * (a sweep already in flight keeps the config it started with).
+   *
+   * @param priority New priority config (normalized hex), or undefined to
+   *   clear the exemption
+   */
+  setPriority(priority?: CachePriority): void {
+    this.priority = priority;
   }
 
   /**

@@ -67,6 +67,7 @@ new NostrCacheRelay(
 | `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` | インプロセス購読を作成し、保存済みイベントを `event` リスナへ再生してから `eose` を発火 / Creates an in-process subscription, replays stored events to `event` listeners, then emits `eose` |
 | `unsubscribe(subscriptionId: string): boolean` | 購読を削除。存在して削除できたら `true` / Removes a subscription; `true` if it existed |
 | `getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>` | イベント id ごとの永続化された署名検証状態（`'validated'` / `'pending'` / `'unknown'`）を一括取得。主キー参照のため高頻度呼び出し可・LRU/LFU のアクセス追跡に影響しない。組み込みクライアントが自前の署名検証を省略してバッジ表示等に使える / Bulk-fetches the persisted signature-verification status per event id. Primary-key lookup — cheap to poll and never counts as a read for LRU/LFU. Lets an embedding client reuse the relay's verification instead of re-verifying |
+| `setCachePriority(input?): void` | キャッシュ優先度設定（`cachePriority` オプションと同形式。pubkey は npub / hex 可）を実行時に差し替える。不正値は例外を投げて現行設定を維持。`undefined` で解除。優先判定は退避・TTL スイープ実行時に評価されるため、次回の退避・スイープから即反映（退避済みイベントは戻らない） / Replaces the cache priority config at runtime (same shape as the `cachePriority` option; pubkeys as npub or hex). Invalid input throws and keeps the current config; pass `undefined` to clear. Priority is evaluated at eviction / TTL-sweep time, so new rules apply from the next pass — already-evicted events are not restored |
 | `on(event, callback): void` | イベントリスナを登録 / Registers an event listener |
 | `off(event, callback): void` | イベントリスナを解除 / Removes an event listener |
 

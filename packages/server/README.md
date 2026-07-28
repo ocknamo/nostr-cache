@@ -72,7 +72,9 @@ npm run start:server
 ```
 
 プログラムから利用する場合は `storageOptions.cachePriority` を指定します（下記
-「設定オプション」参照）。
+「設定オプション」参照）。実行中の差し替えは `server.setCachePriority(input)` で
+行えます（再起動不要。不正値は例外を投げて現行設定を維持し、`undefined` で解除。
+次回の退避・TTL スイープから反映）。
 
 挙動の要点：
 

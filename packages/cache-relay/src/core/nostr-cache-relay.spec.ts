@@ -174,6 +174,57 @@ describe('NostrCacheRelay', () => {
       ).toThrow(/npub1invalid/);
     });
 
+    it('should apply setCachePriority (normalized) to subsequent evictions', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cacheStrategy: 'FIFO',
+      });
+
+      boundedRelay.setCachePriority({
+        // NIP-19 公式テストベクタ
+        pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
+        kinds: [0],
+      });
+      await boundedRelay.publishEvent(sampleEvent);
+
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
+        pubkeys: ['7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e'],
+        kinds: [0],
+      });
+    });
+
+    it('should clear the priority config when setCachePriority is called without rules', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cacheStrategy: 'FIFO',
+        cachePriority: { kinds: [0] },
+      });
+
+      boundedRelay.setCachePriority(undefined);
+      await boundedRelay.publishEvent(sampleEvent);
+
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', undefined);
+    });
+
+    it('should keep the current config when setCachePriority input is invalid', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cacheStrategy: 'FIFO',
+        cachePriority: { kinds: [0] },
+      });
+
+      expect(() => boundedRelay.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(
+        /npub1invalid/
+      );
+      await boundedRelay.publishEvent(sampleEvent);
+
+      // 例外時は反映されず、生成時の設定のまま
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
+        pubkeys: [],
+        kinds: [0],
+      });
+    });
+
     it('should not enforce the storage limit when storageMaxSize is unset', async () => {
       await relay.publishEvent(sampleEvent);
 
