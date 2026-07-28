@@ -254,6 +254,7 @@ const cache = new NostrRelayServer({
 | `getConnectionCount(): number` | 現在の WebSocket 接続数 / Current WebSocket connection count |
 | `getEventCount(): Promise<number>` | 保存済みイベント数 / Number of stored events |
 | `getPort(): number` | 待ち受けポート / The configured port |
+| `setCachePriority(input?): void` | キャッシュ優先度設定（`storageOptions.cachePriority` と同形式。npub / hex 可）を実行時に差し替える。不正値は例外で現行設定を維持、`undefined` で解除。次回の退避・TTL スイープから反映 / Replaces the cache priority config at runtime (same shape as `storageOptions.cachePriority`; npub or hex). Invalid input throws and keeps the current config; `undefined` clears. Applies from the next eviction / TTL sweep |
 
 設定オプションの詳細は [`packages/server/README.md`](../packages/server/README.md) を参照してください。
 See the server README for the full option list.

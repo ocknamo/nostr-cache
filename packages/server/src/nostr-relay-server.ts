@@ -222,6 +222,9 @@ export class NostrRelayServer {
    * @param input 新しい優先度設定。undefined で解除
    */
   setCachePriority(input?: { pubkeys?: string[]; kinds?: number[] }): void {
+    // relay 側の検証が通ってから自身の options も同期する（将来 relay を
+    // 再生成するコードが入っても旧設定が復活しないように）
     this.relay.setCachePriority(input);
+    this.options.storageOptions = { ...this.options.storageOptions, cachePriority: input };
   }
 }

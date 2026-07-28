@@ -274,13 +274,21 @@ describe('NostrRelayServer cachePriority option', () => {
 
   it('should allow replacing the priority config at runtime via setCachePriority', () => {
     const server = new NostrRelayServer({ port: 9999 });
+    // 委譲先の relay まで届くことを検証する（private フィールドへのスパイ）
+    // biome-ignore lint/suspicious/noExplicitAny: テストのため private relay にアクセス
+    const relaySpy = vi.spyOn((server as any).relay, 'setCachePriority');
 
     // npub / hex を受け付け、不正値は例外（現行設定は維持される）
-    server.setCachePriority({
+    const input = {
       pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
       kinds: [0],
-    });
+    };
+    server.setCachePriority(input);
+    expect(relaySpy).toHaveBeenCalledWith(input);
+
     expect(() => server.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(/npub1invalid/);
+
     server.setCachePriority(undefined);
+    expect(relaySpy).toHaveBeenLastCalledWith(undefined);
   });
 });

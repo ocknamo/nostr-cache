@@ -7,6 +7,9 @@
 import { MessageHandler } from './core/message-handler.js';
 // Core components
 import { NostrCacheRelay, NostrRelayOptions } from './core/nostr-cache-relay.js';
+// cachePriority 設定の正規化（npub→hex・検証）。setCachePriority へ渡す前の
+// 事前検証に利用できる
+import { normalizeCachePriority } from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
@@ -61,6 +64,7 @@ export {
   type CachePriority,
   createPriorityMatcher,
   hasPriorityRules,
+  normalizeCachePriority,
   // Transport
   TransportAdapter,
   WebSocketServer,

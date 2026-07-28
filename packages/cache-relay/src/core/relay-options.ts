@@ -92,7 +92,8 @@ export interface NostrRelayOptions {
    * they are evicted by the normal {@link cacheStrategy}, so `storageMaxSize`
    * is always honored) and are exempt from the {@link ttl} sweep.
    *
-   * Invalid pubkeys or kinds throw at relay construction time.
+   * Invalid pubkeys or kinds throw at relay construction time. The config can
+   * also be replaced at runtime via `NostrCacheRelay.setCachePriority()`.
    */
   cachePriority?: { pubkeys?: string[]; kinds?: number[] };
 

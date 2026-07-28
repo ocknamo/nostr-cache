@@ -225,6 +225,26 @@ describe('NostrCacheRelay', () => {
       });
     });
 
+    it('should apply setCachePriority to transport EVENT evictions', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cacheStrategy: 'FIFO',
+      });
+      // relay が transport に登録したメッセージハンドラ（MessageHandler 経路）
+      const onMessage = (mockTransport.onMessage as Mock).mock.calls.at(-1)?.[0];
+
+      boundedRelay.setCachePriority({ kinds: [0] });
+      onMessage('client1', ['EVENT', sampleEvent]);
+
+      // transport 経由の退避（MessageHandler.ingestEvent）にも新設定が届くこと
+      await vi.waitFor(() => {
+        expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
+          pubkeys: [],
+          kinds: [0],
+        });
+      });
+    });
+
     it('should not enforce the storage limit when storageMaxSize is unset', async () => {
       await relay.publishEvent(sampleEvent);
 
@@ -608,6 +628,28 @@ describe('NostrCacheRelay', () => {
       const now = Math.floor(Date.now() / 1000);
       const [[threshold]] = (mockStorage.deleteExpired as Mock).mock.calls;
       expect(threshold).toBeLessThanOrEqual(now - 100);
+
+      await ttlRelay.disconnect();
+    });
+
+    it('should apply setCachePriority to subsequent sweeps', async () => {
+      const ttlRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        ttl: 100,
+        ttlSweepInterval: 30,
+      });
+
+      await ttlRelay.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      // 差し替え前は優先設定なし（1 引数）
+      expect(mockStorage.deleteExpired).toHaveBeenLastCalledWith(expect.any(Number));
+
+      ttlRelay.setCachePriority({ kinds: [0] });
+      await vi.advanceTimersByTimeAsync(30_000);
+      // 次回スイープ（ExpiryReaper 経路）から新設定が反映されること
+      expect(mockStorage.deleteExpired).toHaveBeenLastCalledWith(expect.any(Number), {
+        pubkeys: [],
+        kinds: [0],
+      });
 
       await ttlRelay.disconnect();
     });
