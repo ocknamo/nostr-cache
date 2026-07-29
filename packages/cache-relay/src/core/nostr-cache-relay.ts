@@ -15,6 +15,7 @@ import type {
   RelayErrorHandler,
   RelayEventHandler,
 } from '@nostr-cache/shared';
+import { applyDeletionRequest, isDeletionEvent } from '../event/deletion.js';
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
@@ -275,22 +276,28 @@ export class NostrCacheRelay {
    * @returns Promise resolving to true if successful, false otherwise
    */
   async publishEvent(event: NostrEvent): Promise<boolean> {
-    // Validate the event if enabled
-    if (
-      this.options.validateEventsType === 'IMMEDIATELY' &&
-      !(await this.validator.validate(event))
-    ) {
+    // Validate the event if enabled.
+    // NIP-09 deletion requests destroy other events on arrival and no later
+    // pass can undo that, so they are verified in every mode — `NONE` included,
+    // exactly as EventHandler does on the transport path.
+    const mustValidateNow =
+      isDeletionEvent(event) || this.options.validateEventsType === 'IMMEDIATELY';
+    if (mustValidateNow && !(await this.validator.validate(event))) {
       return false;
     }
 
-    // Save the event to storage. IMMEDIATELY で事前検証を通過した場合のみ
-    // 検証済みとして永続化する。LAZY では pending（validated=0）で保存され、
+    // Save the event to storage. 事前検証を通過したイベントのみ検証済みとして
+    // 永続化する。LAZY では通常イベントは pending（validated=0）で保存され、
     // バックグラウンド検証パスが後から検証・マーク（不正なら削除）する
-    const saved = await this.storage.saveEvent(event, {
-      validated: this.options.validateEventsType === 'IMMEDIATELY',
-    });
+    const saved = await this.storage.saveEvent(event, { validated: mustValidateNow });
 
     if (saved) {
+      // NIP-09: 削除リクエストを保存したら参照先の削除を適用する
+      // （transport 経由の EVENT では EventHandler が同じ処理を行う）
+      if (isDeletionEvent(event)) {
+        await applyDeletionRequest(this.storage, event);
+      }
+
       // ストレージ上限を超えた場合は古いイベントを退避する
       await this.enforceStorageLimit();
 

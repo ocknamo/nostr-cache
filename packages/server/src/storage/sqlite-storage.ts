@@ -8,17 +8,40 @@ import type * as nodeSqlite from 'node:sqlite';
 import type {
   CachePriority,
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
 } from '@nostr-cache/cache-relay';
-import { filterUtils, getIndexedTags, hasPriorityRules } from '@nostr-cache/cache-relay';
+import {
+  DELETION_EVENT_KIND,
+  filterUtils,
+  getAlwaysRetainedKinds,
+  getIndexedTags,
+  hasPriorityRules,
+  isDeletableAddress,
+  matchesAddressIdentifier,
+} from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { logger } from '@nostr-cache/shared';
 // drizzle-orm 本体と sqlite-core は node:sqlite をロードしないため静的 import で安全。
 // ドライバ（drizzle-orm/node-sqlite）だけは node:sqlite を即ロードするため、
 // open() 内で遅延ロードする（下記 requireModule 参照）
-import { type SQL, and, asc, count, desc, eq, inArray, lt, not, or, sql } from 'drizzle-orm';
+import {
+  type SQL,
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  lt,
+  lte,
+  ne,
+  not,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
 import { buildFilterQuery, hasInvalidTagFilter } from './sqlite/query-builder.js';
 import {
@@ -47,22 +70,27 @@ const EVICTION_ORDER: Record<CacheStrategy, SQL[]> = {
 const ID_CHUNK_SIZE = 500;
 
 /**
- * Build the SQL condition matching priority events (pubkey IN (...) OR kind
- * IN (...)), or undefined when the config has no effective rules. Empty lists
+ * Build the SQL condition matching retained events: the configured priority
+ * rules (pubkey IN (...) OR kind IN (...)) plus the kinds that are always
+ * retained regardless of configuration (NIP-09 deletion requests). Empty lists
  * are guarded so an `IN ()` clause is never emitted.
+ *
+ * Always returns a condition — unlike the configured rules, retention applies
+ * even with no `priority` config, so callers must never skip it. Mirrors
+ * cache-relay's `createPriorityMatcher`.
  */
-function priorityCondition(priority?: CachePriority): SQL | undefined {
-  if (!hasPriorityRules(priority)) {
-    return undefined;
+function retentionCondition(priority?: CachePriority): SQL {
+  const conditions: SQL[] = [inArray(events.kind, getAlwaysRetainedKinds())];
+  if (hasPriorityRules(priority)) {
+    if (priority.pubkeys && priority.pubkeys.length > 0) {
+      conditions.push(inArray(events.pubkey, priority.pubkeys));
+    }
+    if (priority.kinds && priority.kinds.length > 0) {
+      conditions.push(inArray(events.kind, priority.kinds));
+    }
   }
-  const conditions: SQL[] = [];
-  if (priority.pubkeys && priority.pubkeys.length > 0) {
-    conditions.push(inArray(events.pubkey, priority.pubkeys));
-  }
-  if (priority.kinds && priority.kinds.length > 0) {
-    conditions.push(inArray(events.kind, priority.kinds));
-  }
-  return or(...conditions);
+  // conditions は常に 1 要素以上なので or() が undefined を返すことはない
+  return or(...conditions) as SQL;
 }
 
 /**
@@ -437,10 +465,9 @@ export class SqliteStorage implements StorageAdapter {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
       const expired = lt(events.cachedAt, olderThan * 1000);
-      const cond = priorityCondition(priority);
       const { changes } = this.db
         .delete(events)
-        .where(cond ? and(expired, not(cond)) : expired)
+        .where(and(expired, not(retentionCondition(priority))))
         .run();
       return Number(changes);
     } catch (error) {
@@ -505,13 +532,13 @@ export class SqliteStorage implements StorageAdapter {
           return 0;
         }
         const excess = total - maxSize;
-        const cond = priorityCondition(priority);
+        const cond = retentionCondition(priority);
 
-        // パス1: 非優先イベントを戦略順で退避する（優先設定なしなら全件対象）
+        // パス1: 非優先イベントを戦略順で退避する
         const victims = this.db
           .select({ id: events.id })
           .from(events)
-          .where(cond ? not(cond) : undefined)
+          .where(not(cond))
           .orderBy(...EVICTION_ORDER[strategy])
           .limit(excess);
         const { changes } = this.db.delete(events).where(inArray(events.id, victims)).run();
@@ -520,7 +547,7 @@ export class SqliteStorage implements StorageAdapter {
         // パス2: 非優先だけで excess に満たない場合、残りは全て優先イベント。
         // フィルタなしの通常順で不足分を退避する（maxSize は常に厳守）
         const remaining = excess - deleted;
-        if (cond && remaining > 0) {
+        if (remaining > 0) {
           const priorityVictims = this.db
             .select({ id: events.id })
             .from(events)
@@ -624,6 +651,111 @@ export class SqliteStorage implements StorageAdapter {
         }`
       );
       return false;
+    }
+  }
+
+  /**
+   * Delete the events with the given ids that belong to `pubkey`
+   * (NIP-09 `e` tags).
+   *
+   * Both restrictions are enforced in SQL against the stored row, since the
+   * caller cannot see it: another author's event must never be deleted, and a
+   * deletion request (kind 5) is never deletable. Mirrors the Dexie
+   * implementation.
+   *
+   * @param ids Ids of the events to delete
+   * @param pubkey Author of the deletion request
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    try {
+      // 複数チャンクでも Dexie の単一 delete と同じく全件原子的に削除する
+      return this.inTransaction(() => {
+        let deleted = 0;
+        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+          const { changes } = this.db
+            .delete(events)
+            .where(
+              and(
+                inArray(events.id, part),
+                eq(events.pubkey, pubkey),
+                ne(events.kind, DELETION_EVENT_KIND)
+              )
+            )
+            .run();
+          deleted += Number(changes);
+        }
+        return deleted;
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by ids: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Delete every version of the addressed event with `created_at <= until`
+   * (NIP-09 `a` tags).
+   *
+   * The `(pubkey, kind, created_at)` index serves the range; the `d`
+   * identifier is then matched against the full `tags` JSON (not `event_tags`)
+   * so the 100-entry tag index cap cannot change the outcome — the same reason
+   * {@link deleteEventsByPubkeyKindAndDTag} does. The predicate itself is
+   * cache-relay's, shared with the Dexie adapter.
+   *
+   * Unlike Dexie's single filtered cursor delete, the select and the delete run
+   * in separate statements (the delete batched in one transaction). Nothing
+   * awaits between them, so no concurrent statement can interleave.
+   *
+   * @param address Coordinate of the event to delete
+   * @param until Unix timestamp (seconds); versions at or before it are deleted
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
+    if (!isDeletableAddress(address, until)) {
+      return 0;
+    }
+    try {
+      const rows = this.db
+        .select({ id: events.id, tags: events.tags })
+        .from(events)
+        .where(
+          and(
+            eq(events.pubkey, address.pubkey),
+            eq(events.kind, address.kind),
+            lte(events.createdAt, until)
+          )
+        )
+        .all();
+
+      const idsToDelete = rows
+        .filter((row) => matchesAddressIdentifier(JSON.parse(row.tags) as string[][], address))
+        .map((row) => row.id);
+
+      if (idsToDelete.length === 0) {
+        return 0;
+      }
+
+      return this.inTransaction(() => {
+        let deleted = 0;
+        for (const part of chunk(idsToDelete, ID_CHUNK_SIZE)) {
+          const { changes } = this.db.delete(events).where(inArray(events.id, part)).run();
+          deleted += Number(changes);
+        }
+        return deleted;
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by address: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
     }
   }
 

@@ -13,7 +13,13 @@ import { normalizeCachePriority } from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
+// 座標の d 識別子判定。Dexie 非依存の純関数で、SQLite アダプタが NIP-09 の
+// `a` タグ解釈を単一ソース化するために再利用する
+import { isDeletableAddress, matchesAddressIdentifier } from './event/deletion.js';
 import { EventHandler } from './event/event-handler.js';
+// NIP-01 の kind レンジ判定。SQLite アダプタが NIP-09 のガード条件を
+// cache-relay と同じ定義で書くために必要なものだけを公開する
+import { DELETION_EVENT_KIND } from './event/event-kind.js';
 import { EventValidator } from './event/event-validator.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
@@ -21,11 +27,17 @@ import { DexieStorage } from './storage/dexie-storage.js';
 // server パッケージの SQLite アダプタがタグインデックスのセマンティクスを
 // 単一ソース化するために再利用する
 import { getIndexedTags } from './storage/dexie/tag-index.js';
-// キャッシュ優先度の判定。こちらも Dexie 非依存の純関数で SQLite アダプタと共有する
-import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './storage/priority.js';
+// キャッシュ保持優先度の判定。こちらも Dexie 非依存の純関数で SQLite アダプタと共有する
+import {
+  type CachePriority,
+  createPriorityMatcher,
+  getAlwaysRetainedKinds,
+  hasPriorityRules,
+} from './storage/priority.js';
 // Storage
 import {
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
@@ -54,9 +66,15 @@ export {
   // Event
   EventHandler,
   EventValidator,
+  // Deletion requests (NIP-09) — storage adapters implement the spec's
+  // "same pubkey only" / "never delete a kind 5" guards themselves
+  DELETION_EVENT_KIND,
+  isDeletableAddress,
+  matchesAddressIdentifier,
   // Storage
   StorageAdapter,
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   ValidationStatus,
   DexieStorage,
@@ -64,6 +82,7 @@ export {
   type CachePriority,
   createPriorityMatcher,
   hasPriorityRules,
+  getAlwaysRetainedKinds,
   normalizeCachePriority,
   // Transport
   TransportAdapter,

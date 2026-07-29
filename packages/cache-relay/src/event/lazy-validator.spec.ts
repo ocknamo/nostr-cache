@@ -39,6 +39,8 @@ describe('LazyValidator', () => {
       count: vi.fn().mockResolvedValue(0),
       deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
       deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+      deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
+      deleteEventsByAddress: vi.fn().mockResolvedValue(0),
       getUnvalidatedEvents: vi
         .fn()
         .mockImplementation((limit: number) => Promise.resolve(pending.slice(0, limit))),

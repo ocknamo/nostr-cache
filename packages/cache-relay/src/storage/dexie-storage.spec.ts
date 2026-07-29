@@ -1140,6 +1140,198 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('deleteEventsByIdsForPubkey (NIP-09 e tags)', () => {
+    const AUTHOR = 'a'.repeat(64);
+    const OTHER_AUTHOR = 'b'.repeat(64);
+
+    const event = (id: string, pubkey = AUTHOR, kind = 1): NostrEvent => ({
+      id,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [],
+      content: 'content',
+      sig: 'sig',
+    });
+
+    it('should delete the referenced events of that author', async () => {
+      await storage.saveEvent(event('one'));
+      await storage.saveEvent(event('two'));
+      await storage.saveEvent(event('three'));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['one', 'three'], AUTHOR)).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id);
+      expect(remaining).toEqual(['two']);
+    });
+
+    it('should never delete another author’s event', async () => {
+      await storage.saveEvent(event('mine'));
+      await storage.saveEvent(event('theirs', OTHER_AUTHOR));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['mine', 'theirs'], AUTHOR)).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1] }])).map((e) => e.id);
+      expect(remaining).toEqual(['theirs']);
+    });
+
+    it('should never delete a deletion request', async () => {
+      // NIP-09: 削除リクエストに対する削除リクエストは効果を持たない
+      await storage.saveEvent(event('earlier-deletion', AUTHOR, 5));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['earlier-deletion'], AUTHOR)).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+
+    it('should ignore ids that are not stored', async () => {
+      await storage.saveEvent(event('stored'));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['stored', 'missing'], AUTHOR)).toBe(1);
+    });
+
+    it('should delete replaceable and addressable events referenced by id', async () => {
+      // e タグは kind を問わず id で指す（a タグのような座標制限は無い）
+      await storage.saveEvent(event('profile', AUTHOR, 0));
+      await storage.saveEvent(event('article', AUTHOR, 30023));
+
+      expect(await storage.deleteEventsByIdsForPubkey(['profile', 'article'], AUTHOR)).toBe(2);
+      expect(await storage.count()).toBe(0);
+    });
+
+    it('should return 0 for an empty id list', async () => {
+      await storage.saveEvent(event('stored'));
+
+      expect(await storage.deleteEventsByIdsForPubkey([], AUTHOR)).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+  });
+
+  describe('deleteEventsByAddress (NIP-09 a tags)', () => {
+    const AUTHOR = 'a'.repeat(64);
+    const OTHER_AUTHOR = 'b'.repeat(64);
+
+    const versioned = (
+      id: string,
+      createdAt: number,
+      kind = 30023,
+      // null で「d タグを持たないイベント」を作る（undefined は既定値に化ける）
+      identifier: string | null = 'slug',
+      pubkey = AUTHOR
+    ): NostrEvent => ({
+      id,
+      pubkey,
+      created_at: createdAt,
+      kind,
+      tags: identifier === null ? [] : [['d', identifier]],
+      content: 'content',
+      sig: 'sig',
+    });
+
+    it('should delete every version up to and including the request time', async () => {
+      await storage.saveEvent(versioned('v1', 100));
+      await storage.saveEvent(versioned('v2', 200));
+      await storage.saveEvent(versioned('v3', 300));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        200
+      );
+
+      // created_at <= until のみ削除。リクエストより後の版 (v3) は残る
+      expect(removed).toBe(2);
+      const remaining = (await storage.getEvents([{ kinds: [30023] }])).map((e) => e.id);
+      expect(remaining).toEqual(['v3']);
+    });
+
+    it('should only delete versions with a matching d tag', async () => {
+      await storage.saveEvent(versioned('target', 100, 30023, 'slug'));
+      await storage.saveEvent(versioned('other-slug', 100, 30023, 'another'));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [30023] }])).map((e) => e.id);
+      expect(remaining).toEqual(['other-slug']);
+    });
+
+    it('should ignore the d tag for replaceable kinds', async () => {
+      await storage.saveEvent(versioned('profile', 100, 0, 'ignored'));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 0, pubkey: AUTHOR, identifier: '' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+    });
+
+    it('should never delete another author’s versions', async () => {
+      await storage.saveEvent(versioned('mine', 100));
+      await storage.saveEvent(versioned('theirs', 100, 30023, 'slug', OTHER_AUTHOR));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [30023] }])).map((e) => e.id);
+      expect(remaining).toEqual(['theirs']);
+    });
+
+    it('should treat a missing d tag as the empty identifier', async () => {
+      await storage.saveEvent(versioned('no-d-tag', 100, 30023, null));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: '' },
+        1000
+      );
+
+      expect(removed).toBe(1);
+      expect(await storage.count()).toBe(0);
+    });
+
+    it('should never delete deletion requests', async () => {
+      await storage.saveEvent(versioned('a-deletion', 100, 5, 'slug'));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 5, pubkey: AUTHOR, identifier: 'slug' },
+        1000
+      );
+
+      expect(removed).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+
+    it('should refuse a coordinate naming a regular kind', async () => {
+      // 公開メソッドなので、解析段階のガードとは別にここでも防ぐ
+      await storage.saveEvent(versioned('note', 100, 1, null));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 1, pubkey: AUTHOR, identifier: '' },
+        1000
+      );
+
+      expect(removed).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+
+    it('should refuse a non-finite until bound', async () => {
+      // IndexedDB のキー順序では文字列が全ての数値より上に並ぶため、
+      // 数値以外の上限を通すと範囲が実質無制限になる
+      await storage.saveEvent(versioned('v1', 100));
+
+      const removed = await storage.deleteEventsByAddress(
+        { kind: 30023, pubkey: AUTHOR, identifier: 'slug' },
+        Number.NaN
+      );
+
+      expect(removed).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+  });
+
   describe('deleteExpired', () => {
     it('should delete only events cached strictly before the threshold', async () => {
       const nowSpy = vi.spyOn(Date, 'now');
@@ -1213,6 +1405,55 @@ describe('DexieStorage', () => {
       expect(removed).toBe(1);
       const remaining = (await storage.getEvents([{ kinds: [0, 1] }])).map((e) => e.id).sort();
       expect(remaining).toEqual(['plain-fresh', 'priority-expired', 'profile-expired']);
+    });
+  });
+
+  describe('retention of deletion requests (NIP-09)', () => {
+    const eventOfKind = (id: string, kind: number, createdAt: number): NostrEvent => ({
+      id,
+      pubkey: 'author',
+      created_at: createdAt,
+      kind,
+      tags: [],
+      content: 'content',
+      sig: 'sig',
+    });
+
+    it('should keep expired deletion requests out of the TTL sweep', async () => {
+      // 削除リクエストが先に消えると、対象イベントが再取得されたときに
+      // 再適用する手段が失われる
+      const nowSpy = vi.spyOn(Date, 'now');
+      nowSpy.mockReturnValue(100_000);
+      await storage.saveEvent(eventOfKind('deletion', 5, 1));
+      await storage.saveEvent(eventOfKind('note', 1, 1));
+      nowSpy.mockRestore();
+
+      const removed = await storage.deleteExpired(200);
+
+      expect(removed).toBe(1);
+      expect((await storage.getEvents([{ kinds: [1, 5] }])).map((e) => e.id)).toEqual(['deletion']);
+    });
+
+    it('should evict deletion requests last under storageMaxSize', async () => {
+      await storage.saveEvent(eventOfKind('deletion', 5, 1));
+      await storage.saveEvent(eventOfKind('old-note', 1, 2));
+      await storage.saveEvent(eventOfKind('new-note', 1, 3));
+
+      // FIFO なら created_at 最小の 'deletion' が最初に退避されるはずだが、
+      // 常時保持の kind なので非優先の 'old-note' が先に退避される
+      expect(await storage.enforceLimit(2, 'FIFO')).toBe(1);
+      const remaining = (await storage.getEvents([{ kinds: [1, 5] }])).map((e) => e.id).sort();
+      expect(remaining).toEqual(['deletion', 'new-note']);
+    });
+
+    it('should still honor storageMaxSize when only deletion requests remain', async () => {
+      await storage.saveEvent(eventOfKind('deletion-1', 5, 1));
+      await storage.saveEvent(eventOfKind('deletion-2', 5, 2));
+      await storage.saveEvent(eventOfKind('deletion-3', 5, 3));
+
+      // 保持は best-effort。退避できるものが他に無ければ maxSize が優先される
+      expect(await storage.enforceLimit(2, 'FIFO')).toBe(1);
+      expect(await storage.count()).toBe(2);
     });
   });
 });

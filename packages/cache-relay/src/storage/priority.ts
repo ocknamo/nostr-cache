@@ -1,9 +1,11 @@
 /**
- * キャッシュ優先度の判定ロジック
+ * キャッシュの保持優先度（退避・TTL スイープからの保護）の判定ロジック
  *
  * Dexie にも SQLite にも依存しない純粋関数として切り出し、両ストレージ実装で
  * 共有する（`dexie/tag-index.ts` と同じパターン）。
  */
+
+import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 
 /**
  * Cache priority configuration.
@@ -25,7 +27,24 @@ export interface CachePriority {
 }
 
 /**
- * Whether the given config contains at least one effective priority rule.
+ * Kinds that are always retained, on top of whatever the user configured.
+ *
+ * NIP-09 deletion requests (kind 5) are the only entry: the spec asks relays to
+ * keep serving them indefinitely, and dropping one also drops this cache's
+ * ability to re-apply the deletion when the deleted event arrives again from an
+ * upstream relay. See [doc/nips/nip-09.md](../../../../doc/nips/nip-09.md).
+ *
+ * Retention is absolute against the TTL sweep and best-effort against
+ * `storageMaxSize` — protected events are evicted last, but `maxSize` still
+ * wins when nothing else is left to evict.
+ */
+const ALWAYS_RETAINED_KINDS: ReadonlySet<number> = new Set([DELETION_EVENT_KIND]);
+
+/**
+ * Whether the given config contains at least one user-configured priority rule.
+ *
+ * Note this says nothing about {@link ALWAYS_RETAINED_KINDS}: retention rules
+ * always apply, so callers must not use this to skip filtering entirely.
  *
  * @param priority Cache priority config (possibly undefined or empty)
  * @returns True when at least one pubkey or kind is listed
@@ -37,16 +56,39 @@ export function hasPriorityRules(priority?: CachePriority): priority is CachePri
 }
 
 /**
- * Build a matcher deciding whether a stored event row is a priority event.
- * Precomputes lookup sets once so the returned function is cheap per row.
+ * Whether a kind is retained regardless of the configured priority rules.
  *
- * @param priority Cache priority config
- * @returns Function returning true for rows matching any priority rule
+ * @param kind Event kind
+ * @returns True if the kind must survive TTL expiry and be evicted last
+ */
+export function isAlwaysRetainedKind(kind: number): boolean {
+  return ALWAYS_RETAINED_KINDS.has(kind);
+}
+
+/**
+ * The kinds that are always retained, for storage backends that express
+ * retention as a query condition rather than a per-row predicate.
+ *
+ * @returns The always-retained kinds
+ */
+export function getAlwaysRetainedKinds(): number[] {
+  return Array.from(ALWAYS_RETAINED_KINDS);
+}
+
+/**
+ * Build a matcher deciding whether a stored event row must be retained —
+ * either because it matches a configured priority rule or because its kind is
+ * always retained. Precomputes lookup sets once so the returned function is
+ * cheap per row.
+ *
+ * @param priority Cache priority config (optional; retention still applies
+ *   without it)
+ * @returns Function returning true for rows that should be retained
  */
 export function createPriorityMatcher(
-  priority: CachePriority
+  priority?: CachePriority
 ): (row: { pubkey: string; kind: number }) => boolean {
-  const pubkeys = new Set(priority.pubkeys ?? []);
-  const kinds = new Set(priority.kinds ?? []);
-  return (row) => pubkeys.has(row.pubkey) || kinds.has(row.kind);
+  const pubkeys = new Set(priority?.pubkeys ?? []);
+  const kinds = new Set(priority?.kinds ?? []);
+  return (row) => isAlwaysRetainedKind(row.kind) || pubkeys.has(row.pubkey) || kinds.has(row.kind);
 }

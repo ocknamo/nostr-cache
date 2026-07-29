@@ -66,7 +66,9 @@ export const SQLITE_PRAGMAS = `
  *
  * インデックスは Dexie スキーマ（EVENTS_SCHEMA_V1）の対応物:
  * pubkey / created_at / kind / (pubkey,kind)＝置換可能・アドレサブル削除用 /
- * last_accessed_at＝LRU / (access_count,last_accessed_at)＝LFU /
+ * (pubkey,kind,created_at)＝NIP-09 の a タグ削除（時刻上限つき座標範囲。Dexie の
+ * [pubkey+kind+created_at] に対応）/ last_accessed_at＝LRU /
+ * (access_count,last_accessed_at)＝LFU /
  * cached_at＝TTL スイープ / (validated,cached_at)＝遅延検証の永続キュー。
  * `event_tags` は 1 行 1 タグで持ち、(tag, event_id) インデックスで #tag
  * フィルタをインデックス検索にする。複合主キーが Dexie multientry の
@@ -90,6 +92,7 @@ export const SQLITE_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_events_created_at      ON events(created_at);
   CREATE INDEX IF NOT EXISTS idx_events_kind            ON events(kind);
   CREATE INDEX IF NOT EXISTS idx_events_pubkey_kind     ON events(pubkey, kind);
+  CREATE INDEX IF NOT EXISTS idx_events_address         ON events(pubkey, kind, created_at);
   CREATE INDEX IF NOT EXISTS idx_events_lru             ON events(last_accessed_at);
   CREATE INDEX IF NOT EXISTS idx_events_lfu             ON events(access_count, last_accessed_at);
   CREATE INDEX IF NOT EXISTS idx_events_cached_at       ON events(cached_at);

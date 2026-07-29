@@ -3,6 +3,8 @@
  */
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
+import { getRandomSecret } from '@nostr-cache/shared';
+import { seckeySigner } from 'rx-nostr-crypto';
 import { type Mock, vi } from 'vitest';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
@@ -18,6 +20,8 @@ describe('MessageHandler', () => {
     clear: vi.fn().mockResolvedValue(undefined),
     deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
     deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
+    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
+    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
     count: vi.fn().mockResolvedValue(0),
     enforceLimit: vi.fn().mockResolvedValue(0),
     getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
@@ -44,6 +48,21 @@ describe('MessageHandler', () => {
       .fn()
       .mockImplementation((clientId, subscriptionId) => `${clientId}:${subscriptionId}`),
   } as unknown as SubscriptionManager;
+
+  /**
+   * Sign a real NIP-09 deletion request. kind 5 is verified in every
+   * validation mode, so these tests cannot use a hand-written signature.
+   */
+  async function signDeletionRequest(tags: string[][]): Promise<NostrEvent> {
+    const signer = seckeySigner(getRandomSecret());
+    return signer.signEvent({
+      pubkey: await signer.getPublicKey(),
+      created_at: 1742660714,
+      kind: 5,
+      tags,
+      content: '',
+    });
+  }
 
   // Sample events
   const sampleEvent: NostrEvent = {
@@ -729,6 +748,36 @@ describe('MessageHandler', () => {
 
       expect(result).toEqual({ success: false, stored: false });
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('ingestUpstreamEvent applies a deletion request from upstream (NIP-09)', async () => {
+      // 上流で削除されたイベントを配信し続けないよう、backfill 経路にも
+      // 同じ NIP-09 処理を通す
+      const target = 'd'.repeat(64);
+      const deletion = await signDeletionRequest([['e', target]]);
+
+      const result = await messageHandler.ingestUpstreamEvent(deletion);
+
+      expect(result).toEqual({ success: true, stored: true });
+      expect(mockStorage.deleteEventsByIdsForPubkey).toHaveBeenCalledWith(
+        [target],
+        deletion.pubkey
+      );
+    });
+
+    it('ingestUpstreamEvent verifies a deletion request even in NONE mode', async () => {
+      // 削除は取り消せないので、検証を切っていても署名は必ず確認する
+      const noneHandler = new MessageHandler(mockStorage, mockSubscriptionManager, 20, 500, 'NONE');
+      const forged: NostrEvent = {
+        ...(await signDeletionRequest([['e', 'd'.repeat(64)]])),
+        sig: '0'.repeat(128),
+      };
+
+      const result = await noneHandler.ingestUpstreamEvent(forged);
+
+      expect(result).toEqual({ success: false, stored: false });
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+      expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,14 +1,17 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
+import { isDeletableAddress, matchesAddressIdentifier } from '../event/deletion.js';
+import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
-import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './priority.js';
+import { type CachePriority, createPriorityMatcher } from './priority.js';
 import type {
   CacheStrategy,
+  EventAddress,
   SaveEventOptions,
   StorageAdapter,
   ValidationStatus,
@@ -292,7 +295,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * efficient bulk range delete, backing the TTL background sweep.
    *
    * Priority events (matching `priority`) are exempt and retained even when
-   * expired.
+   * expired, as are the always-retained kinds (NIP-09 deletion requests).
    *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
@@ -303,11 +306,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
       const expired = this.events.where('cached_at').below(olderThan * 1000);
-      if (hasPriorityRules(priority)) {
-        const isPriority = createPriorityMatcher(priority);
-        return await expired.filter((row) => !isPriority(row)).delete();
-      }
-      return await expired.delete();
+      // 常時保持の kind（NIP-09 の削除リクエスト）があるため、priority 設定が
+      // 無くても行ごとの判定が要る（範囲一括削除には落とせない）
+      const isRetained = createPriorityMatcher(priority);
+      return await expired.filter((row) => !isRetained(row)).delete();
     } catch (error) {
       logger.error(
         `Failed to delete expired events: ${
@@ -415,6 +417,74 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         }`
       );
       return false;
+    }
+  }
+
+  /**
+   * Delete the events with the given ids that belong to `pubkey`
+   * (NIP-09 `e` tags).
+   *
+   * The primary-key lookup is narrowed by a filter rather than trusting the
+   * caller, because both restrictions can only be checked against the stored
+   * row: another author's event must never be deleted, and a deletion request
+   * (kind 5) is never deletable — a kind 5 targeting a kind 5 has no effect.
+   *
+   * @param ids Ids of the events to delete
+   * @param pubkey Author of the deletion request
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    try {
+      return await this.events
+        .where('id')
+        .anyOf(ids)
+        .filter((row) => row.pubkey === pubkey && row.kind !== DELETION_EVENT_KIND)
+        .delete();
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by ids: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Delete every version of the addressed event with `created_at <= until`
+   * (NIP-09 `a` tags).
+   *
+   * The `[pubkey+kind+created_at]` index gives the range directly; the `d`
+   * identifier and the coordinate guard come from cache-relay's shared
+   * predicates so Dexie and SQLite read coordinates the same way.
+   *
+   * @param address Coordinate of the event to delete
+   * @param until Unix timestamp (seconds); versions at or before it are deleted
+   * @returns Promise resolving to the number of events deleted (0 on error)
+   */
+  async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
+    if (!isDeletableAddress(address, until)) {
+      return 0;
+    }
+    try {
+      return await this.events
+        .where('[pubkey+kind+created_at]')
+        .between(
+          [address.pubkey, address.kind, Dexie.minKey],
+          [address.pubkey, address.kind, until],
+          true,
+          true
+        )
+        .filter((row) => matchesAddressIdentifier(row.tags, address))
+        .delete();
+    } catch (error) {
+      logger.error(
+        `Failed to delete events by address: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
     }
   }
 }

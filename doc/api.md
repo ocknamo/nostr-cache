@@ -26,6 +26,51 @@ monorepo. Runnable samples live in [`examples/`](../examples/README.md).
 The relay core. It takes a `StorageAdapter` and a `TransportAdapter` and handles
 NIP-01 message processing, subscription management, and event validation.
 
+#### 対応 NIP / Supported NIPs
+
+- **NIP-01**: 基本のイベント・メッセージ・フィルタ / core events, messages, filters
+- **NIP-02**: kind 3（フォローリスト）を置換可能イベントとして扱う / kind 3 treated as replaceable
+- **NIP-09**: 削除リクエスト（kind 5）。詳細は下記 / deletion requests (kind 5), see below
+
+##### NIP-09（イベント削除リクエスト） / Event deletion requests
+
+kind 5 のイベントを受け取ると、リレーは `e` タグ（イベント id）と `a` タグ
+（`<kind>:<pubkey>:<d-identifier>` 座標）が指す先を削除します。適用ルール:
+
+- **同一 `pubkey` のイベントのみ削除**します。他者のイベントを指す参照は無視されます
+- **削除リクエスト自体は保存し、配信し続けます**（まだ受け取っていないクライアントのため／
+  再受信時に再適用できるようにするため）。そのため kind 5 は **`ttl` スイープの対象外**で、
+  **`storageMaxSize` 超過時も最後に退避**されます（`cachePriority` の設定によらず常に）。
+  ただし退避の保護は best-effort で、他に退避できるものが無ければ `maxSize` が優先されます。
+  kind 5 を指す kind 5 は効果を持ちません
+- `a` タグは `created_at <= 削除リクエストの created_at` の版のみを削除します。
+  リクエストより後に公開された版は残ります
+- `a` タグは置換可能 kind（0 / 3 / 10000–19999）とアドレサブル kind（30000–39999）にのみ
+  適用します。`1:<pubkey>:` のような通常 kind の座標は無視します
+  （1 つのタグが「この著者の kind 1 を全削除」になるのを防ぐため）
+- 削除は取り消せないため、kind 5 は **`NONE` を含む全モードで同期的に署名検証**します
+  （`validateEventsType` で検証を切っても、未検証の削除リクエストは受理しません）
+- 1 つのリクエストで適用する参照は `e` / `a` それぞれ最大 1000 件です。超過分は破棄します
+- 上流リレーから流れてきた kind 5 にも同じ処理を適用します（透過キャッシュ経路）
+- `k` タグは削除の判定には使いません（NIP-09 でも SHOULD）
+
+When a kind 5 event arrives the relay deletes the events referenced by its `e`
+tags (event ids) and `a` tags (`<kind>:<pubkey>:<d-identifier>` coordinates):
+only the request author's own events are deleted; the request itself is stored
+and kept served (exempt from the `ttl` sweep and evicted last under
+`storageMaxSize`, regardless of `cachePriority`), and a kind 5 targeting a
+kind 5 has no effect; `a` tags delete only versions with `created_at <= ` the
+request's `created_at`, and only for replaceable / addressable kinds. Because
+deletion cannot be undone, kind 5 signatures are verified synchronously in
+**every** validation mode, `NONE` included, and the same handling applies to
+kind 5 events ingested from upstream relays.
+
+現状の制約 / Known limitation: 削除済みイベントの「復活」防止は未実装です。削除リクエストを
+受け取った後に、同じイベントが別経路（削除を反映していない上流リレー、クライアントの再送）
+から再び届いた場合は再び保存されます。/ Resurrection is not prevented: if a deleted event
+arrives again from another source (an upstream relay that has not honored the deletion, a
+client rebroadcast), it is stored again.
+
 ### `class NostrCacheRelay`
 
 ```typescript
@@ -63,7 +108,7 @@ new NostrCacheRelay(
 |---|---|
 | `connect(): Promise<void>` | トランスポートを起動し `connect` イベントを発火 / Starts the transport and emits `connect` |
 | `disconnect(): Promise<void>` | トランスポートを停止し `disconnect` イベントを発火 / Stops the transport and emits `disconnect` |
-| `publishEvent(event: NostrEvent): Promise<boolean>` | イベントを検証・保存し、一致するローカル購読へ `event` を通知。保存成功で `true` / Validates, stores, and notifies matching local subscriptions; resolves `true` on success |
+| `publishEvent(event: NostrEvent): Promise<boolean>` | イベントを検証・保存し、一致するローカル購読へ `event` を通知。kind 5 は保存後に NIP-09 の削除を適用。保存成功で `true` / Validates, stores, and notifies matching local subscriptions; a kind 5 event also applies its NIP-09 deletion after being stored. Resolves `true` on success |
 | `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` | インプロセス購読を作成し、保存済みイベントを `event` リスナへ再生してから `eose` を発火 / Creates an in-process subscription, replays stored events to `event` listeners, then emits `eose` |
 | `unsubscribe(subscriptionId: string): boolean` | 購読を削除。存在して削除できたら `true` / Removes a subscription; `true` if it existed |
 | `getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>` | イベント id ごとの永続化された署名検証状態（`'validated'` / `'pending'` / `'unknown'`）を一括取得。主キー参照のため高頻度呼び出し可・LRU/LFU のアクセス追跡に影響しない。組み込みクライアントが自前の署名検証を省略してバッジ表示等に使える / Bulk-fetches the persisted signature-verification status per event id. Primary-key lookup — cheap to poll and never counts as a read for LRU/LFU. Lets an embedding client reuse the relay's verification instead of re-verifying |
@@ -139,6 +184,13 @@ interface NostrRelayOptions {
 （`node:sqlite` エンジン + Drizzle ORM のクエリ層。`storageOptions.dbPath` で有効化）が
 あります。
 
+> **互換性の注意 / Compatibility note:** NIP-09 対応で `deleteEventsByIdsForPubkey` と
+> `deleteEventsByAddress` が**必須メソッドとして追加**されました（`deleteExpired` /
+> `enforceLimit` のような optional ではありません）。独自の `StorageAdapter` 実装を
+> 持っている場合は両メソッドの実装が必要です。
+> / Both methods were added as **required** members of `StorageAdapter`, so
+> external adapter implementations must add them.
+
 ```typescript
 type ValidationStatus = 'validated' | 'pending' | 'unknown';
 
@@ -154,9 +206,17 @@ interface StorageAdapter {
     kind: number,
     dTagValue: string,
   ): Promise<boolean>;
+  deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number>;
+  deleteEventsByAddress(address: EventAddress, until: number): Promise<number>;
   getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
   markValidated(ids: string[]): Promise<void>;
   getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
+}
+
+interface EventAddress {
+  kind: number;       // 対象の kind / kind of the addressed event
+  pubkey: string;     // 64 桁 hex / 64-char lowercase hex
+  identifier: string; // `d` タグ値（置換可能 kind では空） / `d` tag value (empty for replaceable kinds)
 }
 ```
 
@@ -170,6 +230,19 @@ interface StorageAdapter {
 - `getValidationStatus` は id ごとに `'validated'` / `'pending'` / `'unknown'`（未保存・削除済み）を
   返します。これらの読み取りは LRU/LFU のアクセス追跡に影響しません。
   / Per-id status lookup; these reads never affect LRU/LFU access tracking.
+- `deleteEventsByIdsForPubkey` / `deleteEventsByAddress` は NIP-09（削除リクエスト）の
+  `e` タグ / `a` タグに対応します。実装側で 2 つの制約を保証する必要があります
+  （呼び出し側は保存済みの行を見られないため）: **`pubkey` が一致するイベントのみ削除する**、
+  **kind 5 は決して削除しない**（削除リクエストに対する削除リクエストは効果を持たない）。
+  `deleteEventsByAddress` は `created_at <= until` の版のみを削除し、アドレサブル kind
+  （30000–39999）では `d` タグが `address.identifier` と一致する必要があります（`d` タグが
+  無い場合は空文字列とみなします）。置換可能 kind では `identifier` は無視されます。
+  / Back the `e` / `a` tags of a NIP-09 deletion request. Implementations must enforce
+  both spec rules themselves — delete only events with a matching `pubkey`, and never
+  delete a kind 5 event. `deleteEventsByAddress` deletes only versions with
+  `created_at <= until`; for addressable kinds the `d` tag must equal
+  `address.identifier` (a missing `d` tag counts as the empty identifier), while for
+  replaceable kinds the identifier is ignored.
 - `getEvents` のフィルタ解釈は NIP-01 準拠で、`DexieStorage` と `SqliteStorage` で一致します。
   - `since` / `until` はいずれも境界を含みます（`since <= created_at <= until`）。`0` も
     「指定なし」ではなく実際の境界として扱います。
