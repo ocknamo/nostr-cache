@@ -19,7 +19,7 @@
   import { type BenchmarkResult, runBenchmark } from './lib/benchmark.ts';
 
   const DEFAULT_SETTINGS = {
-    relays: 'wss://nos.lol, wss://relay.damus.io',
+    relays: 'wss://yabu.me',
     kinds: '1',
     limit: '50',
   };
@@ -344,7 +344,12 @@
   }
 
   .timeline-scroll {
-    max-height: 520px;
+    /* Never taller than the screen: a scroll area that outgrows the viewport
+       leaves no way to reach the rest of the page on a phone. */
+    max-height: min(520px, 70vh);
+    /* dvh tracks the collapsing address bar on mobile Safari; the vh line above
+       stays as the fallback. */
+    max-height: min(520px, 70dvh);
     overflow-y: auto;
     padding-right: 4px;
   }
@@ -352,5 +357,16 @@
   footer {
     color: var(--muted);
     font-size: 0.8rem;
+  }
+
+  @media (max-width: 600px) {
+    .page {
+      padding: 20px 12px 48px;
+      gap: 16px;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+    }
   }
 </style>

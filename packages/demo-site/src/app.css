@@ -39,6 +39,9 @@ code {
   background: #eef1f5;
   border-radius: 4px;
   padding: 1px 5px;
+  /* Inline identifiers such as `upstreamEoseTimeout` are single unbreakable
+     tokens; on a phone they have to break somewhere or they widen the page. */
+  overflow-wrap: anywhere;
 }
 
 pre {
@@ -58,6 +61,8 @@ pre code {
   padding: 0;
   color: inherit;
   font-size: inherit;
+  /* Snippets scroll rather than wrap, so undo the inline-code break rule. */
+  overflow-wrap: normal;
 }
 
 a {
@@ -104,6 +109,12 @@ select {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 18px;
+}
+
+@media (max-width: 600px) {
+  .panel {
+    padding: 14px 12px;
+  }
 }
 
 .panel > h2 {
