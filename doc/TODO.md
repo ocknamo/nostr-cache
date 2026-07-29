@@ -197,6 +197,13 @@ web-client は 2026-07 に廃棄した）
     NIP-01 準拠のまま N 件で打ち切れる。それ以外の分岐（`kind` / `pubkey` / タグ index）は
     走査順が `created_at` と無関係なため全件走査が必要で、この最適化は使えない
   - 着手時は「どの分岐で早期打ち切りしたか」がテストから見えるようにすること
+- [ ] 統合テストのポート採番を衝突しない方式にする
+  - 現状は spec ファイルごとに `Math.floor(Math.random() * 10000) + <帯>` で採番しており
+    （9000 / 20000 / 30000 / 40000 / 50000 番台に手で振り分けている）、同一帯の中で
+    衝突すると `EADDRINUSE` でフレークする（実際に `performance.spec.ts` で発生）。
+    ヘルスチェックが `port + 1` を使うため 1 サーバあたり 2 ポート消費する点にも注意
+  - `WebSocketServer` にポート 0（OS 任せ）で起動して実ポートを返す口を用意し、
+    テストはそれを使うのが本筋
 - [ ] `DexieStorage` と `SqliteStorage` の等価性を担保する契約テストを用意する
   - `doc/api.md` は両実装のフィルタ解釈が一致すると宣言しているが、それを一括で保証する
     テストが無く、実装ごとの spec に同等ケースを手で並べている状態。実際、返却順・
@@ -205,6 +212,11 @@ web-client は 2026-07 に廃棄した）
   - 共有フィクスチャに対して同じフィルタ集合を両アダプタへ流し、結果を**順序込み**で
     比較する形が望ましい（`SqliteStorage` は server パッケージにあるため、テストの
     置き場所は server 側か新規の共有テストパッケージかを決める必要がある）
+  - NIP-09 対応（2026-07）でも同じ複製が積み増しになった: `deleteEventsByIdsForPubkey` /
+    `deleteEventsByAddress` / kind 5 の保持について、両 spec にほぼ同一のテストを
+    手で並べている。しかも複製直後にヘルパが乖離し（Dexie 側だけ「d タグ無し」を
+    作ろうとして到達不能なコードになっていた）、レビューで指摘されて初めて気づいた。
+    契約テスト化は「あると良い」ではなく、複製が増えるたびに実際に事故が起きている
 
 ## 優先度: 中（NIP 対応の拡張 — 2026-07 の棚卸しで追加）
 
@@ -230,17 +242,35 @@ web-client は 2026-07 に廃棄した）
     座標を受理すると「この著者の kind 1 を全削除」になるため、解析段階で落とす
   - `a` タグの削除は `created_at <= 削除リクエストの created_at` の版のみ（リクエスト後に
     公開された版は残る）。`e` タグには時刻制約は無い
-  - **削除は取り消せないため、`validateEventsType: 'LAZY'` でも kind 5 は同期検証**する
-    （ephemeral と同じ理由。後追いで復元できない破壊的操作を未検証で実行させない）。
-    transport 経由（`EventHandler`）と in-process（`NostrCacheRelay.publishEvent`）の両方に適用
+  - **削除は取り消せないため、kind 5 は `NONE` を含む全モードで同期検証**する。
+    `NONE` は「送ったものを検証せず保存する」という意思表示であって「誰でも他人のデータを
+    消してよい」ではない。未検証で受理すると、`validateEvents: false` のサーバに対して
+    任意のクライアントが偽造 kind 5 で任意 pubkey のキャッシュを破壊できる。
+    削除リクエスト 1 通あたり署名検証 1 回のコストで防げる。transport 経由
+    （`EventHandler`）と in-process（`NostrCacheRelay.publishEvent`）の両方に適用
+  - 同期検証を通ったイベントは `validated=1` で保存する（`saveOptions` を
+    「設定されたモード」ではなく「実際に検証したか」で決めるよう変更）。LAZY/NONE で
+    検証済みの kind 5 が遅延検証キューに再投入されたり `getValidationStatus` が
+    `pending` を返したりしないようにするため
   - 削除リクエスト自体は保存し、配信し続ける（まだ受け取っていないクライアントのため／
-    再受信時に再適用できるようにするため）。上流へのライトスルー転送も既存経路で機能する
+    再受信時に再適用できるようにするため）。このため **kind 5 は TTL スイープの対象外・
+    `storageMaxSize` 超過時は最後に退避**する（`storage/priority.ts` の
+    `ALWAYS_RETAINED_KINDS`。`cachePriority` の設定によらず常に適用。退避の保護は
+    best-effort で、他に退避対象が無ければ `maxSize` が優先される）。
+    上流へのライトスルー転送も既存経路で機能する
+  - 1 リクエストあたりの参照数は `e` / `a` それぞれ 1000 件で打ち切る
+    （`MAX_DELETION_REFERENCES`）。座標 1 件につきストレージ 1 往復で、server では
+    `node:sqlite` の同期 API のためイベントループがブロックされる。時間窓レート制限が
+    未実装の現状、1 EVENT = O(1) ストレージ操作という性質を壊さないための上限
   - 上流から流れてきた kind 5（`MessageHandler.ingestUpstreamEvent` 経路）も
     `ingestEvent` → `EventHandler.handleEvent` を通るため同じ処理が適用される
+  - `StorageAdapter` への 2 メソッド追加は**必須メンバー**（`deleteExpired` / `enforceLimit`
+    のような optional ではない）なので、独自アダプタ実装に対しては破壊的変更。
+    `doc/api.md` に注記済み
   - テスト: `event/deletion.spec.ts`（19 件）、`event-handler.spec.ts` / `message-handler.spec.ts` /
     `nostr-cache-relay.spec.ts` への追加、`dexie-storage.spec.ts` / `sqlite-storage.spec.ts` に
-    対になるストレージテスト（各 10 件）、`packages/server/tests/integration/nip09.spec.ts`
-    （実 WebSocket + 実署名で 9 件）
+    対になるストレージテスト（各 17 件。NIP-09 の削除 + kind 5 の保持）、
+    `packages/server/tests/integration/nip09.spec.ts`（実 WebSocket + 実署名で 9 件）
 - [ ] **削除済みイベントの「復活」防止**（NIP-09 の残課題）
   - 現状: 削除リクエストを適用した後に、同じイベントが別経路から再び届くと再保存される。
     具体的には、削除を反映していない上流リレーからのリードスルー充填、クライアントの再送

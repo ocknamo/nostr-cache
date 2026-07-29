@@ -278,7 +278,7 @@ describe('EventHandler', () => {
 
   describe('handleReplaceableEvent', () => {
     it('should delete old events and save new event', async () => {
-      await eventHandler['handleReplaceableEvent'](replaceableEvent);
+      await eventHandler['handleReplaceableEvent'](replaceableEvent, true);
 
       expect(mockStorage.deleteEventsByPubkeyAndKind).toHaveBeenCalledWith(
         replaceableEvent.pubkey,
@@ -290,21 +290,25 @@ describe('EventHandler', () => {
     it('should handle errors during old event deletion', async () => {
       mockStorage.deleteEventsByPubkeyAndKind.mockRejectedValueOnce(new Error('Delete error'));
 
-      await expect(eventHandler['handleReplaceableEvent'](replaceableEvent)).rejects.toThrow();
+      await expect(
+        eventHandler['handleReplaceableEvent'](replaceableEvent, true)
+      ).rejects.toThrow();
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
     });
 
     it('should handle errors during new event saving', async () => {
       mockStorage.saveEvent.mockRejectedValueOnce(new Error('Save error'));
 
-      await expect(eventHandler['handleReplaceableEvent'](replaceableEvent)).rejects.toThrow();
+      await expect(
+        eventHandler['handleReplaceableEvent'](replaceableEvent, true)
+      ).rejects.toThrow();
       expect(mockStorage.deleteEventsByPubkeyAndKind).toHaveBeenCalled();
     });
   });
 
   describe('handleAddressableEvent', () => {
     it('should delete old events and save new event', async () => {
-      await eventHandler['handleAddressableEvent'](addressableEvent);
+      await eventHandler['handleAddressableEvent'](addressableEvent, true);
 
       expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalledWith(
         addressableEvent.pubkey,
@@ -320,7 +324,7 @@ describe('EventHandler', () => {
         tags: [],
       };
 
-      const result = await eventHandler['handleAddressableEvent'](eventWithoutDTag);
+      const result = await eventHandler['handleAddressableEvent'](eventWithoutDTag, true);
 
       expect(result).toBe(false);
       expect(mockStorage.deleteEventsByPubkeyKindAndDTag).not.toHaveBeenCalled();
@@ -330,14 +334,18 @@ describe('EventHandler', () => {
     it('should handle errors during old event deletion', async () => {
       mockStorage.deleteEventsByPubkeyKindAndDTag.mockRejectedValueOnce(new Error('Delete error'));
 
-      await expect(eventHandler['handleAddressableEvent'](addressableEvent)).rejects.toThrow();
+      await expect(
+        eventHandler['handleAddressableEvent'](addressableEvent, true)
+      ).rejects.toThrow();
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
     });
 
     it('should handle errors during new event saving', async () => {
       mockStorage.saveEvent.mockRejectedValueOnce(new Error('Save error'));
 
-      await expect(eventHandler['handleAddressableEvent'](addressableEvent)).rejects.toThrow();
+      await expect(
+        eventHandler['handleAddressableEvent'](addressableEvent, true)
+      ).rejects.toThrow();
       expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalled();
     });
   });

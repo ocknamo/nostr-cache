@@ -38,24 +38,32 @@ kind 5 のイベントを受け取ると、リレーは `e` タグ（イベン�
 （`<kind>:<pubkey>:<d-identifier>` 座標）が指す先を削除します。適用ルール:
 
 - **同一 `pubkey` のイベントのみ削除**します。他者のイベントを指す参照は無視されます
-- **削除リクエスト自体は保存し、配信し続けます**（まだ受け取っていないクライアントのため）。
+- **削除リクエスト自体は保存し、配信し続けます**（まだ受け取っていないクライアントのため／
+  再受信時に再適用できるようにするため）。そのため kind 5 は **`ttl` スイープの対象外**で、
+  **`storageMaxSize` 超過時も最後に退避**されます（`cachePriority` の設定によらず常に）。
+  ただし退避の保護は best-effort で、他に退避できるものが無ければ `maxSize` が優先されます。
   kind 5 を指す kind 5 は効果を持ちません
 - `a` タグは `created_at <= 削除リクエストの created_at` の版のみを削除します。
   リクエストより後に公開された版は残ります
 - `a` タグは置換可能 kind（0 / 3 / 10000–19999）とアドレサブル kind（30000–39999）にのみ
   適用します。`1:<pubkey>:` のような通常 kind の座標は無視します
   （1 つのタグが「この著者の kind 1 を全削除」になるのを防ぐため）
-- 削除は取り消せないため、`validateEventsType: 'LAZY'` でも kind 5 は**同期的に署名検証**します
+- 削除は取り消せないため、kind 5 は **`NONE` を含む全モードで同期的に署名検証**します
+  （`validateEventsType` で検証を切っても、未検証の削除リクエストは受理しません）
+- 1 つのリクエストで適用する参照は `e` / `a` それぞれ最大 1000 件です。超過分は破棄します
 - 上流リレーから流れてきた kind 5 にも同じ処理を適用します（透過キャッシュ経路）
+- `k` タグは削除の判定には使いません（NIP-09 でも SHOULD）
 
 When a kind 5 event arrives the relay deletes the events referenced by its `e`
 tags (event ids) and `a` tags (`<kind>:<pubkey>:<d-identifier>` coordinates):
 only the request author's own events are deleted; the request itself is stored
-and kept served indefinitely (and a kind 5 targeting a kind 5 has no effect);
-`a` tags delete only versions with `created_at <= ` the request's `created_at`,
-and only for replaceable / addressable kinds. Because deletion cannot be undone,
-kind 5 signatures are verified synchronously even in `LAZY` mode, and the same
-handling applies to kind 5 events ingested from upstream relays.
+and kept served (exempt from the `ttl` sweep and evicted last under
+`storageMaxSize`, regardless of `cachePriority`), and a kind 5 targeting a
+kind 5 has no effect; `a` tags delete only versions with `created_at <= ` the
+request's `created_at`, and only for replaceable / addressable kinds. Because
+deletion cannot be undone, kind 5 signatures are verified synchronously in
+**every** validation mode, `NONE` included, and the same handling applies to
+kind 5 events ingested from upstream relays.
 
 現状の制約 / Known limitation: 削除済みイベントの「復活」防止は未実装です。削除リクエストを
 受け取った後に、同じイベントが別経路（削除を反映していない上流リレー、クライアントの再送）
@@ -175,6 +183,13 @@ interface NostrRelayOptions {
 このほか `@nostr-cache/server` 内には Node.js 専用の永続実装 `SqliteStorage`
 （`node:sqlite` エンジン + Drizzle ORM のクエリ層。`storageOptions.dbPath` で有効化）が
 あります。
+
+> **互換性の注意 / Compatibility note:** NIP-09 対応で `deleteEventsByIdsForPubkey` と
+> `deleteEventsByAddress` が**必須メソッドとして追加**されました（`deleteExpired` /
+> `enforceLimit` のような optional ではありません）。独自の `StorageAdapter` 実装を
+> 持っている場合は両メソッドの実装が必要です。
+> / Both methods were added as **required** members of `StorageAdapter`, so
+> external adapter implementations must add them.
 
 ```typescript
 type ValidationStatus = 'validated' | 'pending' | 'unknown';

@@ -4,6 +4,9 @@
 （`EVENT` / `REQ` / `CLOSE` → `OK` / `EVENT` / `EOSE` / `CLOSED` / `NOTICE`）を実装し、
 kind 0 / 3 などの replaceable イベントにも対応します（NIP-02 のフォローリストは
 この replaceable 処理の範囲でのみ扱われ、専用ロジックは持ちません）。
+NIP-09（削除リクエスト・kind 5）にも対応し、`e` / `a` タグが指す**同一 pubkey の**
+イベントを削除します（削除リクエスト自体は保持し配信し続けます）。
+仕様と適用ルールの詳細は [../../doc/api.md](../../doc/api.md) を参照してください。
 ストレージ（IndexedDB / Dexie.js）とトランスポート（WebSocket）をアダプタとして
 差し替えることで、**Node.js サーバ**としても**ブラウザ内のローカルキャッシュリレー**としても
 動作します。プロジェクト全体の目的は [../../doc/concept.md](../../doc/concept.md) を参照してください。
@@ -226,14 +229,14 @@ relay.unsubscribe('sub1');
 | オプション | 型 | 状況 |
 |---|---|---|
 | `maxSubscriptions` | `number` | 実装済み（デフォルト 20） |
-| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では保存されたイベントが最大 `lazyValidateInterval` 秒ぶん一時的に未検証で配信され得る。なお **ephemeral（kind 20000–29999）など保存されないイベントは、後から削除できないため `LAZY` でも同期検証**して不正を即拒否する。検証キューは**ストレージ自体に永続化**される（`validated` カラム。メモリキュー・キュー上限なし）ため、リロード/クラッシュ後も次回 `connect()` 時に未検証分の検証を自動再開する。検証結果は `relay.getValidationStatus(ids)` で参照でき、組み込みクライアントが自前の署名検証を省略できる |
+| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では保存されたイベントが最大 `lazyValidateInterval` 秒ぶん一時的に未検証で配信され得る。なお **ephemeral（kind 20000–29999）など保存されないイベントは、後から削除できないため `LAZY` でも同期検証**して不正を即拒否する。**NIP-09 の削除リクエスト（kind 5）は `NONE` を含む全モードで同期検証**する（削除は取り消せないため、未検証で受理すると任意のクライアントが任意の pubkey のキャッシュを破壊できてしまう）。検証キューは**ストレージ自体に永続化**される（`validated` カラム。メモリキュー・キュー上限なし）ため、リロード/クラッシュ後も次回 `connect()` 時に未検証分の検証を自動再開する。検証結果は `relay.getValidationStatus(ids)` で参照でき、組み込みクライアントが自前の署名検証を省略できる |
 | `port` | `number` | Node.js の WebSocket サーバ用 |
 | `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
 | `storageMaxSize` | `number` | 実装済み。保存後に relay が `storage.enforceLimit()` を呼び、この件数を超えたら古い順に退避（未指定で無効。`enforceLimit` 対応ストレージが必要） |
 | `ttl` | `number` | 実装済み。キャッシュ投入（保存）時刻 `cached_at` が `now - ttl` より古いイベントを**バックグラウンドの定期スイープ**でストレージから削除（`created_at` 基準ではなく、読み出し時フィルタでもない）。最大で `ttlSweepInterval` 秒ぶん期限切れイベントを返しうる。未指定で無効。`deleteExpired` 対応ストレージ（`DexieStorage`）が必要 |
 | `ttlSweepInterval` | `number` | 実装済み。TTL スイープの実行間隔（秒、デフォルト 60） |
 | `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | 実装済み（`storageMaxSize` の退避戦略、デフォルト `FIFO`）。`FIFO`=作成が古い順、`LRU`=読み出しが古い順、`LFU`=読み出し頻度が低い順（同数なら古い順） |
-| `cachePriority` | `{ pubkeys?: string[]; kinds?: number[] }` | 実装済み。指定 pubkey（npub / hex）の発行イベントまたは指定 kind のイベントを優先イベントとして扱う。優先イベントは `storageMaxSize` 超過時に最後まで残り（非優先を先に退避。優先だけになったら通常の `cacheStrategy` 順で退避し `maxSize` は厳守）、`ttl` スイープの削除対象外。不正な npub は生成時に例外 |
+| `cachePriority` | `{ pubkeys?: string[]; kinds?: number[] }` | 実装済み。指定 pubkey（npub / hex）の発行イベントまたは指定 kind のイベントを優先イベントとして扱う。優先イベントは `storageMaxSize` 超過時に最後まで残り（非優先を先に退避。優先だけになったら通常の `cacheStrategy` 順で退避し `maxSize` は厳守）、`ttl` スイープの削除対象外。不正な npub は生成時に例外。なお **NIP-09 の削除リクエスト（kind 5）は設定によらず常に同じ保護を受ける**（TTL 対象外・最後に退避） |
 | `lazyValidateInterval` | `number` | 実装済み。`LAZY` 時のバックグラウンド検証の実行間隔（秒、デフォルト 60） |
 | `lazyValidateBatchSize` | `number` | 実装済み。`LAZY` 時の 1 回の検証で処理するイベント数（デフォルト 100） |
 

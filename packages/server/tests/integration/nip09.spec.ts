@@ -113,7 +113,8 @@ describe('NostrRelayServer NIP-09 event deletion', () => {
   let port: number;
 
   beforeEach(async () => {
-    port = Math.floor(Math.random() * 10000) + 9000;
+    // ポート帯は spec ファイルごとに分けている（並列実行時の衝突回避）
+    port = Math.floor(Math.random() * 10000) + 50000;
     server = new NostrRelayServer({ port });
     await server.start();
   });

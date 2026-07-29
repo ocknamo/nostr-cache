@@ -3,6 +3,8 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
+import { getRandomSecret } from '@nostr-cache/shared';
+import { seckeySigner } from 'rx-nostr-crypto';
 import { type Mock, vi } from 'vitest';
 import { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
@@ -38,6 +40,21 @@ describe('NostrCacheRelay', () => {
     onDisconnect: vi.fn(),
     getConnectionCount: vi.fn().mockReturnValue(0),
   };
+
+  /**
+   * Sign a real NIP-09 deletion request. kind 5 is verified in every
+   * validation mode, so these tests cannot use a hand-written signature.
+   */
+  async function signDeletionRequest(tags: string[][]): Promise<NostrEvent> {
+    const signer = seckeySigner(getRandomSecret());
+    return signer.signEvent({
+      pubkey: await signer.getPublicKey(),
+      created_at: 1742660714,
+      kind: 5,
+      tags,
+      content: '',
+    });
+  }
 
   // Sample event
   const sampleEvent: NostrEvent = {
@@ -140,20 +157,13 @@ describe('NostrCacheRelay', () => {
     it('should apply a published deletion request (NIP-09)', async () => {
       // in-process の publishEvent は EventHandler を経由しないため、
       // transport 経由 EVENT と同じ削除適用がここにも必要
-      const noneRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEventsType: 'NONE',
-      });
       const target = 'd'.repeat(64);
-      const deletion: NostrEvent = {
-        ...sampleEvent,
-        id: 'deletion-id',
-        kind: 5,
-        tags: [['e', target]],
-      };
+      const deletion = await signDeletionRequest([['e', target]]);
 
-      await noneRelay.publishEvent(deletion);
+      await relay.publishEvent(deletion);
 
-      expect(mockStorage.saveEvent).toHaveBeenCalledWith(deletion, { validated: false });
+      // 同期検証を通ったので検証済みとして保存される
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(deletion, { validated: true });
       expect(mockStorage.deleteEventsByIdsForPubkey).toHaveBeenCalledWith(
         [target],
         deletion.pubkey
@@ -161,37 +171,33 @@ describe('NostrCacheRelay', () => {
     });
 
     it('should not apply a deletion request that failed to save', async () => {
-      const noneRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEventsType: 'NONE',
-      });
+      const deletion = await signDeletionRequest([['e', 'd'.repeat(64)]]);
       (mockStorage.saveEvent as Mock).mockResolvedValueOnce(false);
 
-      await noneRelay.publishEvent({
-        ...sampleEvent,
-        kind: 5,
-        tags: [['e', 'd'.repeat(64)]],
-      });
+      await relay.publishEvent(deletion);
 
       expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
     });
 
-    it('should verify a deletion request up front even in LAZY mode', async () => {
-      // 削除は取り消せないため、LAZY でも同期検証して不正な署名を弾く
-      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        validateEventsType: 'LAZY',
-      });
+    it.each(['LAZY', 'NONE'] as const)(
+      'should verify a deletion request up front in %s mode',
+      async (validateEventsType) => {
+        // 削除は取り消せないため、検証を緩めたモードでも署名を必ず確認する
+        const relaxedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+          validateEventsType,
+        });
+        const forged: NostrEvent = {
+          ...(await signDeletionRequest([['e', 'd'.repeat(64)]])),
+          sig: '0'.repeat(128),
+        };
 
-      // 署名が sampleEvent のままなので kind 5 に書き換えると検証に失敗する
-      const result = await lazyRelay.publishEvent({
-        ...sampleEvent,
-        kind: 5,
-        tags: [['e', 'd'.repeat(64)]],
-      });
+        const result = await relaxedRelay.publishEvent(forged);
 
-      expect(result).toBe(false);
-      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
-      expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
-    });
+        expect(result).toBe(false);
+        expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+        expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
+      }
+    );
 
     it('should enforce the storage limit after a save when storageMaxSize is set', async () => {
       const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {

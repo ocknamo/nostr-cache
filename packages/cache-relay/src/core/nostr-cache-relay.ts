@@ -278,21 +278,18 @@ export class NostrCacheRelay {
   async publishEvent(event: NostrEvent): Promise<boolean> {
     // Validate the event if enabled.
     // NIP-09 deletion requests destroy other events on arrival and no later
-    // pass can undo that, so they are verified up front even in LAZY mode —
-    // the same reasoning EventHandler applies on the transport path.
+    // pass can undo that, so they are verified in every mode — `NONE` included,
+    // exactly as EventHandler does on the transport path.
     const mustValidateNow =
-      this.options.validateEventsType === 'IMMEDIATELY' ||
-      (this.options.validateEventsType === 'LAZY' && isDeletionEvent(event));
+      isDeletionEvent(event) || this.options.validateEventsType === 'IMMEDIATELY';
     if (mustValidateNow && !(await this.validator.validate(event))) {
       return false;
     }
 
-    // Save the event to storage. IMMEDIATELY で事前検証を通過した場合のみ
-    // 検証済みとして永続化する。LAZY では pending（validated=0）で保存され、
+    // Save the event to storage. 事前検証を通過したイベントのみ検証済みとして
+    // 永続化する。LAZY では通常イベントは pending（validated=0）で保存され、
     // バックグラウンド検証パスが後から検証・マーク（不正なら削除）する
-    const saved = await this.storage.saveEvent(event, {
-      validated: this.options.validateEventsType === 'IMMEDIATELY',
-    });
+    const saved = await this.storage.saveEvent(event, { validated: mustValidateNow });
 
     if (saved) {
       // NIP-09: 削除リクエストを保存したら参照先の削除を適用する

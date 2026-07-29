@@ -16,8 +16,10 @@ import type {
 import {
   DELETION_EVENT_KIND,
   filterUtils,
+  getAlwaysRetainedKinds,
   getIndexedTags,
   hasPriorityRules,
+  isDeletableAddress,
   matchesAddressIdentifier,
 } from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
@@ -68,22 +70,27 @@ const EVICTION_ORDER: Record<CacheStrategy, SQL[]> = {
 const ID_CHUNK_SIZE = 500;
 
 /**
- * Build the SQL condition matching priority events (pubkey IN (...) OR kind
- * IN (...)), or undefined when the config has no effective rules. Empty lists
+ * Build the SQL condition matching retained events: the configured priority
+ * rules (pubkey IN (...) OR kind IN (...)) plus the kinds that are always
+ * retained regardless of configuration (NIP-09 deletion requests). Empty lists
  * are guarded so an `IN ()` clause is never emitted.
+ *
+ * Always returns a condition — unlike the configured rules, retention applies
+ * even with no `priority` config, so callers must never skip it. Mirrors
+ * cache-relay's `createPriorityMatcher`.
  */
-function priorityCondition(priority?: CachePriority): SQL | undefined {
-  if (!hasPriorityRules(priority)) {
-    return undefined;
+function retentionCondition(priority?: CachePriority): SQL {
+  const conditions: SQL[] = [inArray(events.kind, getAlwaysRetainedKinds())];
+  if (hasPriorityRules(priority)) {
+    if (priority.pubkeys && priority.pubkeys.length > 0) {
+      conditions.push(inArray(events.pubkey, priority.pubkeys));
+    }
+    if (priority.kinds && priority.kinds.length > 0) {
+      conditions.push(inArray(events.kind, priority.kinds));
+    }
   }
-  const conditions: SQL[] = [];
-  if (priority.pubkeys && priority.pubkeys.length > 0) {
-    conditions.push(inArray(events.pubkey, priority.pubkeys));
-  }
-  if (priority.kinds && priority.kinds.length > 0) {
-    conditions.push(inArray(events.kind, priority.kinds));
-  }
-  return or(...conditions);
+  // conditions は常に 1 要素以上なので or() が undefined を返すことはない
+  return or(...conditions) as SQL;
 }
 
 /**
@@ -458,10 +465,9 @@ export class SqliteStorage implements StorageAdapter {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
       const expired = lt(events.cachedAt, olderThan * 1000);
-      const cond = priorityCondition(priority);
       const { changes } = this.db
         .delete(events)
-        .where(cond ? and(expired, not(cond)) : expired)
+        .where(and(expired, not(retentionCondition(priority))))
         .run();
       return Number(changes);
     } catch (error) {
@@ -526,13 +532,13 @@ export class SqliteStorage implements StorageAdapter {
           return 0;
         }
         const excess = total - maxSize;
-        const cond = priorityCondition(priority);
+        const cond = retentionCondition(priority);
 
-        // パス1: 非優先イベントを戦略順で退避する（優先設定なしなら全件対象）
+        // パス1: 非優先イベントを戦略順で退避する
         const victims = this.db
           .select({ id: events.id })
           .from(events)
-          .where(cond ? not(cond) : undefined)
+          .where(not(cond))
           .orderBy(...EVICTION_ORDER[strategy])
           .limit(excess);
         const { changes } = this.db.delete(events).where(inArray(events.id, victims)).run();
@@ -541,7 +547,7 @@ export class SqliteStorage implements StorageAdapter {
         // パス2: 非優先だけで excess に満たない場合、残りは全て優先イベント。
         // フィルタなしの通常順で不足分を退避する（maxSize は常に厳守）
         const remaining = excess - deleted;
-        if (cond && remaining > 0) {
+        if (remaining > 0) {
           const priorityVictims = this.db
             .select({ id: events.id })
             .from(events)
@@ -696,19 +702,22 @@ export class SqliteStorage implements StorageAdapter {
    * Delete every version of the addressed event with `created_at <= until`
    * (NIP-09 `a` tags).
    *
-   * The `d` identifier is matched against the full `tags` JSON (not
-   * `event_tags`) so the 100-entry tag index cap cannot change the outcome —
-   * the same reason {@link deleteEventsByPubkeyKindAndDTag} does. The
-   * predicate itself is cache-relay's, shared with the Dexie adapter.
+   * The `(pubkey, kind, created_at)` index serves the range; the `d`
+   * identifier is then matched against the full `tags` JSON (not `event_tags`)
+   * so the 100-entry tag index cap cannot change the outcome — the same reason
+   * {@link deleteEventsByPubkeyKindAndDTag} does. The predicate itself is
+   * cache-relay's, shared with the Dexie adapter.
+   *
+   * Unlike Dexie's single filtered cursor delete, the select and the delete run
+   * in separate statements (the delete batched in one transaction). Nothing
+   * awaits between them, so no concurrent statement can interleave.
    *
    * @param address Coordinate of the event to delete
    * @param until Unix timestamp (seconds); versions at or before it are deleted
    * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
-    // 座標が指せない kind は呼び出し側で弾いているが、kind 5 の削除だけは
-    // 到達しても効果を持たないことを保証する
-    if (address.kind === DELETION_EVENT_KIND) {
+    if (!isDeletableAddress(address, until)) {
       return 0;
     }
     try {

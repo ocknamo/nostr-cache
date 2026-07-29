@@ -1,14 +1,14 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
-import { matchesAddressIdentifier } from '../event/deletion.js';
+import { isDeletableAddress, matchesAddressIdentifier } from '../event/deletion.js';
 import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
-import { type CachePriority, createPriorityMatcher, hasPriorityRules } from './priority.js';
+import { type CachePriority, createPriorityMatcher } from './priority.js';
 import type {
   CacheStrategy,
   EventAddress,
@@ -295,7 +295,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * efficient bulk range delete, backing the TTL background sweep.
    *
    * Priority events (matching `priority`) are exempt and retained even when
-   * expired.
+   * expired, as are the always-retained kinds (NIP-09 deletion requests).
    *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
@@ -306,11 +306,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       // cached_at はミリ秒で保持しているため秒指定の閾値を変換して比較する
       const expired = this.events.where('cached_at').below(olderThan * 1000);
-      if (hasPriorityRules(priority)) {
-        const isPriority = createPriorityMatcher(priority);
-        return await expired.filter((row) => !isPriority(row)).delete();
-      }
-      return await expired.delete();
+      // 常時保持の kind（NIP-09 の削除リクエスト）があるため、priority 設定が
+      // 無くても行ごとの判定が要る（範囲一括削除には落とせない）
+      const isRetained = createPriorityMatcher(priority);
+      return await expired.filter((row) => !isRetained(row)).delete();
     } catch (error) {
       logger.error(
         `Failed to delete expired events: ${
@@ -457,17 +456,15 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * (NIP-09 `a` tags).
    *
    * The `[pubkey+kind+created_at]` index gives the range directly; the `d`
-   * identifier is applied by the shared predicate so Dexie and SQLite read
-   * coordinates the same way.
+   * identifier and the coordinate guard come from cache-relay's shared
+   * predicates so Dexie and SQLite read coordinates the same way.
    *
    * @param address Coordinate of the event to delete
    * @param until Unix timestamp (seconds); versions at or before it are deleted
    * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
-    // 座標が指せない kind は呼び出し側で弾いているが、kind 5 の削除だけは
-    // 到達しても効果を持たないことを保証する
-    if (address.kind === DELETION_EVENT_KIND) {
+    if (!isDeletableAddress(address, until)) {
       return 0;
     }
     try {

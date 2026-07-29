@@ -186,6 +186,12 @@ export interface StorageAdapter {
    * `address.identifier` (a missing `d` tag counts as the empty identifier);
    * for replaceable kinds the identifier is ignored.
    *
+   * Implementations MUST reject anything else — a coordinate naming a regular
+   * kind (`1:<pubkey>:`) would mean "delete every kind 1 note by this author",
+   * and a non-finite `until` would remove the upper bound entirely. Calling
+   * `isDeletableAddress(address, until)` applies both checks; this is a public
+   * method, so the guard cannot live only in the deletion-request parser.
+   *
    * @param address Coordinate of the event to delete (kind / pubkey / d value)
    * @param until Unix timestamp (seconds); versions with `created_at <= until`
    *   are deleted

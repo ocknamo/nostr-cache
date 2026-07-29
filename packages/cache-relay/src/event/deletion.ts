@@ -10,9 +10,10 @@
  *   author, so they are filtered while parsing; `e` tags do not, so the
  *   pubkey check is delegated to the storage adapter, which can see the
  *   stored row;
- * - the deletion request itself is stored and kept indefinitely, because
- *   clients may not have seen it yet and it must be re-appliable and
- *   forwardable upstream.
+ * - the deletion request itself is stored and kept durably, because clients
+ *   may not have seen it yet and it must be re-appliable and forwardable
+ *   upstream. Kind 5 is therefore exempt from the TTL sweep and evicted last
+ *   under `storageMaxSize` (see `storage/priority.ts`).
  */
 
 import { logger } from '@nostr-cache/shared';
@@ -25,6 +26,21 @@ const HEX_PUBKEY_PATTERN = /^[0-9a-f]{64}$/;
 
 /** Event ids referenced by `e` tags (32-byte lowercase hex). */
 const HEX_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+/** Canonical decimal kind: digits only, no leading zeros (except `0` itself). */
+const KIND_PATTERN = /^(0|[1-9]\d*)$/;
+
+/**
+ * Maximum references honored per deletion request, per tag type.
+ *
+ * Each coordinate costs one storage round trip, and on the server those run
+ * synchronously against SQLite, so an unbounded request would let a single
+ * EVENT block the relay for as long as it liked. Ids are cheaper (one batched
+ * query) but capped for symmetry. Excess references are dropped with a log
+ * rather than rejecting the request, since the request itself is still worth
+ * storing and forwarding.
+ */
+export const MAX_DELETION_REFERENCES = 1000;
 
 /**
  * The deletion targets carried by one kind 5 event, after dropping malformed
@@ -77,8 +93,9 @@ export function parseAddress(value: string): EventAddress | undefined {
   const pubkey = value.slice(firstColon + 1, secondColon);
   const identifier = value.slice(secondColon + 1);
 
-  // 整数以外（'1.5' / '0x1' / ' 1'）を Number の寛容さで取り込まないよう桁だけを許す
-  if (!/^\d+$/.test(rawKind)) {
+  // 整数以外（'1.5' / '0x1' / ' 1'）を Number の寛容さで取り込まないよう桁だけを許し、
+  // 先行ゼロ（'007'）も非正規形として弾く
+  if (!KIND_PATTERN.test(rawKind)) {
     return undefined;
   }
   const kind = Number(rawKind);
@@ -96,7 +113,11 @@ export function parseAddress(value: string): EventAddress | undefined {
  * are malformed, name another author, or name a kind that is not addressed by
  * a coordinate (a regular kind such as `1:<pubkey>:` would otherwise delete
  * every note by that author). Self-references to kind 5 are rejected by the
- * storage adapter, which is where a target's kind is visible.
+ * storage adapter, which is where a target's kind is visible. References beyond
+ * {@link MAX_DELETION_REFERENCES} per tag type are dropped.
+ *
+ * Tolerates a malformed `tags` array (a non-array, or entries that are not
+ * arrays), which `NONE` validation mode makes reachable.
  *
  * @param event Deletion request event (kind 5)
  * @returns The targets to delete, deduplicated
@@ -104,17 +125,26 @@ export function parseAddress(value: string): EventAddress | undefined {
 export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
   const ids = new Set<string>();
   const addresses = new Map<string, EventAddress>();
+  let dropped = 0;
 
-  for (const tag of event.tags) {
+  for (const tag of Array.isArray(event.tags) ? event.tags : []) {
+    if (!Array.isArray(tag)) {
+      continue;
+    }
     const [name, value] = tag;
     if (typeof value !== 'string' || value.length === 0) {
       continue;
     }
 
     if (name === 'e') {
-      if (HEX_ID_PATTERN.test(value)) {
-        ids.add(value);
+      if (!HEX_ID_PATTERN.test(value)) {
+        continue;
       }
+      if (ids.size >= MAX_DELETION_REFERENCES && !ids.has(value)) {
+        dropped++;
+        continue;
+      }
+      ids.add(value);
       continue;
     }
 
@@ -128,8 +158,19 @@ export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
         continue;
       }
       // 同じ座標を指す複数の a タグは 1 回にまとめる
-      addresses.set(`${address.kind}:${address.pubkey}:${address.identifier}`, address);
+      const key = `${address.kind}:${address.pubkey}:${address.identifier}`;
+      if (addresses.size >= MAX_DELETION_REFERENCES && !addresses.has(key)) {
+        dropped++;
+        continue;
+      }
+      addresses.set(key, address);
     }
+  }
+
+  if (dropped > 0) {
+    logger.info(
+      `Deletion request ${event.id}: dropped ${dropped} references over the ${MAX_DELETION_REFERENCES} per-type limit`
+    );
   }
 
   return {
@@ -138,6 +179,28 @@ export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
     addresses: Array.from(addresses.values()),
     until: event.created_at,
   };
+}
+
+/**
+ * Whether a coordinate deletion may run at all.
+ *
+ * Shared guard for the storage adapters, mirroring what
+ * {@link parseDeletionRequest} already rejects — the adapters repeat it because
+ * `deleteEventsByAddress` is a public method that can be called directly, and a
+ * coordinate naming a regular kind would delete every event of that kind by the
+ * author. Kind 5 is excluded implicitly: it is neither replaceable nor
+ * addressable, so it is never coordinate-addressable.
+ *
+ * `until` must be a finite number: IndexedDB orders strings above every number,
+ * so a non-numeric upper bound would silently turn the range into "all
+ * versions".
+ *
+ * @param address Coordinate being deleted
+ * @param until Upper bound on `created_at`
+ * @returns True if the deletion may proceed
+ */
+export function isDeletableAddress(address: EventAddress, until: number): boolean {
+  return isCoordinateAddressableKind(address.kind) && Number.isFinite(until);
 }
 
 /**
@@ -165,9 +228,10 @@ export function matchesAddressIdentifier(tags: string[][], address: EventAddress
  * requester is allowed to delete.
  *
  * Idempotent, so re-receiving the same request (an upstream echo, a client
- * rebroadcast) simply deletes nothing new. Storage failures are logged and
- * swallowed — the request itself is already persisted and gets re-applied the
- * next time it arrives.
+ * rebroadcast) simply deletes nothing new. Parsing and storage failures alike
+ * are logged and swallowed — the request itself is already persisted and gets
+ * re-applied the next time it arrives, and callers rely on this never throwing
+ * (`NostrCacheRelay.publishEvent` has already committed the save by then).
  *
  * @param storage Storage adapter to delete from
  * @param event Deletion request event (kind 5)
@@ -177,10 +241,10 @@ export async function applyDeletionRequest(
   storage: StorageAdapter,
   event: NostrEvent
 ): Promise<number> {
-  const request = parseDeletionRequest(event);
   let deleted = 0;
 
   try {
+    const request = parseDeletionRequest(event);
     if (request.ids.length > 0) {
       deleted += await storage.deleteEventsByIdsForPubkey(request.ids, request.pubkey);
     }

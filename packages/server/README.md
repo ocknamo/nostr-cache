@@ -2,11 +2,12 @@
 
 **注意: このパッケージは開発中のため、一部の機能は正常に動作しません。**
 
-NIP-01準拠のNostrリレーサーバー実装。このパッケージは`@nostr-cache/cache-relay`を使用してNostrリレーサーバーをローカルで実行できるようにします。
+NIP-01 / NIP-02 / NIP-09 準拠のNostrリレーサーバー実装。このパッケージは`@nostr-cache/cache-relay`を使用してNostrリレーサーバーをローカルで実行できるようにします。
 
 ## 主な機能
 
 - WebSocketを通じたNIP-01準拠のNostrリレープロトコルの実装
+- NIP-09（イベント削除リクエスト・kind 5）の適用
 - イベントの保存と取得
 - サブスクリプション管理
 - イベントのバリデーション
@@ -122,6 +123,8 @@ interface NostrRelayServerOptions {
     maxSubscriptions?: number;     // 最大サブスクリプション数
     maxEventsPerRequest?: number;  // リクエストあたりの最大イベント数
     validateEvents?: boolean;      // イベントのバリデーションを行うかどうか
+                                   // false でも NIP-09 の削除リクエスト（kind 5）は必ず署名検証する
+                                   // （削除は取り消せないため）
   };
 
   // ヘルスチェック設定

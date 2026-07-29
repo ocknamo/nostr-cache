@@ -6,7 +6,9 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mocked, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import {
+  MAX_DELETION_REFERENCES,
   applyDeletionRequest,
+  isDeletableAddress,
   isDeletionEvent,
   matchesAddressIdentifier,
   parseAddress,
@@ -70,6 +72,35 @@ describe('parseAddress', () => {
     expect(parseAddress(` 1:${AUTHOR}:x`)).toBeUndefined();
     expect(parseAddress('30023:short-pubkey:x')).toBeUndefined();
     expect(parseAddress(`30023:${AUTHOR.toUpperCase()}:x`)).toBeUndefined();
+  });
+
+  it('should reject a kind with leading zeros as a non-canonical coordinate', () => {
+    expect(parseAddress(`030023:${AUTHOR}:x`)).toBeUndefined();
+    // '0' 単体は正規形
+    expect(parseAddress(`0:${AUTHOR}:`)?.kind).toBe(0);
+  });
+});
+
+describe('isDeletableAddress', () => {
+  it('should accept replaceable and addressable coordinates', () => {
+    for (const kind of [0, 3, 10002, 30023]) {
+      expect(isDeletableAddress({ kind, pubkey: AUTHOR, identifier: '' }, 1000)).toBe(true);
+    }
+  });
+
+  it('should reject coordinates that cannot address an event', () => {
+    // 通常 kind を通すと「この著者の kind 1 を全部削除」になる。kind 5 は
+    // 座標で指せる kind ではないので同じ判定で落ちる
+    for (const kind of [1, 5, 20001]) {
+      expect(isDeletableAddress({ kind, pubkey: AUTHOR, identifier: '' }, 1000)).toBe(false);
+    }
+  });
+
+  it('should reject a non-finite until bound', () => {
+    const address = { kind: 30023, pubkey: AUTHOR, identifier: 'slug' };
+    expect(isDeletableAddress(address, Number.NaN)).toBe(false);
+    expect(isDeletableAddress(address, Number.POSITIVE_INFINITY)).toBe(false);
+    expect(isDeletableAddress(address, 'x' as unknown as number)).toBe(false);
   });
 });
 
@@ -156,6 +187,47 @@ describe('parseDeletionRequest', () => {
     expect(request.ids).toEqual([TARGET_ID]);
     expect(request.addresses).toEqual([]);
   });
+
+  it('should cap references per tag type', () => {
+    // 座標 1 件につきストレージ 1 往復なので、1 通で無制限に増幅させない
+    const hexId = (index: number) => index.toString(16).padStart(64, '0');
+    const tags: string[][] = [];
+    for (let index = 0; index < MAX_DELETION_REFERENCES + 10; index++) {
+      tags.push(['e', hexId(index)]);
+      tags.push(['a', `30023:${AUTHOR}:slug-${index}`]);
+    }
+
+    const request = parseDeletionRequest(deletionRequest(tags));
+
+    expect(request.ids).toHaveLength(MAX_DELETION_REFERENCES);
+    expect(request.addresses).toHaveLength(MAX_DELETION_REFERENCES);
+  });
+
+  it('should not count duplicates against the cap', () => {
+    const tags: string[][] = Array.from({ length: MAX_DELETION_REFERENCES + 10 }, () => [
+      'e',
+      TARGET_ID,
+    ]);
+    tags.push(['e', OTHER_TARGET_ID]);
+
+    const request = parseDeletionRequest(deletionRequest(tags));
+
+    expect(request.ids).toEqual([TARGET_ID, OTHER_TARGET_ID]);
+  });
+
+  it('should tolerate a malformed tags array', () => {
+    // NONE モードでは構造が壊れたイベントも到達しうる
+    const malformed = {
+      ...deletionRequest([]),
+      tags: [null, 'not-an-array', ['e', TARGET_ID], []],
+    } as unknown as NostrEvent;
+
+    expect(() => parseDeletionRequest(malformed)).not.toThrow();
+    expect(parseDeletionRequest(malformed).ids).toEqual([TARGET_ID]);
+
+    const noTags = { ...deletionRequest([]), tags: undefined } as unknown as NostrEvent;
+    expect(parseDeletionRequest(noTags).ids).toEqual([]);
+  });
 });
 
 describe('matchesAddressIdentifier', () => {
@@ -224,6 +296,13 @@ describe('applyDeletionRequest', () => {
     expect(storage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
     expect(storage.deleteEventsByAddress).not.toHaveBeenCalled();
     expect(deleted).toBe(0);
+  });
+
+  it('should swallow a malformed request instead of throwing', async () => {
+    // publishEvent は保存をコミットした後に呼ぶため、ここで throw させない
+    const malformed = { ...deletionRequest([]), tags: null } as unknown as NostrEvent;
+
+    await expect(applyDeletionRequest(storage, malformed)).resolves.toBe(0);
   });
 
   it('should swallow storage failures so the stored request can be re-applied', async () => {

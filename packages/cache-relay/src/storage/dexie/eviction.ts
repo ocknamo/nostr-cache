@@ -1,6 +1,6 @@
 import { logger } from '@nostr-cache/shared';
 import type { Dexie } from 'dexie';
-import { type CachePriority, createPriorityMatcher, hasPriorityRules } from '../priority.js';
+import { type CachePriority, createPriorityMatcher } from '../priority.js';
 import type { CacheStrategy } from '../storage-adapter.js';
 import type { NostrEventTable } from './schema.js';
 
@@ -32,12 +32,14 @@ const evictionIndex: Record<CacheStrategy, string> = {
  *   first" rather than strict arrival order (`cached_at`) — a deliberate
  *   choice. Events sharing the same `created_at` are evicted in primary-key
  *   (id) order.
- * - Priority events (matching `priority`) are evicted last: non-priority
- *   events are evicted first in strategy order, and only if the store is
- *   still over `maxSize` are priority events evicted (also in strategy
- *   order), so `maxSize` is always honored. The priority pass needs row
- *   values (pubkey/kind), so it walks a value cursor in eviction order and
- *   stops once enough victims are found.
+ * - Priority events are evicted last: non-priority events are evicted first
+ *   in strategy order, and only if the store is still over `maxSize` are
+ *   priority events evicted (also in strategy order), so `maxSize` is always
+ *   honored. The priority pass needs row values (pubkey/kind), so it walks a
+ *   value cursor in eviction order and stops once enough victims are found.
+ *   "Priority" covers both the configured `priority` rules and the kinds that
+ *   are always retained (NIP-09 deletion requests), so this filtered path runs
+ *   even when no `priority` config is given.
  *
  * @param db The Dexie database (used to open the eviction transaction)
  * @param table The Dexie events table
@@ -67,17 +69,6 @@ export async function enforceLimit(
       }
 
       const excess = count - maxSize;
-
-      if (!hasPriorityRules(priority)) {
-        const idsToEvict = await table.orderBy(evictionIndex[strategy]).limit(excess).primaryKeys();
-
-        if (idsToEvict.length > 0) {
-          await table.bulkDelete(idsToEvict);
-          logger.info(`Evicted ${idsToEvict.length} events to respect storageMaxSize ${maxSize}`);
-        }
-
-        return idsToEvict.length;
-      }
 
       const isPriority = createPriorityMatcher(priority);
       const nonPriorityVictims = await table
