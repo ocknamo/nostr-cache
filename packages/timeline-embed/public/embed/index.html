@@ -56,6 +56,9 @@
             return;
           }
           lastHeight = height;
+          // targetOrigin '*' because the embedding origin is unknown by design.
+          // The payload is only a height, and the README's receiving snippet
+          // checks event.source before acting on it.
           parent.postMessage({ type: 'nostr-timeline:height', height: height }, '*');
         }
 

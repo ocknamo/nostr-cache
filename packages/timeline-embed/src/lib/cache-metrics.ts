@@ -1,76 +1,86 @@
 /**
- * Tracks where each timeline event came from: the local cache or an upstream
+ * Tracks where each delivered event came from: the local cache or an upstream
  * relay.
  *
  * The classification relies on the ordering guaranteed by the relay's
- * read-through path:
+ * read-through path. An event fetched upstream passes through the upstream pool
+ * (recorded here by {@link CacheMetrics.recordUpstreamEvent}) *before* the relay
+ * validates, stores and forwards it to a client, so by the time it reaches the
+ * client the sighting is already on record. An event served from storage never
+ * passes through the pool at all, and `UpstreamCoordinator.markDelivered` seeds
+ * the subscription's dedup set with it so the later upstream echo is dropped
+ * rather than re-delivered.
  *
- * - An upstream event passes through the upstream pool (recorded here by
- *   {@link recordUpstreamEvent}) *before* the relay validates, stores and
- *   forwards it to the client, so by the time the client sees it the id is
- *   already known to be an upstream one.
- * - A locally cached event is delivered straight from storage, ahead of any
- *   upstream traffic, and `UpstreamCoordinator.markDelivered` seeds the
- *   subscription's dedup set with it — so the inevitable upstream echo of the
- *   same event is dropped rather than re-delivered. It therefore reaches the
- *   client without ever having been recorded here.
+ * Sightings are therefore **consumed** by the delivery they explain, and expire
+ * after {@link UPSTREAM_ATTRIBUTION_WINDOW_MS}. Both matter: an id that came
+ * from upstream once must not brand every later delivery of that same event as
+ * an upstream fetch, or genuine cache hits get mislabelled — which is exactly
+ * what happens after the demo's cold/warm benchmark, and whenever two widgets
+ * on a page share this instance.
  *
- * A classification is made once, when the event is delivered, and never
- * rewritten: an event served from cache stays `cache` even if an upstream
- * relay happens to send it afterwards on another subscription.
+ * Per-view stability is the caller's job: `TimelineController` keeps its own
+ * id → origin map per subscription, so a rendered badge never changes under the
+ * reader. This class answers "where did *this* delivery come from", once.
  */
+
+/** How long a recorded upstream sighting can still explain a delivery. */
+export const UPSTREAM_ATTRIBUTION_WINDOW_MS = 5000;
 
 export type EventOrigin = 'cache' | 'upstream';
 
 export interface MetricsSnapshot {
-  /** Events delivered to the client straight from local storage. */
+  /** Deliveries served out of local storage. */
   cacheHits: number;
   /** Distinct events received from upstream relays. */
   upstreamEvents: number;
-  /** Events delivered to the client in total (cacheHits + upstream-delivered). */
+  /** Deliveries classified in total. */
   delivered: number;
 }
 
 export class CacheMetrics {
-  private readonly upstreamSeen = new Set<string>();
-  private readonly origins = new Map<string, EventOrigin>();
+  /** Upstream sightings awaiting the delivery they explain, by event id. */
+  private readonly pendingUpstream = new Map<string, number[]>();
+  /** Every id ever seen upstream, for the distinct-event counter. */
+  private readonly seenUpstreamIds = new Set<string>();
   private readonly relayByEvent = new Map<string, string>();
   private readonly listeners = new Set<() => void>();
   private cacheHits = 0;
-  private upstreamEvents = 0;
+  private delivered = 0;
+
+  constructor(private readonly now: () => number = () => Date.now()) {}
 
   /**
    * Record an event observed arriving from an upstream relay. Must be called
-   * before the event is forwarded on to the relay (see the ordering note in
-   * the module docblock).
+   * before the event is forwarded on to the relay (see the module docblock).
    *
    * @param eventId Event id as received upstream
    * @param relayUrl URL of the upstream relay that sent it
    */
   recordUpstreamEvent(eventId: string, relayUrl: string): void {
-    if (this.upstreamSeen.has(eventId)) {
-      return;
+    const sightings = this.pendingUpstream.get(eventId);
+    if (sightings) {
+      sightings.push(this.now());
+    } else {
+      this.pendingUpstream.set(eventId, [this.now()]);
     }
-    this.upstreamSeen.add(eventId);
-    this.relayByEvent.set(eventId, relayUrl);
-    this.upstreamEvents += 1;
-    this.notify();
+
+    if (!this.seenUpstreamIds.has(eventId)) {
+      this.seenUpstreamIds.add(eventId);
+      this.relayByEvent.set(eventId, relayUrl);
+      this.notify();
+    }
   }
 
   /**
-   * Classify an event at the moment it is delivered to the client, and
-   * remember the verdict. Repeat calls return the first verdict unchanged.
+   * Classify one delivery of an event to a client, consuming the upstream
+   * sighting that explains it (if any).
    *
    * @param eventId Event id delivered to the client
-   * @returns Where this event came from
+   * @returns Where this particular delivery came from
    */
   classifyDelivered(eventId: string): EventOrigin {
-    const existing = this.origins.get(eventId);
-    if (existing) {
-      return existing;
-    }
-    const origin: EventOrigin = this.upstreamSeen.has(eventId) ? 'upstream' : 'cache';
-    this.origins.set(eventId, origin);
+    this.delivered += 1;
+    const origin: EventOrigin = this.consumeUpstreamSighting(eventId) ? 'upstream' : 'cache';
     if (origin === 'cache') {
       this.cacheHits += 1;
     }
@@ -78,12 +88,33 @@ export class CacheMetrics {
     return origin;
   }
 
-  /** The recorded origin of an event, or undefined if it was never delivered. */
-  getOrigin(eventId: string): EventOrigin | undefined {
-    return this.origins.get(eventId);
+  /**
+   * Take one unexpired sighting for an event, if there is one.
+   *
+   * @returns True when this delivery is attributable to an upstream fetch
+   */
+  private consumeUpstreamSighting(eventId: string): boolean {
+    const sightings = this.pendingUpstream.get(eventId);
+    if (!sightings) {
+      return false;
+    }
+    const cutoff = this.now() - UPSTREAM_ATTRIBUTION_WINDOW_MS;
+    // Sightings are appended in time order, so dropping from the front removes
+    // exactly the expired ones.
+    while (sightings.length > 0 && sightings[0] < cutoff) {
+      sightings.shift();
+    }
+    const attributable = sightings.length > 0;
+    if (attributable) {
+      sightings.shift();
+    }
+    if (sightings.length === 0) {
+      this.pendingUpstream.delete(eventId);
+    }
+    return attributable;
   }
 
-  /** The upstream relay an event was first seen on, if it came from upstream. */
+  /** The upstream relay an event was first seen on, if it ever came from one. */
   getRelayUrl(eventId: string): string | undefined {
     return this.relayByEvent.get(eventId);
   }
@@ -91,8 +122,8 @@ export class CacheMetrics {
   snapshot(): MetricsSnapshot {
     return {
       cacheHits: this.cacheHits,
-      upstreamEvents: this.upstreamEvents,
-      delivered: this.origins.size,
+      upstreamEvents: this.seenUpstreamIds.size,
+      delivered: this.delivered,
     };
   }
 
@@ -114,11 +145,11 @@ export class CacheMetrics {
    * so the next run classifies from a clean slate.
    */
   reset(): void {
-    this.upstreamSeen.clear();
-    this.origins.clear();
+    this.pendingUpstream.clear();
+    this.seenUpstreamIds.clear();
     this.relayByEvent.clear();
     this.cacheHits = 0;
-    this.upstreamEvents = 0;
+    this.delivered = 0;
     this.notify();
   }
 

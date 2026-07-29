@@ -42,9 +42,11 @@
     eose: false,
   });
 
-  // Attributes are read once at mount: the relay is shared page-wide and
-  // re-acquiring it mid-life would disturb the other widgets using it. Change
-  // the filter by replacing the element.
+  // Attributes are reactive: changing one tears this widget's controller down
+  // and builds a new one. That is safe even when this is the only widget on the
+  // page — `acquireRelayHost` waits for a host that is still shutting down
+  // before starting its replacement — but it does restart the relay, so prefer
+  // setting the attributes before the element is connected.
   $effect(() => {
     const controller = new TimelineController({
       host: {

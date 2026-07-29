@@ -278,13 +278,17 @@ web-client は 2026-07 に廃棄した）
   - 検証済み: `e2e/tests/browser/timeline-embed.e2e.spec.ts`（6 件）で、実 Chromium +
     実 IndexedDB + モック上流リレーに対し「初回は `upstream` バッジ → リロード後は同じ
     イベントが `cache` バッジ」「ウォームでも上流への REQ 転送は続く」を確認
-- [x] https ページからの `ws://` インターセプトの検証
+- [x] https ページからの `ws://` インターセプトの検証（自動テスト化済み）
   - Pages は https 配信のため、`new WebSocket('ws://nostr-cache.invalid')` が混在コンテンツで
     弾かれる懸念があった。emulator は差し替えたコンストラクタで `EmulatedWebSocket`
     （ネイティブ非継承）を返すためブラウザのチェックに到達せず、**https オリジンでも
-    インターセプトが成立する**ことを自己署名証明書 + 実 Chromium で確認済み
-  - 上流リレーの側は https 制約をそのまま受けるため、`wss://` 以外は
-    `parseRelays` が警告付きで除外する
+    インターセプトが成立する**
+  - 回帰ガード: `e2e/tests/browser/embed-https.e2e.spec.ts`（3 件）。
+    `e2e/src/self-signed-cert.ts` が実行時に openssl で自己署名証明書を生成し
+    （鍵はコミットしない）、埋め込みページを https で、モック上流を `wss://` で配信して
+    実 Chromium から検証する。openssl が無い環境では skip する
+  - 上流リレーの側は https の混在コンテンツ制約をそのまま受ける（上流接続は差し替え前の
+    実 WebSocket を使うため）。`wss://` 以外は `parseRelays` が警告付きで除外する
 
 ## 優先度: 低（整備）
 

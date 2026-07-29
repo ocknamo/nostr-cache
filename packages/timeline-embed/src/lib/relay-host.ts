@@ -73,6 +73,14 @@ interface HostState {
 }
 
 let current: HostState | undefined;
+/**
+ * Teardown of the previous host, while it is still in flight.
+ *
+ * A new host must not be started until this settles: `relay.disconnect()`
+ * restores `globalThis.WebSocket`, and starting early would capture the still
+ * patched constructor as the next host's "original".
+ */
+let pendingStop: Promise<void> | undefined;
 
 function resolveConfig(config: RelayHostConfig): ResolvedConfig {
   return {
@@ -106,7 +114,24 @@ async function startHost(config: ResolvedConfig): Promise<SharedHost> {
   const metrics = new CacheMetrics();
   const storage = new DexieStorage(config.dbName);
   const transport = new WebSocketServerEmulator(config.interceptUrl);
+  try {
+    return await connectHost(config, metrics, storage, transport);
+  } catch (error) {
+    // `relay.connect()` patches the global WebSocket before it can fail on
+    // anything after that (validator, reaper, upstream). Leaving the patch in
+    // place would hand the *next* host a patched constructor to keep as its
+    // "original" — the exact breakage this module exists to prevent.
+    await transport.stop();
+    throw error;
+  }
+}
 
+async function connectHost(
+  config: ResolvedConfig,
+  metrics: CacheMetrics,
+  storage: DexieStorage,
+  transport: WebSocketServerEmulator
+): Promise<SharedHost> {
   // Only wire the upstream layer when there is somewhere to read through to;
   // otherwise the relay stays an independent cache-only relay.
   const upstreamPool = config.upstreamRelays.length
@@ -154,6 +179,12 @@ async function startHost(config: ResolvedConfig): Promise<SharedHost> {
  */
 export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<RelayHost> {
   const resolved = resolveConfig(config);
+
+  // Let a host that is still shutting down finish restoring the global
+  // WebSocket before starting a replacement on top of it.
+  while (!current && pendingStop) {
+    await pendingStop;
+  }
 
   if (current) {
     warnOnConflict(current.config, resolved);
@@ -203,14 +234,25 @@ export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<Re
       if (current === state) {
         current = undefined;
       }
-      await state.stop();
+      // Publish the teardown before awaiting it, so an `acquire()` that starts
+      // while it is running waits rather than racing the global restore.
+      const stopping = state.stop().finally(() => {
+        if (pendingStop === stopping) {
+          pendingStop = undefined;
+        }
+      });
+      pendingStop = stopping;
+      await stopping;
     },
   };
 }
 
 /**
- * How many un-released acquisitions the page currently holds. Exposed for
- * tests asserting that widgets clean up after themselves.
+ * How many un-released acquisitions the page currently holds.
+ *
+ * Useful in tests asserting that widgets clean up after themselves, and to an
+ * embedder that needs to know when every widget has let go — the demo site uses
+ * it to sequence a relay restart.
  */
 export function getRelayHostRefCount(): number {
   return current?.refCount ?? 0;

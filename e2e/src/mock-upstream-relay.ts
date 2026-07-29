@@ -10,6 +10,7 @@
  * with OK.
  */
 
+import { createServer } from 'node:https';
 import type { NostrEvent } from '@nostr-cache/shared';
 import { WebSocketServer } from 'ws';
 
@@ -20,13 +21,29 @@ export interface MockUpstreamRelay {
   close: () => Promise<void>;
 }
 
+export interface MockUpstreamRelayOptions {
+  /**
+   * Serve `wss://` with the given certificate. Required when the page under
+   * test is https: the upstream connection uses the real WebSocket, so a
+   * `ws://` upstream would be blocked as mixed content.
+   */
+  tls?: { key: Buffer; cert: Buffer };
+}
+
 /**
  * Start the mock relay.
  *
  * @param events Events returned for every REQ, in order, before EOSE
+ * @param options Transport options
  */
-export async function startMockUpstreamRelay(events: NostrEvent[]): Promise<MockUpstreamRelay> {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+export async function startMockUpstreamRelay(
+  events: NostrEvent[],
+  options: MockUpstreamRelayOptions = {}
+): Promise<MockUpstreamRelay> {
+  const tlsServer = options.tls ? createServer(options.tls) : undefined;
+  const server = tlsServer
+    ? new WebSocketServer({ server: tlsServer })
+    : new WebSocketServer({ port: 0, host: '127.0.0.1' });
   let reqCount = 0;
 
   server.on('connection', (socket) => {
@@ -58,19 +75,26 @@ export async function startMockUpstreamRelay(events: NostrEvent[]): Promise<Mock
     });
   });
 
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-  const address = server.address();
+  if (tlsServer) {
+    await new Promise<void>((resolve) => tlsServer.listen(0, '127.0.0.1', () => resolve()));
+  } else {
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  }
+
+  const address = (tlsServer ?? server).address();
   const port = typeof address === 'object' && address ? address.port : 0;
 
   return {
-    url: `ws://127.0.0.1:${port}`,
+    url: `${tlsServer ? 'wss' : 'ws'}://127.0.0.1:${port}`,
     reqCount: () => reqCount,
-    close: () =>
-      new Promise<void>((resolve) => {
-        for (const client of server.clients) {
-          client.terminate();
-        }
-        server.close(() => resolve());
-      }),
+    close: async () => {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (tlsServer) {
+        await new Promise<void>((resolve) => tlsServer.close(() => resolve()));
+      }
+    },
   };
 }

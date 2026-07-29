@@ -39,10 +39,18 @@ jobs:
           node-version: "22.x"
           cache: "npm"
       - run: npm ci
-      # Builds every workspace in dependency order: shared and cache-relay
-      # first, then timeline-embed's bundle, then the demo site (whose build
-      # copies that bundle into its own dist).
+      # `--workspaces` runs in the order the root package.json lists them, not
+      # in dependency order, so the two packages whose builds depend on each
+      # other are named explicitly: demo-site's build copies timeline-embed's
+      # dist into its own.
       - run: npm run build
+      - run: npm run build:embed
+      - run: npm run build:demo
+      # lint-and-test.yml and e2e.yml run in parallel with this workflow, so
+      # without a gate here a red build would still be published.
+      - run: npm run typecheck
+      - run: npm run lint:check
+      - run: npm test
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

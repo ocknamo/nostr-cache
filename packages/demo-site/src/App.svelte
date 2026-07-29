@@ -52,6 +52,7 @@
   let benchmarkResult = $state<BenchmarkResult | undefined>(undefined);
   let benchmarkRunning = $state(false);
   let benchmarkError = $state<string | undefined>(undefined);
+  let restartError = $state<string | undefined>(undefined);
 
   const relays = $derived(parseRelays(settings.relays));
   const filter = $derived(parseFilter({ kinds: settings.kinds, limit: settings.limit }));
@@ -97,10 +98,19 @@
    * Wait until nothing holds the shared relay, so the next session starts a
    * genuinely new one (with the new upstream relays) instead of silently
    * reusing the running one.
+   *
+   * @throws If a holder is still hanging on when the timeout expires — carrying
+   *   on regardless would show the new settings in the form while the old relay
+   *   keeps running, with only a console warning to say so.
    */
   async function waitForRelayRelease(timeoutMs = 3000): Promise<void> {
     const startedAt = Date.now();
-    while (getRelayHostRefCount() > 0 && Date.now() - startedAt < timeoutMs) {
+    while (getRelayHostRefCount() > 0) {
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(
+          `リレーの解放待ちがタイムアウトしました（残り ${getRelayHostRefCount()} 件）`
+        );
+      }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
@@ -110,6 +120,7 @@
       return;
     }
     restarting = true;
+    restartError = undefined;
     try {
       await stopSession();
       settings = { ...draft };
@@ -117,6 +128,10 @@
       metrics = { cacheHits: 0, upstreamEvents: 0, delivered: 0 };
       connectedUpstreams = 0;
       await startSession();
+    } catch (error) {
+      restartError = `リレーの再起動に失敗しました: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     } finally {
       restarting = false;
     }
@@ -137,6 +152,9 @@
     }
     benchmarkRunning = true;
     benchmarkError = undefined;
+    // Close the live subscription first: it reads through to the upstream and
+    // keeps refilling the cache, which would contaminate the cold pass.
+    controller?.suspend();
     try {
       benchmarkResult = await runBenchmark({
         interceptUrl: host.interceptUrl,
@@ -149,13 +167,20 @@
         },
       });
       await refreshStoredCount();
-      // The live timeline was showing events that no longer exist; re-run its
-      // subscription so what is on screen matches what is in the cache.
-      controller?.applyFilter(filter);
     } catch (error) {
       benchmarkError = `計測に失敗しました: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       benchmarkRunning = false;
+      // The benchmark's own connections pulled every event through the upstream
+      // without classifying the deliveries, leaving sightings that would
+      // otherwise be attributed to the resumed timeline and label genuine cache
+      // reads as upstream fetches. The benchmark is a separate activity, so its
+      // traffic should not carry into the live counters.
+      controller?.host?.metrics.reset();
+      metrics = { cacheHits: 0, upstreamEvents: 0, delivered: 0 };
+      // Resume the live timeline. Its previous events were wiped by the cold
+      // pass, so re-subscribing is what makes the view match the cache again.
+      controller?.applyFilter(filter);
     }
   }
 
@@ -207,6 +232,9 @@
       接続: <strong>{timeline.status}</strong>
       {#if relays.length === 0}
         <span class="warn">上流リレー未設定（保存済みイベントのみ返します）</span>
+      {/if}
+      {#if restartError}
+        <span class="warn">{restartError}</span>
       {/if}
       {#if timeline.error}
         <span class="warn">{timeline.error}</span>

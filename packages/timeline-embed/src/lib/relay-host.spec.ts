@@ -1,5 +1,6 @@
 // fake-indexeddb provides an in-memory IndexedDB so DexieStorage works in Node.
 import 'fake-indexeddb/auto';
+import { NostrCacheRelay, WebSocketServerEmulator } from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
 
@@ -125,6 +126,54 @@ describe('acquireRelayHost', () => {
     const host = await acquire();
 
     expect(host.getConnectedUpstreams()).toBe(0);
+  });
+
+  it('shuts the emulator down when startup fails', async () => {
+    // relay.connect() patches the global WebSocket before it can fail on
+    // anything after that, so a failed start must still undo the patch —
+    // otherwise the next host captures a patched constructor as its "original".
+    const stop = vi.spyOn(WebSocketServerEmulator.prototype, 'stop');
+    vi.spyOn(NostrCacheRelay.prototype, 'connect').mockRejectedValueOnce(new Error('boom'));
+
+    await expect(acquireRelayHost({ dbName: `test-${crypto.randomUUID()}` })).rejects.toThrow(
+      'boom'
+    );
+
+    expect(stop).toHaveBeenCalled();
+    expect(globalThis.WebSocket).toBe(originalWebSocket);
+    expect(getRelayHostRefCount()).toBe(0);
+  });
+
+  it('starts cleanly after a failed startup', async () => {
+    vi.spyOn(NostrCacheRelay.prototype, 'connect').mockRejectedValueOnce(new Error('boom'));
+    await expect(acquireRelayHost({ dbName: `test-${crypto.randomUUID()}` })).rejects.toThrow(
+      'boom'
+    );
+
+    const host = await acquire();
+    await host.release();
+
+    // The retry must have captured the real original, not the leftover patch.
+    expect(globalThis.WebSocket).toBe(originalWebSocket);
+  });
+
+  it('waits for a host that is still stopping before starting the next one', async () => {
+    const first = await acquire({ dbName: `test-${crypto.randomUUID()}` });
+
+    // Deliberately not awaited: this is what the demo's relay restart does when
+    // it swaps upstream relays.
+    const releasing = first.release();
+    const second = await acquireRelayHost({ dbName: `test-${crypto.randomUUID()}` });
+    acquired.push(second);
+    await releasing;
+
+    expect(second.relay).not.toBe(first.relay);
+    // The new host must be live, i.e. it patched a global that had really been
+    // restored first.
+    expect(globalThis.WebSocket).not.toBe(originalWebSocket);
+
+    await second.release();
+    expect(globalThis.WebSocket).toBe(originalWebSocket);
   });
 
   it('serves a NIP-01 client over the intercepted URL without touching the network', async () => {

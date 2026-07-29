@@ -8,7 +8,8 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { type RequestListener, createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,12 +25,25 @@ export interface EmbedSiteServer {
   close: () => Promise<void>;
 }
 
+export interface EmbedSiteServerOptions {
+  /**
+   * Serve over https with the given certificate.
+   *
+   * GitHub Pages is https-only, and an https page blocks `ws://` as mixed
+   * content — so whether the emulator's interception survives on a secure
+   * origin can only be established over real TLS.
+   */
+  tls?: { key: Buffer; cert: Buffer };
+}
+
 /**
  * Start serving the embed bundle.
  *
  * @throws If the bundle has not been built yet
  */
-export async function startEmbedSiteServer(): Promise<EmbedSiteServer> {
+export async function startEmbedSiteServer(
+  options: EmbedSiteServerOptions = {}
+): Promise<EmbedSiteServer> {
   let bundle: string;
   let embedPage: string;
   try {
@@ -43,7 +57,7 @@ export async function startEmbedSiteServer(): Promise<EmbedSiteServer> {
     );
   }
 
-  const httpServer = createServer((req, res) => {
+  const handler: RequestListener = (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
     if (path === '/nostr-timeline.js') {
       res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' });
@@ -57,13 +71,17 @@ export async function startEmbedSiteServer(): Promise<EmbedSiteServer> {
     }
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
-  });
+  };
+
+  const httpServer = options.tls
+    ? createHttpsServer(options.tls, handler)
+    : createHttpServer(handler);
 
   await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', () => resolve()));
 
   const address = httpServer.address();
   const port = typeof address === 'object' && address ? address.port : 0;
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const baseUrl = `${options.tls ? 'https' : 'http'}://127.0.0.1:${port}`;
 
   return {
     port,

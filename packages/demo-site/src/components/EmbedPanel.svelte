@@ -35,11 +35,16 @@
   );
 
   let iframeHeight = $state(480);
+  let iframeElement = $state<HTMLIFrameElement | undefined>(undefined);
 
   onMount(() => {
     // The embed page reports its content height so the iframe can be sized to
     // it instead of guessing (the same snippet is documented in the README).
     const onMessage = (event: MessageEvent) => {
+      // Only our own iframe may resize itself; any frame on the page can post.
+      if (!iframeElement || event.source !== iframeElement.contentWindow) {
+        return;
+      }
       const data = event.data;
       if (data && data.type === 'nostr-timeline:height' && typeof data.height === 'number') {
         iframeHeight = Math.min(Math.max(data.height, 160), 800);
@@ -73,6 +78,7 @@
         <code>globalThis</code> でリレーを動かすため、ホストページの WebSocket には触れません。
       </p>
       <iframe
+        bind:this={iframeElement}
         title="Nostr timeline (iframe embed)"
         src={iframeSrc}
         style="height: {iframeHeight}px"

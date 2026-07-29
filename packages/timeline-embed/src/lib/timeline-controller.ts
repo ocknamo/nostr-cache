@@ -56,9 +56,15 @@ export class TimelineController {
   private validationFetchTimer?: ReturnType<typeof setTimeout>;
   private validationPollTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  /** Settles on stop(), so a pending connect() cannot leave start() hanging. */
+  private readonly stopSignal: Promise<void>;
+  private signalStopped!: () => void;
 
   constructor(options: TimelineControllerOptions) {
     this.options = options;
+    this.stopSignal = new Promise((resolve) => {
+      this.signalStopped = resolve;
+    });
     this.connection = new RelayConnection({
       onStatusChange: (status) => this.patch({ status }),
     });
@@ -99,9 +105,14 @@ export class TimelineController {
       return;
     }
     try {
-      await this.connection.connect(this.relayHost.interceptUrl);
+      // stop() detaches the socket's handlers, so a connect() in flight would
+      // otherwise never settle and this method would hang forever.
+      await Promise.race([this.connection.connect(this.relayHost.interceptUrl), this.stopSignal]);
     } catch (error) {
       this.patch({ status: 'error', error: `接続に失敗しました: ${message(error)}` });
+      return;
+    }
+    if (this.stopped) {
       return;
     }
     this.subscribe(filter);
@@ -113,11 +124,27 @@ export class TimelineController {
   }
 
   /**
+   * Close the current subscription while keeping the relay and connection.
+   *
+   * Used while benchmarking: a live subscription keeps reading through to the
+   * upstream and refilling the cache, which would contaminate a cold pass.
+   * Call {@link applyFilter} to start again.
+   */
+  suspend(): void {
+    if (this.currentSubId) {
+      this.connection.unsubscribe(this.currentSubId);
+      this.currentSubId = null;
+    }
+    this.clearTimers();
+  }
+
+  /**
    * Close the subscription and release this widget's claim on the relay. Safe
    * to call more than once, and safe to call while {@link start} is in flight.
    */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.signalStopped();
     this.clearTimers();
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
@@ -135,9 +162,19 @@ export class TimelineController {
       this.currentSubId = null;
     }
     this.clearTimers();
-    this.patch({ events: [], origins: new Map(), validationStatuses: new Map(), eose: false });
+    // Timings are per subscription id and never revisited once replaced.
+    this.timer.clear();
+    this.patch({
+      events: [],
+      origins: new Map(),
+      validationStatuses: new Map(),
+      eose: false,
+      error: undefined,
+    });
 
     if (!this.connection.isConnected) {
+      // Say so rather than leaving the UI on "読み込み中…" forever.
+      this.patch({ error: 'リレーに接続していないため購読できません' });
       return;
     }
 
@@ -149,8 +186,13 @@ export class TimelineController {
     this.connection.subscribe(subId, [filter], {
       onEvent: (event) => {
         this.timer.markEvent(subId);
-        const origin = this.relayHost?.metrics.classifyDelivered(event.id) ?? 'cache';
-        const origins = new Map(this.state.origins).set(event.id, origin);
+        // Without a host there is nothing that can tell cache from upstream;
+        // leave the origin unset so no badge is rendered rather than guessing.
+        const origin = this.relayHost?.metrics.classifyDelivered(event.id);
+        const origins = new Map(this.state.origins);
+        if (origin) {
+          origins.set(event.id, origin);
+        }
         this.patch({
           events: insertEvent(this.state.events, event, this.options.maxEvents),
           origins,

@@ -112,7 +112,7 @@ async function measurePass(subId: string, options: BenchmarkOptions): Promise<Be
 
 /**
  * How many times faster the warm pass produced its first event. Undefined when
- * either pass produced none, or when the cold pass was too fast to divide by.
+ * either pass produced none, or when the warm pass was too fast to divide by.
  */
 export function speedup(result: BenchmarkResult): number | undefined {
   const cold = result.cold.timeToFirstEvent;
