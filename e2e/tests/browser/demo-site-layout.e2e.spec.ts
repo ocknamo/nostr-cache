@@ -108,6 +108,19 @@ describe('Demo site mobile layout E2E', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('loads the embed widget in the iframe, not the demo page itself', async () => {
+    page = await openAt(375);
+
+    // The iframe sits inside the widest panel on the page, so what it renders
+    // decides whether the measurements above mean anything. Serving the SPA for
+    // `/embed/` would nest the whole demo inside itself and still "pass".
+    const frame = await (await page.waitForSelector('iframe', { timeout: TIMEOUT })).contentFrame();
+    expect(frame).toBeTruthy();
+    await frame?.waitForSelector('nostr-timeline', { timeout: TIMEOUT });
+
+    expect(await frame?.$('.page')).toBeNull();
+  });
+
   it('keeps the timeline scroll area shorter than the screen', async () => {
     page = await openAt(375);
 

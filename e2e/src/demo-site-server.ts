@@ -2,9 +2,10 @@
  * Serves the built demo site (`packages/demo-site/dist`) over a real http
  * origin.
  *
- * The layout E2E needs the shipped artifact rather than a dev server: the
- * published CSS is what a phone actually loads, and IndexedDB — which the page
- * boots its relay against on load — refuses to work on an opaque origin.
+ * The layout E2E needs a server rather than `file://` for two reasons: the page
+ * boots its relay against IndexedDB on load, which refuses to work on an opaque
+ * origin, and the site is built with `base: '/nostr-cache/'`, so its asset URLs
+ * only resolve under that path prefix.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -15,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const SITE_DIST = resolve(currentDir, '../../packages/demo-site/dist');
 
-/** The site is deployed under a project-pages sub-path, and links assume it. */
+/** The site is deployed under a project-pages sub-path, and its URLs assume it. */
 const BASE = '/nostr-cache/';
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -34,14 +35,28 @@ export interface DemoSiteServer {
 }
 
 /**
+ * Map a request path to a file inside the built site.
+ *
+ * A directory resolves to its own `index.html` — not the site root's. The demo
+ * has no client-side routing, but it does embed `/nostr-cache/embed/` in an
+ * iframe, and answering that with the SPA would nest the whole demo page inside
+ * itself instead of loading the widget.
+ */
+function toFilePath(requestPath: string): string {
+  const withoutBase = requestPath.startsWith(BASE)
+    ? requestPath.slice(BASE.length)
+    : requestPath.replace(/^\//, '');
+  return withoutBase === '' || withoutBase.endsWith('/') ? `${withoutBase}index.html` : withoutBase;
+}
+
+/**
  * Start serving the demo site.
  *
  * @throws If the site has not been built yet
  */
 export async function startDemoSiteServer(): Promise<DemoSiteServer> {
-  const indexPath = resolve(SITE_DIST, 'index.html');
   try {
-    await readFile(indexPath);
+    await readFile(resolve(SITE_DIST, 'index.html'));
   } catch (error) {
     throw new Error(
       `Demo site missing from ${SITE_DIST}. Run "npm run build:demo" first. (${
@@ -51,12 +66,7 @@ export async function startDemoSiteServer(): Promise<DemoSiteServer> {
   }
 
   const httpServer = createServer((req, res) => {
-    const path = (req.url ?? '/').split('?')[0];
-    const relative = path.startsWith(BASE) ? path.slice(BASE.length) : path.replace(/^\//, '');
-    // Vite emits a single-page app, so anything without a file extension is the
-    // SPA entry rather than a 404.
-    const file = relative === '' || extname(relative) === '' ? 'index.html' : relative;
-
+    const file = toFilePath((req.url ?? '/').split('?')[0]);
     const target = resolve(SITE_DIST, normalize(file));
     if (target !== SITE_DIST && !target.startsWith(SITE_DIST + sep)) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
