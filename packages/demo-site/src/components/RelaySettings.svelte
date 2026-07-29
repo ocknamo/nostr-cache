@@ -28,7 +28,7 @@
     <span>上流リレー（カンマ区切り・空ならキャッシュのみ）</span>
     <input
       bind:value={relays}
-      placeholder="wss://nos.lol, wss://relay.damus.io"
+      placeholder="wss://yabu.me"
       spellcheck="false"
       autocapitalize="off"
     />

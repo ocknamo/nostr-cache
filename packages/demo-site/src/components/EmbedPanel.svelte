@@ -34,8 +34,26 @@
     `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"\n></nostr-timeline>`
   );
 
+  /** Bounds on the height the embed page may ask for. */
+  const MIN_IFRAME_HEIGHT = 160;
+  const MAX_IFRAME_HEIGHT = 800;
+
   let iframeHeight = $state(480);
   let iframeElement = $state<HTMLIFrameElement | undefined>(undefined);
+  /** Latest height the embed page asked for, so a resize can re-clamp it. */
+  let lastRequestedHeight = 480;
+
+  /**
+   * Clamp a requested height, never letting the frame grow past the screen:
+   * once its content no longer fits, the iframe scrolls internally, and a
+   * nested scroll area taller than the viewport traps the page on a phone.
+   */
+  function clampIframeHeight(height: number): number {
+    const viewportCap =
+      typeof window === 'undefined' ? MAX_IFRAME_HEIGHT : Math.round(window.innerHeight * 0.8);
+    const cap = Math.max(MIN_IFRAME_HEIGHT, Math.min(MAX_IFRAME_HEIGHT, viewportCap));
+    return Math.min(Math.max(height, MIN_IFRAME_HEIGHT), cap);
+  }
 
   onMount(() => {
     // The embed page reports its content height so the iframe can be sized to
@@ -47,11 +65,20 @@
       }
       const data = event.data;
       if (data && data.type === 'nostr-timeline:height' && typeof data.height === 'number') {
-        iframeHeight = Math.min(Math.max(data.height, 160), 800);
+        lastRequestedHeight = data.height;
+        iframeHeight = clampIframeHeight(data.height);
       }
     };
+    // Rotating the phone changes the cap, so re-clamp the last request.
+    const onResize = () => {
+      iframeHeight = clampIframeHeight(lastRequestedHeight);
+    };
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('resize', onResize);
+    };
   });
 
   async function copy(text: string) {
@@ -146,7 +173,10 @@
     border-radius: 10px;
     background: #fff;
     padding: 8px;
-    max-height: 480px;
+    /* Same rule as the page's own timeline: a nested scroll area that is taller
+       than the screen leaves no way to reach the rest of the page. */
+    max-height: min(480px, 70vh);
+    max-height: min(480px, 70dvh);
     overflow-y: auto;
   }
 

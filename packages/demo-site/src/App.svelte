@@ -19,7 +19,7 @@
   import { type BenchmarkResult, runBenchmark } from './lib/benchmark.ts';
 
   const DEFAULT_SETTINGS = {
-    relays: 'wss://nos.lol, wss://relay.damus.io',
+    relays: 'wss://yabu.me',
     kinds: '1',
     limit: '50',
   };
