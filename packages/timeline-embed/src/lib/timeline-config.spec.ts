@@ -1,0 +1,114 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  DEFAULT_KINDS,
+  DEFAULT_LIMIT,
+  configFromSearchParams,
+  parseFilter,
+  parseRelays,
+} from './timeline-config.ts';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe('parseRelays', () => {
+  it('splits, trims and de-duplicates a comma-separated list', () => {
+    expect(parseRelays(' wss://a.example , wss://b.example ,wss://a.example')).toEqual([
+      'wss://a.example',
+      'wss://b.example',
+    ]);
+  });
+
+  it('returns an empty list for empty or missing input', () => {
+    expect(parseRelays(undefined)).toEqual([]);
+    expect(parseRelays(null)).toEqual([]);
+    expect(parseRelays('')).toEqual([]);
+    expect(parseRelays('  ,  ')).toEqual([]);
+  });
+
+  it('drops malformed and non-WebSocket URLs', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseRelays('not a url,https://relay.example,wss://ok.example')).toEqual([
+      'wss://ok.example',
+    ]);
+  });
+
+  it('drops ws:// upstreams on an https page because the browser blocks them', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('location', { protocol: 'https:' });
+
+    expect(parseRelays('ws://insecure.example,wss://ok.example')).toEqual(['wss://ok.example']);
+    expect(warn.mock.calls[0][0]).toContain('mixed content');
+  });
+
+  it('keeps ws:// upstreams on an http page', () => {
+    vi.stubGlobal('location', { protocol: 'http:' });
+
+    expect(parseRelays('ws://localhost:8080')).toEqual(['ws://localhost:8080']);
+  });
+});
+
+describe('parseFilter', () => {
+  it('falls back to the defaults when nothing is given', () => {
+    expect(parseFilter({})).toEqual({ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT });
+  });
+
+  it('parses kinds, authors and limit', () => {
+    expect(parseFilter({ kinds: '1, 6', authors: 'abc, def', limit: '20' })).toEqual({
+      kinds: [1, 6],
+      authors: ['abc', 'def'],
+      limit: 20,
+    });
+  });
+
+  it('omits authors entirely when none are given', () => {
+    expect(parseFilter({ kinds: '1' })).not.toHaveProperty('authors');
+  });
+
+  it('ignores non-integer and negative kinds', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseFilter({ kinds: '1,abc,-2,1.5' }).kinds).toEqual([1]);
+  });
+
+  it('falls back to the default kinds when every kind is invalid', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseFilter({ kinds: 'abc' }).kinds).toEqual(DEFAULT_KINDS);
+  });
+
+  it('falls back to the default limit for zero, negative and unparseable values', () => {
+    expect(parseFilter({ limit: '0' }).limit).toBe(DEFAULT_LIMIT);
+    expect(parseFilter({ limit: '-5' }).limit).toBe(DEFAULT_LIMIT);
+    expect(parseFilter({ limit: 'lots' }).limit).toBe(DEFAULT_LIMIT);
+    expect(parseFilter({ limit: '2.5' }).limit).toBe(DEFAULT_LIMIT);
+  });
+});
+
+describe('configFromSearchParams', () => {
+  it('reads the same options the custom element takes as attributes', () => {
+    const config = configFromSearchParams(
+      new URLSearchParams(
+        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&show-origin=false'
+      )
+    );
+
+    expect(config).toEqual({
+      relays: ['wss://a.example'],
+      filter: { kinds: [1, 7], authors: ['abc'], limit: 20 },
+      dbName: 'demo',
+      showOrigin: false,
+    });
+  });
+
+  it('defaults to showing origin badges and no explicit database name', () => {
+    const config = configFromSearchParams(new URLSearchParams(''));
+
+    expect(config.showOrigin).toBe(true);
+    expect(config.dbName).toBeUndefined();
+    expect(config.relays).toEqual([]);
+    expect(config.filter).toEqual({ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT });
+  });
+});

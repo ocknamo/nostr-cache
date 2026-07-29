@@ -1,0 +1,51 @@
+# Publishes the demo site (and the embed bundle it serves) to GitHub Pages.
+#
+# The deployed directory is packages/demo-site/dist, which the demo-site build
+# also copies the embed bundle into — so the SPA, `nostr-timeline.js` and the
+# `/embed/` iframe page are all served from one origin, which is what makes the
+# published embed snippets work.
+#
+# One-time setup: Settings → Pages → Source must be set to "GitHub Actions".
+
+name: pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead of cancelling a running publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+      - run: npm ci
+      # Builds every workspace in dependency order: shared and cache-relay
+      # first, then timeline-embed's bundle, then the demo site (whose build
+      # copies that bundle into its own dist).
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/demo-site/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -177,6 +177,28 @@ const relay = new NostrCacheRelay(storage, transport, {
 npm run dev:web   # http://localhost:5173 で起動
 ```
 
+## 埋め込みウィジェットとして使う
+
+自分で組み立てる代わりに、本手順をパッケージ化した
+[`@nostr-cache/timeline-embed`](../packages/timeline-embed/README.md) をそのまま
+埋め込むこともできます。iframe と Web Component の 2 形態があり、実装は 1 つです。
+
+```html
+<!-- A. iframe: 埋め込み先から完全に隔離（iframe 自身の globalThis で動く） -->
+<iframe src="https://ocknamo.github.io/nostr-cache/embed/?relays=wss://nos.lol"></iframe>
+
+<!-- B. Web Component: 埋め込み先ページ内で動き、globalThis.WebSocket を差し替える -->
+<script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
+<nostr-timeline relays="wss://nos.lol" kinds="1" limit="50"></nostr-timeline>
+```
+
+B は本ドキュメントの手順そのもの（パターン A の専用ローカル URL 方式）を内部で
+実行します。1 ページにリレーは 1 つだけ起動して共有されるため、複数のウィジェットを
+置いても上流への接続は増えません。
+
+透過キャッシュの動作（キャッシュ由来の可視化・コールド/ウォーム計測）は
+公開デモで確認できます: <https://ocknamo.github.io/nostr-cache/>
+
 ## 関連ドキュメント
 
 - [doc/concept.md](./concept.md): 透過キャッシュ構想の背景・全体像
