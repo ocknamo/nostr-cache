@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>nostr-cache — 透過キャッシュのデモ</title>
+    <!-- Inline so the page needs no extra request (and logs no favicon 404). -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b7a3f'/%3E%3Cpath d='M9 21V11h2.6l5 6.6V11H19v10h-2.6l-5-6.6V21z' fill='%23fff'/%3E%3C/svg%3E"
+    />
+    <meta
+      name="description"
+      content="ブラウザ内で動く Nostr リレーを上流リレーの手前に透過キャッシュとして挟むデモ。キャッシュ由来の可視化とコールド/ウォーム計測、埋め込み用タイムラインつき。"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

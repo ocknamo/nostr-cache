@@ -309,7 +309,67 @@ web-client は 2026-07 に廃棄した）
   - 公開 API の破壊的変更になるため、ハンドラのシグネチャ変更（`(event, subscriptionId)`）で
     進めるかを決めてから着手する
 
+## 優先度: 高（公開デモと埋め込み — 2026-07 に追加）
+
+- [x] **GitHub Pages で公開する透過キャッシュのデモサイト**（`packages/demo-site`）
+  - Svelte 5 + Vite の SPA（`base: '/nostr-cache/'`）。上流リレー / kinds / limit を UI から
+    設定でき、`packages/web-client` のように上流リレーをソースへハードコードする必要がない
+  - キャッシュ由来の可視化: 各イベントに `cache` / `upstream` バッジ。ライブカウンタ
+    （キャッシュ配信数 / 上流取得数 / 上流接続数 / キャッシュ保存数）
+  - コールド / ウォーム計測: `storage.clear()` 後の 1 回目と 2 回目を比較し、
+    **初回イベントまでの時間**を並べて表示（EOSE はリードスルーが常に上流へ REQ を
+    転送するため縮まない。これは仕様どおりで、UI にもその旨を明記した）
+  - `.github/workflows/pages.yml` で `main` への push 時に自動デプロイ
+    （要初回設定: Settings → Pages → Source = GitHub Actions）
+- [x] **埋め込み可能なタイムラインウィジェット**（`packages/timeline-embed`）
+  - iframe と Web Component の 2 形態。**実装は 1 つ**で、`dist/embed/index.html` は
+    `dist/nostr-timeline.js` を読んで `<nostr-timeline>` を置くだけの薄いページ。
+    iframe 内では emulator が iframe 自身の `globalThis` を差し替えるため、
+    インページ方式の実装がそのまま隔離モードとしても動く（別コードパスなし）
+  - 自己完結した IIFE 1 ファイル（約 232 KB / gzip 約 78 KB）。スタイルは Shadow DOM に
+    インライン展開されるため別途 CSS 不要。CSS カスタムプロパティでテーマ調整可能
+  - `relay-host.ts`: ページ共有リレーのシングルトン + 参照カウント。emulator が
+    `globalThis.WebSocket` を差し替える以上、複数ウィジェットが各自エミュレータを
+    起動すると 2 つ目が**差し替え済みの WebSocket を "original" として保持**して
+    復元順で壊れるため。購読の分離は各ウィジェットが `new WebSocket(interceptUrl)` で
+    自分専用の接続を張ることで得ている（emulator の `Map<clientId, socket>` を利用）。
+    これにより in-process `subscribe()` の「`RelayEventHandler` が subscriptionId を
+    運べない」既知の制約も回避している
+  - 設定衝突は「最初に mount されたウィジェットの設定が勝ち、以降は警告して共有」。
+    1 ページから同じ上流へ何本も接続を張らないための意図的な制約
+- [x] **cache-relay を無改変での上流トラフィック計測**
+  - `NostrRelayOptions.upstreamPool`（公開済みの注入口。`upstreamRelays` より優先）を使い、
+    `UpstreamPool` を実装した `InstrumentedUpstreamPool` デコレータで `UpstreamRelayPool` を包む
+  - 由来の分類は「上流から来た id の集合」との照合。上流イベントはプールの `onEvent` →
+    リレーの検証・保存 → クライアント配信の順に流れるため、クライアント到達時には必ず
+    集合に入っている。ローカルキャッシュ由来は上流より先に配信され、かつ
+    `UpstreamCoordinator.markDelivered` が dedup 集合に播種するので上流エコーで再配信されない
+  - 分類は配信時点で確定し後から書き換えない（`cache` と表示したものが後で `upstream` に
+    変わらない）
+  - 検証済み: `e2e/tests/browser/timeline-embed.e2e.spec.ts`（6 件）で、実 Chromium +
+    実 IndexedDB + モック上流リレーに対し「初回は `upstream` バッジ → リロード後は同じ
+    イベントが `cache` バッジ」「ウォームでも上流への REQ 転送は続く」を確認
+- [x] https ページからの `ws://` インターセプトの検証（自動テスト化済み）
+  - Pages は https 配信のため、`new WebSocket('ws://nostr-cache.invalid')` が混在コンテンツで
+    弾かれる懸念があった。emulator は差し替えたコンストラクタで `EmulatedWebSocket`
+    （ネイティブ非継承）を返すためブラウザのチェックに到達せず、**https オリジンでも
+    インターセプトが成立する**
+  - 回帰ガード: `e2e/tests/browser/embed-https.e2e.spec.ts`（3 件）。
+    `e2e/src/self-signed-cert.ts` が実行時に openssl で自己署名証明書を生成し
+    （鍵はコミットしない）、埋め込みページを https で、モック上流を `wss://` で配信して
+    実 Chromium から検証する。openssl が無い環境では skip する
+  - 上流リレーの側は https の混在コンテンツ制約をそのまま受ける（上流接続は差し替え前の
+    実 WebSocket を使うため）。`wss://` 以外は `parseRelays` が警告付きで除外する
+
 ## 優先度: 低（整備）
+
+- [ ] `packages/web-client` の lib モジュールを `timeline-embed` へ寄せて重複を解消する
+  - `relay-connection.ts` / `timeline-utils.ts` / `validation-status.ts` は
+    web-client と timeline-embed に同等のコードが 2 箇所ある（timeline-embed 追加時に
+    web-client を壊さないよう複製した）
+  - timeline-embed が実質の共通ライブラリ層になっているので、web-client から
+    `@nostr-cache/timeline-embed` を参照する形に寄せるか、共通パッケージへ切り出すかを決める
+  - 併せて、web-client 自体を残すのか（`demo-site` と役割が重複する）を判断する
 
 - [x] shared パッケージのテスト追加（現状 `test` スクリプトは `echo 'Add test here'`）
   - `vitest` を導入し `message` / `relays` / `logger` / `crypto` / `message-to-wire` の単体テストを追加済み（#7）

@@ -7,6 +7,8 @@
     "packages/cache-relay",
     "packages/server",
     "packages/web-client",
+    "packages/timeline-embed",
+    "packages/demo-site",
     "e2e"
   ],
   "engines": {
@@ -31,7 +33,11 @@
     "dev:server": "npm run dev --workspace=packages/server",
     "start:server": "npm run start --workspace=packages/server",
     "build:web": "npm run build --workspace=packages/web-client",
-    "dev:web": "npm run dev --workspace=packages/web-client"
+    "dev:web": "npm run dev --workspace=packages/web-client",
+    "build:embed": "npm run build --workspace=packages/timeline-embed",
+    "dev:embed": "npm run dev --workspace=packages/timeline-embed",
+    "build:demo": "npm run build --workspace=packages/demo-site",
+    "dev:demo": "npm run dev --workspace=packages/demo-site"
   },
   "devDependencies": {
     "typescript": "^6.0.0",
