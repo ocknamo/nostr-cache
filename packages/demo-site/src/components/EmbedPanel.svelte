@@ -116,7 +116,9 @@
 <style>
   .modes {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    /* `min(320px, 100%)` so the two-column layout still collapses on screens
+       narrower than the 320px track itself, instead of overflowing them. */
+    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
     gap: 18px;
   }
 

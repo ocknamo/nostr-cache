@@ -47,7 +47,11 @@
 <style>
   form {
     display: grid;
-    grid-template-columns: 1fr 120px 120px auto;
+    /* minmax(0, …) rather than plain `1fr`: an <input> without an explicit
+       width reports a ~20-character intrinsic minimum, which an auto-minimum
+       track has to honour — that is what pushed the whole page wider than the
+       viewport on phones. */
+    grid-template-columns: minmax(0, 1fr) 120px 120px auto;
     gap: 10px;
     align-items: end;
   }
@@ -58,14 +62,24 @@
     gap: 4px;
     font-size: 0.78rem;
     color: var(--muted);
+    min-width: 0;
+  }
+
+  input {
+    width: 100%;
   }
 
   @media (max-width: 720px) {
     form {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
 
     .wide {
+      grid-column: 1 / -1;
+    }
+
+    /* Full width, so the long label does not wrap inside a half-width button. */
+    button {
       grid-column: 1 / -1;
     }
   }

@@ -60,9 +60,11 @@
 
   header {
     display: flex;
-    justify-content: space-between;
     align-items: baseline;
-    gap: 8px;
+    /* Narrow screens cannot fit the pubkey and the metadata on one line, so let
+       the metadata drop to its own line instead of overflowing the card. */
+    flex-wrap: wrap;
+    gap: 4px 8px;
     margin-bottom: 6px;
   }
 
@@ -70,6 +72,13 @@
     font-weight: 700;
     font-family: var(--nt-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
     font-size: 0.85rem;
+    /* The abbreviated pubkey is one token; breaking it mid-hex reads as two.
+       Where even one line does not fit — a very narrow embed, or a host page
+       that raised --nt-font-size — clip it rather than widen the card. */
+    white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .verified {
@@ -80,10 +89,16 @@
 
   .meta {
     display: flex;
-    gap: 8px;
+    gap: 2px 8px;
     align-items: baseline;
+    flex-wrap: wrap;
+    /* Stay right-aligned even once it has wrapped onto its own line. */
+    margin-left: auto;
     color: var(--nt-muted, #657786);
     font-size: 0.8rem;
+  }
+
+  .meta time {
     white-space: nowrap;
   }
 
@@ -93,6 +108,7 @@
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.02em;
+    white-space: nowrap;
   }
 
   /* The whole point of the widget: cache hits are visibly distinct. */

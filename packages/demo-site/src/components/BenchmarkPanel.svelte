@@ -71,25 +71,32 @@
       </p>
     {/if}
 
-    <table>
-      <thead>
-        <tr><th></th><th>初回イベント</th><th>EOSE</th><th>イベント数</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <th scope="row">コールド</th>
-          <td>{ms(result.cold.timeToFirstEvent)}</td>
-          <td>{result.cold.timedOut ? 'タイムアウト' : ms(result.cold.timeToEose)}</td>
-          <td>{result.cold.eventCount}</td>
-        </tr>
-        <tr>
-          <th scope="row">ウォーム</th>
-          <td>{ms(result.warm.timeToFirstEvent)}</td>
-          <td>{result.warm.timedOut ? 'タイムアウト' : ms(result.warm.timeToEose)}</td>
-          <td>{result.warm.eventCount}</td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- Scrolls on its own when the four columns no longer fit, so a phone
+         gets a swipeable table instead of headings broken mid-word. Focusable
+         because a scroll region has to be reachable without a pointer; the rule
+         below flags exactly that pattern, which WCAG 2.1.1 asks for. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div class="table-scroll" tabindex="0" role="region" aria-label="計測結果の表">
+      <table>
+        <thead>
+          <tr><th></th><th>初回イベント</th><th>EOSE</th><th>イベント数</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">コールド</th>
+            <td>{ms(result.cold.timeToFirstEvent)}</td>
+            <td>{result.cold.timedOut ? 'タイムアウト' : ms(result.cold.timeToEose)}</td>
+            <td>{result.cold.eventCount}</td>
+          </tr>
+          <tr>
+            <th scope="row">ウォーム</th>
+            <td>{ms(result.warm.timeToFirstEvent)}</td>
+            <td>{result.warm.timedOut ? 'タイムアウト' : ms(result.warm.timeToEose)}</td>
+            <td>{result.warm.eventCount}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <p class="footnote">
       EOSE はウォームでもあまり縮みません。これは仕様どおりで、リードスルーは常に REQ を上流へ
@@ -157,11 +164,15 @@
     font-size: 0.85rem;
   }
 
+  .table-scroll {
+    margin-top: 8px;
+    overflow-x: auto;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.82rem;
-    margin-top: 8px;
   }
 
   th,
@@ -170,6 +181,7 @@
     padding: 6px 8px;
     border-bottom: 1px solid var(--border);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   thead th,
