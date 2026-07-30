@@ -1,5 +1,12 @@
 <script lang="ts">
   import type { Filter, NostrEvent } from '@nostr-cache/shared';
+  import type { ConnectionStatus, ValidationStatus } from '@nostr-cache/timeline-embed/lib';
+  import {
+    RelayConnection,
+    fetchValidationStatuses,
+    hasPending,
+    insertEvent,
+  } from '@nostr-cache/timeline-embed/lib';
   import { onMount } from 'svelte';
   import ConnectionBar from './lib/components/ConnectionBar.svelte';
   import FilterForm from './lib/components/FilterForm.svelte';
@@ -8,11 +15,6 @@
   import { EventSigner } from './lib/event-signer.ts';
   import type { LocalRelayHandle } from './lib/local-relay.ts';
   import { LOCAL_RELAY_URL, startLocalRelay } from './lib/local-relay.ts';
-  import type { ConnectionStatus } from './lib/relay-connection.ts';
-  import { RelayConnection } from './lib/relay-connection.ts';
-  import { insertEvent } from './lib/timeline-utils.ts';
-  import type { ValidationStatus } from './lib/validation-status.ts';
-  import { fetchValidationStatuses, hasPending } from './lib/validation-status.ts';
 
   const DEFAULT_FILTER: Filter = { kinds: [1], limit: 100 };
   const MAX_NOTICES = 5;

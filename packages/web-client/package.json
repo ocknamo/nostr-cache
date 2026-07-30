@@ -22,6 +22,7 @@
   "dependencies": {
     "@nostr-cache/cache-relay": "^0.1.0",
     "@nostr-cache/shared": "^0.1.0",
+    "@nostr-cache/timeline-embed": "^0.1.0",
     "rx-nostr-crypto": "^3.1.3"
   },
   "devDependencies": {

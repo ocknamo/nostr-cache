@@ -4,7 +4,7 @@
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { seckeySigner } from 'rx-nostr-crypto';
-import { getRandomSecret } from './get-random-secret.js';
+import { getRandomSecret } from '@nostr-cache/shared';
 
 /**
  * Create a test event

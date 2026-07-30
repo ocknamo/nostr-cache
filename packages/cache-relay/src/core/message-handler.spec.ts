@@ -7,6 +7,7 @@ import { getRandomSecret } from '@nostr-cache/shared';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { type Mock, vi } from 'vitest';
 import { EventValidator } from '../event/event-validator.js';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { createMockStorage } from '../test/utils/mock-storage.js';
 import { FreshnessGate } from '../upstream/freshness.js';
 import { MessageHandler } from './message-handler.js';

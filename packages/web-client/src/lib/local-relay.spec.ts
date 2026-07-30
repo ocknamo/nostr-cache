@@ -1,11 +1,11 @@
 // fake-indexeddb provides an in-memory IndexedDB so DexieStorage works in Node.
 import 'fake-indexeddb/auto';
 import type { NostrEvent } from '@nostr-cache/shared';
+import { RelayConnection } from '@nostr-cache/timeline-embed/lib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EventSigner } from './event-signer.ts';
 import type { LocalRelayHandle } from './local-relay.ts';
 import { startLocalRelay } from './local-relay.ts';
-import { RelayConnection } from './relay-connection.ts';
 
 const TEST_URL = 'ws://localhost:4747';
 

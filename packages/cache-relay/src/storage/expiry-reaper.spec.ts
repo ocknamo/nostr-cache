@@ -6,6 +6,7 @@ import { logger } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
 import { type MockStorage, createMockStorage } from '../test/utils/mock-storage.js';
 import { ExpiryReaper } from './expiry-reaper.js';
+import type { StorageAdapter } from './storage-adapter.js';
 
 describe('ExpiryReaper', () => {
   let storage: MockStorage;

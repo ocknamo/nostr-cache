@@ -1,8 +1,8 @@
+import { makeEvent } from '@nostr-cache/timeline-embed/test-fixtures';
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import EventCard from './EventCard.svelte';
-import { makeEvent } from './test-fixtures.ts';
 
 describe('EventCard', () => {
   it('renders the content, kind and a shortened pubkey', () => {
