@@ -271,7 +271,10 @@ interface EventAddress {
   この一致は共通の適合性テスト（`cache-relay/src/test/storage-conformance.ts`）で担保しており、
   両アダプタの spec が同じテスト群を実行します。独自アダプタを実装する場合も、
   `@nostr-cache/cache-relay/test/storage-conformance` の
-  `describeStorageAdapterConformance()` を呼べば同じ契約を検証できます。
+  `describeStorageAdapterConformance()` を呼べば同じ契約を検証できます
+  （テストヘルパのためこのサブパスは dist ではなく TypeScript ソースを指し、
+  vitest を optional な peer dependency として要求します。ハーネスの実装例は
+  `dexie-storage.spec.ts` / `sqlite-storage.spec.ts` を参照）。
   - `since` / `until` はいずれも境界を含みます（`since <= created_at <= until`）。`0` も
     「指定なし」ではなく実際の境界として扱います。
   - `filter.limit` は「一致するイベントのうち**最新** N 件」を返し、**新しい順**

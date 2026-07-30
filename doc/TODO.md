@@ -110,6 +110,13 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
 - [ ] `packages/web-client` を残すかを判断する（`demo-site` と役割が重複する）
   - lib モジュールの重複は解消済み（web-client は `@nostr-cache/timeline-embed/lib` を参照）。
     残っているのは「開発用クライアントを 2 つ維持するか」という判断だけ
+- [ ] フォローリスト由来のタイムライン表示（NIP-02）をクライアントに出すか決める
+  - 旧 Angular 製 POC の設計書に「特定ユーザーのフォローリスト（kind 3）を取得し、
+    フォロー中の pubkey の kind 1 を購読する」拡張案があった。リレー側は kind 3 を
+    replaceable として扱えるため下地はあるが、クライアント（web-client /
+    timeline-embed）側は未実装で、`{ kinds: [1], authors: [...] }` を手で入れる必要がある
+  - 実装するなら timeline-embed の `timeline-config.ts` に「pubkey を起点に
+    フォローリストを引いて authors を展開する」経路を足す形になる
 
 ## 完了済み
 

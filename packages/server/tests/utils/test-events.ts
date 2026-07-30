@@ -3,8 +3,8 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
-import { seckeySigner } from 'rx-nostr-crypto';
 import { getRandomSecret } from '@nostr-cache/shared';
+import { seckeySigner } from 'rx-nostr-crypto';
 
 /**
  * Create a test event

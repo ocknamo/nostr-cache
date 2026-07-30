@@ -21,8 +21,8 @@ import { SqliteStorage } from './sqlite-storage.js';
 // ブックキーピング列を検証するための private client（生の DatabaseSync）アクセス
 type WithClient = { client: nodeSqlite.DatabaseSync };
 
-const rawQuery = <T>(storage: SqliteStorage, sql: string, ...params: string[]): T =>
-  (storage as unknown as WithClient).client.prepare(sql).get(...params) as T;
+const rawQuery = <T>(storage: SqliteStorage, sql: string, ...params: string[]): T | undefined =>
+  (storage as unknown as WithClient).client.prepare(sql).get(...params) as T | undefined;
 
 describeStorageAdapterConformance('SqliteStorage', {
   create: () => new SqliteStorage(':memory:'),
@@ -33,7 +33,7 @@ describeStorageAdapterConformance('SqliteStorage', {
       'SELECT validated, access_count FROM events WHERE id = ?',
       id
     );
-    return { validated: row.validated, accessCount: row.access_count };
+    return row && { validated: row.validated === 1, accessCount: row.access_count };
   },
 });
 
@@ -71,28 +71,38 @@ describe('SqliteStorage (SQLite-specific)', () => {
     });
   });
 
+  // close 済みの DB への操作は投げずにフォールバック値を返す（server の
+  // stop() → start() が既定モードと対称に振る舞うための前提）。
+  // 失敗時の切り分けができるよう、読み・書き・void 返しで分けて検証する。
   describe('error fallbacks after close', () => {
-    it('should return safe fallback values instead of throwing', async () => {
+    beforeEach(async () => {
       await storage.saveEvent(mockEvent);
       storage.close();
+    });
 
-      expect(await storage.saveEvent({ ...mockEvent, id: 'other' })).toBe(false);
+    it('should return empty results from reads', async () => {
       expect(await storage.getEvents([{ ids: [mockEvent.id] }])).toEqual([]);
       expect(await storage.getUnvalidatedEvents(10)).toEqual([]);
       expect((await storage.getValidationStatus([mockEvent.id])).get(mockEvent.id)).toBe('unknown');
-      expect(await storage.deleteEvent(mockEvent.id)).toBe(false);
       expect(await storage.count()).toBe(0);
-      expect(await storage.deleteExpired(999_999_999)).toBe(0);
-      expect(await storage.enforceLimit(1)).toBe(0);
       expect((await storage.getCachedAt([mockEvent.id])).size).toBe(0);
-      expect(await storage.touchCachedAt([mockEvent.id])).toBe(0);
+    });
+
+    it('should report failure from writes and deletions', async () => {
+      expect(await storage.saveEvent({ ...mockEvent, id: 'other' })).toBe(false);
+      expect(await storage.deleteEvent(mockEvent.id)).toBe(false);
       expect(await storage.deleteEventsByPubkeyAndKind(mockEvent.pubkey, mockEvent.kind)).toBe(
         false
       );
       expect(await storage.deleteEventsByPubkeyKindAndDTag(mockEvent.pubkey, 30001, 'd')).toBe(
         false
       );
-      // markValidated / clear は例外を投げないこと
+      expect(await storage.deleteExpired(999_999_999)).toBe(0);
+      expect(await storage.enforceLimit(1)).toBe(0);
+      expect(await storage.touchCachedAt([mockEvent.id])).toBe(0);
+    });
+
+    it('should not throw from the void-returning methods', async () => {
       await expect(storage.markValidated([mockEvent.id])).resolves.toBeUndefined();
       await expect(storage.clear()).resolves.toBeUndefined();
     });

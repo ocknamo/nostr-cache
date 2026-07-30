@@ -31,7 +31,7 @@ describeStorageAdapterConformance('DexieStorage', {
   dispose: disposeStorage,
   readBookkeeping: async (storage, id) => {
     const row = await storage.table('events').get(id);
-    return { validated: row.validated, accessCount: row.access_count };
+    return row && { validated: row.validated === 1, accessCount: row.access_count };
   },
 });
 

@@ -35,19 +35,28 @@ export type ConformantStorage = StorageAdapter &
  * 違うため、ハーネス経由で読み出す。
  */
 export interface StorageBookkeeping {
-  /** 検証済みなら 1、pending なら 0 */
-  validated: number;
+  /** 署名検証済みか（バックエンドが 0/1 で持つ場合はハーネス側で正規化する） */
+  validated: boolean;
   /** 挿入 1 回を含む累積アクセス回数 */
   accessCount: number;
 }
 
 export interface StorageConformanceHarness<T extends ConformantStorage = ConformantStorage> {
-  /** テスト 1 件ごとに空のストレージを作る */
+  /**
+   * テスト 1 件ごとに**空の**ストレージを作る。テスト間で状態を持ち越さないのは
+   * ハーネスの責務で、`beforeEach` が実際に空であることを検証する。
+   */
   create(): T | Promise<T>;
   /** {@link create} で作ったストレージを破棄する */
   dispose(storage: T): void | Promise<void>;
-  /** 1 イベント分のブックキーピング列を読む */
-  readBookkeeping(storage: T, id: string): StorageBookkeeping | Promise<StorageBookkeeping>;
+  /**
+   * 1 イベント分のブックキーピング列を読む。id が存在しない場合は `undefined` を
+   * 返す（アサーションが低レベルな例外ではなく差分として出るようにするため）。
+   */
+  readBookkeeping(
+    storage: T,
+    id: string
+  ): StorageBookkeeping | undefined | Promise<StorageBookkeeping | undefined>;
 }
 
 /** 適合性テストが共有する基準イベント */
@@ -70,9 +79,15 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
 
     beforeEach(async () => {
       storage = await harness.create();
+      // ハーネスの隔離契約を機械的に強制する。ここが落ちるなら dispose() が
+      // 前のテストの状態を残しており、以降の期待値はすべて信用できない
+      expect(await storage.count()).toBe(0);
     });
 
     afterEach(async () => {
+      // Date.now のスパイを張るテストがあるため、dispose より先に必ず戻す。
+      // 残したままだと以降のテスト全体へ固定時刻が漏れる
+      vi.restoreAllMocks();
       await harness.dispose(storage);
     });
 
@@ -99,7 +114,13 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
       content: 'content',
       sig: 'sig',
     });
-    const bookkeeping = (id: string) => harness.readBookkeeping(storage, id);
+    const bookkeeping = async (id: string): Promise<StorageBookkeeping> => {
+      const row = await harness.readBookkeeping(storage, id);
+      // 存在しない id をブックキーピングの期待値と比べようとしている＝テスト側の
+      // 前提が崩れている。`undefined.accessCount` の TypeError より読みやすく落とす
+      expect(row, `no stored row for id "${id}"`).toBeDefined();
+      return row as StorageBookkeeping;
+    };
 
     describe('saveEvent', () => {
       it('should save event successfully', async () => {
@@ -283,7 +304,7 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
         await storage.saveEvent(mockEvent, { validated: true });
         await storage.touchCachedAt([mockEvent.id]);
 
-        expect(await bookkeeping(mockEvent.id)).toEqual({ validated: 1, accessCount: 1 });
+        expect(await bookkeeping(mockEvent.id)).toEqual({ validated: true, accessCount: 1 });
         expect((await storage.getValidationStatus([mockEvent.id])).get(mockEvent.id)).toBe(
           'validated'
         );

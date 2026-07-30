@@ -20,8 +20,8 @@
       "default": "./src/lib/index.ts"
     },
     "./test-fixtures": {
-      "types": "./src/components/test-fixtures.ts",
-      "default": "./src/components/test-fixtures.ts"
+      "types": "./src/test-fixtures.ts",
+      "default": "./src/test-fixtures.ts"
     }
   },
   "scripts": {
