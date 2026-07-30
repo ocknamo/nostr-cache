@@ -3,8 +3,10 @@
  */
 
 import { normalizePubkey } from '@nostr-cache/shared';
+import { isReplaceableKind } from '../event/event-kind.js';
 import type { CachePriority } from '../storage/priority.js';
 import type { CacheStrategy } from '../storage/storage-adapter.js';
+import type { FreshnessWindows } from '../upstream/freshness.js';
 import type { UpstreamPool } from '../upstream/upstream-types.js';
 
 /**
@@ -149,6 +151,27 @@ export interface NostrRelayOptions {
   upstreamConnectionTimeout?: number;
 
   /**
+   * 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」。
+   * `{ 0: 3600 }` なら「1時間以内にキャッシュした kind 0 は上流に問い合わせない」。
+   *
+   * Cache-first freshness window per kind (kind → seconds), the cache
+   * equivalent of HTTP `max-age`. When a REQ's filter asks only for replaceable
+   * events (`kinds` + `authors`) and every requested (kind, pubkey) was served
+   * from cache within its window, that filter is **not** forwarded upstream.
+   * Anything stale, missing or not enumerable is forwarded as before.
+   *
+   * Only meaningful together with {@link upstreamRelays}, and requires a
+   * storage adapter implementing `getCachedAt` (`DexieStorage` and
+   * `SqliteStorage` do); otherwise it has no effect aside from a one-time
+   * warning.
+   *
+   * Only replaceable kinds may be listed (0 / 3 / 10000–19999) — an addressable
+   * or regular kind throws at relay construction time, as does a non-positive
+   * window. See [doc/cache-relay/upstream.md](../../../../doc/cache-relay/upstream.md).
+   */
+  upstreamFreshness?: Record<number, number>;
+
+  /**
    * テスト・高度用途向け: 上流プールの実装を差し替える。指定時は `upstreamRelays`
    * より優先され、リード/ライトスルーが有効になる。
    *
@@ -209,4 +232,51 @@ export function normalizeCachePriority(input?: {
     return undefined;
   }
   return { pubkeys, kinds };
+}
+
+/**
+ * Normalize a caller-supplied {@link NostrRelayOptions.upstreamFreshness} map
+ * into the `Map` the freshness gate evaluates against.
+ *
+ * Deliberately not applied by {@link resolveRelayOptions}: unlike
+ * `cachePriority`, whose input and normalized shapes are structurally
+ * compatible, `Record<number, number>` and `Map` are not — folding it in would
+ * force the public options type to admit both. `NostrCacheRelay` calls this
+ * once at construction instead, so an invalid config still throws there.
+ *
+ * Non-replaceable kinds are rejected rather than ignored: a window on kind 1
+ * can never be honoured (the result set is unbounded, so "the cache has
+ * everything" is unknowable), and silently dropping it would leave the caller
+ * with no way to see why their setting did nothing.
+ *
+ * @param input Caller-supplied map of kind → window in seconds
+ * @returns The normalized windows, or undefined when there are no entries
+ * @throws Error naming the offending entry on an invalid kind or window
+ */
+export function normalizeFreshnessWindows(
+  input?: Record<number, number>
+): FreshnessWindows | undefined {
+  if (!input) {
+    return undefined;
+  }
+  const windows = new Map<number, number>();
+  for (const [rawKind, seconds] of Object.entries(input)) {
+    const kind = Number(rawKind);
+    // NIP-01 の kind は 0..65535
+    if (!Number.isInteger(kind) || kind < 0 || kind > 65535) {
+      throw new Error(`Invalid upstreamFreshness kind (expected integer 0-65535): ${rawKind}`);
+    }
+    if (!isReplaceableKind(kind)) {
+      throw new Error(
+        `Invalid upstreamFreshness kind ${kind}: only replaceable kinds (0, 3, 10000-19999) are supported`
+      );
+    }
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) {
+      throw new Error(
+        `Invalid upstreamFreshness window for kind ${kind} (expected a positive finite number of seconds): ${seconds}`
+      );
+    }
+    windows.set(kind, seconds);
+  }
+  return windows.size > 0 ? windows : undefined;
 }

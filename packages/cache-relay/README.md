@@ -90,9 +90,11 @@ await relay.subscribe('sub-1', [{ kinds: [1] }]); // 保存済みイベントを
 relay.unsubscribe('sub-1');
 ```
 
-現状はどちらの形態も「ローカルに保存済みのイベントを返す独立リレー」であり、
-上流リレーへのリードスルー / ライトスルー（透過キャッシュ化）は未実装です
-（[doc/TODO.md](../../doc/TODO.md) 参照）。
+どちらの形態も既定では「ローカルに保存済みのイベントを返す独立リレー」です。
+`upstreamRelays` を指定すると上流実リレー群の手前に挟まる透過キャッシュ
+（リードスルー / ライトスルー）になり、`upstreamFreshness` で kind ごとに
+「窓の内側なら上流に問い合わせない」鮮度ウィンドウを設定できます
+（[doc/cache-relay/upstream.md](../../doc/cache-relay/upstream.md) 参照）。
 
 ### Node.js（サーバとして起動）
 
@@ -237,6 +239,7 @@ relay.unsubscribe('sub1');
 | `ttlSweepInterval` | `number` | 実装済み。TTL スイープの実行間隔（秒、デフォルト 60） |
 | `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | 実装済み（`storageMaxSize` の退避戦略、デフォルト `FIFO`）。`FIFO`=作成が古い順、`LRU`=読み出しが古い順、`LFU`=読み出し頻度が低い順（同数なら古い順） |
 | `cachePriority` | `{ pubkeys?: string[]; kinds?: number[] }` | 実装済み。指定 pubkey（npub / hex）の発行イベントまたは指定 kind のイベントを優先イベントとして扱う。優先イベントは `storageMaxSize` 超過時に最後まで残り（非優先を先に退避。優先だけになったら通常の `cacheStrategy` 順で退避し `maxSize` は厳守）、`ttl` スイープの削除対象外。不正な npub は生成時に例外。なお **NIP-09 の削除リクエスト（kind 5）は設定によらず常に同じ保護を受ける**（TTL 対象外・最後に退避） |
+| `upstreamFreshness` | `Record<number, number>` | 実装済み。鮮度ウィンドウ（kind → 秒）。`upstreamRelays` と併用したとき、REQ のフィルタが replaceable な kind（`kinds` + `authors`）だけを要求し、要求した (kind, pubkey) すべてが窓の内側のキャッシュから返せた場合、そのフィルタを**上流へ転送せず即 EOSE を返す**（HTTP の `max-age` 相当）。1件でも古い・欠けていれば従来どおり転送する。指定できるのは replaceable な kind（0 / 3 / 10000–19999）のみで、それ以外や非正の秒は生成時に例外。`getCachedAt` 対応ストレージ（`DexieStorage` / `SqliteStorage`）が必要で、未対応なら警告1回で無効。**窓の内側の購読は上流購読を持たないためライブ更新を受け取らない**（次回 REQ で再検証）。詳細は [../../doc/cache-relay/upstream.md](../../doc/cache-relay/upstream.md) 第5節 |
 | `lazyValidateInterval` | `number` | 実装済み。`LAZY` 時のバックグラウンド検証の実行間隔（秒、デフォルト 60） |
 | `lazyValidateBatchSize` | `number` | 実装済み。`LAZY` 時の 1 回の検証で処理するイベント数（デフォルト 100） |
 

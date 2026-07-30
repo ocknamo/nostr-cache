@@ -9,7 +9,7 @@ import { MessageHandler } from './core/message-handler.js';
 import { NostrCacheRelay, NostrRelayOptions } from './core/nostr-cache-relay.js';
 // cachePriority 設定の正規化（npub→hex・検証）。setCachePriority へ渡す前の
 // 事前検証に利用できる
-import { normalizeCachePriority } from './core/relay-options.js';
+import { normalizeCachePriority, normalizeFreshnessWindows } from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
@@ -49,6 +49,12 @@ import { WebSocketServerEmulator } from './transport/web-socket-server-emulator.
 import { WebSocketServer } from './transport/web-socket-server.js';
 
 // Upstream (read-through / write-through)
+import {
+  FreshnessGate,
+  type FreshnessWindows,
+  isFreshnessEligible,
+  narrowFiltersByFreshness,
+} from './upstream/freshness.js';
 import { UpstreamConnection } from './upstream/upstream-connection.js';
 import { UpstreamCoordinator } from './upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from './upstream/upstream-relay-pool.js';
@@ -84,6 +90,7 @@ export {
   hasPriorityRules,
   getAlwaysRetainedKinds,
   normalizeCachePriority,
+  normalizeFreshnessWindows,
   // Transport
   TransportAdapter,
   WebSocketServer,
@@ -94,6 +101,11 @@ export {
   UpstreamCoordinator,
   type UpstreamPool,
   type UpstreamPoolOptions,
+  // Freshness window (cache-first read-through)
+  FreshnessGate,
+  type FreshnessWindows,
+  isFreshnessEligible,
+  narrowFiltersByFreshness,
   // Utils
   filterUtils,
 };

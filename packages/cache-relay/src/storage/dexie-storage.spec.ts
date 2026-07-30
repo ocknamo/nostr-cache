@@ -135,6 +135,58 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('getCachedAt (freshness window)', () => {
+    const eventWithId = (id: string): NostrEvent => ({ ...mockEvent, id });
+
+    it('should return the cache insertion time in milliseconds', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+      await storage.saveEvent(mockEvent);
+      nowSpy.mockRestore();
+
+      const cachedAt = await storage.getCachedAt([mockEvent.id]);
+      expect(cachedAt.get(mockEvent.id)).toBe(1_700_000_000_000);
+    });
+
+    it('should reflect the re-save time (TTL and freshness restart together)', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+      await storage.saveEvent(mockEvent);
+      nowSpy.mockReturnValue(5000);
+      await storage.saveEvent(mockEvent);
+      nowSpy.mockRestore();
+
+      const cachedAt = await storage.getCachedAt([mockEvent.id]);
+      expect(cachedAt.get(mockEvent.id)).toBe(5000);
+    });
+
+    it('should omit ids that are not stored', async () => {
+      await storage.saveEvent(mockEvent);
+
+      const cachedAt = await storage.getCachedAt([mockEvent.id, 'missing-id']);
+      expect(cachedAt.has('missing-id')).toBe(false);
+      expect(cachedAt.size).toBe(1);
+    });
+
+    it('should return an empty map for no ids', async () => {
+      expect((await storage.getCachedAt([])).size).toBe(0);
+    });
+
+    it('should look up several ids at once', async () => {
+      await storage.saveEvent(eventWithId('a'));
+      await storage.saveEvent(eventWithId('b'));
+
+      const cachedAt = await storage.getCachedAt(['a', 'b']);
+      expect([...cachedAt.keys()].sort()).toEqual(['a', 'b']);
+    });
+
+    it('should not track access (a freshness check must not disturb LRU/LFU)', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.getCachedAt([mockEvent.id]);
+
+      const row = await storage.table('events').get(mockEvent.id);
+      expect(row.access_count).toBe(1);
+    });
+  });
+
   describe('getEvents', () => {
     beforeEach(async () => {
       await storage.saveEvent(mockEvent);

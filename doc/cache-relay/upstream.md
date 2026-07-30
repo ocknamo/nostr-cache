@@ -104,6 +104,18 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
 以降も購読は上流で開いたまま。ライブイベントが透過的に流れ続ける
 ```
 
+### REQ（鮮度ウィンドウでスキップされる場合）
+
+```
+client ── ["REQ", subId, {"kinds":[0],"authors":[pk]}] ──▶ handleReqMessage
+  ├─ storage.getEvents → capEvents → client へ ["EVENT", subId, ev]×N
+  ├─ FreshnessGate.filtersForUpstream(filters, 送信したイベント)
+  │    ├─ 適用対象フィルタなし / getCachedAt 非対応 / エラー → フィルタをそのまま返す
+  │    └─ storage.getCachedAt → 窓の内側の座標集合を作り、充足フィルタを除外
+  └─ 残ったフィルタが 0 件 → 上流購読を開かず client ◀── ["EOSE", subId] を即送出
+     残ったフィルタが 1 件以上 → その分だけを coordinator.openForSubscription へ
+```
+
 ### CLOSE / 切断
 
 ```
@@ -125,12 +137,78 @@ relay.disconnect() ──▶ coordinator.stop()（全 EOSE タイマー解除 + 
 | `upstreamRelays?: string[]` | なし | 上流リレー URL。指定時のみリード/ライトスルーが有効 |
 | `upstreamEoseTimeout?: number` | `DEFAULT_SUBSCRIPTION_TIMEOUT`（3000ms） | クライアント EOSE を上流 EOSE まで待つ上限 |
 | `upstreamConnectionTimeout?: number` | `DEFAULT_CONNECTION_TIMEOUT`（5000ms） | 上流への接続タイムアウト |
+| `upstreamFreshness?: Record<number, number>` | なし | 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」（第5節参照）。replaceable な kind のみ指定可 |
 | `upstreamPool?: UpstreamPool` | なし | テスト・高度用途。プール実装を差し替える（`upstreamRelays` より優先） |
 
 `packages/server` では `NostrRelayServerOptions.relay.upstreamRelays` 等として素通しする。
 `packages/web-client` の `startLocalRelay(url, { upstreamRelays })` からも指定できる。
 
-## 5. 設計上の判断とトレードオフ
+## 5. 鮮度ウィンドウ（cache-first read-through）
+
+既定のリードスルーは、キャッシュのヒット状況に関係なく **毎回** 上流へ REQ を転送する。
+kind 0（プロフィール）のような replaceable イベントは (pubkey, kind) ごとに最新1件しか
+存在せず内容もほとんど変化しないため、これは上流トラフィックと EOSE レイテンシの
+両面で無駄になる（EOSE は上流の集約 EOSE か `upstreamEoseTimeout` まで保留される）。
+
+`upstreamFreshness` は HTTP キャッシュの `max-age` に相当する仕組みで、
+**「キャッシュ投入から N 秒以内の replaceable イベントは十分新鮮とみなし、上流に
+問い合わせない」**。実装は `upstream/freshness.ts`（判定は純粋関数、ストレージ
+アクセスを伴うラッパが `FreshnessGate`）。
+
+```ts
+const relay = new NostrCacheRelay(storage, transport, {
+  upstreamRelays: ['wss://nos.lol'],
+  upstreamFreshness: { 0: 3600, 3: 600 }, // プロフィールは1時間、フォローリストは10分
+});
+```
+
+### 判定アルゴリズム
+
+REQ のフィルタごとに独立に判定する。
+
+**適用条件** — 以下を **すべて** 満たすフィルタだけがスキップ判定に進む。1つでも
+欠ければそのフィルタは無条件に上流へ転送される。
+
+- `kinds` が非空で、**全 kind が replaceable かつ全 kind に窓が設定済み**。
+  通常 kind が1つ混ざるだけで結果集合は非有界になり「キャッシュが全部持っている」が
+  判定不能になる
+- `authors` が非空。期待する座標は `kinds × authors` なので、authors が無いと
+  列挙できない
+- `ids` を持たない。id 指定は別の（より強い）ショートサーキットの領域
+- `since` / `until` を持たない。`until` は「その時点での最新版」を要求しており、
+  キャッシュが持つ最新版とは別物になりうる
+- `#` で始まるタグ条件を持たない
+
+`limit` は許容される。切り詰めで座標が充足されなくなるだけなので、結果は保守側に倒れる。
+
+**期待座標集合** = `kinds × authors`（キーは `<kind>:<pubkey>`。replaceable は
+d タグを使わないので座標に入らない）。
+
+**充足座標集合** = 「その REQ で実際にクライアントへ送ったイベント」のうち、
+`storage.getCachedAt` の返す `cached_at` が `now - 窓*1000` 以降のもの。
+`limit` / `maxEventsPerRequest` で切り捨てられたイベントは送っていないので数えない。
+
+期待集合が充足集合に包含されればそのフィルタを上流へ送らない。**全フィルタが
+スキップされた場合は上流購読を開かず、その場で EOSE を返す。**
+
+### フェイルオープン
+
+`getCachedAt` 未実装のアダプタ、ストレージエラー、判定不能はすべて
+「従来どおり上流へ転送」に倒す。証明できない鮮度でキャッシュを返すことだけが、
+透過性を静かに壊す唯一の失敗モードだからである。
+
+### トレードオフ
+
+- **スキップされた購読はライブ更新を受け取らない**。上流購読を持たないため、
+  その購読が生きている間の新着は届かない。HTTP キャッシュと同じ
+  「次回のリクエストで再検証する」セマンティクスになる
+- 窓の内側では上流の更新が見えない。`ttl` と違い、窓が切れてもキャッシュは
+  削除されず、次回 REQ で上流に問い合わせて再検証される（replaceable なので
+  新しい版が来れば置換される）
+- 判定コストは REQ ごとに `getCachedAt` 1回（主キー検索、アクセス追跡なし）。
+  適用対象フィルタが無い場合はストレージに触らない
+
+## 6. 設計上の判断とトレードオフ
 
 - **EOSE を保留する**理由: web-client のような「EOSE で描画確定」型のワンショット
   クライアントに対する透過性を優先。NIP-01 上、EOSE 後のイベント配信も合法なので、
@@ -146,7 +224,7 @@ relay.disconnect() ──▶ coordinator.stop()（全 EOSE タイマー解除 + 
   横取りしつつ同じ URL を上流に指定した場合の**自己接続ループを構造的に防ぐ**。
   評価は接続時（構築時ではなく）なので、`connect()` 前後どちらでも安全。
 
-## 6. 既知の制限（将来課題）
+## 7. 既知の制限（将来課題）
 
 - **再送キューは持たない**: 上流が全滅している間に投稿された EVENT は転送されず失われる
   （クライアントへの `OK` は `true` で返る）。オフライン中の投稿を後で送る仕組みは未実装。
@@ -160,3 +238,15 @@ relay.disconnect() ──▶ coordinator.stop()（全 EOSE タイマー解除 + 
   `close()` されるまで再接続を試み続ける。到達不能な URL を誤設定すると再接続ログが
   出続ける。リトライ回数上限やサーキットブレーカは未実装。
 - **上流 AUTH（NIP-42）などは未対応**: 認証が必要な上流リレーには接続できない。
+- **鮮度ウィンドウは addressable 未対応**: 30000–39999 は座標に `d` タグが入るため、
+  フィルタに `#d` がなければ期待集合を列挙できない。今回は replaceable
+  （0 / 3 / 10000–19999）のみを対象とし、addressable な kind を設定すると構築時に
+  例外を投げる。
+- **鮮度ウィンドウは部分ヒットを絞り込まない**: `authors` の一部だけが新鮮な場合、
+  そのフィルタは元のまま上流へ転送される（新鮮でない author だけに絞った残余
+  フィルタは作らない）。著者を多数まとめて引く REQ では節約が効きにくい。
+- **鮮度ウィンドウでスキップした購読はライブ更新を受け取らない**: 上流購読を
+  開かないため、その購読が生きている間の新着は届かない（第5節のトレードオフ）。
+- **`ids` 指定のショートサーキットは未実装**: id は内容ハッシュで不変なので
+  「要求 id 全件がキャッシュにあれば上流に聞かなくてよい」が原理的に成り立つが、
+  今回の鮮度ウィンドウとは別の判定経路になるため実装していない。

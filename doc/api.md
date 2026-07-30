@@ -164,6 +164,10 @@ interface NostrRelayOptions {
   upstreamRelays?: string[];        // 上流実リレー URL。指定時のみリード/ライトスルー有効（未指定で独立リレー）
   upstreamEoseTimeout?: number;     // 上流 EOSE を待ってクライアントへ EOSE を返す上限 ms (default: 3000)
   upstreamConnectionTimeout?: number; // 上流への接続タイムアウト ms (default: 5000)
+  upstreamFreshness?: Record<number, number>; // 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが窓の内側なら
+                                    // そのフィルタを上流へ転送せず即 EOSE を返す（HTTP の max-age 相当）。
+                                    // replaceable な kind（0 / 3 / 10000-19999）のみ指定可、他は生成時に例外。
+                                    // getCachedAt 対応ストレージが必要。窓の内側の購読はライブ更新を受け取らない
   upstreamPool?: UpstreamPool;      // テスト・高度用途: 上流プール実装の差し替え（upstreamRelays より優先）
 }
 ```
@@ -211,6 +215,7 @@ interface StorageAdapter {
   getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
   markValidated(ids: string[]): Promise<void>;
   getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
+  getCachedAt?(ids: string[]): Promise<Map<string, number>>; // optional
 }
 
 interface EventAddress {
@@ -230,6 +235,15 @@ interface EventAddress {
 - `getValidationStatus` は id ごとに `'validated'` / `'pending'` / `'unknown'`（未保存・削除済み）を
   返します。これらの読み取りは LRU/LFU のアクセス追跡に影響しません。
   / Per-id status lookup; these reads never affect LRU/LFU access tracking.
+- `getCachedAt`（**optional**）は id ごとのキャッシュ投入時刻（ミリ秒。TTL が期限判定に使う
+  時刻と同じで、イベント自身の `created_at` ではない）を返します。`upstreamFreshness`
+  （鮮度ウィンドウ）の判定に使われ、未保存の id はマップに含めません。`getValidationStatus`
+  と同様、LRU/LFU のアクセス追跡には影響しません。未実装のアダプタでは鮮度ウィンドウが
+  警告1回を出して無効化されます（`DexieStorage` / `SqliteStorage` は実装済み）。
+  / Optional. Returns per-id cache insertion time in ms (the clock the TTL sweep uses, not
+  the event's `created_at`), backing the `upstreamFreshness` window. Unstored ids are
+  omitted; never affects LRU/LFU tracking. Adapters may omit it — the window then logs a
+  one-time warning and has no effect.
 - `deleteEventsByIdsForPubkey` / `deleteEventsByAddress` は NIP-09（削除リクエスト）の
   `e` タグ / `a` タグに対応します。実装側で 2 つの制約を保証する必要があります
   （呼び出し側は保存済みの行を見られないため）: **`pubkey` が一致するイベントのみ削除する**、
@@ -309,14 +323,18 @@ await server.start();
 await server.stop();
 ```
 
-`relay.upstreamRelays`（+ `upstreamEoseTimeout` / `upstreamConnectionTimeout`）を
-指定すると、このサーバーは上流実リレー群の手前に挟まる透過キャッシュ（リード/ライト
-スルー）として動作します。
+`relay.upstreamRelays`（+ `upstreamEoseTimeout` / `upstreamConnectionTimeout` /
+`upstreamFreshness`）を指定すると、このサーバーは上流実リレー群の手前に挟まる透過
+キャッシュ（リード/ライトスルー）として動作します。
 
 ```typescript
 const cache = new NostrRelayServer({
   port: 8008,
-  relay: { upstreamRelays: ['wss://nos.lol'] },
+  relay: {
+    upstreamRelays: ['wss://nos.lol'],
+    // 鮮度ウィンドウ: 1時間以内にキャッシュした kind 0 は上流に問い合わせない
+    upstreamFreshness: { 0: 3600 },
+  },
 });
 ```
 

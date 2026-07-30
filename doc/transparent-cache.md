@@ -123,6 +123,7 @@ new WebSocketServerEmulator(['wss://relay.example.com', 'wss://nos.lol']);
 | `upstreamRelays` | 上流実リレーの URL 群。指定するとリード/ライトスルーが有効 | 無効（独立リレー） |
 | `upstreamEoseTimeout` | 上流 EOSE を待ってクライアントへ EOSE を返す上限（ms） | 3000 |
 | `upstreamConnectionTimeout` | 上流リレーへの接続タイムアウト（ms） | 5000 |
+| `upstreamFreshness` | 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが窓の内側なら上流に問い合わせない | 無効 |
 
 ## 上流リレーへのリードスルー / ライトスルー（透過キャッシュ）
 
@@ -141,6 +142,31 @@ const relay = new NostrCacheRelay(storage, transport, {
   upstreamEoseTimeout: 3000,
 });
 ```
+
+### 鮮度ウィンドウで上流への問い合わせを省く
+
+リードスルーは既定では**キャッシュのヒット状況に関係なく毎回**上流へ REQ を転送します。
+kind 0（プロフィール）のように「(pubkey, kind) ごとに1件しかなく、ほとんど変化しない」
+イベントでは、これは上流トラフィックと EOSE 待ち（最大 `upstreamEoseTimeout`）の両方が無駄です。
+
+`upstreamFreshness` に kind ごとの秒数を指定すると、その kind のキャッシュが窓の内側に
+ある間は上流へ問い合わせず、キャッシュだけで応答して即座に EOSE を返します
+（HTTP キャッシュの `max-age` 相当）。
+
+```ts
+const relay = new NostrCacheRelay(storage, transport, {
+  upstreamRelays: ['wss://nos.lol'],
+  upstreamFreshness: {
+    0: 3600,  // プロフィールは1時間キャッシュ優先
+    3: 600,   // フォローリストは10分
+  },
+});
+```
+
+指定できるのは replaceable な kind（0 / 3 / 10000–19999）のみで、それ以外を指定すると
+リレー生成時に例外になります。窓の内側にある間はその購読が上流購読を持たないため
+**ライブ更新は届きません**（次回の REQ で再検証されます）。判定条件と制約の詳細は
+[doc/cache-relay/upstream.md](./cache-relay/upstream.md) の第5節を参照してください。
 
 パターン B（実リレー URL を横取り）でも、上流コネクタは差し替え前の
 `WebSocket`（`getOriginalWebSocket()`）を使って実リレーへ接続するため、

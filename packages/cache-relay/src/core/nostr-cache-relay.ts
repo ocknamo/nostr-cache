@@ -21,6 +21,7 @@ import { LazyValidator } from '../event/lazy-validator.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter, ValidationStatus } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
+import { FreshnessGate } from '../upstream/freshness.js';
 import { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from '../upstream/upstream-relay-pool.js';
 import { capEvents } from '../utils/filter-utils.js';
@@ -31,6 +32,7 @@ import {
   LOCAL_CLIENT_ID,
   type NostrRelayOptions,
   normalizeCachePriority,
+  normalizeFreshnessWindows,
   resolveRelayOptions,
 } from './relay-options.js';
 import { SubscriptionManager } from './subscription-manager.js';
@@ -57,6 +59,12 @@ export class NostrCacheRelay {
    * (or a custom pool) are configured.
    */
   private upstreamCoordinator?: UpstreamCoordinator;
+  /**
+   * Cache-first freshness window, present only when `upstreamFreshness` is
+   * configured. Shared with {@link MessageHandler} so the transport REQ path and
+   * the in-process {@link subscribe} path decide identically.
+   */
+  private freshnessGate?: FreshnessGate;
   private emitter = new RelayEventEmitter();
 
   /**
@@ -90,6 +98,14 @@ export class NostrCacheRelay {
       );
     }
 
+    // 鮮度ウィンドウ。不正な設定はここで例外になる（`cachePriority` と同じ方針）。
+    // `upstreamRelays` 未指定でも構築する: 上流が無ければ REQ はそもそも転送されず
+    // gate は呼ばれないため無害で、設定ミスだけは常に構築時に気づける
+    const freshnessWindows = normalizeFreshnessWindows(this.options.upstreamFreshness);
+    if (freshnessWindows) {
+      this.freshnessGate = new FreshnessGate(storage, freshnessWindows);
+    }
+
     // 初期化
     this.subscriptionManager = new SubscriptionManager();
     this.messageHandler = new MessageHandler(
@@ -103,7 +119,8 @@ export class NostrCacheRelay {
       // 保存後のストレージ上限退避（transport 経由 EVENT）
       this.options.storageMaxSize,
       this.options.cacheStrategy,
-      this.options.cachePriority
+      this.options.cachePriority,
+      this.freshnessGate
     );
 
     // TTL 設定時はバックグラウンドの定期パージを用意する。
@@ -383,12 +400,14 @@ export class NostrCacheRelay {
     // Replay the matching stored events to the listeners.
     // TTL expiry is handled by the background sweep, not filtered here.
     const sentIds: string[] = [];
+    let sentEvents: NostrEvent[] = [];
     try {
       const events = await this.storage.getEvents(filters);
       const limitedEvents = capEvents(
         events,
         this.options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS
       );
+      sentEvents = limitedEvents;
       for (const event of limitedEvents) {
         this.emitter.emit('event', event);
         sentIds.push(event.id);
@@ -398,13 +417,20 @@ export class NostrCacheRelay {
       this.emitter.emit('error', error instanceof Error ? error : new Error(String(error)));
     }
 
+    // 鮮度ウィンドウ: キャッシュだけで充足したフィルタは上流へ投げない
+    // （transport 経由の REQ と同じ判定を通す）
+    const upstreamFilters = this.freshnessGate
+      ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
+      : filters;
+
     // リードスルー有効時は上流へも問い合わせ、EOSE は coordinator が
-    // （上流 EOSE の集約 or タイムアウトで）発火する。無効時は従来どおり即 EOSE。
-    if (this.upstreamCoordinator) {
+    // （上流 EOSE の集約 or タイムアウトで）発火する。無効時、および鮮度ウィンドウで
+    // 全フィルタが充足した場合は従来どおり即 EOSE。
+    if (this.upstreamCoordinator && upstreamFilters.length > 0) {
       this.upstreamCoordinator.openForSubscription(
         LOCAL_CLIENT_ID,
         subscriptionId,
-        filters,
+        upstreamFilters,
         sentIds
       );
     } else {

@@ -176,6 +176,42 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
+   * Get the cache insertion time (ms) of the given event ids.
+   *
+   * Primary-key `bulkGet`, like {@link getValidationStatus}, and likewise does
+   * NOT track access: a freshness check must not disturb LRU/LFU ordering.
+   * Ids that are not stored are omitted from the map.
+   *
+   * @param ids Event IDs to look up
+   * @returns Promise resolving to a map of id → `cached_at` in milliseconds
+   */
+  async getCachedAt(ids: string[]): Promise<Map<string, number>> {
+    const cachedAt = new Map<string, number>();
+    if (ids.length === 0) {
+      return cachedAt;
+    }
+    try {
+      const rows = await this.events.bulkGet(ids);
+      ids.forEach((id, index) => {
+        const row = rows[index];
+        if (row !== undefined) {
+          cachedAt.set(id, row.cached_at);
+        }
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to get cache insertion times: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      // 部分的な結果を返すと「新鮮」と誤判定しうるため空で返す（= 全件が
+      // 期限切れ扱い → 上流へ転送）
+      cachedAt.clear();
+    }
+    return cachedAt;
+  }
+
+  /**
    * Get events matching the given filters
    *
    * @param filters Array of filters to match events against

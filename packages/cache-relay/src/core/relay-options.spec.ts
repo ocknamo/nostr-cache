@@ -5,6 +5,7 @@
 import {
   DEFAULT_MAX_EVENTS,
   normalizeCachePriority,
+  normalizeFreshnessWindows,
   resolveRelayOptions,
 } from './relay-options.js';
 
@@ -90,5 +91,49 @@ describe('normalizeCachePriority', () => {
     expect(() => normalizeCachePriority({ kinds: [1.5] })).toThrow(/1\.5/);
     expect(() => normalizeCachePriority({ kinds: [-1] })).toThrow(/-1/);
     expect(() => normalizeCachePriority({ kinds: [65536] })).toThrow(/65536/);
+  });
+});
+
+describe('normalizeFreshnessWindows', () => {
+  it('returns undefined for absent or empty config', () => {
+    expect(normalizeFreshnessWindows(undefined)).toBeUndefined();
+    expect(normalizeFreshnessWindows({})).toBeUndefined();
+  });
+
+  it('converts the record into a kind → seconds map', () => {
+    const windows = normalizeFreshnessWindows({ 0: 3600, 3: 600, 10002: 60 });
+    expect(windows).toEqual(
+      new Map([
+        [0, 3600],
+        [3, 600],
+        [10002, 60],
+      ])
+    );
+  });
+
+  it('throws on a non-replaceable kind naming it', () => {
+    // 通常 kind は結果集合が非有界で、窓を尊重できない
+    expect(() => normalizeFreshnessWindows({ 1: 3600 })).toThrow(/kind 1/);
+    // addressable は d タグが座標に入るため今回対象外
+    expect(() => normalizeFreshnessWindows({ 30023: 3600 })).toThrow(/kind 30023/);
+    expect(() => normalizeFreshnessWindows({ 20000: 3600 })).toThrow(/kind 20000/);
+  });
+
+  it('throws on an out-of-range kind', () => {
+    expect(() => normalizeFreshnessWindows({ 65536: 3600 })).toThrow(/65536/);
+    expect(() => normalizeFreshnessWindows({ '-1': 3600 })).toThrow(/-1/);
+  });
+
+  it('throws on a non-positive or non-finite window', () => {
+    expect(() => normalizeFreshnessWindows({ 0: 0 })).toThrow(/kind 0/);
+    expect(() => normalizeFreshnessWindows({ 0: -1 })).toThrow(/kind 0/);
+    expect(() => normalizeFreshnessWindows({ 0: Number.NaN })).toThrow(/kind 0/);
+    expect(() => normalizeFreshnessWindows({ 0: Number.POSITIVE_INFINITY })).toThrow(/kind 0/);
+  });
+
+  it('is not applied by resolveRelayOptions (the relay normalizes it itself)', () => {
+    // 公開オプション型は素の Record のまま通す
+    const resolved = resolveRelayOptions({ upstreamFreshness: { 0: 3600 } });
+    expect(resolved.upstreamFreshness).toEqual({ 0: 3600 });
   });
 });
