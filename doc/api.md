@@ -268,6 +268,10 @@ interface EventAddress {
   `address.identifier` (a missing `d` tag counts as the empty identifier), while for
   replaceable kinds the identifier is ignored.
 - `getEvents` のフィルタ解釈は NIP-01 準拠で、`DexieStorage` と `SqliteStorage` で一致します。
+  この一致は共通の適合性テスト（`cache-relay/src/test/storage-conformance.ts`）で担保しており、
+  両アダプタの spec が同じテスト群を実行します。独自アダプタを実装する場合も、
+  `@nostr-cache/cache-relay/test/storage-conformance` の
+  `describeStorageAdapterConformance()` を呼べば同じ契約を検証できます。
   - `since` / `until` はいずれも境界を含みます（`since <= created_at <= until`）。`0` も
     「指定なし」ではなく実際の境界として扱います。
   - `filter.limit` は「一致するイベントのうち**最新** N 件」を返し、**新しい順**
