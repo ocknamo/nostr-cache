@@ -655,6 +655,74 @@ describe('NostrCacheRelay', () => {
       await relay.subscribe('sub1', [sampleFilter]);
       expect(eoseHandler).toHaveBeenCalledWith('sub1');
     });
+
+    // in-process subscribe() は handleReqMessage とは別経路なので、鮮度ウィンドウが
+    // 両方で同じ判断をすることを個別に押さえる
+    describe('freshness window on the in-process subscribe() path', () => {
+      const PROFILE_PUBKEY = sampleEvent.pubkey;
+      const profileFilter: Filter = { kinds: [0], authors: [PROFILE_PUBKEY] };
+      const profileEvent: NostrEvent = { ...sampleEvent, id: 'profile-1', kind: 0 };
+
+      /** Relay whose cached profile is `cachedSecondsAgo` seconds old. */
+      function relayWithWindow(cachedSecondsAgo: number): {
+        relay: NostrCacheRelay;
+        pool: MockPool;
+        touchCachedAt: Mock;
+      } {
+        const touchCachedAt = vi.fn().mockResolvedValue(1);
+        const storage = {
+          ...mockStorage,
+          getEvents: vi.fn().mockResolvedValue([profileEvent]),
+          getCachedAt: vi
+            .fn()
+            .mockResolvedValue(new Map([[profileEvent.id, Date.now() - cachedSecondsAgo * 1000]])),
+          touchCachedAt,
+        } as unknown as StorageAdapter;
+        const freshPool = new MockPool();
+        return {
+          relay: new NostrCacheRelay(storage, mockTransport, {
+            upstreamPool: freshPool,
+            upstreamFreshness: { 0: 3600 },
+          }),
+          pool: freshPool,
+          touchCachedAt,
+        };
+      }
+
+      it('skips the upstream subscription and emits eose itself when fresh', async () => {
+        const { relay: freshRelay, pool: freshPool } = relayWithWindow(60);
+        const eoseHandler = vi.fn();
+        freshRelay.on('eose', eoseHandler);
+
+        await freshRelay.subscribe('sub1', [profileFilter]);
+
+        expect(freshPool.opened).toHaveLength(0);
+        expect(eoseHandler).toHaveBeenCalledWith('sub1');
+      });
+
+      it('opens the upstream subscription when the window has expired', async () => {
+        const { relay: staleRelay, pool: stalePool } = relayWithWindow(7200);
+        const eoseHandler = vi.fn();
+        staleRelay.on('eose', eoseHandler);
+
+        await staleRelay.subscribe('sub1', [profileFilter]);
+
+        expect(stalePool.opened).toHaveLength(1);
+        expect(stalePool.opened[0].filters).toEqual([profileFilter]);
+        // eose は従来どおり coordinator が発火する
+        expect(eoseHandler).not.toHaveBeenCalled();
+      });
+
+      it('re-arms the window when the upstream echoes an already-delivered id', async () => {
+        const { relay: staleRelay, pool: stalePool, touchCachedAt } = relayWithWindow(7200);
+        await staleRelay.subscribe('sub1', [profileFilter]);
+
+        // 上流が同じ id を返す（内容が変わっていない replaceable の典型ケース）
+        stalePool.eventCb?.(stalePool.opened[0].subId, profileEvent, 'wss://upstream.example');
+
+        expect(touchCachedAt).toHaveBeenCalledWith([profileEvent.id]);
+      });
+    });
   });
 
   describe('ttl background sweep', () => {

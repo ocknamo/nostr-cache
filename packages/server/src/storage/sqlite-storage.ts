@@ -362,6 +362,42 @@ export class SqliteStorage implements StorageAdapter {
   }
 
   /**
+   * Re-stamp the cache insertion time of the given ids to now.
+   * `cached_at` のみを更新し、検証状態とアクセスメタデータには触らない。
+   * 再保存と同じく、対象イベントの TTL は数え直しになる。
+   *
+   * @param ids Event IDs to re-stamp
+   * @returns Promise resolving to the number of events updated (0 on error)
+   */
+  async touchCachedAt(ids: string[]): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    const now = Date.now();
+    let updated = 0;
+    try {
+      this.inTransaction(() => {
+        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+          const result = this.db
+            .update(events)
+            .set({ cachedAt: now })
+            .where(inArray(events.id, part))
+            .run();
+          updated += Number(result.changes ?? 0);
+        }
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to touch cache insertion times: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
+    }
+    return updated;
+  }
+
+  /**
    * Get events matching the given filters.
    *
    * 各フィルタを独立に評価して id でデデュープ（Dexie 実装と同一）。

@@ -47,7 +47,8 @@ web-client は 2026-07 に廃棄した）
     `UpstreamRelayPool`（複数リレーへのファンアウトと EOSE 集約）/
     `UpstreamCoordinator`（購読対応表・重複排除・backfill・EOSE 保留・クリーンアップ））。
     設計詳細は [doc/cache-relay/upstream.md](./cache-relay/upstream.md)
-  - リードスルー: `REQ` を常に上流へ転送。ローカル結果は即返しつつ、上流イベントを
+  - リードスルー: `REQ` を上流へ転送（既定。`upstreamFreshness` を設定した kind は
+    窓の内側なら転送を省く。下記参照）。ローカル結果は即返しつつ、上流イベントを
     `event.id` で重複排除し、`MessageHandler.ingestUpstreamEvent`（通常 EVENT と同じ検証・
     保存・置換・遅延検証・上限退避）でローカルへ充填してからクライアントへ配信。
     上流購読はクライアントの CLOSE / 切断まで維持し、EOSE 後のライブイベントも透過配信する
@@ -61,6 +62,34 @@ web-client は 2026-07 に廃棄した）
     横取り URL を上流指定した場合の自己接続ループを防ぐ
   - 付随修正: クライアント切断時にローカル購読が削除されていなかった既存のリークを、
     `MessageHandler.handleClientDisconnect`（`removeAllSubscriptions` + 上流購読クローズ）で解消
+
+- [x] **鮮度ウィンドウ（`upstreamFreshness`）で上流への問い合わせを省く**
+  - HTTP キャッシュの `max-age` 相当。`{ 0: 3600 }` のように kind → 秒 を指定すると、
+    REQ のフィルタが replaceable な kind（`kinds` + `authors`）だけを要求し、要求した
+    (kind, pubkey) 座標すべてが窓の内側のキャッシュから返せた場合、そのフィルタを
+    上流へ転送せず即 EOSE を返す。1件でも古い / 欠けていれば従来どおり転送する
+  - 判定は `upstream/freshness.ts`（純粋関数 + `FreshnessGate`）。
+    `StorageAdapter.getCachedAt` / `touchCachedAt` を optional 追加し Dexie / SQLite に実装
+  - 内容が変わらない replaceable でも窓が再武装するよう、上流が既配信 id を返したら
+    `onDuplicate` → `touchCachedAt` で `cached_at` を打ち直す
+  - 対象は replaceable のみ（0 / 3 / 10000-19999）。設計と制約は
+    [doc/cache-relay/upstream.md](./cache-relay/upstream.md) 第5節・第7節
+
+## 優先度: 高（NIP-01 準拠）
+
+- [ ] **replaceable / addressable の置換で `created_at` を比較していない**
+  （`packages/cache-relay/src/event/event-handler.ts` の `handleReplaceableEvent` /
+  `handleAddressableEvent`）
+  - 現状: 同じ (pubkey, kind[, d]) の既存版を無条件に削除してから保存するため、
+    **古い署名済みイベントを1通投げるだけで新しい版を上書きできる**。NIP-01 の
+    「最新の1件だけを保持する」に非準拠
+  - 影響: 鮮度ウィンドウ（`upstreamFreshness`）を有効にしていると、上書き時に
+    `cached_at` が現在時刻になるため **最大で窓の秒数ぶん stale な版が固定される**
+    （無効時は次の REQ の上流問い合わせで自己修復する）
+  - 対応: 保存前に既存版の `created_at` と比較し、既存の方が新しければ保存をスキップする
+    （同値なら NIP-01 に従い id の辞書順で小さい方を残す）。`handleEvent` の戻り値
+    （`success` は OK 応答、`stored` は退避契機）と、上流由来イベントを
+    クライアントへ配信するかの判断もあわせて決める必要がある
 
 ## 優先度: 高（ビルド / CI 復旧）
 
@@ -317,8 +346,10 @@ web-client は 2026-07 に廃棄した）
   - キャッシュ由来の可視化: 各イベントに `cache` / `upstream` バッジ。ライブカウンタ
     （キャッシュ配信数 / 上流取得数 / 上流接続数 / キャッシュ保存数）
   - コールド / ウォーム計測: `storage.clear()` 後の 1 回目と 2 回目を比較し、
-    **初回イベントまでの時間**を並べて表示（EOSE はリードスルーが常に上流へ REQ を
-    転送するため縮まない。これは仕様どおりで、UI にもその旨を明記した）
+    **初回イベントまでの時間**を並べて表示（EOSE はリードスルーが上流へ REQ を
+    転送するため縮まない。これは仕様どおりで、UI にもその旨を明記した。
+    なお `upstreamFreshness` を設定した kind は窓の内側なら上流へ転送しないため
+    EOSE も即返るが、デモサイトはこのオプションを露出していない）
   - `.github/workflows/pages.yml` で `main` への push 時に自動デプロイ
     （要初回設定: Settings → Pages → Source = GitHub Actions）
 - [x] **埋め込み可能なタイムラインウィジェット**（`packages/timeline-embed`）

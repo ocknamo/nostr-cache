@@ -358,10 +358,12 @@ export class MessageHandler {
       }
 
       // 鮮度ウィンドウ: キャッシュだけで完全に充足したフィルタは上流へ投げない。
-      // 未設定・判定不能・ストレージ非対応ならフィルタはそのまま返る（フェイルオープン）
-      const upstreamFilters = this.freshnessGate
-        ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
-        : filters;
+      // 未設定・判定不能・ストレージ非対応ならフィルタはそのまま返る（フェイルオープン）。
+      // 上流が無い構成では判定自体が無意味なので、ストレージに触る前に短絡する
+      const upstreamFilters =
+        this.upstreamCoordinator && this.freshnessGate
+          ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
+          : filters;
       if (upstreamFilters.length < filters.length) {
         logger.debug(
           `Subscription ${subscriptionId}: ${filters.length - upstreamFilters.length}/${filters.length} filters served from cache within the freshness window`

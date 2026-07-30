@@ -209,6 +209,86 @@ describe('SqliteStorage', () => {
       // afterEach の close() を二重呼びしても安全なように開き直す
       storage.open();
     });
+
+    it('should look up more ids than the chunk size in one call', async () => {
+      const ids = Array.from({ length: 1200 }, (_, i) => `bulk-${i}`);
+      for (const id of ids) {
+        await storage.saveEvent({ ...mockEvent, id });
+      }
+
+      const cachedAt = await storage.getCachedAt(ids);
+      expect(cachedAt.size).toBe(ids.length);
+    });
+  });
+
+  describe('touchCachedAt (re-arming the freshness window)', () => {
+    const eventWithId = (id: string): NostrEvent => ({ ...mockEvent, id });
+
+    it('should re-stamp cached_at to now and report the count', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+      await storage.saveEvent(mockEvent);
+      nowSpy.mockReturnValue(9000);
+      const updated = await storage.touchCachedAt([mockEvent.id]);
+      nowSpy.mockRestore();
+
+      expect(updated).toBe(1);
+      expect((await storage.getCachedAt([mockEvent.id])).get(mockEvent.id)).toBe(9000);
+    });
+
+    it('should skip ids that are not stored', async () => {
+      await storage.saveEvent(mockEvent);
+
+      expect(await storage.touchCachedAt(['missing-id'])).toBe(0);
+      expect(await storage.touchCachedAt([mockEvent.id, 'missing-id'])).toBe(1);
+    });
+
+    it('should be a no-op for an empty id list', async () => {
+      expect(await storage.touchCachedAt([])).toBe(0);
+    });
+
+    it('should re-stamp several ids at once', async () => {
+      await storage.saveEvent(eventWithId('a'));
+      await storage.saveEvent(eventWithId('b'));
+
+      expect(await storage.touchCachedAt(['a', 'b'])).toBe(2);
+    });
+
+    it('should not change validation state or access metadata', async () => {
+      await storage.saveEvent(mockEvent, { validated: true });
+      await storage.touchCachedAt([mockEvent.id]);
+
+      const row = (storage as unknown as WithClient).client
+        .prepare('SELECT validated, access_count FROM events WHERE id = ?')
+        .get(mockEvent.id) as { validated: number; access_count: number };
+      expect(row.validated).toBe(1);
+      expect(row.access_count).toBe(1);
+    });
+
+    it('should leave the event body untouched', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.touchCachedAt([mockEvent.id]);
+
+      const [stored] = await storage.getEvents([{ ids: [mockEvent.id] }]);
+      expect(stored).toEqual(mockEvent);
+    });
+
+    it('should re-stamp more ids than the chunk size in one call', async () => {
+      const ids = Array.from({ length: 1200 }, (_, i) => `bulk-${i}`);
+      for (const id of ids) {
+        await storage.saveEvent({ ...mockEvent, id });
+      }
+
+      expect(await storage.touchCachedAt(ids)).toBe(ids.length);
+    });
+
+    it('should return 0 after close instead of throwing', async () => {
+      await storage.saveEvent(mockEvent);
+      storage.close();
+
+      expect(await storage.touchCachedAt([mockEvent.id])).toBe(0);
+
+      storage.open();
+    });
   });
 
   describe('getEvents', () => {

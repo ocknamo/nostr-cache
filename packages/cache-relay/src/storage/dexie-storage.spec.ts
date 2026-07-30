@@ -187,6 +187,66 @@ describe('DexieStorage', () => {
     });
   });
 
+  describe('touchCachedAt (re-arming the freshness window)', () => {
+    const eventWithId = (id: string): NostrEvent => ({ ...mockEvent, id });
+
+    it('should re-stamp cached_at to now and report the count', async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
+      await storage.saveEvent(mockEvent);
+      nowSpy.mockReturnValue(9000);
+      const updated = await storage.touchCachedAt([mockEvent.id]);
+      nowSpy.mockRestore();
+
+      expect(updated).toBe(1);
+      expect((await storage.getCachedAt([mockEvent.id])).get(mockEvent.id)).toBe(9000);
+    });
+
+    it('should skip ids that are not stored', async () => {
+      await storage.saveEvent(mockEvent);
+
+      expect(await storage.touchCachedAt(['missing-id'])).toBe(0);
+      expect(await storage.touchCachedAt([mockEvent.id, 'missing-id'])).toBe(1);
+    });
+
+    it('should be a no-op for an empty id list', async () => {
+      expect(await storage.touchCachedAt([])).toBe(0);
+    });
+
+    it('should re-stamp several ids at once', async () => {
+      await storage.saveEvent(eventWithId('a'));
+      await storage.saveEvent(eventWithId('b'));
+
+      expect(await storage.touchCachedAt(['a', 'b'])).toBe(2);
+    });
+
+    it('should not change validation state or access metadata', async () => {
+      await storage.saveEvent(mockEvent, { validated: true });
+      await storage.touchCachedAt([mockEvent.id]);
+
+      const row = await storage.table('events').get(mockEvent.id);
+      expect(row.validated).toBe(1);
+      expect(row.access_count).toBe(1);
+      expect((await storage.getValidationStatus([mockEvent.id])).get(mockEvent.id)).toBe(
+        'validated'
+      );
+    });
+
+    it('should keep a pending event pending', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.touchCachedAt([mockEvent.id]);
+
+      expect((await storage.getValidationStatus([mockEvent.id])).get(mockEvent.id)).toBe('pending');
+    });
+
+    it('should leave the event body untouched', async () => {
+      await storage.saveEvent(mockEvent);
+      await storage.touchCachedAt([mockEvent.id]);
+
+      const [stored] = await storage.getEvents([{ ids: [mockEvent.id] }]);
+      expect(stored).toEqual(mockEvent);
+    });
+  });
+
   describe('getEvents', () => {
     beforeEach(async () => {
       await storage.saveEvent(mockEvent);

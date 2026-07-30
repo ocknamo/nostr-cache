@@ -43,6 +43,45 @@ function coordinateKey(kind: number, pubkey: string): string {
 }
 
 /**
+ * Whether a cached copy counts as fresh, written so that **every** unusable
+ * input falls out as stale.
+ *
+ * A plain `now - cached > window * 1000` comparison does the opposite: any
+ * `NaN` on either side makes the comparison `false` and the copy would be taken
+ * as fresh — the one direction that silently breaks transparency. `getCachedAt`
+ * is an optional public interface third-party adapters implement (they might
+ * return a `Date`, an ISO string, or nothing at all), and `FreshnessGate` is
+ * publicly exported, so `windows` can arrive without passing through
+ * `normalizeFreshnessWindows`. Neither input is trusted here.
+ *
+ * A `cached` timestamp in the future is also treated as stale: `Date.now()` is
+ * not monotonic, and a SQLite-backed cache compares timestamps across process
+ * restarts, so clock skew must not hand out an unbounded window.
+ *
+ * @param cached Cache insertion time in ms, or undefined when not stored
+ * @param windowSeconds Configured window for the event's kind, or undefined
+ * @param nowMs Current time in milliseconds
+ * @returns True only when all inputs are sane and the copy is inside the window
+ */
+function isWithinWindow(
+  cached: number | undefined,
+  windowSeconds: number | undefined,
+  nowMs: number
+): boolean {
+  if (windowSeconds === undefined || !Number.isFinite(windowSeconds) || windowSeconds <= 0) {
+    return false;
+  }
+  if (cached === undefined || !Number.isFinite(cached) || !Number.isFinite(nowMs)) {
+    return false;
+  }
+  // 未来の cached_at はクロックスキュー。窓を無限に伸ばさないよう古い扱いにする
+  if (cached > nowMs) {
+    return false;
+  }
+  return nowMs - cached <= windowSeconds * 1000;
+}
+
+/**
  * Whether a filter is a candidate for the freshness window at all.
  *
  * The window can only skip a filter when the *complete* set of events that
@@ -119,10 +158,8 @@ export function narrowFiltersByFreshness(
   const fresh = new Set<string>();
   for (const event of sentEvents) {
     const windowSeconds = windows.get(event.kind);
-    if (windowSeconds === undefined) continue;
     const cached = cachedAt.get(event.id);
-    if (cached === undefined) continue;
-    if (nowMs - cached > windowSeconds * 1000) continue;
+    if (!isWithinWindow(cached, windowSeconds, nowMs)) continue;
     fresh.add(coordinateKey(event.kind, event.pubkey));
   }
 
@@ -203,5 +240,32 @@ export class FreshnessGate {
     }
 
     return narrowFiltersByFreshness(filters, sentEvents, cachedAt, this.windows, this.now());
+  }
+
+  /**
+   * Record that an upstream relay just confirmed a copy this cache already
+   * holds, re-arming its window.
+   *
+   * Without this the window would only ever fire once per event. When the window
+   * expires the REQ is forwarded upstream, but for a replaceable event whose
+   * content has not changed the upstream answer is the *same event id* — which
+   * the coordinator dedupes away before `ingest`, so `cached_at` is never
+   * rewritten. The window would then stay expired forever and every later REQ
+   * would go upstream again, which is exactly the traffic this option exists to
+   * avoid (unchanged profiles are the common case).
+   *
+   * Fire-and-forget: this is cache bookkeeping on the read path, so a failure
+   * must never affect the REQ. Only kinds that actually have a window are
+   * touched, so a high-volume regular kind never reaches storage here.
+   *
+   * @param event The upstream event that duplicated an already-delivered id
+   */
+  markRevalidated(event: NostrEvent): void {
+    if (!this.windows.has(event.kind) || typeof this.storage.touchCachedAt !== 'function') {
+      return;
+    }
+    void this.storage.touchCachedAt([event.id]).catch((error) => {
+      logger.debug('Failed to re-arm the freshness window:', error);
+    });
   }
 }

@@ -207,6 +207,10 @@ export class NostrCacheRelay {
             this.messageHandler.sendEOSE(clientId, subscriptionId);
           }
         },
+        // 上流が既配信の id を返してきた = キャッシュ済みの版が最新だと確認できた。
+        // 鮮度ウィンドウを張り直す（内容が変わらない replaceable でも窓が
+        // 再武装するようにするため。詳細は FreshnessGate.markRevalidated）
+        onDuplicate: (event) => this.freshnessGate?.markRevalidated(event),
       },
       { eoseTimeout: this.options.upstreamEoseTimeout }
     );
@@ -418,10 +422,11 @@ export class NostrCacheRelay {
     }
 
     // 鮮度ウィンドウ: キャッシュだけで充足したフィルタは上流へ投げない
-    // （transport 経由の REQ と同じ判定を通す）
-    const upstreamFilters = this.freshnessGate
-      ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
-      : filters;
+    // （transport 経由の REQ と同じ判定を通す。上流が無ければ短絡する）
+    const upstreamFilters =
+      this.upstreamCoordinator && this.freshnessGate
+        ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
+        : filters;
 
     // リードスルー有効時は上流へも問い合わせ、EOSE は coordinator が
     // （上流 EOSE の集約 or タイムアウトで）発火する。無効時、および鮮度ウィンドウで

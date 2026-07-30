@@ -371,6 +371,43 @@ describe('Freshness window integration', () => {
     client.close();
   });
 
+  it('re-arms the window when the upstream confirms the cached version is current', async () => {
+    // 内容が変わらない replaceable の典型ケース。上流も同じ id を返すため、
+    // 上流エコーは重複排除で ingest 前に落ちる。それでも「再検証できた」
+    // 事実で cached_at を打ち直さないと、窓は二度と再武装せず以後の REQ が
+    // 毎回上流へ行ってしまう（この機能が避けたいトラフィックそのもの）
+    await upstream.storage.deleteEvent(upstreamProfile.id);
+    await upstream.storage.saveEvent(cachedProfile);
+
+    // 2 時間前にキャッシュ → 1 時間の窓は切れている
+    await startRelay(3600, 7200);
+
+    const before = (await cacheStorage.getCachedAt([cachedProfile.id])).get(cachedProfile.id);
+    expect(before).toBeDefined();
+
+    const client = await openClient(cacheUrl);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+    await waitForMessage(client, NostrMessageType.EOSE);
+
+    // 上流エコーの受信で cached_at が現在時刻へ打ち直される
+    await waitFor(async () => {
+      const after = (await cacheStorage.getCachedAt([cachedProfile.id])).get(cachedProfile.id);
+      return after !== undefined && after > (before as number);
+    });
+
+    client.close();
+
+    // 窓が再武装したので、次の REQ は上流へ行かず即 EOSE で返る
+    const client2 = await openClient(cacheUrl);
+    const started = Date.now();
+    const eosePromise = waitForMessage(client2, NostrMessageType.EOSE);
+    client2.send(JSON.stringify(['REQ', 'sub2', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+    await eosePromise;
+    expect(Date.now() - started).toBeLessThan(EOSE_TIMEOUT / 2);
+
+    client2.close();
+  });
+
   it('still forwards a filter the window cannot satisfy (regular kind)', async () => {
     await startRelay(3600, 60);
     const note = await createTestEvent(seckey, { kind: 1 });

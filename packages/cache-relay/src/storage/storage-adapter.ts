@@ -131,6 +131,27 @@ export interface StorageAdapter {
   getCachedAt?(ids: string[]): Promise<Map<string, number>>;
 
   /**
+   * Reset the cache insertion time of the given event ids to now.
+   *
+   * Optional companion to {@link getCachedAt}, used when an upstream relay
+   * confirms that a copy the cache already holds is still current: without this
+   * the `upstreamFreshness` window could never re-arm for an event whose content
+   * never changes, since the upstream echo of an already-delivered id is deduped
+   * before it reaches `saveEvent`.
+   *
+   * Semantically this is "revalidated just now", so — exactly as a re-`saveEvent`
+   * of the same id does — it also restarts the {@link deleteExpired} TTL for
+   * those events.
+   *
+   * Must not change validation state, and must not count as a read access for
+   * LRU/LFU eviction purposes. Ids that are not stored are skipped silently.
+   *
+   * @param ids Event IDs to re-stamp
+   * @returns Promise resolving to the number of events updated (0 on error)
+   */
+  touchCachedAt?(ids: string[]): Promise<number>;
+
+  /**
    * Delete an event from storage
    *
    * @param id ID of the event to delete

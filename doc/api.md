@@ -216,6 +216,7 @@ interface StorageAdapter {
   markValidated(ids: string[]): Promise<void>;
   getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
   getCachedAt?(ids: string[]): Promise<Map<string, number>>; // optional
+  touchCachedAt?(ids: string[]): Promise<number>;            // optional
 }
 
 interface EventAddress {
@@ -244,6 +245,15 @@ interface EventAddress {
   the event's `created_at`), backing the `upstreamFreshness` window. Unstored ids are
   omitted; never affects LRU/LFU tracking. Adapters may omit it — the window then logs a
   one-time warning and has no effect.
+- `touchCachedAt`（**optional**）は指定 id の `cached_at` を現在時刻に打ち直します。上流が
+  「キャッシュ済みの版が最新だ」と確認したときに鮮度ウィンドウを張り直すためのもので、
+  これが無いと内容の変わらない replaceable では窓が二度と再武装しません（上流エコーは
+  重複排除で `saveEvent` に届かないため）。再保存と同様に **TTL も数え直し**になります。
+  検証状態とアクセスメタデータは変更しません。
+  / Optional. Re-stamps `cached_at` to now, re-arming the `upstreamFreshness` window when an
+  upstream relay confirms a copy the cache already holds (the echo is deduped before
+  `saveEvent`, so nothing else would refresh it). Restarts the TTL, as a re-save does. Never
+  changes validation state or access metadata.
 - `deleteEventsByIdsForPubkey` / `deleteEventsByAddress` は NIP-09（削除リクエスト）の
   `e` タグ / `a` タグに対応します。実装側で 2 つの制約を保証する必要があります
   （呼び出し側は保存済みの行を見られないため）: **`pubkey` が一致するイベントのみ削除する**、

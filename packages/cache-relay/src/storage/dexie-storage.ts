@@ -212,6 +212,38 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
+   * Re-stamp the cache insertion time of the given ids to now.
+   *
+   * Only touches `cached_at`, so validation state and the LRU/LFU access
+   * metadata are left alone. Restarts the TTL for those events, as a re-save of
+   * the same id would.
+   *
+   * @param ids Event IDs to re-stamp
+   * @returns Promise resolving to the number of events updated (0 on error)
+   */
+  async touchCachedAt(ids: string[]): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    try {
+      const now = Date.now();
+      return await this.events
+        .where('id')
+        .anyOf(ids)
+        .modify((event) => {
+          event.cached_at = now;
+        });
+    } catch (error) {
+      logger.error(
+        `Failed to touch cache insertion times: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
+    }
+  }
+
+  /**
    * Get events matching the given filters
    *
    * @param filters Array of filters to match events against

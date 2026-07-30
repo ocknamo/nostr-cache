@@ -3,7 +3,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { type Mock, describe, expect, it, vi } from 'vitest';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { FreshnessGate, isFreshnessEligible, narrowFiltersByFreshness } from './freshness.js';
 
@@ -172,6 +172,50 @@ describe('narrowFiltersByFreshness', () => {
     const filters: Filter[] = [{ kinds: [1], authors: [PUBKEY_A] }];
     expect(narrowFiltersByFreshness(filters, [], new Map(), WINDOWS, NOW)).toEqual(filters);
   });
+
+  // 判定不能な値は「新鮮」ではなく「古い」に倒れなければならない。素朴な
+  // `now - cached > window` 比較は NaN で false になり、逆側に倒れてしまう
+  describe('unusable inputs fall out as stale', () => {
+    const filters: Filter[] = [{ kinds: [0], authors: [PUBKEY_A] }];
+    const sent = [event('e1', 0, PUBKEY_A)];
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['-Infinity', Number.NEGATIVE_INFINITY],
+      ['a Date', new Date(NOW) as unknown as number],
+      ['an ISO string', '2026-07-30T00:00:00Z' as unknown as number],
+      ['an object', {} as unknown as number],
+      ['null', null as unknown as number],
+    ])('treats a cached_at of %s as stale', (_label, cached) => {
+      const cachedAt = new Map<string, number>([['e1', cached]]);
+      expect(narrowFiltersByFreshness(filters, sent, cachedAt, WINDOWS, NOW)).toEqual(filters);
+    });
+
+    it('treats a future cached_at as stale (clock skew must not widen the window)', () => {
+      const cachedAt = new Map([['e1', NOW + 60_000]]);
+      expect(narrowFiltersByFreshness(filters, sent, cachedAt, WINDOWS, NOW)).toEqual(filters);
+    });
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['zero', 0],
+      ['negative', -1],
+    ])('treats a window of %s as stale', (_label, windowSeconds) => {
+      // FreshnessGate は公開エクスポートなので、正規化を通らない窓が届きうる
+      const windows = new Map([[0, windowSeconds]]);
+      const cachedAt = cachedSecondsAgo({ e1: 1 });
+      expect(narrowFiltersByFreshness(filters, sent, cachedAt, windows, NOW)).toEqual(filters);
+    });
+
+    it('treats a NaN clock as stale', () => {
+      const cachedAt = cachedSecondsAgo({ e1: 1 });
+      expect(narrowFiltersByFreshness(filters, sent, cachedAt, WINDOWS, Number.NaN)).toEqual(
+        filters
+      );
+    });
+  });
 });
 
 describe('FreshnessGate', () => {
@@ -235,5 +279,47 @@ describe('FreshnessGate', () => {
     const gate = new FreshnessGate(storageWith(getCachedAt), WINDOWS, () => NOW);
 
     expect(await gate.filtersForUpstream([freshFilter], sent)).toEqual([freshFilter]);
+  });
+
+  describe('markRevalidated (re-arming the window)', () => {
+    /** Storage stub exposing `touchCachedAt`. */
+    function storageWithTouch(touchCachedAt: Mock): StorageAdapter {
+      return { getCachedAt: vi.fn(), touchCachedAt } as unknown as StorageAdapter;
+    }
+
+    it('re-stamps an upstream-confirmed event of a windowed kind', () => {
+      const touchCachedAt = vi.fn().mockResolvedValue(1);
+      const gate = new FreshnessGate(storageWithTouch(touchCachedAt), WINDOWS, () => NOW);
+
+      gate.markRevalidated(event('e1', 0, PUBKEY_A));
+
+      expect(touchCachedAt).toHaveBeenCalledWith(['e1']);
+    });
+
+    it('ignores kinds without a window (a busy regular kind must not hit storage)', () => {
+      const touchCachedAt = vi.fn().mockResolvedValue(1);
+      const gate = new FreshnessGate(storageWithTouch(touchCachedAt), WINDOWS, () => NOW);
+
+      gate.markRevalidated(event('e1', 1, PUBKEY_A));
+
+      expect(touchCachedAt).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when the adapter does not implement touchCachedAt', () => {
+      const gate = new FreshnessGate(storageWith(vi.fn()), WINDOWS, () => NOW);
+
+      expect(() => gate.markRevalidated(event('e1', 0, PUBKEY_A))).not.toThrow();
+    });
+
+    it('swallows a rejected touch (read-path bookkeeping must not surface)', async () => {
+      const touchCachedAt = vi.fn().mockRejectedValue(new Error('storage down'));
+      const gate = new FreshnessGate(storageWithTouch(touchCachedAt), WINDOWS, () => NOW);
+
+      gate.markRevalidated(event('e1', 0, PUBKEY_A));
+      // 未処理の rejection にならないことを確認するため microtask を1周させる
+      await Promise.resolve();
+
+      expect(touchCachedAt).toHaveBeenCalled();
+    });
   });
 });
