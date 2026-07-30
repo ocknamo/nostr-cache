@@ -8,6 +8,7 @@ import { seckeySigner } from 'rx-nostr-crypto';
 import { type Mock, vi } from 'vitest';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { FreshnessGate } from '../upstream/freshness.js';
 import { MessageHandler } from './message-handler.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
@@ -731,6 +732,118 @@ describe('MessageHandler', () => {
     it('sends EOSE directly when no coordinator is set (opt-in unchanged)', async () => {
       await messageHandler.handleMessage('client1', ['REQ', 'sub1', sampleFilter]);
       expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+    });
+
+    describe('freshness window', () => {
+      const PROFILE_PUBKEY = sampleEvent.pubkey;
+      const profileFilter = { kinds: [0], authors: [PROFILE_PUBKEY] };
+      const profileEvent: NostrEvent = { ...sampleEvent, id: 'profile-1', kind: 0 };
+      const NOW = 1_700_000_000_000;
+
+      /** MessageHandler wired with a freshness gate over `getCachedAt`. */
+      function makeHandler(cachedSecondsAgo: number | undefined) {
+        const storage = {
+          ...mockStorage,
+          getEvents: vi.fn().mockResolvedValue([profileEvent]),
+          getCachedAt: vi
+            .fn()
+            .mockResolvedValue(
+              cachedSecondsAgo === undefined
+                ? new Map()
+                : new Map([[profileEvent.id, NOW - cachedSecondsAgo * 1000]])
+            ),
+        } as unknown as StorageAdapter;
+        const gate = new FreshnessGate(storage, new Map([[0, 3600]]), () => NOW);
+        const handler = new MessageHandler(
+          storage,
+          mockSubscriptionManager,
+          20,
+          500,
+          'IMMEDIATELY',
+          undefined,
+          undefined,
+          undefined,
+          gate
+        );
+        const callback = vi.fn();
+        handler.onResponse(callback);
+        return { handler, callback };
+      }
+
+      it('skips upstream and sends EOSE itself when the cache is fresh', async () => {
+        const coordinator = makeCoordinator();
+        const { handler, callback } = makeHandler(60);
+        handler.setUpstreamCoordinator(coordinator as never);
+
+        await handler.handleMessage('client1', ['REQ', 'sub1', profileFilter]);
+
+        expect(callback).toHaveBeenCalledWith('client1', ['EVENT', 'sub1', profileEvent]);
+        expect(callback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+        expect(coordinator.openForSubscription).not.toHaveBeenCalled();
+      });
+
+      it('forwards upstream when the cached copy is past its window', async () => {
+        const coordinator = makeCoordinator();
+        const { handler, callback } = makeHandler(7200);
+        handler.setUpstreamCoordinator(coordinator as never);
+
+        await handler.handleMessage('client1', ['REQ', 'sub1', profileFilter]);
+
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [profileFilter],
+          [profileEvent.id]
+        );
+        // EOSE remains the coordinator's to send.
+        expect(callback).not.toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+      });
+
+      it('forwards only the filters the window does not satisfy', async () => {
+        const coordinator = makeCoordinator();
+        const { handler } = makeHandler(60);
+        handler.setUpstreamCoordinator(coordinator as never);
+
+        await handler.handleMessage('client1', ['REQ', 'sub1', profileFilter, sampleFilter]);
+
+        // kind 1 のフィルタは窓の対象外なので上流へ残る
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [sampleFilter],
+          [profileEvent.id]
+        );
+      });
+
+      it('forwards upstream when the adapter does not implement getCachedAt', async () => {
+        const coordinator = makeCoordinator();
+        const storage = {
+          ...mockStorage,
+          getEvents: vi.fn().mockResolvedValue([profileEvent]),
+          getCachedAt: undefined,
+        } as unknown as StorageAdapter;
+        const handler = new MessageHandler(
+          storage,
+          mockSubscriptionManager,
+          20,
+          500,
+          'IMMEDIATELY',
+          undefined,
+          undefined,
+          undefined,
+          new FreshnessGate(storage, new Map([[0, 3600]]), () => NOW)
+        );
+        handler.setUpstreamCoordinator(coordinator as never);
+
+        await handler.handleMessage('client1', ['REQ', 'sub1', profileFilter]);
+
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [profileFilter],
+          [profileEvent.id]
+        );
+      });
     });
 
     it('ingestUpstreamEvent stores without sending OK or broadcasting', async () => {

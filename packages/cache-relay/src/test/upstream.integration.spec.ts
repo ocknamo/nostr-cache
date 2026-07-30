@@ -11,8 +11,13 @@
 // Register fake-indexeddb before anything pulls in Dexie (DexieStorage below),
 // otherwise Dexie evaluates without a global indexedDB and throws MissingAPIError.
 import 'fake-indexeddb/auto';
-import { type NostrEvent, NostrMessageType, type NostrWireMessage } from '@nostr-cache/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  type NostrEvent,
+  NostrMessageType,
+  type NostrWireMessage,
+  getRandomSecret,
+} from '@nostr-cache/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NostrCacheRelay } from '../core/nostr-cache-relay.js';
 import { DexieStorage } from '../storage/dexie-storage.js';
 import { WebSocketServer } from '../transport/web-socket-server.js';
@@ -220,6 +225,226 @@ describe('Upstream read/write-through integration', () => {
 
     const delivered = received.filter(
       (m) => m[0] === NostrMessageType.EVENT && (m[2] as NostrEvent).id === liveEvent.id
+    );
+    expect(delivered).toHaveLength(0);
+
+    publisher.close();
+    client.close();
+  });
+});
+
+/**
+ * Freshness window (`upstreamFreshness`) integration tests.
+ *
+ * Same two-relay setup as above, but the cache relay is built per test with a
+ * configurable window so both the "fresh, upstream untouched" and the "expired,
+ * upstream re-consulted" paths run over real sockets.
+ *
+ * The upstream holds a *newer* kind 0 for the same author than the cache does,
+ * so "the upstream was not consulted" is directly observable: the client either
+ * sees the stale cached profile only, or it also sees the upstream one.
+ */
+describe('Freshness window integration', () => {
+  /** Upstream EOSE budget; a skipped upstream must beat this by a wide margin. */
+  const EOSE_TIMEOUT = 3000;
+
+  let upstream: IntegrationTestBase;
+  let cacheStorage: DexieStorage;
+  let cacheServer: WebSocketServer;
+  let cacheRelay: NostrCacheRelay;
+  let pool: UpstreamRelayPool;
+  let cacheUrl: string;
+
+  /** Author shared by the cached and the upstream profile. */
+  let seckey: string;
+  /** kind 0 held by the cache. */
+  let cachedProfile: NostrEvent;
+  /** Newer kind 0 held only by the upstream. */
+  let upstreamProfile: NostrEvent;
+
+  beforeEach(async () => {
+    upstream = new IntegrationTestBase(0);
+    await upstream.setup();
+
+    seckey = getRandomSecret();
+    cachedProfile = await createTestEvent(seckey, {
+      kind: 0,
+      created_at: 1_000_000,
+      content: '{"name":"cached"}',
+    });
+    upstreamProfile = await createTestEvent(seckey, {
+      kind: 0,
+      created_at: 2_000_000,
+      content: '{"name":"upstream"}',
+    });
+    await upstream.storage.saveEvent(upstreamProfile);
+
+    cacheStorage = new DexieStorage('CacheRelayFreshnessIntegrationDb');
+    cacheServer = new WebSocketServer(0);
+    pool = new UpstreamRelayPool([upstream.getServerUrl()], { connectionTimeout: 2000 });
+  });
+
+  afterEach(async () => {
+    await cacheRelay.disconnect();
+    await cacheStorage.clear();
+    await cacheStorage.delete();
+    await upstream.teardown();
+  });
+
+  /**
+   * Start the cache relay with the given window and seed the cached profile,
+   * backdated by `cachedSecondsAgo` so its `cached_at` is deterministic.
+   */
+  async function startRelay(windowSeconds: number, cachedSecondsAgo: number): Promise<void> {
+    // saveEvent stamps cached_at from Date.now(); backdate it to control freshness
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() - cachedSecondsAgo * 1000);
+    await cacheStorage.saveEvent(cachedProfile, { validated: true });
+    nowSpy.mockRestore();
+
+    cacheRelay = new NostrCacheRelay(cacheStorage, cacheServer, {
+      upstreamPool: pool,
+      upstreamEoseTimeout: EOSE_TIMEOUT,
+      upstreamFreshness: { 0: windowSeconds },
+    });
+    await cacheRelay.connect();
+    cacheUrl = `ws://localhost:${cacheServer.getPort()}`;
+    await waitFor(() => pool.getConnectedCount() > 0);
+  }
+
+  it('serves a fresh kind 0 from cache without consulting the upstream', async () => {
+    await startRelay(3600, 60);
+
+    const client = await openClient(cacheUrl);
+    const received = collectMessages(client);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+
+    await waitForMessage(client, NostrMessageType.EOSE);
+    // Give an (erroneous) upstream round-trip time to land.
+    await delay(400);
+
+    const ids = received
+      .filter((m) => m[0] === NostrMessageType.EVENT)
+      .map((m) => (m[2] as NostrEvent).id);
+    expect(ids).toEqual([cachedProfile.id]);
+    // 上流の新しい版は届かない = REQ が転送されていない
+    expect(ids).not.toContain(upstreamProfile.id);
+
+    client.close();
+  });
+
+  it('returns EOSE immediately instead of waiting out upstreamEoseTimeout', async () => {
+    await startRelay(3600, 60);
+
+    const client = await openClient(cacheUrl);
+    const started = Date.now();
+    const eosePromise = waitForMessage(client, NostrMessageType.EOSE);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+    await eosePromise;
+
+    expect(Date.now() - started).toBeLessThan(EOSE_TIMEOUT / 2);
+
+    client.close();
+  });
+
+  it('re-consults the upstream once the window has expired', async () => {
+    // 2 時間前にキャッシュ → 1 時間の窓を超過
+    await startRelay(3600, 7200);
+
+    const client = await openClient(cacheUrl);
+    const received = collectMessages(client);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+
+    await waitFor(() =>
+      received.some(
+        (m) => m[0] === NostrMessageType.EVENT && (m[2] as NostrEvent).id === upstreamProfile.id
+      )
+    );
+
+    // 新しい版がローカルへ充填され、置換で古い版が消えている
+    await waitFor(async () => {
+      const stored = await cacheStorage.getEvents([
+        { kinds: [0], authors: [cachedProfile.pubkey] },
+      ]);
+      return stored.length === 1 && stored[0].id === upstreamProfile.id;
+    });
+
+    client.close();
+  });
+
+  it('re-arms the window when the upstream confirms the cached version is current', async () => {
+    // 内容が変わらない replaceable の典型ケース。上流も同じ id を返すため、
+    // 上流エコーは重複排除で ingest 前に落ちる。それでも「再検証できた」
+    // 事実で cached_at を打ち直さないと、窓は二度と再武装せず以後の REQ が
+    // 毎回上流へ行ってしまう（この機能が避けたいトラフィックそのもの）
+    await upstream.storage.deleteEvent(upstreamProfile.id);
+    await upstream.storage.saveEvent(cachedProfile);
+
+    // 2 時間前にキャッシュ → 1 時間の窓は切れている
+    await startRelay(3600, 7200);
+
+    const before = (await cacheStorage.getCachedAt([cachedProfile.id])).get(cachedProfile.id);
+    expect(before).toBeDefined();
+
+    const client = await openClient(cacheUrl);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+    await waitForMessage(client, NostrMessageType.EOSE);
+
+    // 上流エコーの受信で cached_at が現在時刻へ打ち直される
+    await waitFor(async () => {
+      const after = (await cacheStorage.getCachedAt([cachedProfile.id])).get(cachedProfile.id);
+      return after !== undefined && after > (before as number);
+    });
+
+    client.close();
+
+    // 窓が再武装したので、次の REQ は上流へ行かず即 EOSE で返る
+    const client2 = await openClient(cacheUrl);
+    const started = Date.now();
+    const eosePromise = waitForMessage(client2, NostrMessageType.EOSE);
+    client2.send(JSON.stringify(['REQ', 'sub2', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+    await eosePromise;
+    expect(Date.now() - started).toBeLessThan(EOSE_TIMEOUT / 2);
+
+    client2.close();
+  });
+
+  it('still forwards a filter the window cannot satisfy (regular kind)', async () => {
+    await startRelay(3600, 60);
+    const note = await createTestEvent(seckey, { kind: 1 });
+    await upstream.storage.saveEvent(note);
+
+    const client = await openClient(cacheUrl);
+    const received = collectMessages(client);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [1], authors: [note.pubkey] }]));
+
+    await waitFor(() =>
+      received.some((m) => m[0] === NostrMessageType.EVENT && (m[2] as NostrEvent).id === note.id)
+    );
+
+    client.close();
+  });
+
+  it('does not deliver live upstream updates for a skipped subscription', async () => {
+    await startRelay(3600, 60);
+
+    const client = await openClient(cacheUrl);
+    const received = collectMessages(client);
+    client.send(JSON.stringify(['REQ', 'sub1', { kinds: [0], authors: [cachedProfile.pubkey] }]));
+    await waitForMessage(client, NostrMessageType.EOSE);
+
+    // 窓の内側では上流購読を持たないため、以降のライブ更新は届かない
+    // （HTTP キャッシュと同じ「次回 REQ で再検証」セマンティクス）
+    const newer = await createTestEvent(seckey, {
+      kind: 0,
+      created_at: 3_000_000,
+      content: '{"name":"live"}',
+    });
+    const publisher = await openClient(upstream.getServerUrl());
+    publisher.send(JSON.stringify(['EVENT', newer]));
+    await delay(400);
+
+    const delivered = received.filter(
+      (m) => m[0] === NostrMessageType.EVENT && (m[2] as NostrEvent).id === newer.id
     );
     expect(delivered).toHaveLength(0);
 

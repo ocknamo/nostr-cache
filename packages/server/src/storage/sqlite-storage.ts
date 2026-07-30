@@ -326,6 +326,78 @@ export class SqliteStorage implements StorageAdapter {
   }
 
   /**
+   * Get the cache insertion time (ms) of the given event ids.
+   * Does NOT track access, mirroring `DexieStorage`: a freshness check must not
+   * disturb LRU/LFU ordering. Unstored ids are omitted from the map.
+   *
+   * @param ids Event IDs to look up
+   * @returns Promise resolving to a map of id → cached_at in milliseconds
+   */
+  async getCachedAt(ids: string[]): Promise<Map<string, number>> {
+    const cachedAt = new Map<string, number>();
+    if (ids.length === 0) {
+      return cachedAt;
+    }
+    try {
+      for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+        const rows = this.db
+          .select({ id: events.id, cachedAt: events.cachedAt })
+          .from(events)
+          .where(inArray(events.id, part))
+          .all();
+        for (const row of rows) {
+          cachedAt.set(row.id, row.cachedAt);
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `Failed to get cache insertion times: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      // 部分的な結果を返すと「新鮮」と誤判定しうるため空で返す
+      cachedAt.clear();
+    }
+    return cachedAt;
+  }
+
+  /**
+   * Re-stamp the cache insertion time of the given ids to now.
+   * `cached_at` のみを更新し、検証状態とアクセスメタデータには触らない。
+   * 再保存と同じく、対象イベントの TTL は数え直しになる。
+   *
+   * @param ids Event IDs to re-stamp
+   * @returns Promise resolving to the number of events updated (0 on error)
+   */
+  async touchCachedAt(ids: string[]): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+    const now = Date.now();
+    let updated = 0;
+    try {
+      this.inTransaction(() => {
+        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
+          const result = this.db
+            .update(events)
+            .set({ cachedAt: now })
+            .where(inArray(events.id, part))
+            .run();
+          updated += Number(result.changes ?? 0);
+        }
+      });
+    } catch (error) {
+      logger.error(
+        `Failed to touch cache insertion times: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      return 0;
+    }
+    return updated;
+  }
+
+  /**
    * Get events matching the given filters.
    *
    * 各フィルタを独立に評価して id でデデュープ（Dexie 実装と同一）。

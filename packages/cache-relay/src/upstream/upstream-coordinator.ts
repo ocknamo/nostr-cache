@@ -40,6 +40,14 @@ export interface UpstreamCoordinatorDeps {
   deliver: (clientId: string, subscriptionId: string, event: NostrEvent) => void;
   /** Send EOSE to the owning client subscription. */
   sendEose: (clientId: string, subscriptionId: string) => void;
+  /**
+   * An upstream relay returned an event id this subscription had already
+   * delivered — i.e. upstream confirmed a copy the cache (or another upstream)
+   * already provided. The event is not re-ingested or re-delivered; this hook
+   * only exists so the freshness window can treat the echo as a successful
+   * revalidation and re-arm. Optional and must never throw.
+   */
+  onDuplicate?: (event: NostrEvent) => void;
 }
 
 export interface UpstreamCoordinatorOptions {
@@ -209,12 +217,16 @@ export class UpstreamCoordinator {
       return;
     }
     if (state.sentIds.has(event.id)) {
+      this.notifyDuplicate(event);
       return;
     }
     state.ingestChain = state.ingestChain.then(async () => {
       // Re-check: the subscription may have closed while queued, or another
       // relay may have delivered the same id first.
       if (state.closed || state.sentIds.has(event.id)) {
+        if (!state.closed) {
+          this.notifyDuplicate(event);
+        }
         return;
       }
       let result: IngestResult;
@@ -236,6 +248,19 @@ export class UpstreamCoordinator {
         logger.debug('Upstream event delivery failed:', error);
       }
     });
+  }
+
+  /**
+   * Tell the freshness window that upstream re-confirmed an already-delivered
+   * event. Purely advisory bookkeeping, so a throwing hook must not break the
+   * dedup path.
+   */
+  private notifyDuplicate(event: NostrEvent): void {
+    try {
+      this.deps.onDuplicate?.(event);
+    } catch (error) {
+      logger.debug('onDuplicate hook failed:', error);
+    }
   }
 
   /** Aggregated upstream EOSE arrived: release the client's EOSE if pending. */

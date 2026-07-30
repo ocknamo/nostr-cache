@@ -109,6 +109,49 @@ export interface StorageAdapter {
   getEvents(filters: Filter[]): Promise<NostrEvent[]>;
 
   /**
+   * Get the cache insertion time (in milliseconds) of the given event ids —
+   * the same clock the TTL sweep expires against, i.e. when the event was
+   * written into this cache, not the event's own `created_at`.
+   *
+   * Optional capability backing the `upstreamFreshness` window: the relay uses
+   * it to decide whether a cached replaceable event is recent enough to serve
+   * without re-asking the upstream relays. Adapters that cannot report it may
+   * omit the method, in which case the window has no effect aside from a
+   * one-time warning.
+   *
+   * Like {@link getValidationStatus}, this must not count as a read access for
+   * LRU/LFU eviction purposes — a freshness check is bookkeeping, not a read of
+   * the event. Ids that are not stored must be left out of the map entirely
+   * (callers treat a missing entry as "not fresh").
+   *
+   * @param ids Event IDs to look up
+   * @returns Promise resolving to a map of id → cache insertion time in ms,
+   *   containing only the ids that are stored
+   */
+  getCachedAt?(ids: string[]): Promise<Map<string, number>>;
+
+  /**
+   * Reset the cache insertion time of the given event ids to now.
+   *
+   * Optional companion to {@link getCachedAt}, used when an upstream relay
+   * confirms that a copy the cache already holds is still current: without this
+   * the `upstreamFreshness` window could never re-arm for an event whose content
+   * never changes, since the upstream echo of an already-delivered id is deduped
+   * before it reaches `saveEvent`.
+   *
+   * Semantically this is "revalidated just now", so — exactly as a re-`saveEvent`
+   * of the same id does — it also restarts the {@link deleteExpired} TTL for
+   * those events.
+   *
+   * Must not change validation state, and must not count as a read access for
+   * LRU/LFU eviction purposes. Ids that are not stored are skipped silently.
+   *
+   * @param ids Event IDs to re-stamp
+   * @returns Promise resolving to the number of events updated (0 on error)
+   */
+  touchCachedAt?(ids: string[]): Promise<number>;
+
+  /**
    * Delete an event from storage
    *
    * @param id ID of the event to delete

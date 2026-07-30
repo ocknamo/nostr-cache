@@ -16,6 +16,7 @@ import {
 import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
 import type { CachePriority } from '../storage/priority.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
+import type { FreshnessGate } from '../upstream/freshness.js';
 import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { capEvents, isValidFilterShape } from '../utils/filter-utils.js';
 import { ClientResponder } from './client-responder.js';
@@ -53,6 +54,9 @@ export class MessageHandler {
    * @param cacheStrategy Eviction strategy used with `storageMaxSize`
    * @param cachePriority Cache priority config (normalized hex); matching
    *   events are evicted last
+   * @param freshnessGate Cache-first freshness window, present only when
+   *   `upstreamFreshness` is configured. Decides which of a REQ's filters still
+   *   need to be forwarded upstream.
    */
   constructor(
     storage: StorageAdapter,
@@ -62,7 +66,8 @@ export class MessageHandler {
     validateEventsType: ValidateEventsType = 'IMMEDIATELY',
     private storageMaxSize?: number,
     private cacheStrategy?: CacheStrategy,
-    private cachePriority?: CachePriority
+    private cachePriority?: CachePriority,
+    private freshnessGate?: FreshnessGate
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -317,6 +322,8 @@ export class MessageHandler {
 
       // ローカルから送信済みのイベント id。上流由来イベントの重複排除に使う。
       const sentIds: string[] = [];
+      // 送信したイベント本体。鮮度ウィンドウの充足判定に kind / pubkey が必要。
+      let sentEvents: NostrEvent[] = [];
 
       // 既存の一致するイベントの取得と送信
       try {
@@ -327,6 +334,7 @@ export class MessageHandler {
         // リレーが一度に返すイベント数の上限を適用。上限超過時は NIP-01 の
         // limit セマンティクスに合わせ、新しい順（created_at 降順）に N 件残す
         const limitedEvents = capEvents(events, this.maxEventsPerRequest);
+        sentEvents = limitedEvents;
 
         // イベントをクライアントに送信
         for (const event of limitedEvents) {
@@ -349,10 +357,29 @@ export class MessageHandler {
         return;
       }
 
+      // 鮮度ウィンドウ: キャッシュだけで完全に充足したフィルタは上流へ投げない。
+      // 未設定・判定不能・ストレージ非対応ならフィルタはそのまま返る（フェイルオープン）。
+      // 上流が無い構成では判定自体が無意味なので、ストレージに触る前に短絡する
+      const upstreamFilters =
+        this.upstreamCoordinator && this.freshnessGate
+          ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
+          : filters;
+      if (upstreamFilters.length < filters.length) {
+        logger.debug(
+          `Subscription ${subscriptionId}: ${filters.length - upstreamFilters.length}/${filters.length} filters served from cache within the freshness window`
+        );
+      }
+
       // リードスルー有効時は上流へ REQ を展開し、EOSE の送出は coordinator に委譲する
-      // （上流 EOSE の集約 or タイムアウトで送られる）。無効時は従来どおり即 EOSE。
-      if (this.upstreamCoordinator) {
-        this.upstreamCoordinator.openForSubscription(clientId, subscriptionId, filters, sentIds);
+      // （上流 EOSE の集約 or タイムアウトで送られる）。無効時、および鮮度ウィンドウで
+      // 全フィルタが充足した場合は従来どおり即 EOSE。
+      if (this.upstreamCoordinator && upstreamFilters.length > 0) {
+        this.upstreamCoordinator.openForSubscription(
+          clientId,
+          subscriptionId,
+          upstreamFilters,
+          sentIds
+        );
       } else {
         // EOSE（End of Stored Events）の送信
         // すべての保存されたイベントが送信されたことをクライアントに通知
