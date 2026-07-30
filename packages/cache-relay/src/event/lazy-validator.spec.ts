@@ -4,7 +4,7 @@
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { type MockStorage, createMockStorage } from '../test/utils/mock-storage.js';
 import type { EventValidator } from './event-validator.js';
 import { LazyValidator } from './lazy-validator.js';
 
@@ -19,7 +19,7 @@ describe('LazyValidator', () => {
     sig: 'sig',
   });
 
-  let storage: StorageAdapter;
+  let storage: MockStorage;
   let validator: EventValidator;
   /** In-memory stand-in for the persisted pending queue (validated=0 rows). */
   let pending: NostrEvent[];
@@ -27,20 +27,12 @@ describe('LazyValidator', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     pending = [];
-    storage = {
-      saveEvent: vi.fn().mockResolvedValue(true),
-      getEvents: vi.fn().mockResolvedValue([]),
+    storage = createMockStorage({
       deleteEvent: vi.fn().mockImplementation((id: string) => {
         const before = pending.length;
         pending = pending.filter((event) => event.id !== id);
         return Promise.resolve(pending.length < before);
       }),
-      clear: vi.fn().mockResolvedValue(undefined),
-      count: vi.fn().mockResolvedValue(0),
-      deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
-      deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-      deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
-      deleteEventsByAddress: vi.fn().mockResolvedValue(0),
       getUnvalidatedEvents: vi
         .fn()
         .mockImplementation((limit: number) => Promise.resolve(pending.slice(0, limit))),
@@ -48,8 +40,7 @@ describe('LazyValidator', () => {
         pending = pending.filter((event) => !ids.includes(event.id));
         return Promise.resolve();
       }),
-      getValidationStatus: vi.fn().mockResolvedValue(new Map()),
-    } as StorageAdapter;
+    });
     validator = { validate: vi.fn().mockResolvedValue(true) } as unknown as EventValidator;
   });
 

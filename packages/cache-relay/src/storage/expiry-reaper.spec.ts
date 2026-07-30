@@ -4,29 +4,15 @@
 
 import { logger } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
+import { type MockStorage, createMockStorage } from '../test/utils/mock-storage.js';
 import { ExpiryReaper } from './expiry-reaper.js';
-import type { StorageAdapter } from './storage-adapter.js';
 
 describe('ExpiryReaper', () => {
-  let storage: StorageAdapter;
+  let storage: MockStorage;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    storage = {
-      saveEvent: vi.fn().mockResolvedValue(true),
-      getEvents: vi.fn().mockResolvedValue([]),
-      deleteEvent: vi.fn().mockResolvedValue(true),
-      clear: vi.fn().mockResolvedValue(undefined),
-      count: vi.fn().mockResolvedValue(0),
-      deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
-      deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-      deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
-      deleteEventsByAddress: vi.fn().mockResolvedValue(0),
-      deleteExpired: vi.fn().mockResolvedValue(0),
-      getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
-      markValidated: vi.fn().mockResolvedValue(undefined),
-      getValidationStatus: vi.fn().mockResolvedValue(new Map()),
-    } as StorageAdapter;
+    storage = createMockStorage({ deleteExpired: vi.fn().mockResolvedValue(0) });
   });
 
   afterEach(() => {

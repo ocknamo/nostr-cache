@@ -14,6 +14,10 @@
     "./browser": {
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
+    },
+    "./test/storage-conformance": {
+      "types": "./src/test/storage-conformance.ts",
+      "default": "./src/test/storage-conformance.ts"
     }
   },
   "scripts": {
