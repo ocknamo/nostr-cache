@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ConnectionStatus } from '../relay-connection.ts';
+  import type { ConnectionStatus } from '@nostr-cache/timeline-embed/lib';
 
   interface Props {
     url: string;

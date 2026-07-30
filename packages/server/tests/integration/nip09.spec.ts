@@ -8,9 +8,9 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
+import { getRandomSecret } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
-import { getRandomSecret } from '../utils/get-random-secret.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 /**

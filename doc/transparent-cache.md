@@ -196,7 +196,7 @@ const relay = new NostrCacheRelay(storage, transport, {
 このリポジトリの `packages/web-client` が本手順の実働サンプルです:
 
 - 組み立て: [`packages/web-client/src/lib/local-relay.ts`](../packages/web-client/src/lib/local-relay.ts)
-- クライアント側（素の WebSocket による NIP-01 実装）: [`packages/web-client/src/lib/relay-connection.ts`](../packages/web-client/src/lib/relay-connection.ts)
+- クライアント側（素の WebSocket による NIP-01 実装）: [`packages/timeline-embed/src/lib/relay-connection.ts`](../packages/timeline-embed/src/lib/relay-connection.ts) — web-client も `@nostr-cache/timeline-embed/lib` からこれを使う
 - 統合テスト（fake-indexeddb + 実エミュレータで NIP-01 一巡）: [`packages/web-client/src/lib/local-relay.spec.ts`](../packages/web-client/src/lib/local-relay.spec.ts)
 
 ```bash

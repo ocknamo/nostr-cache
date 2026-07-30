@@ -8,27 +8,15 @@ import { seckeySigner } from 'rx-nostr-crypto';
 import { type Mock, vi } from 'vitest';
 import { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { createMockStorage } from '../test/utils/mock-storage.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { NostrCacheRelay } from './nostr-cache-relay.js';
 
 describe('NostrCacheRelay', () => {
-  // Mock storage adapter
-  const mockStorage: StorageAdapter = {
-    saveEvent: vi.fn().mockResolvedValue(true),
-    getEvents: vi.fn().mockResolvedValue([]),
-    deleteEvent: vi.fn().mockResolvedValue(true),
-    clear: vi.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
-    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
-    count: vi.fn().mockResolvedValue(0),
+  const mockStorage = createMockStorage({
     deleteExpired: vi.fn().mockResolvedValue(0),
     enforceLimit: vi.fn().mockResolvedValue(0),
-    getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
-    markValidated: vi.fn().mockResolvedValue(undefined),
-    getValidationStatus: vi.fn().mockResolvedValue(new Map()),
-  };
+  });
 
   // Mock transport adapter
   const mockTransport: TransportAdapter = {

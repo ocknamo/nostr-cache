@@ -5,22 +5,12 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mocked, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { createMockStorage } from '../test/utils/mock-storage.js';
 import { EventHandler } from './event-handler.js';
 import type { EventValidator } from './event-validator.js';
 
 describe('EventHandler', () => {
-  // Mock storage adapter
-  const mockStorage = {
-    saveEvent: vi.fn().mockResolvedValue(true),
-    getEvents: vi.fn().mockResolvedValue([]),
-    deleteEvent: vi.fn().mockResolvedValue(true),
-    clear: vi.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
-    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
-  } as unknown as Mocked<StorageAdapter>;
+  const mockStorage = createMockStorage();
 
   // Mock subscription manager
   const mockSubscriptionManager = {

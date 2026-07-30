@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
+import { makeEvent } from '../test-fixtures.ts';
 import EventCard from './EventCard.svelte';
-import { makeEvent } from './test-fixtures.ts';
 
 describe('EventCard', () => {
   it('renders the content and a shortened pubkey that keeps the full one on hover', () => {

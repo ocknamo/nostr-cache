@@ -4,12 +4,12 @@
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import 'fake-indexeddb/auto';
+import { getRandomSecret } from '@nostr-cache/shared';
 import { seckeySigner } from 'rx-nostr-crypto';
 import { MessageHandler } from '../../core/message-handler.js';
 import { SubscriptionManager } from '../../core/subscription-manager.js';
 import { DexieStorage } from '../../storage/dexie-storage.js';
 import { WebSocketServer } from '../../transport/web-socket-server.js';
-import { getRandomSecret } from './getRandomSecret.js';
 
 /**
  * Create a test event

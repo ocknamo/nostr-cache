@@ -1,8 +1,8 @@
+import { makeEvent } from '@nostr-cache/timeline-embed/test-fixtures';
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import Timeline from './Timeline.svelte';
-import { makeEvent } from './test-fixtures.ts';
 
 describe('Timeline', () => {
   it('shows the loading message before EOSE when there are no events', () => {

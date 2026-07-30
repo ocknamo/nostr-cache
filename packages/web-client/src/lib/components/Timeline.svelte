@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
-  import type { ValidationStatus } from '../validation-status.ts';
+  import type { ValidationStatus } from '@nostr-cache/timeline-embed/lib';
   import EventCard from './EventCard.svelte';
 
   interface Props {

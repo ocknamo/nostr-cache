@@ -8,27 +8,13 @@ import { seckeySigner } from 'rx-nostr-crypto';
 import { type Mock, vi } from 'vitest';
 import { EventValidator } from '../event/event-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import { createMockStorage } from '../test/utils/mock-storage.js';
 import { FreshnessGate } from '../upstream/freshness.js';
 import { MessageHandler } from './message-handler.js';
 import type { SubscriptionManager } from './subscription-manager.js';
 
 describe('MessageHandler', () => {
-  // Mock storage adapter
-  const mockStorage = {
-    saveEvent: vi.fn().mockResolvedValue(true),
-    getEvents: vi.fn().mockResolvedValue([]),
-    deleteEvent: vi.fn().mockResolvedValue(true),
-    clear: vi.fn().mockResolvedValue(undefined),
-    deleteEventsByPubkeyAndKind: vi.fn().mockResolvedValue(true),
-    deleteEventsByPubkeyKindAndDTag: vi.fn().mockResolvedValue(true),
-    deleteEventsByIdsForPubkey: vi.fn().mockResolvedValue(0),
-    deleteEventsByAddress: vi.fn().mockResolvedValue(0),
-    count: vi.fn().mockResolvedValue(0),
-    enforceLimit: vi.fn().mockResolvedValue(0),
-    getUnvalidatedEvents: vi.fn().mockResolvedValue([]),
-    markValidated: vi.fn().mockResolvedValue(undefined),
-    getValidationStatus: vi.fn().mockResolvedValue(new Map()),
-  } as StorageAdapter;
+  const mockStorage = createMockStorage({ enforceLimit: vi.fn().mockResolvedValue(0) });
 
   // Mock subscription manager
   const mockSubscriptionManager = {

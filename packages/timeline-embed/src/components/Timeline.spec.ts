@@ -2,8 +2,8 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import type { EventOrigin } from '../lib/cache-metrics.ts';
+import { makeEvent } from '../test-fixtures.ts';
 import Timeline from './Timeline.svelte';
-import { makeEvent } from './test-fixtures.ts';
 
 describe('Timeline', () => {
   it('shows the loading message before EOSE when there are no events', () => {
