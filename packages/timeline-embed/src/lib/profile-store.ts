@@ -136,14 +136,21 @@ export class ProfileStore {
   }
 
   /**
-   * Replace the subscription with one covering every wanted author.
+   * Replace the subscription with one covering the authors still missing a
+   * profile.
    *
-   * Re-requesting authors we already have looks wasteful, but the relay answers
-   * those from storage, and keeping one subscription (rather than accumulating
-   * one per batch) is what bounds the work on both sides.
+   * Only the unresolved ones go in the filter. Asking for the whole set every
+   * time would be quadratic on a live timeline — each new author would re-REQ
+   * every profile already in hand, and read-through forwards that REQ upstream,
+   * so the cost lands on someone else's relay rather than on our cache.
+   *
+   * The trade-off is that a profile is fetched once and then left alone: an
+   * author who edits their kind 0 while the widget is open keeps their old name
+   * until the page is reloaded. For an embedded read-only timeline that is a
+   * better deal than re-asking upstream for hundreds of profiles per new author.
    */
   private resubscribe(): void {
-    if (this.closed || this.wanted.size === 0) {
+    if (this.closed) {
       return;
     }
     if (!this.options.connection.isConnected) {
@@ -151,13 +158,18 @@ export class ProfileStore {
       // schedule this again. Names fall back to the shortened pubkey.
       return;
     }
+    const authors = [...this.wanted].filter((pubkey) => !this.profiles.has(pubkey));
     if (this.subId) {
       this.options.connection.unsubscribe(this.subId);
+      this.subId = null;
+    }
+    if (authors.length === 0) {
+      return;
     }
     this.subSeq += 1;
     const subId = `profiles-${this.subSeq}`;
     this.subId = subId;
-    this.options.connection.subscribe(subId, [{ kinds: [0], authors: [...this.wanted] }], {
+    this.options.connection.subscribe(subId, [{ kinds: [0], authors }], {
       onEvent: (event) => this.ingest(event),
     });
   }

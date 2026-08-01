@@ -107,6 +107,44 @@ describe('ProfileStore', () => {
     expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['a', 'b'] }]);
   });
 
+  it('drops authors it already has a profile for from the next filter', () => {
+    const store = createStore();
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+    connection.latest.onEvent(profileEvent('a', { name: 'alice' }));
+
+    store.request(['b']);
+    vi.advanceTimersByTime(200);
+
+    // Re-asking for 'a' would forward a REQ upstream for a profile already in
+    // hand — quadratic across a timeline that gains authors one at a time.
+    expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['b'] }]);
+  });
+
+  it('opens no subscription once every author is resolved', () => {
+    const store = createStore();
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+    connection.latest.onEvent(profileEvent('a', { name: 'alice' }));
+
+    // 'a' again plus nothing new: there is nothing left to ask for.
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+
+    expect(connection.opened).toHaveLength(1);
+  });
+
+  it('keeps asking for an author no relay has a profile for', () => {
+    const store = createStore();
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+
+    store.request(['b']);
+    vi.advanceTimersByTime(200);
+
+    expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['a', 'b'] }]);
+  });
+
   it('parses delivered profiles and reports them', () => {
     const store = createStore();
     store.request(['a']);
