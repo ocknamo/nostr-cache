@@ -43,6 +43,14 @@ export interface MockUpstreamRelay {
   url: string;
   /** How many REQ messages this relay has answered. */
   reqCount: () => number;
+  /**
+   * How many REQs asked for the given kind.
+   *
+   * The widget opens a profile subscription (kind 0) alongside the timeline's,
+   * so a bare `reqCount()` no longer tells the two apart — a test that means
+   * "the timeline read through" has to say which kind it means.
+   */
+  reqCountForKind: (kind: number) => number;
   close: () => Promise<void>;
 }
 
@@ -70,6 +78,7 @@ export async function startMockUpstreamRelay(
     ? new WebSocketServer({ server: tlsServer })
     : new WebSocketServer({ port: 0, host: '127.0.0.1' });
   let reqCount = 0;
+  const reqCountByKind = new Map<number, number>();
 
   server.on('connection', (socket) => {
     socket.on('message', (raw) => {
@@ -86,6 +95,9 @@ export async function startMockUpstreamRelay(
       if (message[0] === 'REQ') {
         reqCount += 1;
         const [, subId, ...filters] = message as ['REQ', string, ...Filter[]];
+        for (const kind of new Set(filters.flatMap((filter) => filter.kinds ?? []))) {
+          reqCountByKind.set(kind, (reqCountByKind.get(kind) ?? 0) + 1);
+        }
         for (const event of events) {
           if (filters.some((filter) => matchesFilter(event, filter))) {
             socket.send(JSON.stringify(['EVENT', subId, event]));
@@ -114,6 +126,7 @@ export async function startMockUpstreamRelay(
   return {
     url: `${tlsServer ? 'wss' : 'ws'}://127.0.0.1:${port}`,
     reqCount: () => reqCount,
+    reqCountForKind: (kind: number) => reqCountByKind.get(kind) ?? 0,
     close: async () => {
       for (const client of server.clients) {
         client.terminate();

@@ -39,8 +39,6 @@ export interface TimelineControllerOptions {
   host?: RelayHostConfig;
   /** Cap on events held in the timeline. */
   maxEvents?: number;
-  /** Set false to skip fetching kind 0, leaving authors as shortened pubkeys. */
-  fetchProfiles?: boolean;
   /** Called with a fresh snapshot whenever anything changes. */
   onChange: (state: TimelineState) => void;
 }
@@ -240,12 +238,8 @@ export class TimelineController {
    * events, and leaving them unclassified would make the delivered/cache-hit
    * numbers cover a smaller set than the upstream one.
    *
-   * @returns The store, or undefined when profile fetching is switched off
    */
-  private createProfileStore(): ProfileStore | undefined {
-    if (this.options.fetchProfiles === false) {
-      return undefined;
-    }
+  private createProfileStore(): ProfileStore {
     return new ProfileStore({
       connection: this.connection,
       onEvent: (event) => {

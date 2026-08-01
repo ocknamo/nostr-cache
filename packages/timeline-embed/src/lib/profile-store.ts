@@ -56,13 +56,32 @@ export class ProfileStore {
   private readonly profiles = new Map<string, Profile>();
   /** created_at of the profile we kept, so an older replay cannot win. */
   private readonly seenAt = new Map<string, number>();
-  /** Authors covered by the next subscription, in the order first seen. */
+  /**
+   * Authors still to look up, in the order first seen. An author leaves this
+   * set as soon as a kind 0 arrives for them — see {@link answered}.
+   */
   private readonly wanted = new Set<string>();
+  /**
+   * Authors a kind 0 has been delivered for, whether or not it parsed into
+   * anything renderable.
+   *
+   * Tracked separately from `profiles` because a profile carrying only fields
+   * the timeline does not render (`about`, `banner`, `lud16` …) parses to
+   * undefined, and those are common. Keying "resolved" off `profiles` would
+   * leave such authors in `wanted` forever, re-REQing them — and read-through
+   * forwarding that REQ upstream — every time a new author appears.
+   */
+  private readonly answered = new Set<string>();
   private subId: string | null = null;
   private subSeq = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private closed = false;
   private warnedAboutCap = false;
+  /**
+   * Set when a re-subscribe was wanted but the connection was down, so the next
+   * {@link request} retries even if it names no author we have not seen.
+   */
+  private retryPending = false;
 
   constructor(options: ProfileStoreOptions) {
     this.options = options;
@@ -87,16 +106,19 @@ export class ProfileStore {
     }
     let added = false;
     for (const pubkey of pubkeys) {
-      if (this.wanted.has(pubkey)) {
+      if (this.wanted.has(pubkey) || this.answered.has(pubkey)) {
         continue;
       }
+      // The cap bounds the authors in one filter, and answered authors have
+      // already left `wanted` — so this limits outstanding lookups, not how
+      // many authors a long-running timeline may ever resolve.
       if (this.wanted.size >= (this.options.maxAuthors ?? MAX_PROFILE_AUTHORS)) {
         if (!this.warnedAboutCap) {
           this.warnedAboutCap = true;
           console.warn(
-            `[nostr-timeline] Not fetching profiles beyond ${
+            `[nostr-timeline] Not looking up more than ${
               this.options.maxAuthors ?? MAX_PROFILE_AUTHORS
-            } authors; the remaining ones render with a shortened pubkey.`
+            } profiles at once; the remaining authors render with a shortened pubkey.`
           );
         }
         break;
@@ -104,7 +126,7 @@ export class ProfileStore {
       this.wanted.add(pubkey);
       added = true;
     }
-    if (added) {
+    if (added || this.retryPending) {
       this.schedule();
     }
   }
@@ -127,6 +149,7 @@ export class ProfileStore {
     }
   }
 
+  /** Coalesce the lookups triggered by a burst of incoming events. */
   private schedule(): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
@@ -154,11 +177,14 @@ export class ProfileStore {
       return;
     }
     if (!this.options.connection.isConnected) {
-      // Nothing to retry against; the next request() after a reconnect will
-      // schedule this again. Names fall back to the shortened pubkey.
+      // Remember that a lookup is owed. `request()` alone would not schedule
+      // another pass once every on-screen author is already in `wanted`, so
+      // without this the store would stay silent for the rest of its life.
+      this.retryPending = true;
       return;
     }
-    const authors = [...this.wanted].filter((pubkey) => !this.profiles.has(pubkey));
+    this.retryPending = false;
+    const authors = [...this.wanted];
     if (this.subId) {
       this.options.connection.unsubscribe(this.subId);
       this.subId = null;
@@ -174,11 +200,20 @@ export class ProfileStore {
     });
   }
 
+  /**
+   * Take one delivered kind 0 event.
+   *
+   * The author counts as answered as soon as anything arrives for them, even if
+   * the content is unparseable or holds no field the timeline renders — the
+   * relay has said all it has to say, and asking again would only repeat it.
+   */
   private ingest(event: NostrEvent): void {
     if (this.closed || event.kind !== 0) {
       return;
     }
     this.options.onEvent?.(event);
+    this.answered.add(event.pubkey);
+    this.wanted.delete(event.pubkey);
 
     // Storage and upstream can both deliver a copy; keep the newer one.
     const seenAt = this.seenAt.get(event.pubkey);

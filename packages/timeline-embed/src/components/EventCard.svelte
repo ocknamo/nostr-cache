@@ -43,13 +43,16 @@
       <span class="identity" title={event.pubkey}>
         <span class="name">{name}</span>
         {#if handle}
-          <span class="handle" title={profile?.nip05}>@{handle}</span>
-        {/if}
-        {#if status === 'validated'}
-          <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
+          <span class="handle">@{handle}</span>
         {/if}
       </span>
       <span class="meta">
+        <!-- The ✓ lives here rather than beside the name on purpose: the name
+             is upstream-controlled text, and an author whose display_name ends
+             in "✓" could otherwise pass for a verified one. -->
+        {#if status === 'validated'}
+          <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
+        {/if}
         {#if origin}
           <span
             class="origin {origin}"

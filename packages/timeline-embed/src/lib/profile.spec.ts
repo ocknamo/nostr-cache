@@ -48,6 +48,28 @@ describe('parseProfileContent', () => {
     expect(profile).toEqual({ nip05: 'n@example.com' });
   });
 
+  it('strips control characters and bidi overrides from names', () => {
+    const profile = parseProfileContent(
+      JSON.stringify({ name: 'ali\u000Ace', display_name: '\u202Eたけし\u202C' })
+    );
+
+    // A newline would break the single-line header; a bidi override could make
+    // the name read as something other than what it is.
+    expect(profile).toEqual({ name: 'alice', displayName: 'たけし' });
+  });
+
+  it('drops a name that is nothing but control characters', () => {
+    expect(parseProfileContent(JSON.stringify({ name: '\u0000\u0001' }))).toBeUndefined();
+  });
+
+  it('returns the parsed form of a picture URL, not the raw string', () => {
+    const profile = parseProfileContent(
+      JSON.stringify({ name: 'n', picture: 'https://example.com/a\u0009b.png' })
+    );
+
+    expect(profile?.picture).toBe('https://example.com/ab.png');
+  });
+
   it('drops names longer than the render cap', () => {
     const profile = parseProfileContent(
       JSON.stringify({ name: 'a'.repeat(129), display_name: 'b'.repeat(128) })

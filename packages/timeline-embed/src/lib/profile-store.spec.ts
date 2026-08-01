@@ -121,6 +121,38 @@ describe('ProfileStore', () => {
     expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['b'] }]);
   });
 
+  it('stops asking for an author whose kind 0 held nothing renderable', () => {
+    const store = createStore();
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+    // Profiles with only about/banner/lud16 are common, and parse to nothing.
+    connection.latest.onEvent(profileEvent('a', { about: 'hello', banner: 'x' }));
+
+    store.request(['b']);
+    vi.advanceTimersByTime(200);
+
+    expect(store.current.has('a')).toBe(false);
+    expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['b'] }]);
+  });
+
+  it('counts the cap against outstanding lookups, not authors ever resolved', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createStore({ maxAuthors: 2 });
+
+    store.request(['a', 'b']);
+    vi.advanceTimersByTime(200);
+    connection.latest.onEvent(profileEvent('a', { name: 'alice' }));
+    connection.latest.onEvent(profileEvent('b', { name: 'bob' }));
+
+    // Both slots freed up, so a third author is not turned away.
+    store.request(['c']);
+    vi.advanceTimersByTime(200);
+
+    expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['c'] }]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('opens no subscription once every author is resolved', () => {
     const store = createStore();
     store.request(['a']);
@@ -199,6 +231,22 @@ describe('ProfileStore', () => {
     vi.advanceTimersByTime(200);
 
     expect(connection.opened).toHaveLength(0);
+  });
+
+  it('retries after a reconnect even when no new author appears', () => {
+    connection.isConnected = false;
+    const store = createStore();
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+    expect(connection.opened).toHaveLength(0);
+
+    connection.isConnected = true;
+    // 'a' is already wanted, so nothing is added — the retry has to come from
+    // the lookup the store knows it still owes.
+    store.request(['a']);
+    vi.advanceTimersByTime(200);
+
+    expect(connection.latest.filters).toEqual([{ kinds: [0], authors: ['a'] }]);
   });
 
   it('stops at the author cap and warns once', () => {

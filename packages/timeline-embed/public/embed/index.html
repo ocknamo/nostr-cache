@@ -38,7 +38,15 @@
 
         // Attribute names match the custom element's, so an iframe URL and a
         // Web Component tag configure the widget the same way.
-        ['relays', 'kinds', 'authors', 'limit', 'db-name', 'show-origin'].forEach(function (name) {
+        [
+          'relays',
+          'kinds',
+          'authors',
+          'limit',
+          'db-name',
+          'show-origin',
+          'show-avatars',
+        ].forEach(function (name) {
           var value = params.get(name);
           if (value !== null) {
             timeline.setAttribute(name, value);

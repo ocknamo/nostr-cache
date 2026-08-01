@@ -14,6 +14,13 @@
 const MAX_NAME_LENGTH = 128;
 /** Longest URL we will accept. Comfortably above any real avatar URL. */
 const MAX_URL_LENGTH = 512;
+/**
+ * Characters that must never reach the card: C0/C1 controls (a newline in a
+ * name would break the single-line layout) and the bidi overrides, which can
+ * reorder the text around a name and make it read as something else.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: removing them is the point
+const UNRENDERABLE = /[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
 export interface Profile {
   /** NIP-01 `name` — the short handle, rendered as `@name`. */
@@ -22,20 +29,30 @@ export interface Profile {
   displayName?: string;
   /** Avatar URL. Only `http:` / `https:` survive parsing. */
   picture?: string;
-  /** NIP-05 identifier, kept for the author's `title` tooltip. */
+  /**
+   * NIP-05 identifier, exactly as published.
+   *
+   * **Not verified.** Confirming it needs a `.well-known/nostr.json` lookup
+   * against the claimed domain, which this package does not do — so this is an
+   * unchecked claim by the author and the timeline does not render it.
+   */
   nip05?: string;
 }
 
 /**
  * Read a string field, rejecting non-strings and anything implausibly long.
  *
- * @returns The trimmed value, or undefined when it is unusable
+ * Control characters are stripped rather than rejected: a name is rendered on
+ * one line, and a newline or a bidi override in it would let an author reshape
+ * the card around their own text.
+ *
+ * @returns The cleaned value, or undefined when it is unusable
  */
 function readString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
-  const trimmed = value.trim();
+  const trimmed = value.replace(UNRENDERABLE, '').trim();
   if (trimmed.length === 0 || trimmed.length > maxLength) {
     return undefined;
   }
@@ -65,7 +82,9 @@ function readImageUrl(value: unknown): string | undefined {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return undefined;
   }
-  return raw;
+  // The parsed form, not the raw string: `new URL()` drops embedded tabs and
+  // newlines, so the two can differ and only one of them was validated.
+  return url.href;
 }
 
 /**
