@@ -2,6 +2,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import type { EventOrigin } from '../lib/cache-metrics.ts';
+import type { Profile } from '../lib/profile.ts';
 import { makeEvent } from '../test-fixtures.ts';
 import Timeline from './Timeline.svelte';
 
@@ -55,5 +56,34 @@ describe('Timeline', () => {
     render(Timeline, { props: { events, validationStatuses, eose: true } });
 
     expect(screen.getByLabelText('署名検証済み')).toBeInTheDocument();
+  });
+
+  it('gives each card the profile of its own author', () => {
+    const events = [makeEvent({ id: 'a', pubkey: 'alice' }), makeEvent({ id: 'b', pubkey: 'bob' })];
+    const profiles = new Map<string, Profile>([
+      ['alice', { displayName: 'アリス' }],
+      ['bob', { displayName: 'ボブ' }],
+    ]);
+    render(Timeline, { props: { events, profiles, eose: true } });
+
+    expect(screen.getByText('アリス')).toBeInTheDocument();
+    expect(screen.getByText('ボブ')).toBeInTheDocument();
+  });
+
+  it('leaves an author without a profile on their shortened pubkey', () => {
+    const events = [makeEvent({ id: 'a', pubkey: 'pk'.padEnd(64, '0') })];
+    render(Timeline, { props: { events, profiles: new Map<string, Profile>(), eose: true } });
+
+    expect(screen.getByText('pk000000…00000000')).toBeInTheDocument();
+  });
+
+  it('hides avatars when showAvatars is false', () => {
+    const events = [makeEvent({ id: 'a', pubkey: 'alice' })];
+    const profiles = new Map<string, Profile>([
+      ['alice', { name: 'alice', picture: 'https://example.com/a.png' }],
+    ]);
+    render(Timeline, { props: { events, profiles, showAvatars: false, eose: true } });
+
+    expect(screen.queryByRole('img', { name: 'alice' })).not.toBeInTheDocument();
   });
 });

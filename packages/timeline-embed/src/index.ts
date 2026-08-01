@@ -10,6 +10,7 @@
  * shared logic without compiling the components.
  */
 
+export { default as Avatar } from './components/Avatar.svelte';
 export { default as EventCard } from './components/EventCard.svelte';
 export { default as Timeline } from './components/Timeline.svelte';
 export { default as NostrTimeline } from './nostr-timeline.svelte';

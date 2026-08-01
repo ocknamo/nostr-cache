@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
+  import { parseRefs } from '../lib/event-refs.ts';
+  import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
+  import Avatar from './Avatar.svelte';
 
   interface Props {
     event: NostrEvent;
@@ -9,82 +12,139 @@
     origin?: EventOrigin;
     /** The relay's persisted signature-verification verdict. */
     status?: ValidationStatus;
+    /** The author's kind 0 profile, once it has been fetched. */
+    profile?: Profile;
+    /** Render the author's avatar. */
+    showAvatar?: boolean;
   }
 
-  const { event, origin, status }: Props = $props();
+  const { event, origin, status, profile, showAvatar = true }: Props = $props();
 
-  function shortPubkey(pubkey: string): string {
-    return pubkey.length <= 16 ? pubkey : `${pubkey.slice(0, 8)}…${pubkey.slice(-8)}`;
-  }
+  const name = $derived(authorName(event.pubkey, profile));
+  const handle = $derived(authorHandle(event.pubkey, profile));
+  const refs = $derived(parseRefs(event));
+
+  const REF_LABELS: Record<'reply' | 'quote', string> = {
+    reply: '返信先',
+    quote: '引用',
+  };
 
   function formatTime(timestamp: number): string {
     return new Date(timestamp * 1000).toLocaleString();
   }
 </script>
 
-<article class="event-card">
-  <header>
-    <span class="author" title={event.pubkey}>
-      {shortPubkey(event.pubkey)}
-      {#if status === 'validated'}
-        <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
-      {/if}
-    </span>
-    <span class="meta">
-      {#if origin}
-        <span
-          class="origin {origin}"
-          title={origin === 'cache'
-            ? 'ローカルキャッシュ（IndexedDB）から配信'
-            : '上流リレーから取得してキャッシュに充填'}
-        >
-          {origin === 'cache' ? 'cache' : 'upstream'}
-        </span>
-      {/if}
-      <time datetime={new Date(event.created_at * 1000).toISOString()}>
-        {formatTime(event.created_at)}
-      </time>
-    </span>
-  </header>
-  <p class="content">{event.content}</p>
+<article class="event-card" class:with-avatar={showAvatar}>
+  {#if showAvatar}
+    <Avatar pubkey={event.pubkey} {profile} {name} />
+  {/if}
+  <div class="body">
+    <header>
+      <span class="identity" title={event.pubkey}>
+        <span class="name">{name}</span>
+        {#if handle}
+          <span class="handle" title={profile?.nip05}>@{handle}</span>
+        {/if}
+        {#if status === 'validated'}
+          <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
+        {/if}
+      </span>
+      <span class="meta">
+        {#if origin}
+          <span
+            class="origin {origin}"
+            title={origin === 'cache'
+              ? 'ローカルキャッシュ（IndexedDB）から配信'
+              : '上流リレーから取得してキャッシュに充填'}
+          >
+            {origin === 'cache' ? 'cache' : 'upstream'}
+          </span>
+        {/if}
+        <time datetime={new Date(event.created_at * 1000).toISOString()}>
+          {formatTime(event.created_at)}
+        </time>
+      </span>
+    </header>
+    {#if refs.length > 0}
+      <ul class="refs">
+        {#each refs as ref (ref.id)}
+          <li class="ref">
+            <span class="ref-label">{REF_LABELS[ref.kind]}</span>
+            <!-- Only the reference itself: the widget never fetches the target,
+                 so there is no body to preview here. -->
+            <span class="ref-id" title={ref.id}>{shortPubkey(ref.id)}</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    <p class="content">{event.content}</p>
+  </div>
 </article>
 
 <style>
   .event-card {
-    padding: 12px 14px;
-    border: 1px solid var(--nt-border, #e1e8ed);
-    border-radius: var(--nt-radius, 10px);
-    background: var(--nt-card-bg, #fff);
+    display: grid;
+    /* One column until an avatar is asked for, so hiding avatars closes the
+       gutter instead of leaving the text indented. */
+    grid-template-columns: 1fr;
+    gap: var(--nt-avatar-gap, 10px);
+    padding: var(--nt-card-padding, 10px 12px);
+    background: var(--nt-card-bg, transparent);
     color: var(--nt-fg, #0f1419);
+  }
+
+  .with-avatar {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  /* Every child of a grid item defaults to min-width:auto, which lets long
+     unbroken content push the card wider than the embed. */
+  .body {
+    min-width: 0;
   }
 
   header {
     display: flex;
     align-items: baseline;
-    /* Narrow screens cannot fit the pubkey and the metadata on one line, so let
+    /* Narrow screens cannot fit the name and the metadata on one line, so let
        the metadata drop to its own line instead of overflowing the card. */
     flex-wrap: wrap;
-    gap: 4px 8px;
-    margin-bottom: 6px;
+    gap: 2px 8px;
+    margin-bottom: 4px;
   }
 
-  .author {
-    font-weight: 700;
-    font-family: var(--nt-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-    font-size: 0.85rem;
-    /* The abbreviated pubkey is one token; breaking it mid-hex reads as two.
-       Where even one line does not fit — a very narrow embed, or a host page
-       that raised --nt-font-size — clip it rather than widen the card. */
-    white-space: nowrap;
+  .identity {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    /* The name may be long; let it shrink and ellipsize rather than shove the
+       timestamp off the card. */
     min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .name {
+    font-weight: 700;
+    color: var(--nt-name-fg, inherit);
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .handle {
+    color: var(--nt-handle-fg, var(--nt-muted, #657786));
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Give the display name the space first: the handle is the redundant half. */
+    flex: 0 1 auto;
   }
 
   .verified {
     color: var(--nt-verified, #17bf63);
     font-weight: 700;
-    margin-left: 2px;
+    flex: none;
   }
 
   .meta {
@@ -96,6 +156,7 @@
     margin-left: auto;
     color: var(--nt-muted, #657786);
     font-size: 0.8rem;
+    flex: none;
   }
 
   .meta time {
@@ -120,6 +181,38 @@
   .origin.upstream {
     background: var(--nt-upstream-bg, #eef2f8);
     color: var(--nt-upstream-fg, #4a5b73);
+  }
+
+  .refs {
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .ref {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    padding-left: 8px;
+    border-left: 3px solid var(--nt-quote-bar, #4a7dff);
+    font-size: 0.8rem;
+    color: var(--nt-muted, #657786);
+  }
+
+  .ref-label {
+    font-weight: 700;
+    flex: none;
+  }
+
+  .ref-id {
+    font-family: var(--nt-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .content {

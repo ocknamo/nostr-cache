@@ -12,8 +12,14 @@
 
 export { CacheMetrics } from './cache-metrics.ts';
 export type { EventOrigin, MetricsSnapshot } from './cache-metrics.ts';
+export { parseRefs } from './event-refs.ts';
+export type { EventRef, EventRefKind } from './event-refs.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
+export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
+export type { Profile } from './profile.ts';
+export { MAX_PROFILE_AUTHORS, PROFILE_FETCH_DEBOUNCE_MS, ProfileStore } from './profile-store.ts';
+export type { ProfileStoreOptions, ProfileSubscriber } from './profile-store.ts';
 export { RelayConnection } from './relay-connection.ts';
 export type {
   ConnectionStatus,

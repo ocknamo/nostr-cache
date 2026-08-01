@@ -20,7 +20,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { launchBrowser } from '../../src/browser-launch.js';
 import { type EmbedSiteServer, startEmbedSiteServer } from '../../src/embed-site-server.js';
 import { type MockUpstreamRelay, startMockUpstreamRelay } from '../../src/mock-upstream-relay.js';
-import { createTestEvent } from '../../src/test-events.js';
+import { createTestEvent, getRandomSecret } from '../../src/test-events.js';
 
 const TIMEOUT = 15000;
 
@@ -32,12 +32,28 @@ describe('Embeddable timeline E2E', () => {
   let dbCounter = 0;
 
   beforeAll(async () => {
+    // The site comes up first because the canned profile's `picture` points at
+    // an image it serves, and its port is only known once it is listening.
+    site = await startEmbedSiteServer();
+    // One author is given a fixed key so a kind 0 event can be signed by the
+    // same identity as their note; the other stays anonymous, which is what
+    // keeps the pubkey fallback covered.
+    const authorSeckey = getRandomSecret();
     const events = await Promise.all([
-      createTestEvent(undefined, { content: 'from upstream one', created_at: 1_700_000_100 }),
+      createTestEvent(authorSeckey, { content: 'from upstream one', created_at: 1_700_000_100 }),
       createTestEvent(undefined, { content: 'from upstream two', created_at: 1_700_000_200 }),
+      createTestEvent(authorSeckey, {
+        kind: 0,
+        created_at: 1_700_000_050,
+        tags: [],
+        content: JSON.stringify({
+          name: 'e2e_author',
+          display_name: 'E2E テスト著者',
+          picture: site.avatarUrl,
+        }),
+      }),
     ]);
     upstream = await startMockUpstreamRelay(events);
-    site = await startEmbedSiteServer();
     browser = await launchBrowser();
   });
 
@@ -164,5 +180,59 @@ describe('Embeddable timeline E2E', () => {
     await waitForEventCount(page, 2);
 
     expect(await originBadges(page)).toEqual([]);
+  });
+
+  it('fetches kind 0 and renders the author with their name and avatar', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url }));
+    await waitForEventCount(page, 2);
+
+    // The profile arrives on its own subscription after the notes, so wait for
+    // the name rather than reading straight after the cards appear.
+    const name = await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    expect(name).toBeTruthy();
+    expect(
+      await page.$$eval('nostr-timeline .handle', (nodes) =>
+        nodes.map((node) => node.textContent?.trim() ?? '')
+      )
+    ).toContain('@e2e_author');
+
+    const avatar = await page.waitForSelector('nostr-timeline img.avatar', { timeout: TIMEOUT });
+    expect(await avatar.getAttribute('src')).toBe(site.avatarUrl);
+
+    // The kind 0 event must not reach the timeline itself: it is a different
+    // subscription, and a profile rendered as a note would be a bug.
+    const contents = await page.$$eval('nostr-timeline .content', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+    expect(contents.some((content) => content.includes('display_name'))).toBe(false);
+
+    // The anonymous author has no profile, so their card keeps the fallback.
+    const names = await page.$$eval('nostr-timeline .name', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+    expect(names.some((value) => value.includes('…'))).toBe(true);
+  });
+
+  it('renders the cached profile on a reload without waiting for upstream', async () => {
+    const url = embedUrl({ relays: upstream.url });
+    page = await browser.newPage();
+
+    await page.goto(url);
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+
+    await page.reload();
+    await waitForEventCount(page, 2);
+
+    // kind 0 is replaceable, so the relay stored it on the first visit; this is
+    // what makes avatars appear instantly rather than after a round trip.
+    const name = await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    expect(name).toBeTruthy();
   });
 });

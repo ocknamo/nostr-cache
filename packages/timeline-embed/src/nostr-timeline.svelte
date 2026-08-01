@@ -8,6 +8,7 @@
       limit: { attribute: 'limit' },
       dbName: { attribute: 'db-name' },
       showOrigin: { attribute: 'show-origin' },
+      showAvatars: { attribute: 'show-avatars' },
     },
   }}
 />
@@ -30,15 +31,21 @@
     dbName?: string;
     /** Set to "false" to hide the cache/upstream badges. */
     showOrigin?: string;
+    /**
+     * Set to "false" to hide author avatars. Names are still fetched; this only
+     * stops the widget from loading images from whatever host a profile names.
+     */
+    showAvatars?: string;
   }
 
-  const { relays, kinds, authors, limit, dbName, showOrigin }: Props = $props();
+  const { relays, kinds, authors, limit, dbName, showOrigin, showAvatars }: Props = $props();
 
   let state = $state<TimelineState>({
     status: 'disconnected',
     events: [],
     origins: new Map(),
     validationStatuses: new Map(),
+    profiles: new Map(),
     eose: false,
   });
 
@@ -75,7 +82,9 @@
     eose={state.eose}
     origins={state.origins}
     validationStatuses={state.validationStatuses}
+    profiles={state.profiles}
     showOrigin={showOrigin !== 'false'}
+    showAvatars={showAvatars !== 'false'}
   />
 </div>
 

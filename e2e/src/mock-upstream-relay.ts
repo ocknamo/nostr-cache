@@ -11,8 +11,33 @@
  */
 
 import { createServer } from 'node:https';
-import type { NostrEvent } from '@nostr-cache/shared';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { WebSocketServer } from 'ws';
+
+/**
+ * Match an event against a REQ filter — enough of NIP-01 for these tests.
+ *
+ * The widget now opens a second subscription for kind 0 alongside the
+ * timeline's, so answering every REQ with every canned event is no longer
+ * harmless: `UpstreamCoordinator` trusts upstream to honour the filter and
+ * forwards what it receives straight to the client, which would put profile
+ * events in the timeline.
+ *
+ * Only `kinds`, `authors` and `ids` are implemented; an absent field matches
+ * everything, as NIP-01 specifies.
+ */
+function matchesFilter(event: NostrEvent, filter: Filter): boolean {
+  if (filter.ids && !filter.ids.includes(event.id)) {
+    return false;
+  }
+  if (filter.kinds && !filter.kinds.includes(event.kind)) {
+    return false;
+  }
+  if (filter.authors && !filter.authors.includes(event.pubkey)) {
+    return false;
+  }
+  return true;
+}
 
 export interface MockUpstreamRelay {
   url: string;
@@ -60,9 +85,11 @@ export async function startMockUpstreamRelay(
 
       if (message[0] === 'REQ') {
         reqCount += 1;
-        const subId = message[1] as string;
+        const [, subId, ...filters] = message as ['REQ', string, ...Filter[]];
         for (const event of events) {
-          socket.send(JSON.stringify(['EVENT', subId, event]));
+          if (filters.some((filter) => matchesFilter(event, filter))) {
+            socket.send(JSON.stringify(['EVENT', subId, event]));
+          }
         }
         socket.send(JSON.stringify(['EOSE', subId]));
         return;

@@ -10,6 +10,8 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { CacheMetrics, EventOrigin } from './cache-metrics.ts';
+import { ProfileStore } from './profile-store.ts';
+import type { Profile } from './profile.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
@@ -26,6 +28,8 @@ export interface TimelineState {
   events: NostrEvent[];
   origins: Map<string, EventOrigin>;
   validationStatuses: Map<string, ValidationStatus>;
+  /** Author profiles (kind 0) fetched so far, keyed by pubkey. */
+  profiles: Map<string, Profile>;
   eose: boolean;
   error?: string;
 }
@@ -35,6 +39,8 @@ export interface TimelineControllerOptions {
   host?: RelayHostConfig;
   /** Cap on events held in the timeline. */
   maxEvents?: number;
+  /** Set false to skip fetching kind 0, leaving authors as shortened pubkeys. */
+  fetchProfiles?: boolean;
   /** Called with a fresh snapshot whenever anything changes. */
   onChange: (state: TimelineState) => void;
 }
@@ -42,6 +48,7 @@ export interface TimelineControllerOptions {
 export class TimelineController {
   private connection: RelayConnection;
   private relayHost?: RelayHost;
+  private profileStore?: ProfileStore;
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -49,6 +56,7 @@ export class TimelineController {
     events: [],
     origins: new Map(),
     validationStatuses: new Map(),
+    profiles: new Map(),
     eose: false,
   };
   private currentSubId: string | null = null;
@@ -135,6 +143,11 @@ export class TimelineController {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
     }
+    // The profile subscription reads through to upstream just like the
+    // timeline's does, so leaving it open would keep refilling the very cache
+    // the caller is about to measure cold.
+    this.profileStore?.close();
+    this.profileStore = undefined;
     this.clearTimers();
   }
 
@@ -146,6 +159,8 @@ export class TimelineController {
     this.stopped = true;
     this.signalStopped();
     this.clearTimers();
+    this.profileStore?.close();
+    this.profileStore = undefined;
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -162,6 +177,11 @@ export class TimelineController {
       this.currentSubId = null;
     }
     this.clearTimers();
+    // A store is single-use: close() is terminal, so resuming after suspend()
+    // needs a fresh one. Profiles already parsed stay in state, so authors do
+    // not flicker back to their pubkeys while the new store refills.
+    this.profileStore?.close();
+    this.profileStore = this.createProfileStore();
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -197,6 +217,7 @@ export class TimelineController {
           events: insertEvent(this.state.events, event, this.options.maxEvents),
           origins,
         });
+        this.profileStore?.request([event.pubkey]);
         this.scheduleValidationRefresh();
       },
       onEose: () => {
@@ -206,6 +227,32 @@ export class TimelineController {
       },
       onClosed: (reason) => {
         this.patch({ error: `購読が閉じられました${reason ? `: ${reason}` : ''}` });
+      },
+    });
+  }
+
+  /**
+   * Build the kind 0 subscription that feeds author names and avatars.
+   *
+   * Profile deliveries are classified through `CacheMetrics` as well, so the
+   * cache/upstream counters describe the same population of events: the
+   * instrumented upstream pool already counts kind 0 arrivals as upstream
+   * events, and leaving them unclassified would make the delivered/cache-hit
+   * numbers cover a smaller set than the upstream one.
+   *
+   * @returns The store, or undefined when profile fetching is switched off
+   */
+  private createProfileStore(): ProfileStore | undefined {
+    if (this.options.fetchProfiles === false) {
+      return undefined;
+    }
+    return new ProfileStore({
+      connection: this.connection,
+      onEvent: (event) => {
+        this.relayHost?.metrics.classifyDelivered(event.id);
+      },
+      onChange: (profiles) => {
+        this.patch({ profiles: new Map([...this.state.profiles, ...profiles]) });
       },
     });
   }

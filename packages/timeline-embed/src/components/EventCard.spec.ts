@@ -13,6 +13,76 @@ describe('EventCard', () => {
     expect(screen.getByTitle(event.pubkey)).toHaveTextContent('pk000000…00000000');
   });
 
+  it('prefers the profile display name and shows the handle beside it', () => {
+    const event = makeEvent();
+    render(EventCard, {
+      props: { event, profile: { displayName: 'たけし', name: 'takeshi' } },
+    });
+
+    expect(screen.getByText('たけし')).toBeInTheDocument();
+    expect(screen.getByText('@takeshi')).toBeInTheDocument();
+    expect(screen.queryByText('pk000000…00000000')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the handle when there is no display name', () => {
+    render(EventCard, { props: { event: makeEvent(), profile: { name: 'takeshi' } } });
+
+    expect(screen.getByText('takeshi')).toBeInTheDocument();
+    // The handle would only repeat the name that is already shown.
+    expect(screen.queryByText('@takeshi')).not.toBeInTheDocument();
+  });
+
+  it('renders the avatar without leaking the embedding page as a referrer', () => {
+    render(EventCard, {
+      props: {
+        event: makeEvent(),
+        profile: { name: 'takeshi', picture: 'https://example.com/a.png' },
+      },
+    });
+
+    const avatar = screen.getByRole('img', { name: 'takeshi' });
+    expect(avatar).toHaveAttribute('src', 'https://example.com/a.png');
+    expect(avatar).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(avatar).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('loads no image when avatars are switched off', () => {
+    render(EventCard, {
+      props: {
+        event: makeEvent(),
+        profile: { name: 'takeshi', picture: 'https://example.com/a.png' },
+        showAvatar: false,
+      },
+    });
+
+    expect(screen.queryByRole('img', { name: 'takeshi' })).not.toBeInTheDocument();
+  });
+
+  it('marks a reply with the referenced event id', () => {
+    const parent = 'b'.repeat(64);
+    render(EventCard, {
+      props: { event: makeEvent({ tags: [['e', parent, '', 'reply']] }) },
+    });
+
+    expect(screen.getByText('返信先')).toBeInTheDocument();
+    expect(screen.getByTitle(parent)).toHaveTextContent('bbbbbbbb…bbbbbbbb');
+  });
+
+  it('marks a quote', () => {
+    render(EventCard, {
+      props: { event: makeEvent({ tags: [['q', 'c'.repeat(64)]] }) },
+    });
+
+    expect(screen.getByText('引用')).toBeInTheDocument();
+  });
+
+  it('shows no reference row on a standalone note', () => {
+    render(EventCard, { props: { event: makeEvent() } });
+
+    expect(screen.queryByText('返信先')).not.toBeInTheDocument();
+    expect(screen.queryByText('引用')).not.toBeInTheDocument();
+  });
+
   it('labels a cache hit', () => {
     render(EventCard, { props: { event: makeEvent(), origin: 'cache' } });
 
