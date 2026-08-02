@@ -33,6 +33,8 @@ describe('Embeddable timeline E2E', () => {
   let dbCounter = 0;
   /** The canned set, kept so a test can stand up its own upstream from it. */
   let cannedEvents: NostrEvent[] = [];
+  /** Pubkey of the author who publishes a kind 0. */
+  let profileAuthor = '';
 
   beforeAll(async () => {
     // The site comes up first because the canned profile's `picture` points at
@@ -56,6 +58,7 @@ describe('Embeddable timeline E2E', () => {
         }),
       }),
     ]);
+    profileAuthor = cannedEvents[0].pubkey;
     upstream = await startMockUpstreamRelay(cannedEvents);
     browser = await launchBrowser();
   });
@@ -220,6 +223,27 @@ describe('Embeddable timeline E2E', () => {
       nodes.map((node) => node.textContent?.trim() ?? '')
     );
     expect(names.some((value) => value.includes('…'))).toBe(true);
+  });
+
+  it('serves a cached profile without re-asking upstream, via upstreamFreshness', async () => {
+    const url = embedUrl({ relays: upstream.url, authors: profileAuthor });
+    page = await browser.newPage();
+
+    await page.goto(url);
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    const afterFirstLoad = upstream.reqCountForKind(0);
+    expect(afterFirstLoad).toBeGreaterThan(0);
+
+    await page.reload();
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+
+    // The widget re-asks for the profile on every load; the relay's kind 0
+    // freshness window is what stops that becoming upstream traffic.
+    expect(upstream.reqCountForKind(0)).toBe(afterFirstLoad);
   });
 
   it('honours show-avatars=false from the iframe query string', async () => {

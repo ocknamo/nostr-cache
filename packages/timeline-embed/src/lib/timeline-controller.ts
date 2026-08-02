@@ -10,8 +10,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { CacheMetrics, EventOrigin } from './cache-metrics.ts';
-import { ProfileStore } from './profile-store.ts';
-import type { Profile } from './profile.ts';
+import { type Profile, parseProfileContent } from './profile.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
@@ -20,6 +19,8 @@ import { type ValidationStatus, fetchValidationStatuses, hasPending } from './va
 
 /** Batches the validation lookups triggered by a burst of incoming events. */
 const VALIDATION_FETCH_DEBOUNCE_MS = 200;
+/** Same idea for profiles: one REQ per burst of authors, not one per event. */
+const PROFILE_FETCH_DEBOUNCE_MS = 200;
 /** Lazy validation runs in the background, so re-poll while anything is pending. */
 const VALIDATION_POLL_INTERVAL_MS = 5000;
 
@@ -46,7 +47,13 @@ export interface TimelineControllerOptions {
 export class TimelineController {
   private connection: RelayConnection;
   private relayHost?: RelayHost;
-  private profileStore?: ProfileStore;
+  /** Authors the timeline has shown, i.e. whose profiles we ask for. */
+  private readonly profileAuthors = new Set<string>();
+  /** created_at of the profile we kept, so an older copy cannot overwrite it. */
+  private readonly profileSeenAt = new Map<string, number>();
+  private profileSubId: string | null = null;
+  private profileSeq = 0;
+  private profileTimer?: ReturnType<typeof setTimeout>;
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -141,11 +148,7 @@ export class TimelineController {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
     }
-    // The profile subscription reads through to upstream just like the
-    // timeline's does, so leaving it open would keep refilling the very cache
-    // the caller is about to measure cold.
-    this.profileStore?.close();
-    this.profileStore = undefined;
+    this.closeProfiles();
     this.clearTimers();
   }
 
@@ -157,8 +160,7 @@ export class TimelineController {
     this.stopped = true;
     this.signalStopped();
     this.clearTimers();
-    this.profileStore?.close();
-    this.profileStore = undefined;
+    this.closeProfiles();
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -175,11 +177,10 @@ export class TimelineController {
       this.currentSubId = null;
     }
     this.clearTimers();
-    // A store is single-use: close() is terminal, so resuming after suspend()
-    // needs a fresh one. Profiles already parsed stay in state, so authors do
-    // not flicker back to their pubkeys while the new store refills.
-    this.profileStore?.close();
-    this.profileStore = this.createProfileStore();
+    // The new filter brings its own authors. Profiles already parsed stay in
+    // state, so nobody flickers back to a pubkey while the lookups re-run.
+    this.closeProfiles();
+    this.profileAuthors.clear();
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -215,7 +216,7 @@ export class TimelineController {
           events: insertEvent(this.state.events, event, this.options.maxEvents),
           origins,
         });
-        this.profileStore?.request([event.pubkey]);
+        this.noteProfileAuthor(event.pubkey);
         this.scheduleValidationRefresh();
       },
       onEose: () => {
@@ -230,25 +231,93 @@ export class TimelineController {
   }
 
   /**
-   * Build the kind 0 subscription that feeds author names and avatars.
+   * Note an author whose profile the timeline wants, and schedule the lookup.
    *
-   * Profile deliveries are classified through `CacheMetrics` as well, so the
+   * Cheap to call per event: a pubkey already asked about changes nothing, and
+   * a new one only restarts the debounce so a burst of events costs one REQ.
+   */
+  private noteProfileAuthor(pubkey: string): void {
+    if (this.profileAuthors.has(pubkey)) {
+      return;
+    }
+    this.profileAuthors.add(pubkey);
+    clearTimeout(this.profileTimer);
+    this.profileTimer = setTimeout(() => {
+      this.profileTimer = undefined;
+      this.subscribeProfiles();
+    }, PROFILE_FETCH_DEBOUNCE_MS);
+  }
+
+  /**
+   * Ask for the profiles of every author currently on screen.
+   *
+   * Deliberately naive: it re-asks for authors it already has. Suppressing the
+   * redundant *upstream* traffic is the relay's job — `relay-host.ts` gives it
+   * an `upstreamFreshness` window for kind 0, so a REQ whose authors are all
+   * covered by fresh cached copies is answered from IndexedDB and never
+   * forwarded. Re-implementing that decision here would put a second, divergent
+   * cache policy in front of the cache.
+   */
+  private subscribeProfiles(): void {
+    if (this.stopped || !this.connection.isConnected || this.profileAuthors.size === 0) {
+      return;
+    }
+    if (this.profileSubId) {
+      this.connection.unsubscribe(this.profileSubId);
+    }
+    this.profileSeq += 1;
+    const subId = `profiles-${this.profileSeq}`;
+    this.profileSubId = subId;
+    this.connection.subscribe(subId, [{ kinds: [0], authors: [...this.profileAuthors] }], {
+      onEvent: (event) => this.ingestProfile(event),
+    });
+  }
+
+  /**
+   * Take one delivered kind 0 event into the rendered profile map.
+   *
+   * Profile deliveries are classified through `CacheMetrics` too, so the
    * cache/upstream counters describe the same population of events: the
    * instrumented upstream pool already counts kind 0 arrivals as upstream
    * events, and leaving them unclassified would make the delivered/cache-hit
    * numbers cover a smaller set than the upstream one.
-   *
    */
-  private createProfileStore(): ProfileStore {
-    return new ProfileStore({
-      connection: this.connection,
-      onEvent: (event) => {
-        this.relayHost?.metrics.classifyDelivered(event.id);
-      },
-      onChange: (profiles) => {
-        this.patch({ profiles: new Map([...this.state.profiles, ...profiles]) });
-      },
-    });
+  private ingestProfile(event: NostrEvent): void {
+    if (event.kind !== 0) {
+      return;
+    }
+    this.relayHost?.metrics.classifyDelivered(event.id);
+
+    // Storage holds only the newest copy, but two upstream relays can each
+    // deliver theirs — so the last one to arrive is not necessarily the newest.
+    const seenAt = this.profileSeenAt.get(event.pubkey);
+    if (seenAt !== undefined && seenAt >= event.created_at) {
+      return;
+    }
+    const profile = parseProfileContent(event.content);
+    if (!profile) {
+      return;
+    }
+    this.profileSeenAt.set(event.pubkey, event.created_at);
+    const profiles = new Map(this.state.profiles);
+    profiles.set(event.pubkey, profile);
+    this.patch({ profiles });
+  }
+
+  /**
+   * Close the profile subscription and drop any pending lookup.
+   *
+   * Called from every path that stops the timeline. It matters most for
+   * `suspend()`: a live profile subscription keeps reading through to upstream
+   * and refilling the very cache the caller is about to measure cold.
+   */
+  private closeProfiles(): void {
+    clearTimeout(this.profileTimer);
+    this.profileTimer = undefined;
+    if (this.profileSubId) {
+      this.connection.unsubscribe(this.profileSubId);
+      this.profileSubId = null;
+    }
   }
 
   /** Coalesce the lookups triggered by a burst of incoming events. */

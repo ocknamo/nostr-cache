@@ -36,6 +36,20 @@ export const DEFAULT_INTERCEPT_URL = 'ws://nostr-cache.invalid';
 export const DEFAULT_DB_NAME = 'nostr-cache-embed';
 /** Short enough that the ✓ badges appear while the user is still looking. */
 export const DEFAULT_LAZY_VALIDATE_INTERVAL = 5;
+/**
+ * How long a cached kind 0 is trusted before the relay re-asks upstream.
+ *
+ * The widget re-opens its profile subscription whenever a new author scrolls
+ * into view, which without a window would forward a REQ upstream every time —
+ * for profiles it already holds. Deciding when a cached copy is stale enough to
+ * re-check is the relay's job (`upstreamFreshness`), not the widget's, so the
+ * widget simply asks for what it wants to display and lets the window suppress
+ * the redundant upstream traffic.
+ *
+ * Five minutes comfortably covers a page view while still letting a profile
+ * edit show up on a later visit.
+ */
+export const DEFAULT_PROFILE_FRESHNESS = 300;
 
 export interface RelayHostConfig {
   /** Upstream relay URLs (`wss://…`). Empty means a cache-only relay. */
@@ -46,6 +60,8 @@ export interface RelayHostConfig {
   interceptUrl?: string;
   /** Seconds between background signature-validation passes. */
   lazyValidateInterval?: number;
+  /** Seconds a cached profile (kind 0) is served without re-asking upstream. */
+  profileFreshness?: number;
 }
 
 interface ResolvedConfig extends Required<RelayHostConfig> {}
@@ -88,6 +104,7 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
     dbName: config.dbName ?? DEFAULT_DB_NAME,
     interceptUrl: config.interceptUrl ?? DEFAULT_INTERCEPT_URL,
     lazyValidateInterval: config.lazyValidateInterval ?? DEFAULT_LAZY_VALIDATE_INTERVAL,
+    profileFreshness: config.profileFreshness ?? DEFAULT_PROFILE_FRESHNESS,
   };
 }
 
@@ -155,6 +172,10 @@ async function connectHost(
     lazyValidateInterval: config.lazyValidateInterval,
     maxSubscriptions: 20,
     upstreamPool,
+    // Cache-first window for profiles: see DEFAULT_PROFILE_FRESHNESS. Kept here
+    // rather than in the timeline code so the "when do we re-check upstream"
+    // policy lives with the cache that answers it.
+    upstreamFreshness: { 0: config.profileFreshness },
   });
 
   await relay.connect();

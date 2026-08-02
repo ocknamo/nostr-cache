@@ -18,8 +18,6 @@ export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
 export type { Profile } from './profile.ts';
-export { MAX_PROFILE_AUTHORS, PROFILE_FETCH_DEBOUNCE_MS, ProfileStore } from './profile-store.ts';
-export type { ProfileStoreOptions, ProfileSubscriber } from './profile-store.ts';
 export { RelayConnection } from './relay-connection.ts';
 export type {
   ConnectionStatus,
@@ -30,6 +28,7 @@ export {
   DEFAULT_DB_NAME,
   DEFAULT_INTERCEPT_URL,
   DEFAULT_LAZY_VALIDATE_INTERVAL,
+  DEFAULT_PROFILE_FRESHNESS,
   acquireRelayHost,
   getRelayHostRefCount,
 } from './relay-host.ts';
