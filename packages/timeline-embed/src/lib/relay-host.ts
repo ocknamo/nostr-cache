@@ -60,7 +60,14 @@ export interface RelayHostConfig {
   interceptUrl?: string;
   /** Seconds between background signature-validation passes. */
   lazyValidateInterval?: number;
-  /** Seconds a cached profile (kind 0) is served without re-asking upstream. */
+  /**
+   * Seconds a cached profile (kind 0) is served without re-asking upstream.
+   *
+   * Zero or negative switches the window off, so every profile REQ is forwarded
+   * upstream as it was before the window existed. (The relay itself rejects a
+   * non-positive window, which would fail the whole widget's startup — a
+   * surprising way to spell "disable this".)
+   */
   profileFreshness?: number;
 }
 
@@ -175,7 +182,7 @@ async function connectHost(
     // Cache-first window for profiles: see DEFAULT_PROFILE_FRESHNESS. Kept here
     // rather than in the timeline code so the "when do we re-check upstream"
     // policy lives with the cache that answers it.
-    upstreamFreshness: { 0: config.profileFreshness },
+    upstreamFreshness: config.profileFreshness > 0 ? { 0: config.profileFreshness } : undefined,
   });
 
   await relay.connect();

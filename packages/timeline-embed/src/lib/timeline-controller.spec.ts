@@ -110,10 +110,14 @@ describe('TimelineController', () => {
     expect(profileSubscription(controller)).toBeUndefined();
   });
 
-  it('closes the timeline subscription on suspend', async () => {
-    const { controller } = createController();
+  it('closes both subscriptions on suspend', async () => {
+    const dbName = `controller-${crypto.randomUUID()}`;
+    await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
+    const { controller } = createController(dbName);
     await controller.start({ kinds: [1], limit: 10 });
-    expect(openSubscriptionIds(controller)).toContain('timeline-1');
+    // Wait for the profile subscription to exist, or the assertion below would
+    // hold just as well against a suspend() that closes nothing.
+    await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
 
     controller.suspend();
 
@@ -175,10 +179,20 @@ describe('TimelineController', () => {
 
   it('renders a delivered profile and ignores an older copy of it', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;
+    // Seeded straight into storage, which is keyed by event id and does not
+    // apply the replaceable rule — so both versions survive and get delivered,
+    // the way two upstream relays each answering with their own copy would.
     await seedCache(dbName, [
       makeEvent({ id: 'e1', pubkey: 'alice', created_at: 1_700_000_100 }),
       makeEvent({
-        id: 'p1',
+        id: 'p-old',
+        pubkey: 'alice',
+        kind: 0,
+        created_at: 1_700_000_400,
+        content: JSON.stringify({ name: 'old-alice' }),
+      }),
+      makeEvent({
+        id: 'p-new',
         pubkey: 'alice',
         kind: 0,
         created_at: 1_700_000_500,
@@ -193,7 +207,58 @@ describe('TimelineController', () => {
       "alice's profile to arrive"
     );
 
+    // Both copies really were delivered (note + two kind 0), so the guard is
+    // what decided the outcome rather than the relay only ever sending one.
+    await waitFor(
+      () => (controller.metrics?.snapshot().delivered ?? 0) >= 3,
+      'all three events to be delivered'
+    );
+    // Newest-first delivery means the older copy lands second; without the
+    // created_at guard it would overwrite the newer name.
     expect(states.at(-1)?.profiles.get('alice')).toEqual({ name: 'alice' });
+  });
+
+  it('names only the authors still on screen, so the filter cannot grow without bound', async () => {
+    const dbName = `controller-${crypto.randomUUID()}`;
+    await seedCache(dbName, [
+      makeEvent({ id: 'e1', pubkey: 'alice', created_at: 1_700_000_100 }),
+      makeEvent({ id: 'e2', pubkey: 'bob', created_at: 1_700_000_200 }),
+    ]);
+    const states: TimelineState[] = [];
+    const controller = new TimelineController({
+      host: { dbName },
+      maxEvents: 1,
+      onChange: (state) => states.push(state),
+    });
+    controllers.push(controller);
+
+    await controller.start({ kinds: [1], limit: 10 });
+    await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
+
+    // alice's event was dropped past the cap, so asking about her would grow the
+    // REQ with authors nobody can see — and the pubkeys come from upstream, so
+    // an accumulating list would let a relay decide how big our REQs get.
+    expect(profileSubscription(controller)?.filters[0].authors).toEqual(['bob']);
+  });
+
+  it('counts every delivered kind 0, including one it cannot parse', async () => {
+    const dbName = `controller-${crypto.randomUUID()}`;
+    await seedCache(dbName, [
+      makeEvent({ id: 'e1', pubkey: 'alice' }),
+      makeEvent({ id: 'p1', pubkey: 'alice', kind: 0, content: 'not json' }),
+    ]);
+    const { controller } = createController(dbName);
+
+    await controller.start({ kinds: [1], limit: 10 });
+    await waitFor(
+      () => (controller.metrics?.snapshot().delivered ?? 0) >= 2,
+      'both deliveries to be classified'
+    );
+
+    // Classification happens before parsing on purpose: the upstream pool
+    // counts kind 0 arrivals either way, so skipping the unparseable ones here
+    // would leave the counters describing different populations.
+    expect(controller.metrics?.snapshot().delivered).toBe(2);
   });
 
   it('closes the profile subscription on stop', async () => {

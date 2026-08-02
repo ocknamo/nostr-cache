@@ -47,8 +47,8 @@ export interface TimelineControllerOptions {
 export class TimelineController {
   private connection: RelayConnection;
   private relayHost?: RelayHost;
-  /** Authors the timeline has shown, i.e. whose profiles we ask for. */
-  private readonly profileAuthors = new Set<string>();
+  /** Authors named by the current profile REQ, so a repeat costs nothing. */
+  private requestedAuthors = new Set<string>();
   /** created_at of the profile we kept, so an older copy cannot overwrite it. */
   private readonly profileSeenAt = new Map<string, number>();
   private profileSubId: string | null = null;
@@ -180,7 +180,7 @@ export class TimelineController {
     // The new filter brings its own authors. Profiles already parsed stay in
     // state, so nobody flickers back to a pubkey while the lookups re-run.
     this.closeProfiles();
-    this.profileAuthors.clear();
+    this.requestedAuthors = new Set();
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -231,16 +231,16 @@ export class TimelineController {
   }
 
   /**
-   * Note an author whose profile the timeline wants, and schedule the lookup.
+   * Note that an event by this author was rendered, and schedule the lookup.
    *
-   * Cheap to call per event: a pubkey already asked about changes nothing, and
-   * a new one only restarts the debounce so a burst of events costs one REQ.
+   * Cheap to call per event: an author the last REQ already covered changes
+   * nothing, and a new one only restarts the debounce so a burst of events
+   * costs one REQ.
    */
   private noteProfileAuthor(pubkey: string): void {
-    if (this.profileAuthors.has(pubkey)) {
+    if (this.requestedAuthors.has(pubkey)) {
       return;
     }
-    this.profileAuthors.add(pubkey);
     clearTimeout(this.profileTimer);
     this.profileTimer = setTimeout(() => {
       this.profileTimer = undefined;
@@ -249,26 +249,45 @@ export class TimelineController {
   }
 
   /**
-   * Ask for the profiles of every author currently on screen.
+   * Ask for the profiles of the authors currently on screen.
    *
-   * Deliberately naive: it re-asks for authors it already has. Suppressing the
-   * redundant *upstream* traffic is the relay's job — `relay-host.ts` gives it
-   * an `upstreamFreshness` window for kind 0, so a REQ whose authors are all
-   * covered by fresh cached copies is answered from IndexedDB and never
-   * forwarded. Re-implementing that decision here would put a second, divergent
-   * cache policy in front of the cache.
+   * The author list is derived from the events the timeline is holding rather
+   * than accumulated as they arrive, so it shrinks again when `insertEvent`
+   * drops events past the timeline cap. That bound matters twice over: the
+   * pubkeys come from upstream, so an accumulating list would let a relay
+   * decide how big our own REQs get; and once the filter names more authors
+   * than the relay will return events for (`maxEventsPerRequest`, 500 by
+   * default — the same as the timeline cap), the freshness window below could
+   * never be satisfied, because coverage is judged on the events actually
+   * delivered.
+   *
+   * Beyond that it is deliberately naive: it re-asks for authors it already
+   * has. Suppressing the redundant *upstream* traffic is the relay's job —
+   * `relay-host.ts` gives it an `upstreamFreshness` window for kind 0, so a REQ
+   * whose authors are all covered by fresh cached copies is answered from
+   * IndexedDB and never forwarded. Re-implementing that decision here would put
+   * a second, divergent cache policy in front of the cache.
    */
   private subscribeProfiles(): void {
-    if (this.stopped || !this.connection.isConnected || this.profileAuthors.size === 0) {
+    // Nothing reschedules this if the socket is down: `RelayConnection` never
+    // reconnects on its own (the caller re-invokes connect()), and the timeline
+    // subscription died with the same socket, so there is no path back to a
+    // working widget for a retry to help. Names stay on the shortened pubkey.
+    if (this.stopped || !this.connection.isConnected) {
+      return;
+    }
+    const authors = [...new Set(this.state.events.map((event) => event.pubkey))];
+    if (authors.length === 0) {
       return;
     }
     if (this.profileSubId) {
       this.connection.unsubscribe(this.profileSubId);
     }
+    this.requestedAuthors = new Set(authors);
     this.profileSeq += 1;
     const subId = `profiles-${this.profileSeq}`;
     this.profileSubId = subId;
-    this.connection.subscribe(subId, [{ kinds: [0], authors: [...this.profileAuthors] }], {
+    this.connection.subscribe(subId, [{ kinds: [0], authors }], {
       onEvent: (event) => this.ingestProfile(event),
     });
   }
