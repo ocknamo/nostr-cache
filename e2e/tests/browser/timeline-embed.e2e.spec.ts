@@ -15,12 +15,13 @@
  * which this suite does not use.
  */
 
+import type { NostrEvent } from '@nostr-cache/shared';
 import type { Browser, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { launchBrowser } from '../../src/browser-launch.js';
 import { type EmbedSiteServer, startEmbedSiteServer } from '../../src/embed-site-server.js';
 import { type MockUpstreamRelay, startMockUpstreamRelay } from '../../src/mock-upstream-relay.js';
-import { createTestEvent } from '../../src/test-events.js';
+import { createTestEvent, getRandomSecret } from '../../src/test-events.js';
 
 const TIMEOUT = 15000;
 
@@ -30,14 +31,32 @@ describe('Embeddable timeline E2E', () => {
   let upstream: MockUpstreamRelay;
   let page: Page | undefined;
   let dbCounter = 0;
+  /** The canned set, kept so a test can stand up its own upstream from it. */
+  let cannedEvents: NostrEvent[] = [];
 
   beforeAll(async () => {
-    const events = await Promise.all([
-      createTestEvent(undefined, { content: 'from upstream one', created_at: 1_700_000_100 }),
-      createTestEvent(undefined, { content: 'from upstream two', created_at: 1_700_000_200 }),
-    ]);
-    upstream = await startMockUpstreamRelay(events);
+    // The site comes up first because the canned profile's `picture` points at
+    // an image it serves, and its port is only known once it is listening.
     site = await startEmbedSiteServer();
+    // One author is given a fixed key so a kind 0 event can be signed by the
+    // same identity as their note; the other stays anonymous, which is what
+    // keeps the pubkey fallback covered.
+    const authorSeckey = getRandomSecret();
+    cannedEvents = await Promise.all([
+      createTestEvent(authorSeckey, { content: 'from upstream one', created_at: 1_700_000_100 }),
+      createTestEvent(undefined, { content: 'from upstream two', created_at: 1_700_000_200 }),
+      createTestEvent(authorSeckey, {
+        kind: 0,
+        created_at: 1_700_000_050,
+        tags: [],
+        content: JSON.stringify({
+          name: 'e2e_author',
+          display_name: 'E2E テスト著者',
+          picture: site.avatarUrl,
+        }),
+      }),
+    ]);
+    upstream = await startMockUpstreamRelay(cannedEvents);
     browser = await launchBrowser();
   });
 
@@ -148,14 +167,17 @@ describe('Embeddable timeline E2E', () => {
 
     await page.goto(url);
     await waitForEventCount(page, 2);
-    const afterFirstLoad = upstream.reqCount();
+    // Count kind 1 REQs only: the widget also opens a kind 0 subscription, and
+    // counting every REQ would let this pass even if the timeline stopped
+    // reading through entirely.
+    const afterFirstLoad = upstream.reqCountForKind(1);
 
     await page.reload();
     await waitForEventCount(page, 2);
 
     // A cache that stopped consulting the upstream would be fast and stale;
     // read-through means even a warm load forwards the REQ.
-    expect(upstream.reqCount()).toBeGreaterThan(afterFirstLoad);
+    expect(upstream.reqCountForKind(1)).toBeGreaterThan(afterFirstLoad);
   });
 
   it('hides the origin badges when show-origin is false', async () => {
@@ -164,5 +186,120 @@ describe('Embeddable timeline E2E', () => {
     await waitForEventCount(page, 2);
 
     expect(await originBadges(page)).toEqual([]);
+  });
+
+  it('fetches kind 0 and renders the author with their name and avatar', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url }));
+    await waitForEventCount(page, 2);
+
+    // The profile arrives on its own subscription after the notes, so wait for
+    // the name rather than reading straight after the cards appear.
+    const name = await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    expect(name).toBeTruthy();
+    expect(
+      await page.$$eval('nostr-timeline .handle', (nodes) =>
+        nodes.map((node) => node.textContent?.trim() ?? '')
+      )
+    ).toContain('@e2e_author');
+
+    const avatar = await page.waitForSelector('nostr-timeline img.avatar', { timeout: TIMEOUT });
+    expect(await avatar.getAttribute('src')).toBe(site.avatarUrl);
+
+    // The kind 0 event must not reach the timeline itself: it is a different
+    // subscription, and a profile rendered as a note would be a bug.
+    const contents = await page.$$eval('nostr-timeline .content', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+    expect(contents.some((content) => content.includes('display_name'))).toBe(false);
+
+    // The anonymous author has no profile, so their card keeps the fallback.
+    const names = await page.$$eval('nostr-timeline .name', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+    expect(names.some((value) => value.includes('…'))).toBe(true);
+  });
+
+  it('serves a cached profile without re-asking upstream, via upstreamFreshness', async () => {
+    // The whole canned set, anonymous profile-less author included: one author
+    // per filter means their missing kind 0 cannot stop the freshness window
+    // from covering the author who does have one.
+    const url = embedUrl({ relays: upstream.url });
+    const beforeFirstLoad = upstream.reqCountForKind(0);
+    page = await browser.newPage();
+
+    await page.goto(url);
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    // Two visible authors, so two lookups: one each. Poll rather than read the
+    // counter the moment a name appears — the other author's REQ may still be
+    // on its way, and counting it against the second load would make the delta
+    // below wrong for reasons that have nothing to do with freshness. The
+    // counter is cumulative over the whole suite, hence the baseline.
+    await expect
+      .poll(() => upstream.reqCountForKind(0), { timeout: TIMEOUT })
+      .toBe(beforeFirstLoad + 2);
+    const afterFirstLoad = upstream.reqCountForKind(0);
+
+    await page.reload();
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    // Wait for the one REQ that is expected to reach upstream, then let any
+    // second one (there should be none) have its chance to show up too.
+    await expect
+      .poll(() => upstream.reqCountForKind(0), { timeout: TIMEOUT })
+      .toBeGreaterThanOrEqual(afterFirstLoad + 1);
+    await page.waitForTimeout(500);
+
+    // The widget asks again for both authors on every load. Exactly one of
+    // those reaches the upstream: the anonymous author has no kind 0 to cache,
+    // so nothing can be fresh for them — while the author who does have one is
+    // served from IndexedDB. Under a single filter naming both, the missing
+    // one would have dragged the other upstream as well.
+    expect(upstream.reqCountForKind(0)).toBe(afterFirstLoad + 1);
+  });
+
+  it('honours show-avatars=false from the iframe query string', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url, 'show-avatars': 'false' }));
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+
+    // README offers this as the way to stop the widget loading images from
+    // whatever host a profile names, so it has to reach the iframe path too —
+    // the name still renders, but nothing is fetched from the avatar host.
+    expect(await page.$$('nostr-timeline img.avatar')).toHaveLength(0);
+  });
+
+  it('serves the profile out of the local cache on a reload', async () => {
+    // Its own upstream, because this test shuts it down partway through and the
+    // shared one has to stay usable for the rest of the suite.
+    const disposable = await startMockUpstreamRelay(cannedEvents);
+    const url = embedUrl({ relays: disposable.url });
+    page = await browser.newPage();
+
+    await page.goto(url);
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+
+    // Take the upstream away, so anything that renders after this can only have
+    // come from IndexedDB. kind 0 is replaceable, so the relay stored it on the
+    // first visit — that is what makes avatars appear without a round trip.
+    await disposable.close();
+
+    await page.reload();
+    await waitForEventCount(page, 2);
+    const name = await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+
+    expect(name).toBeTruthy();
+    expect(await originBadges(page)).toEqual(['cache', 'cache']);
   });
 });

@@ -16,12 +16,22 @@ import { fileURLToPath } from 'node:url';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const EMBED_DIST = resolve(currentDir, '../../packages/timeline-embed/dist');
 
+/** Path this server serves a real image from. See {@link EmbedSiteServer.avatarUrl}. */
+const AVATAR_PATH = '/avatar.png';
+/** Smallest valid PNG: 1x1, fully transparent. */
+const TRANSPARENT_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64'
+);
+
 export interface EmbedSiteServer {
   port: number;
   /** Origin the widget is served from. */
   baseUrl: string;
   /** URL of the iframe host page. */
   embedUrl: string;
+  /** URL of a real image, for use as a profile's `picture`. */
+  avatarUrl: string;
   close: () => Promise<void>;
 }
 
@@ -69,6 +79,13 @@ export async function startEmbedSiteServer(
       res.end(embedPage);
       return;
     }
+    // Stands in for the avatar host a real profile's `picture` points at, so
+    // the image path is exercised against a URL that actually loads.
+    if (path === AVATAR_PATH) {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(TRANSPARENT_PNG);
+      return;
+    }
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
   };
@@ -87,6 +104,7 @@ export async function startEmbedSiteServer(
     port,
     baseUrl,
     embedUrl: `${baseUrl}/embed/`,
+    avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };
 }

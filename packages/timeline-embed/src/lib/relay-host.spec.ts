@@ -195,4 +195,37 @@ describe('acquireRelayHost', () => {
     await expect(eose).resolves.toBeUndefined();
     socket.close();
   });
+
+  /**
+   * The kind 0 freshness window is what keeps the timeline's profile lookups
+   * from forwarding a REQ upstream on every re-subscribe. Nothing else in the
+   * package would notice if this stopped being passed to the relay, so the
+   * wiring itself is what these pin down.
+   */
+  describe('profile freshness window', () => {
+    /** The relay only builds a gate when a window was configured. */
+    function hasFreshnessGate(host: RelayHost): boolean {
+      return (host.relay as unknown as { freshnessGate?: unknown }).freshnessGate !== undefined;
+    }
+
+    it('configures a kind 0 window by default', async () => {
+      const host = await acquire();
+
+      expect(hasFreshnessGate(host)).toBe(true);
+    });
+
+    it('accepts an overridden window', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, profileFreshness: 30 });
+
+      expect(hasFreshnessGate(host)).toBe(true);
+    });
+
+    it('treats a non-positive window as "no window" rather than failing to start', async () => {
+      // The relay rejects a non-positive window outright, which would take the
+      // whole widget down — a surprising way to spell "turn this off".
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, profileFreshness: 0 });
+
+      expect(hasFreshnessGate(host)).toBe(false);
+    });
+  });
 });

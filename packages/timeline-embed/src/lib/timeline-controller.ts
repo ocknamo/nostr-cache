@@ -10,6 +10,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { CacheMetrics, EventOrigin } from './cache-metrics.ts';
+import { type Profile, parseProfileContent } from './profile.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
@@ -18,6 +19,27 @@ import { type ValidationStatus, fetchValidationStatuses, hasPending } from './va
 
 /** Batches the validation lookups triggered by a burst of incoming events. */
 const VALIDATION_FETCH_DEBOUNCE_MS = 200;
+/**
+ * Profile lookups allowed in flight at once.
+ *
+ * Well under the relay's `maxSubscriptions` (20), which it counts per client —
+ * and the emulator gives every socket its own client id, so this budget is per
+ * widget and the timeline's own subscription is the only thing sharing it.
+ */
+const MAX_CONCURRENT_PROFILE_REQUESTS = 4;
+/**
+ * How long a profile lookup stays open after EOSE, waiting for an upstream
+ * fetch that is still being ingested. See {@link TimelineController.finishAfterEose}.
+ */
+const PROFILE_EOSE_GRACE_MS = 500;
+/**
+ * Hard deadline on a single profile lookup.
+ *
+ * Covers the relay's upstream EOSE timeout (3s) plus the grace above, with
+ * room to spare. Its real job is the case where no reply of any kind arrives —
+ * see {@link TimelineController.openProfileRequest}.
+ */
+const PROFILE_REQUEST_TIMEOUT_MS = 5000;
 /** Lazy validation runs in the background, so re-poll while anything is pending. */
 const VALIDATION_POLL_INTERVAL_MS = 5000;
 
@@ -26,6 +48,8 @@ export interface TimelineState {
   events: NostrEvent[];
   origins: Map<string, EventOrigin>;
   validationStatuses: Map<string, ValidationStatus>;
+  /** Author profiles (kind 0) fetched so far, keyed by pubkey. */
+  profiles: Map<string, Profile>;
   eose: boolean;
   error?: string;
 }
@@ -42,6 +66,18 @@ export interface TimelineControllerOptions {
 export class TimelineController {
   private connection: RelayConnection;
   private relayHost?: RelayHost;
+  /** Authors a lookup has been started for, so a repeat costs nothing. */
+  private requestedProfiles = new Set<string>();
+  /** Authors waiting for an in-flight slot. */
+  private pendingProfiles: string[] = [];
+  /** In-flight profile subscriptions, by subscription id. */
+  private readonly profileSubs = new Map<
+    string,
+    { timer?: ReturnType<typeof setTimeout>; watchdog?: ReturnType<typeof setTimeout> }
+  >();
+  /** created_at of the profile we kept, so an older copy cannot overwrite it. */
+  private readonly profileSeenAt = new Map<string, number>();
+  private profileSeq = 0;
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -49,6 +85,7 @@ export class TimelineController {
     events: [],
     origins: new Map(),
     validationStatuses: new Map(),
+    profiles: new Map(),
     eose: false,
   };
   private currentSubId: string | null = null;
@@ -56,6 +93,8 @@ export class TimelineController {
   private validationFetchTimer?: ReturnType<typeof setTimeout>;
   private validationPollTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  /** Set by suspend(), cleared by the next subscribe(). */
+  private suspended = false;
   /** Settles on stop(), so a pending connect() cannot leave start() hanging. */
   private readonly stopSignal: Promise<void>;
   private signalStopped!: () => void;
@@ -135,6 +174,8 @@ export class TimelineController {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
     }
+    this.suspended = true;
+    this.closeProfiles();
     this.clearTimers();
   }
 
@@ -146,6 +187,7 @@ export class TimelineController {
     this.stopped = true;
     this.signalStopped();
     this.clearTimers();
+    this.closeProfiles();
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -162,6 +204,12 @@ export class TimelineController {
       this.currentSubId = null;
     }
     this.clearTimers();
+    // The new filter brings its own authors, and the cards that will ask for
+    // them are about to be re-rendered. Profiles already parsed stay in state,
+    // so nobody flickers back to a pubkey while the lookups re-run.
+    this.suspended = false;
+    this.closeProfiles();
+    this.requestedProfiles = new Set();
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -208,6 +256,196 @@ export class TimelineController {
         this.patch({ error: `購読が閉じられました${reason ? `: ${reason}` : ''}` });
       },
     });
+  }
+
+  /**
+   * Fetch one author's profile. Called by the view when their card scrolls into
+   * the viewport, so a timeline of 500 events only looks up the handful of
+   * authors the reader can actually see.
+   *
+   * One author per REQ is what makes the relay's `upstreamFreshness` window
+   * (see `relay-host.ts`) work per author: coverage is judged per filter, so a
+   * filter naming many authors is forwarded upstream in full as soon as any one
+   * of them is missing from the cache — and an author who has never published a
+   * kind 0 is missing forever. Asking one at a time keeps each decision
+   * independent, and keeps the filter a fixed size no matter what pubkeys the
+   * upstream relay hands us.
+   *
+   * Repeat calls for the same author are ignored: that is request de-duplication
+   * (the same card can scroll in and out), not a second cache in front of the
+   * relay's — whether a cached copy is still fresh remains the relay's call.
+   *
+   * @param pubkey Hex pubkey of the author to look up
+   */
+  requestProfile(pubkey: string): void {
+    // `suspended` matters because the trigger lives in the DOM now: the cards
+    // stay on screen while the demo benchmarks a cold cache, and one scrolling
+    // into view would read through to upstream and refill the very cache being
+    // measured. Nothing else stops it — unlike the old design, where lookups
+    // could only be triggered by timeline events that suspend() had cut off.
+    if (this.stopped || this.suspended || !this.canQueueProfiles()) {
+      return;
+    }
+    if (this.requestedProfiles.has(pubkey)) {
+      return;
+    }
+    this.requestedProfiles.add(pubkey);
+    this.pendingProfiles.push(pubkey);
+    this.pumpProfileQueue();
+  }
+
+  /**
+   * Whether a lookup queued now could ever run.
+   *
+   * Nothing retries if the socket is down: `RelayConnection` never reconnects
+   * on its own (the caller re-invokes connect()), and the timeline subscription
+   * died with the same socket, so there is no path back to a working widget for
+   * a retry to help. Queuing anyway would just grow an array nobody drains —
+   * one entry per author the dead connection keeps rendering. Names stay on the
+   * shortened pubkey instead.
+   */
+  private canQueueProfiles(): boolean {
+    return this.connection.isConnected;
+  }
+
+  /**
+   * Start as many queued lookups as the in-flight budget allows.
+   *
+   * The relay caps each *client* at `maxSubscriptions` (20, set in
+   * `relay-host.ts`; the emulator gives every socket its own client id, so a
+   * second widget on the page has its own budget). Every visible card can ask
+   * at once — an iframe embed sized to its content has *every* card in the
+   * viewport — so without a budget a first paint would run past that cap.
+   */
+  private pumpProfileQueue(): void {
+    if (this.stopped || this.suspended || !this.connection.isConnected) {
+      return;
+    }
+    while (
+      this.pendingProfiles.length > 0 &&
+      this.profileSubs.size < MAX_CONCURRENT_PROFILE_REQUESTS
+    ) {
+      const pubkey = this.pendingProfiles.shift();
+      if (pubkey !== undefined) {
+        this.openProfileRequest(pubkey);
+      }
+    }
+  }
+
+  /**
+   * Open a one-shot subscription for a single author's profile.
+   *
+   * kind 0 is replaceable, so there is exactly one event to wait for: the
+   * subscription is closed as soon as EOSE says the relay has nothing more,
+   * which is what frees the slot for the next queued author.
+   *
+   * @param pubkey Hex pubkey of the author to look up
+   */
+  private openProfileRequest(pubkey: string): void {
+    this.profileSeq += 1;
+    const subId = `profile-${this.profileSeq}`;
+    this.profileSubs.set(subId, {
+      // A REQ the relay refuses answers with neither EOSE nor CLOSED — it logs
+      // a NOTICE and returns (subscription limit, storage read failure). This
+      // deadline is the only thing that gives such a slot back; without it the
+      // budget drains one refusal at a time until the queue stops forever and
+      // every later author is stuck on a shortened pubkey.
+      watchdog: setTimeout(() => this.finishProfileRequest(subId), PROFILE_REQUEST_TIMEOUT_MS),
+    });
+    this.connection.subscribe(subId, [{ kinds: [0], authors: [pubkey] }], {
+      // Deliberately not closed on the first event that arrives: two upstream
+      // relays can each answer with their own copy, and the first to land is
+      // not necessarily the newest. Waiting for EOSE lets `ingestProfile` see
+      // them all and keep the newest.
+      onEvent: (event) => this.ingestProfile(event),
+      onEose: () => this.finishAfterEose(subId),
+      onClosed: () => this.finishProfileRequest(subId),
+    });
+  }
+
+  /**
+   * Give an upstream fetch a moment to land, then close the lookup.
+   *
+   * EOSE does not mean "everything has been delivered": on a read-through the
+   * relay sends it as soon as the upstream pool reports end-of-stored, without
+   * waiting for the events it is still ingesting (`UpstreamCoordinator` runs
+   * ingest on a promise chain and drops deliveries once the subscription is
+   * closed). Closing the instant EOSE arrives therefore threw away the very
+   * profile that had just been fetched.
+   *
+   * @param subId Subscription that reached EOSE
+   */
+  private finishAfterEose(subId: string): void {
+    const entry = this.profileSubs.get(subId);
+    if (!entry || entry.timer) {
+      return;
+    }
+    entry.timer = setTimeout(() => this.finishProfileRequest(subId), PROFILE_EOSE_GRACE_MS);
+  }
+
+  /**
+   * Close a finished lookup and let the next queued one start.
+   *
+   * @param subId Subscription that is done with
+   */
+  private finishProfileRequest(subId: string): void {
+    const entry = this.profileSubs.get(subId);
+    if (!entry) {
+      return;
+    }
+    clearTimeout(entry.timer);
+    clearTimeout(entry.watchdog);
+    this.profileSubs.delete(subId);
+    this.connection.unsubscribe(subId);
+    this.pumpProfileQueue();
+  }
+
+  /**
+   * Take one delivered kind 0 event into the rendered profile map.
+   *
+   * Profile deliveries are classified through `CacheMetrics` too, so the
+   * cache/upstream counters describe the same population of events: the
+   * instrumented upstream pool already counts kind 0 arrivals as upstream
+   * events, and leaving them unclassified would make the delivered/cache-hit
+   * numbers cover a smaller set than the upstream one.
+   */
+  private ingestProfile(event: NostrEvent): void {
+    if (event.kind !== 0) {
+      return;
+    }
+    this.relayHost?.metrics.classifyDelivered(event.id);
+
+    // Storage holds only the newest copy, but two upstream relays can each
+    // deliver theirs — so the last one to arrive is not necessarily the newest.
+    const seenAt = this.profileSeenAt.get(event.pubkey);
+    if (seenAt !== undefined && seenAt >= event.created_at) {
+      return;
+    }
+    const profile = parseProfileContent(event.content);
+    if (!profile) {
+      return;
+    }
+    this.profileSeenAt.set(event.pubkey, event.created_at);
+    const profiles = new Map(this.state.profiles);
+    profiles.set(event.pubkey, profile);
+    this.patch({ profiles });
+  }
+
+  /**
+   * Close every in-flight lookup and drop the queue.
+   *
+   * Called from every path that stops the timeline. It matters most for
+   * `suspend()`: a live profile subscription keeps reading through to upstream
+   * and refilling the very cache the caller is about to measure cold.
+   */
+  private closeProfiles(): void {
+    this.pendingProfiles = [];
+    for (const [subId, entry] of [...this.profileSubs]) {
+      clearTimeout(entry.timer);
+      clearTimeout(entry.watchdog);
+      this.profileSubs.delete(subId);
+      this.connection.unsubscribe(subId);
+    }
   }
 
   /** Coalesce the lookups triggered by a burst of incoming events. */

@@ -42,6 +42,7 @@
     events: [],
     origins: new Map(),
     validationStatuses: new Map(),
+    profiles: new Map(),
     eose: false,
   });
   let metrics = $state<MetricsSnapshot>({ cacheHits: 0, upstreamEvents: 0, delivered: 0 });
@@ -218,6 +219,8 @@
       <span class="chip upstream">upstream</span> バッジが、そのイベントを IndexedDB
       から返したのか上流から取ってきたのかを示します。ページをリロードすると、同じイベントが
       今度は <span class="chip cache">cache</span> で返るのが見えます。
+      表示名とアバターは kind 0（プロフィール）を別途購読して取得しており、これもキャッシュ
+      されるため、リロード後は上流を待たずに表示されます。上の計測値はこの取得分も含みます。
     </p>
 
     <RelaySettings
@@ -254,6 +257,8 @@
         eose={timeline.eose}
         origins={timeline.origins}
         validationStatuses={timeline.validationStatuses}
+        profiles={timeline.profiles}
+        onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
       />
     </div>
   </section>

@@ -14,6 +14,9 @@
   const { metrics, connectedUpstreams, configuredUpstreams, storedEvents }: Props = $props();
 </script>
 
+<!-- The counters cover every event the relay served this page, which since the
+     cards gained avatars includes the kind 0 profile lookups behind them — not
+     just the notes visible in the timeline. -->
 <dl class="metrics">
   <div class="metric cache">
     <dt>キャッシュ配信</dt>

@@ -138,6 +138,13 @@
     共有されます（購読はウィジェットごとに独立）。最初に mount されたウィジェットの設定が採用され、
     異なる設定を要求したウィジェットには警告が出ます。設定を分けたい場合は iframe を使ってください。
   </p>
+
+  <p class="footnote">
+    アバターはプロフィール（kind 0）が指す任意の URL から読み込まれるため、閲覧者の IP が
+    その画像ホストに渡ります。避けたい場合は <code>show-avatars="false"</code>
+    （iframe なら <code>&amp;show-avatars=false</code>）を指定してください。表示名は
+    そのまま表示されます。
+  </p>
 </section>
 
 <style>

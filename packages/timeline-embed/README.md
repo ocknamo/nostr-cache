@@ -8,6 +8,10 @@
 - 各イベントに `cache` / `upstream` バッジを表示（キャッシュが効いているのが目で見える）
 - 署名検証はリレーがバックグラウンドで実行し、検証済みイベントに ✓ を表示
   （クライアント側で暗号処理をしない）
+- アバター・表示名・`@handle` を kind 0（プロフィール）から表示。kind 0 は replaceable として
+  同じキャッシュに載り、`upstreamFreshness` の鮮度ウィンドウ（既定 300 秒）が効くため、
+  リロード後は上流に問い合わせず即座に出ます
+- 返信・引用（`e` / `q` タグ）がある投稿には参照チップを表示（参照先の本文は取得しません）
 
 公開デモ: <https://ocknamo.github.io/nostr-cache/>
 
@@ -63,6 +67,7 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | `limit` | 取得件数 | `50` |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `show-origin` | `false` で `cache` / `upstream` バッジを隠す | `true` |
+| `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 
 不正な値（WebSocket でない URL、整数でない kind など）は警告を出して無視されます。
 **https のページからは `ws://` の上流リレーを指定できません**（ブラウザが混在コンテンツ
@@ -86,8 +91,21 @@ nostr-timeline {
   --nt-cache-fg: #4ade80;
   --nt-upstream-bg: #1b2330;
   --nt-upstream-fg: #93a4bd;
+
+  /* カード（アバター + 名前 + 参照チップ） */
+  --nt-separator: #30363d;      /* カード間の区切り線。既定は --nt-border */
+  --nt-card-padding: 10px 12px;
+  --nt-avatar-size: 40px;
+  --nt-avatar-radius: 8px;
+  --nt-avatar-gap: 10px;        /* アバターと本文の間隔 */
+  --nt-name-fg: #e6edf3;        /* 表示名 */
+  --nt-handle-fg: #8b949e;      /* @handle。既定は --nt-muted */
+  --nt-quote-bar: #4a7dff;      /* 返信 / 引用チップの縦線 */
 }
 ```
+
+カードは既定で**区切り線で連なるリスト**です（一般的な Nostr クライアントの見え方）。
+`--nt-gap` を指定すると、従来どおり間隔の空いたブロックとして並びます。
 
 ## 制約
 
@@ -98,6 +116,28 @@ nostr-timeline {
   「検証に失敗して削除される直前」のどちらか**で、その間は画面に残ります。
   表示内容の真正性が重要な用途では、✓ が付いたイベントだけを信頼してください
   （この方式は、クライアント側で暗号処理をせずに済ませるための意図的なトレードオフです）
+- **アバター画像は上流リレー由来の任意の URL から読み込まれます。** `picture` は上流が返した
+  プロフィールの中身そのままで（`http:` / `https:` 以外のスキームは破棄しますが、ホストは
+  制限しません）、画像を読みに行く時点で**閲覧者の IP アドレスとブラウザ情報がその画像ホストに
+  渡ります**。`referrerpolicy="no-referrer"` を付けているので埋め込み先の URL は送られませんが、
+  接続自体は避けられません。気になる場合は `show-avatars="false"` を指定してください
+  （表示名と `@handle` は引き続き表示されます）
+- **NIP-05 は検証していません。** kind 0 の `nip05` はパースしますが、`.well-known/nostr.json`
+  との照合を行わないため、著者の自己申告にすぎません。誤解を招かないよう画面には表示していません
+- **プロフィールはカードが画面に入ってから取得します**（`IntersectionObserver`）。
+  1 著者につき `{"kinds":[0],"authors":["<pubkey>"]}` の購読を 1 本開き、EOSE から
+  500ms 後に閉じます（リレーは取り込み完了を待たずに EOSE を返すため、即座に閉じると
+  取得したてのプロフィールを取りこぼします）。同時に走るのは 4 本までで、残りは
+  順番待ちです。応答が無いまま 5 秒経った購読は打ち切って枠を返します。
+  カードの 200px 手前で取得を始めるので、通常は表示までに名前が揃います。
+  `IntersectionObserver` が無い環境では、遅延せず即座に取得します
+- **上流へ問い合わせ直すかどうかはリレーが判断します**（`upstreamFreshness` の kind 0 の窓。
+  既定 300 秒。JS から `acquireRelayHost` を使う場合のみ `profileFreshness` で変更でき、
+  属性やクエリパラメータでは変えられません）。鮮度判定はフィルタ単位の all-or-nothing ですが、
+  1 フィルタ 1 著者なので**著者ごとに独立して効きます** — プロフィール未公開の著者が
+  混ざっていても、他の著者のキャッシュ済みプロフィールは上流に問い合わせずに返ります
+- **同じ著者を二度は取得しません**（カードが画面外へ出て戻っても再要求しません）。
+  したがって**画面を開いたまま kind 0 が更新されても反映されません**（リロードで反映されます）
 - **1 ページにつきリレーは 1 つ**です。複数の `<nostr-timeline>` を置いた場合、リレーは
   共有されます（購読はウィジェットごとに独立するので表示内容は別々にできます）。
   設定は**最初に mount されたウィジェットのものが採用され**、異なる設定を要求した
@@ -114,7 +154,7 @@ nostr-timeline {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **232 KB（gzip 約 78 KB）** の自己完結した IIFE です。
+`dist/nostr-timeline.js` は約 **245 KB（gzip 約 84 KB）** の自己完結した IIFE です。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）と
 署名検証用の `rx-nostr-crypto` で、これらはリレー本体の機能に必要です。
@@ -144,7 +184,9 @@ import {
 | `InstrumentedUpstreamPool` | `UpstreamPool` デコレータ。cache-relay 無改変で上流トラフィックを計測 |
 | `RequestTimer` | REQ → 初回イベント → EOSE の計測 |
 | `RelayConnection` | 素の WebSocket 上の最小 NIP-01 クライアント |
-| `Timeline` / `EventCard` | 表示コンポーネント |
+| `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
+| `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
+| `Timeline` / `EventCard` / `Avatar` | 表示コンポーネント |
 
 ## 開発
 
