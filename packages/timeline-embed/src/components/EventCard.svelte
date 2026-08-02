@@ -33,21 +33,47 @@
    * every author staying an anonymous pubkey.
    */
   function whenVisible(node: HTMLElement, callback?: () => void) {
-    if (!callback) {
-      return;
-    }
-    if (typeof IntersectionObserver === 'undefined') {
-      callback();
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        observer.disconnect();
-        callback();
+    // Read through a mutable holder so `update` can swap the callback in: an
+    // action captures its argument once, and the prop is optional, so a card
+    // that gains an `onVisible` later would otherwise never report.
+    let current = callback;
+    let reported = false;
+
+    const report = () => {
+      if (reported || !current) {
+        return;
       }
-    });
+      reported = true;
+      current();
+    };
+
+    if (typeof IntersectionObserver === 'undefined') {
+      report();
+      return {
+        update: (next?: () => void) => {
+          current = next;
+          report();
+        },
+        destroy: () => {},
+      };
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          report();
+        }
+      },
+      // Start the lookup just before the card arrives, so the name is usually
+      // there by the time it is read rather than popping in afterwards.
+      { rootMargin: '200px' }
+    );
     observer.observe(node);
     return {
+      update: (next?: () => void) => {
+        current = next;
+      },
       destroy: () => observer.disconnect(),
     };
   }

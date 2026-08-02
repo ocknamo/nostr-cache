@@ -125,8 +125,11 @@ nostr-timeline {
 - **NIP-05 は検証していません。** kind 0 の `nip05` はパースしますが、`.well-known/nostr.json`
   との照合を行わないため、著者の自己申告にすぎません。誤解を招かないよう画面には表示していません
 - **プロフィールはカードが画面に入ってから取得します**（`IntersectionObserver`）。
-  1 著者につき `{"kinds":[0],"authors":["<pubkey>"]}` の購読を 1 本開き、EOSE で閉じます。
-  同時に走るのは 4 本までで、残りは順番待ちになります（リレーの `maxSubscriptions` は 20）。
+  1 著者につき `{"kinds":[0],"authors":["<pubkey>"]}` の購読を 1 本開き、EOSE から
+  500ms 後に閉じます（リレーは取り込み完了を待たずに EOSE を返すため、即座に閉じると
+  取得したてのプロフィールを取りこぼします）。同時に走るのは 4 本までで、残りは
+  順番待ちです。応答が無いまま 5 秒経った購読は打ち切って枠を返します。
+  カードの 200px 手前で取得を始めるので、通常は表示までに名前が揃います。
   `IntersectionObserver` が無い環境では、遅延せず即座に取得します
 - **上流へ問い合わせ直すかどうかはリレーが判断します**（`upstreamFreshness` の kind 0 の窓。
   既定 300 秒。JS から `acquireRelayHost` を使う場合のみ `profileFreshness` で変更でき、
@@ -151,7 +154,7 @@ nostr-timeline {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **243 KB（gzip 約 83 KB）** の自己完結した IIFE です。
+`dist/nostr-timeline.js` は約 **245 KB（gzip 約 84 KB）** の自己完結した IIFE です。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）と
 署名検証用の `rx-nostr-crypto` で、これらはリレー本体の機能に必要です。

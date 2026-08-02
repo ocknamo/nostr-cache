@@ -73,8 +73,8 @@ describe('TimelineController', () => {
     }
   }
 
-  async function waitFor(predicate: () => boolean, what: string): Promise<void> {
-    const deadline = Date.now() + 3000;
+  async function waitFor(predicate: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (predicate()) {
         return;
@@ -182,6 +182,50 @@ describe('TimelineController', () => {
       [{ kinds: [0], authors: ['bob'] }],
     ]);
   });
+
+  it('opens no lookup while suspended, and resumes with the next filter', async () => {
+    const { controller } = createController();
+    await controller.start({ kinds: [1], limit: 10 });
+
+    controller.suspend();
+    // The cards are still on screen while the demo measures a cold cache, so
+    // one scrolling into view must not read through and refill it.
+    controller.requestProfile('alice');
+    expect(profileSubscriptions(controller)).toHaveLength(0);
+
+    controller.applyFilter({ kinds: [1], limit: 10 });
+    controller.requestProfile('alice');
+
+    expect(profileSubscriptions(controller)).toHaveLength(1);
+  });
+
+  it('gives a slot back when the relay answers a lookup with nothing at all', async () => {
+    const { controller } = createController();
+    await controller.start({ kinds: [1], limit: 10 });
+    // A REQ the relay refuses gets a NOTICE and no EOSE or CLOSED — that is
+    // what a storage read failure or the subscription cap looks like from here.
+    const connection = (controller as unknown as { connection: { subscribe: () => void } })
+      .connection;
+    const realSubscribe = connection.subscribe;
+    connection.subscribe = () => {};
+
+    for (const pubkey of ['a', 'b', 'c', 'd', 'e']) {
+      controller.requestProfile(pubkey);
+    }
+    expect(profileSubscriptions(controller)).toHaveLength(0);
+
+    connection.subscribe = realSubscribe;
+    // Without the watchdog the four slots stay taken for good and every later
+    // author is stuck on a shortened pubkey until the page is reloaded.
+    await waitFor(
+      () => (controller as unknown as { profileSubs: Map<string, unknown> }).profileSubs.size === 0,
+      'the stuck lookups to time out',
+      // Longer than PROFILE_REQUEST_TIMEOUT_MS, which is what is under test.
+      8000
+    );
+    controller.requestProfile('f');
+    expect(profileSubscriptions(controller)).toHaveLength(1);
+  }, 10000);
 
   it('ignores a repeat request for an author already asked about', async () => {
     const { controller } = createController();

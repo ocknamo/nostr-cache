@@ -39,12 +39,12 @@ export const DEFAULT_LAZY_VALIDATE_INTERVAL = 5;
 /**
  * How long a cached kind 0 is trusted before the relay re-asks upstream.
  *
- * The widget re-opens its profile subscription whenever a new author scrolls
- * into view, which without a window would forward a REQ upstream every time —
- * for profiles it already holds. Deciding when a cached copy is stale enough to
- * re-check is the relay's job (`upstreamFreshness`), not the widget's, so the
- * widget simply asks for what it wants to display and lets the window suppress
- * the redundant upstream traffic.
+ * The widget opens a lookup per author as their card scrolls into view, which
+ * without a window would forward a REQ upstream every time — for profiles it
+ * already holds. Deciding when a cached copy is stale enough to re-check is the
+ * relay's job (`upstreamFreshness`), not the widget's, so the widget simply
+ * asks for what it wants to display and lets the window suppress the redundant
+ * upstream traffic.
  *
  * Five minutes comfortably covers a page view while still letting a profile
  * edit show up on a later visit.

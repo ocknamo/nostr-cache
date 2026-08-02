@@ -227,22 +227,33 @@ describe('Embeddable timeline E2E', () => {
     // per filter means their missing kind 0 cannot stop the freshness window
     // from covering the author who does have one.
     const url = embedUrl({ relays: upstream.url });
+    const beforeFirstLoad = upstream.reqCountForKind(0);
     page = await browser.newPage();
 
     await page.goto(url);
     await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
       timeout: TIMEOUT,
     });
-    // Two visible authors, so two lookups: one each.
+    // Two visible authors, so two lookups: one each. Poll rather than read the
+    // counter the moment a name appears — the other author's REQ may still be
+    // on its way, and counting it against the second load would make the delta
+    // below wrong for reasons that have nothing to do with freshness. The
+    // counter is cumulative over the whole suite, hence the baseline.
+    await expect
+      .poll(() => upstream.reqCountForKind(0), { timeout: TIMEOUT })
+      .toBe(beforeFirstLoad + 2);
     const afterFirstLoad = upstream.reqCountForKind(0);
-    expect(afterFirstLoad).toBeGreaterThanOrEqual(2);
 
     await page.reload();
     await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
       timeout: TIMEOUT,
     });
-    // Let the second author's lookup finish too, so the count below is settled.
-    await page.waitForTimeout(1000);
+    // Wait for the one REQ that is expected to reach upstream, then let any
+    // second one (there should be none) have its chance to show up too.
+    await expect
+      .poll(() => upstream.reqCountForKind(0), { timeout: TIMEOUT })
+      .toBeGreaterThanOrEqual(afterFirstLoad + 1);
+    await page.waitForTimeout(500);
 
     // The widget asks again for both authors on every load. Exactly one of
     // those reaches the upstream: the anonymous author has no kind 0 to cache,
