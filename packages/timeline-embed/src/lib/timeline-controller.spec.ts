@@ -46,11 +46,17 @@ describe('TimelineController', () => {
     return openSubscriptions(controller).map((subscription) => subscription.id);
   }
 
-  /** The profile subscription, if one is open. */
+  /** The profile lookups currently in flight. */
+  function profileSubscriptions(
+    controller: TimelineController
+  ): { id: string; filters: Filter[] }[] {
+    return openSubscriptions(controller).filter((sub) => sub.id.startsWith('profile-'));
+  }
+
   function profileSubscription(
     controller: TimelineController
   ): { id: string; filters: Filter[] } | undefined {
-    return openSubscriptions(controller).find((sub) => sub.id.startsWith('profiles-'));
+    return profileSubscriptions(controller)[0];
   }
 
   /**
@@ -100,12 +106,12 @@ describe('TimelineController', () => {
     }
   });
 
-  it('opens no profile subscription while the timeline has no authors', async () => {
+  it('opens no profile subscription until a card asks for one', async () => {
     const { controller } = createController();
     await controller.start({ kinds: [1], limit: 10 });
 
-    // Cache-only and empty, so no event — and therefore no author — is ever
-    // seen. Asking for kind 0 anyway would be a REQ with an empty author list.
+    // Lookups are driven by cards scrolling into view, so a timeline nobody has
+    // looked at yet costs exactly one subscription.
     expect(openSubscriptionIds(controller)).toContain('timeline-1');
     expect(profileSubscription(controller)).toBeUndefined();
   });
@@ -117,6 +123,7 @@ describe('TimelineController', () => {
     await controller.start({ kinds: [1], limit: 10 });
     // Wait for the profile subscription to exist, or the assertion below would
     // hold just as well against a suspend() that closes nothing.
+    controller.requestProfile('alice');
     await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
 
     controller.suspend();
@@ -157,24 +164,72 @@ describe('TimelineController', () => {
     expect(after?.profiles).toEqual(before);
   });
 
-  it('asks for the profiles of the authors it displayed, in one REQ', async () => {
+  it('asks for one author per subscription', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;
-    await seedCache(dbName, [
-      makeEvent({ id: 'e1', pubkey: 'alice', created_at: 1_700_000_100 }),
-      makeEvent({ id: 'e2', pubkey: 'bob', created_at: 1_700_000_200 }),
-      makeEvent({ id: 'e3', pubkey: 'alice', created_at: 1_700_000_300 }),
-    ]);
+    await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
     const { controller } = createController(dbName);
-
     await controller.start({ kinds: [1], limit: 10 });
-    await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
 
-    const subscription = profileSubscription(controller);
-    // Three events, two authors, one REQ — the debounce coalesces the burst and
-    // an author is never named twice.
-    expect(subscription?.filters).toHaveLength(1);
-    expect(subscription?.filters[0].kinds).toEqual([0]);
-    expect([...(subscription?.filters[0].authors ?? [])].sort()).toEqual(['alice', 'bob']);
+    controller.requestProfile('alice');
+    controller.requestProfile('bob');
+
+    // One author per filter is what lets the relay's freshness window decide
+    // per author: a filter naming several is forwarded upstream in full as soon
+    // as any one of them is missing from the cache.
+    const filters = profileSubscriptions(controller).map((sub) => sub.filters);
+    expect(filters).toEqual([
+      [{ kinds: [0], authors: ['alice'] }],
+      [{ kinds: [0], authors: ['bob'] }],
+    ]);
+  });
+
+  it('ignores a repeat request for an author already asked about', async () => {
+    const { controller } = createController();
+    await controller.start({ kinds: [1], limit: 10 });
+
+    // Synchronous, so neither lookup can have finished in between: the same
+    // card scrolling out and back must not re-open a subscription.
+    controller.requestProfile('alice');
+    controller.requestProfile('alice');
+
+    expect(profileSubscriptions(controller)).toHaveLength(1);
+  });
+
+  it('caps how many lookups run at once, then drains the queue', async () => {
+    const dbName = `controller-${crypto.randomUUID()}`;
+    const authors = ['a', 'b', 'c', 'd', 'e', 'f'];
+    await seedCache(dbName, [
+      makeEvent({ id: 'e1', pubkey: 'a' }),
+      ...authors.map((pubkey) =>
+        makeEvent({
+          id: `p-${pubkey}`,
+          pubkey,
+          kind: 0,
+          content: JSON.stringify({ name: pubkey }),
+        })
+      ),
+    ]);
+    const { controller, states } = createController(dbName);
+    await controller.start({ kinds: [1], limit: 10 });
+
+    for (const pubkey of authors) {
+      controller.requestProfile(pubkey);
+    }
+
+    // The relay caps a client at 20 subscriptions and an iframe sized to its
+    // content can have every card visible at once, so the burst has to queue.
+    expect(profileSubscriptions(controller)).toHaveLength(4);
+
+    await waitFor(
+      () => (states.at(-1)?.profiles.size ?? 0) === authors.length,
+      'every queued lookup to deliver'
+    );
+    // Each lookup lingers for the post-EOSE grace period, then closes: nothing
+    // is left holding a subscription once the queue has drained.
+    await waitFor(
+      () => profileSubscriptions(controller).length === 0,
+      'every lookup to close itself'
+    );
   });
 
   it('renders a delivered profile and ignores an older copy of it', async () => {
@@ -202,6 +257,7 @@ describe('TimelineController', () => {
     const { controller, states } = createController(dbName);
 
     await controller.start({ kinds: [1], limit: 10 });
+    controller.requestProfile('alice');
     await waitFor(
       () => states.at(-1)?.profiles.get('alice') !== undefined,
       "alice's profile to arrive"
@@ -218,29 +274,6 @@ describe('TimelineController', () => {
     expect(states.at(-1)?.profiles.get('alice')).toEqual({ name: 'alice' });
   });
 
-  it('names only the authors still on screen, so the filter cannot grow without bound', async () => {
-    const dbName = `controller-${crypto.randomUUID()}`;
-    await seedCache(dbName, [
-      makeEvent({ id: 'e1', pubkey: 'alice', created_at: 1_700_000_100 }),
-      makeEvent({ id: 'e2', pubkey: 'bob', created_at: 1_700_000_200 }),
-    ]);
-    const states: TimelineState[] = [];
-    const controller = new TimelineController({
-      host: { dbName },
-      maxEvents: 1,
-      onChange: (state) => states.push(state),
-    });
-    controllers.push(controller);
-
-    await controller.start({ kinds: [1], limit: 10 });
-    await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
-
-    // alice's event was dropped past the cap, so asking about her would grow the
-    // REQ with authors nobody can see — and the pubkeys come from upstream, so
-    // an accumulating list would let a relay decide how big our REQs get.
-    expect(profileSubscription(controller)?.filters[0].authors).toEqual(['bob']);
-  });
-
   it('counts every delivered kind 0, including one it cannot parse', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [
@@ -250,6 +283,7 @@ describe('TimelineController', () => {
     const { controller } = createController(dbName);
 
     await controller.start({ kinds: [1], limit: 10 });
+    controller.requestProfile('alice');
     await waitFor(
       () => (controller.metrics?.snapshot().delivered ?? 0) >= 2,
       'both deliveries to be classified'
@@ -266,6 +300,7 @@ describe('TimelineController', () => {
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
     const { controller } = createController(dbName);
     await controller.start({ kinds: [1], limit: 10 });
+    controller.requestProfile('alice');
     await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
 
     const host = controller.host;

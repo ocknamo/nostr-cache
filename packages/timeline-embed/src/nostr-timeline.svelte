@@ -49,13 +49,19 @@
     eose: false,
   });
 
+  // Deliberately not `$state`: nothing renders from it, the visibility callback
+  // just needs whichever controller is current when a card appears. (It also
+  // cannot be named alongside `$state` here — Svelte reads `$state` as a store
+  // subscription to the `state` variable above.)
+  let controller: TimelineController | undefined;
+
   // Attributes are reactive: changing one tears this widget's controller down
   // and builds a new one. That is safe even when this is the only widget on the
   // page — `acquireRelayHost` waits for a host that is still shutting down
   // before starting its replacement — but it does restart the relay, so prefer
   // setting the attributes before the element is connected.
   $effect(() => {
-    const controller = new TimelineController({
+    const active = new TimelineController({
       host: {
         upstreamRelays: parseRelays(relays),
         dbName: dbName || undefined,
@@ -65,10 +71,12 @@
       },
     });
 
-    void controller.start(parseFilter({ kinds, authors, limit }));
+    controller = active;
+    void active.start(parseFilter({ kinds, authors, limit }));
 
     return () => {
-      void controller.stop();
+      controller = undefined;
+      void active.stop();
     };
   });
 </script>
@@ -85,6 +93,7 @@
     profiles={state.profiles}
     showOrigin={showOrigin !== 'false'}
     showAvatars={showAvatars !== 'false'}
+    onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   />
 </div>
 

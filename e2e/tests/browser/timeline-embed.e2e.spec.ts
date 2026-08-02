@@ -33,8 +33,6 @@ describe('Embeddable timeline E2E', () => {
   let dbCounter = 0;
   /** The canned set, kept so a test can stand up its own upstream from it. */
   let cannedEvents: NostrEvent[] = [];
-  /** Pubkey of the author who publishes a kind 0. */
-  let profileAuthor = '';
 
   beforeAll(async () => {
     // The site comes up first because the canned profile's `picture` points at
@@ -58,7 +56,6 @@ describe('Embeddable timeline E2E', () => {
         }),
       }),
     ]);
-    profileAuthor = cannedEvents[0].pubkey;
     upstream = await startMockUpstreamRelay(cannedEvents);
     browser = await launchBrowser();
   });
@@ -226,24 +223,33 @@ describe('Embeddable timeline E2E', () => {
   });
 
   it('serves a cached profile without re-asking upstream, via upstreamFreshness', async () => {
-    const url = embedUrl({ relays: upstream.url, authors: profileAuthor });
+    // The whole canned set, anonymous profile-less author included: one author
+    // per filter means their missing kind 0 cannot stop the freshness window
+    // from covering the author who does have one.
+    const url = embedUrl({ relays: upstream.url });
     page = await browser.newPage();
 
     await page.goto(url);
     await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
       timeout: TIMEOUT,
     });
+    // Two visible authors, so two lookups: one each.
     const afterFirstLoad = upstream.reqCountForKind(0);
-    expect(afterFirstLoad).toBeGreaterThan(0);
+    expect(afterFirstLoad).toBeGreaterThanOrEqual(2);
 
     await page.reload();
     await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
       timeout: TIMEOUT,
     });
+    // Let the second author's lookup finish too, so the count below is settled.
+    await page.waitForTimeout(1000);
 
-    // The widget re-asks for the profile on every load; the relay's kind 0
-    // freshness window is what stops that becoming upstream traffic.
-    expect(upstream.reqCountForKind(0)).toBe(afterFirstLoad);
+    // The widget asks again for both authors on every load. Exactly one of
+    // those reaches the upstream: the anonymous author has no kind 0 to cache,
+    // so nothing can be fresh for them — while the author who does have one is
+    // served from IndexedDB. Under a single filter naming both, the missing
+    // one would have dragged the other upstream as well.
+    expect(upstream.reqCountForKind(0)).toBe(afterFirstLoad + 1);
   });
 
   it('honours show-avatars=false from the iframe query string', async () => {

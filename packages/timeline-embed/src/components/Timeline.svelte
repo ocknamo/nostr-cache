@@ -17,6 +17,11 @@
     showOrigin?: boolean;
     /** Render author avatars. */
     showAvatars?: boolean;
+    /**
+     * Called with an author's pubkey the first time one of their cards scrolls
+     * into view, so profiles are fetched for what the reader actually sees.
+     */
+    onAuthorVisible?: (pubkey: string) => void;
   }
 
   const {
@@ -27,6 +32,7 @@
     profiles = new Map(),
     showOrigin = true,
     showAvatars = true,
+    onAuthorVisible,
   }: Props = $props();
 </script>
 
@@ -43,6 +49,7 @@
             status={validationStatuses.get(event.id)}
             profile={profiles.get(event.pubkey)}
             showAvatar={showAvatars}
+            onVisible={onAuthorVisible && (() => onAuthorVisible(event.pubkey))}
           />
         </li>
       {/each}

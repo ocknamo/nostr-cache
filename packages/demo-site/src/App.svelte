@@ -258,6 +258,7 @@
         origins={timeline.origins}
         validationStatuses={timeline.validationStatuses}
         profiles={timeline.profiles}
+        onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
       />
     </div>
   </section>

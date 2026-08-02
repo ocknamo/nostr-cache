@@ -16,9 +16,41 @@
     profile?: Profile;
     /** Render the author's avatar. */
     showAvatar?: boolean;
+    /**
+     * Called once, when the card first enters the viewport. The timeline uses
+     * this to look up the author's profile only for cards a reader can see.
+     */
+    onVisible?: () => void;
   }
 
-  const { event, origin, status, profile, showAvatar = true }: Props = $props();
+  const { event, origin, status, profile, showAvatar = true, onVisible }: Props = $props();
+
+  /**
+   * Report the card's first appearance on screen, then stop watching.
+   *
+   * Falls back to reporting immediately where `IntersectionObserver` is missing
+   * (jsdom, older browsers): the lookup being eager is a far better failure than
+   * every author staying an anonymous pubkey.
+   */
+  function whenVisible(node: HTMLElement, callback?: () => void) {
+    if (!callback) {
+      return;
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      callback();
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        callback();
+      }
+    });
+    observer.observe(node);
+    return {
+      destroy: () => observer.disconnect(),
+    };
+  }
 
   const name = $derived(authorName(event.pubkey, profile));
   const handle = $derived(authorHandle(event.pubkey, profile));
@@ -34,7 +66,7 @@
   }
 </script>
 
-<article class="event-card" class:with-avatar={showAvatar}>
+<article class="event-card" class:with-avatar={showAvatar} use:whenVisible={onVisible}>
   {#if showAvatar}
     <Avatar pubkey={event.pubkey} {profile} {name} />
   {/if}

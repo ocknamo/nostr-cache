@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EventOrigin } from '../lib/cache-metrics.ts';
 import type { Profile } from '../lib/profile.ts';
 import { makeEvent } from '../test-fixtures.ts';
@@ -75,6 +75,17 @@ describe('Timeline', () => {
     render(Timeline, { props: { events, profiles: new Map<string, Profile>(), eose: true } });
 
     expect(screen.getByText('pk000000…00000000')).toBeInTheDocument();
+  });
+
+  it('reports the author of each card that becomes visible', () => {
+    const events = [makeEvent({ id: 'a', pubkey: 'alice' }), makeEvent({ id: 'b', pubkey: 'bob' })];
+    const onAuthorVisible = vi.fn();
+
+    // jsdom has no IntersectionObserver, so EventCard reports straight away —
+    // which is exactly the path this asserts: the right pubkey per card.
+    render(Timeline, { props: { events, onAuthorVisible, eose: true } });
+
+    expect(onAuthorVisible.mock.calls.map(([pubkey]) => pubkey)).toEqual(['alice', 'bob']);
   });
 
   it('hides avatars when showAvatars is false', () => {
