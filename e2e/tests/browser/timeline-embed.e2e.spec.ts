@@ -130,7 +130,9 @@ describe('Embeddable timeline E2E', () => {
 
   it('fetches events from the upstream relay and labels them as such', async () => {
     page = await browser.newPage();
-    await page.goto(embedUrl({ relays: upstream.url }));
+    // `debug` because the origin badges these assertions read are diagnostic
+    // and off by default; the fetching itself is unaffected by the flag.
+    await page.goto(embedUrl({ relays: upstream.url, debug: 'true' }));
     await waitForEventCount(page, 2);
 
     // Read the cards themselves: the host element's own textContent is empty
@@ -144,7 +146,7 @@ describe('Embeddable timeline E2E', () => {
   });
 
   it('serves the same events from the local cache after a reload', async () => {
-    const url = embedUrl({ relays: upstream.url });
+    const url = embedUrl({ relays: upstream.url, debug: 'true' });
     page = await browser.newPage();
 
     await page.goto(url);
@@ -180,12 +182,23 @@ describe('Embeddable timeline E2E', () => {
     expect(upstream.reqCountForKind(1)).toBeGreaterThan(afterFirstLoad);
   });
 
-  it('hides the origin badges when show-origin is false', async () => {
+  it('hides the origin badges unless debug is set', async () => {
     page = await browser.newPage();
-    await page.goto(embedUrl({ relays: upstream.url, 'show-origin': 'false' }));
+    await page.goto(embedUrl({ relays: upstream.url }));
     await waitForEventCount(page, 2);
 
+    // The badges are a diagnostic for whoever embeds the widget; a reader of
+    // the embedding site should never see them.
     expect(await originBadges(page)).toEqual([]);
+  });
+
+  it('renders the origin badges for a bare debug flag in the query string', async () => {
+    page = await browser.newPage();
+    // `?debug` with no value, the way an HTML boolean attribute reads.
+    await page.goto(`${embedUrl({ relays: upstream.url })}&debug`);
+    await waitForEventCount(page, 2);
+
+    expect(await originBadges(page)).toEqual(['upstream', 'upstream']);
   });
 
   it('fetches kind 0 and renders the author with their name and avatar', async () => {
@@ -308,7 +321,7 @@ describe('Embeddable timeline E2E', () => {
     // Its own upstream, because this test shuts it down partway through and the
     // shared one has to stay usable for the rest of the suite.
     const disposable = await startMockUpstreamRelay(cannedEvents);
-    const url = embedUrl({ relays: disposable.url });
+    const url = embedUrl({ relays: disposable.url, debug: 'true' });
     page = await browser.newPage();
 
     await page.goto(url);

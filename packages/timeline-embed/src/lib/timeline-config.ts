@@ -103,6 +103,35 @@ export function parseFreshness(value: string | null | undefined): number | undef
   return parsed;
 }
 
+/**
+ * Parse the `debug` switch that turns the widget's diagnostic UI on.
+ *
+ * Off unless asked for: the `cache` / `upstream` badges exist to show that the
+ * cache is working, which is a thing the *embedder* wants to verify — a reader
+ * of the embedding site has no use for them.
+ *
+ * A bare `debug` (attribute with no value, or `?debug` in an iframe URL) arrives
+ * as an empty string and counts as "on", matching how HTML boolean attributes
+ * read. Anything else — including `false` and `0` — leaves it off.
+ *
+ * Booleans are accepted as well as strings: a Svelte parent writing
+ * `<nostr-timeline debug>` sets the custom element's property rather than an
+ * attribute, so what arrives is `true`, not `""`.
+ *
+ * @param value Raw attribute, property or query-parameter value
+ * @returns Whether debug UI should be rendered
+ */
+export function parseDebug(value: string | boolean | null | undefined): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === '' || normalized === 'true' || normalized === '1';
+}
+
 export interface FilterInput {
   kinds?: string | null;
   authors?: string | null;
@@ -142,7 +171,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   dbName: string | undefined;
   /** Seconds a cached profile is served for; `undefined` keeps the default. */
   profileFreshness: number | undefined;
-  showOrigin: boolean;
+  /** Whether to render the diagnostic `cache` / `upstream` badges. */
+  debug: boolean;
 } {
   return {
     relays: parseRelays(params.get('relays')),
@@ -153,6 +183,6 @@ export function configFromSearchParams(params: URLSearchParams): {
     }),
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
-    showOrigin: params.get('show-origin') !== 'false',
+    debug: parseDebug(params.get('debug')),
   };
 }

@@ -102,7 +102,6 @@ describe('<nostr-timeline> custom element', () => {
 
   it('reflects attributes into the rendered timeline', async () => {
     const element = document.createElement('nostr-timeline');
-    element.setAttribute('show-origin', 'false');
     element.setAttribute('kinds', '1');
     element.setAttribute('limit', '5');
     document.body.appendChild(element);

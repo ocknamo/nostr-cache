@@ -39,6 +39,7 @@ export {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
   configFromSearchParams,
+  parseDebug,
   parseFilter,
   parseFreshness,
   parseRelays,

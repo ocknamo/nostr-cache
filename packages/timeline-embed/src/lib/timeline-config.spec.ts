@@ -3,6 +3,7 @@ import {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
   configFromSearchParams,
+  parseDebug,
   parseFilter,
   parseFreshness,
   parseRelays,
@@ -115,11 +116,39 @@ describe('parseFreshness', () => {
   });
 });
 
+describe('parseDebug', () => {
+  it('is on for a bare flag and for an explicit true', () => {
+    // `<nostr-timeline debug>` and `?debug` both arrive as an empty string.
+    expect(parseDebug('')).toBe(true);
+    expect(parseDebug('true')).toBe(true);
+    expect(parseDebug('TRUE')).toBe(true);
+    expect(parseDebug('1')).toBe(true);
+  });
+
+  it('is off when absent', () => {
+    expect(parseDebug(null)).toBe(false);
+    expect(parseDebug(undefined)).toBe(false);
+  });
+
+  it('accepts a real boolean, which is what a Svelte parent passes', () => {
+    // `<nostr-timeline debug>` inside a Svelte component sets the custom
+    // element's property, so the value arrives as `true` rather than `""`.
+    expect(parseDebug(true)).toBe(true);
+    expect(parseDebug(false)).toBe(false);
+  });
+
+  it('is off for anything that does not read as "on"', () => {
+    expect(parseDebug('false')).toBe(false);
+    expect(parseDebug('0')).toBe(false);
+    expect(parseDebug('no')).toBe(false);
+  });
+});
+
 describe('configFromSearchParams', () => {
   it('reads the same options the custom element takes as attributes', () => {
     const config = configFromSearchParams(
       new URLSearchParams(
-        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&profile-freshness=600&show-origin=false'
+        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&profile-freshness=600&debug=true'
       )
     );
 
@@ -128,14 +157,14 @@ describe('configFromSearchParams', () => {
       filter: { kinds: [1, 7], authors: ['abc'], limit: 20 },
       dbName: 'demo',
       profileFreshness: 600,
-      showOrigin: false,
+      debug: true,
     });
   });
 
-  it('defaults to showing origin badges and no explicit database name', () => {
+  it('keeps the debug badges off and takes no explicit database name by default', () => {
     const config = configFromSearchParams(new URLSearchParams(''));
 
-    expect(config.showOrigin).toBe(true);
+    expect(config.debug).toBe(false);
     expect(config.dbName).toBeUndefined();
     expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);

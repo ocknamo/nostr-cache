@@ -21,17 +21,20 @@
   const origin = typeof location === 'undefined' ? '' : location.origin;
 
   const query = $derived(
-    new URLSearchParams({ relays, kinds, limit, 'show-origin': 'true' }).toString()
+    // `debug` so the live examples below keep showing the cache/upstream
+    // badges: they are this page's whole point, and the widget hides them by
+    // default now (they are a diagnostic, not part of an embedded timeline).
+    new URLSearchParams({ relays, kinds, limit, debug: 'true' }).toString()
   );
   const iframeSrc = $derived(`${baseUrl}embed/?${query}`);
   const embedOrigin = $derived(`${origin}${baseUrl}`);
 
   const iframeSnippet = $derived(
-    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
+    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}&debug"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
   );
 
   const webComponentSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"\n></nostr-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"\n  debug\n></nostr-timeline>`
   );
 
   /** Bounds on the height the embed page may ask for. */
@@ -124,7 +127,11 @@
         （対象外の URL は元の実装へそのまま通ります）。
       </p>
       <div class="live">
-        <nostr-timeline {relays} {kinds} {limit} db-name={dbName}></nostr-timeline>
+        <!-- `debug="true"` rather than a bare `debug`: Svelte sets a bare
+             attribute as the custom element's *property* (a real boolean),
+             while plain HTML sets the attribute — the widget accepts both, but
+             the explicit string is the one this page can be read off. -->
+        <nostr-timeline {relays} {kinds} {limit} db-name={dbName} debug="true"></nostr-timeline>
       </div>
       <div class="snippet">
         <pre><code>{webComponentSnippet}</code></pre>
@@ -137,6 +144,12 @@
     ページ内に複数の <code>&lt;nostr-timeline&gt;</code> を置いた場合、リレーは 1 つだけ起動して
     共有されます（購読はウィジェットごとに独立）。最初に mount されたウィジェットの設定が採用され、
     異なる設定を要求したウィジェットには警告が出ます。設定を分けたい場合は iframe を使ってください。
+  </p>
+
+  <p class="footnote">
+    <code>debug</code> を付けると各投稿に <code>cache</code> / <code>upstream</code>
+    バッジが出ます（上の 2 例はどちらも付けています）。動作確認用の表示なので、
+    実際の埋め込みでは外してください。
   </p>
 
   <p class="footnote">

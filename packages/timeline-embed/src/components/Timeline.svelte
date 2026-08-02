@@ -13,7 +13,12 @@
     validationStatuses?: Map<string, ValidationStatus>;
     /** Author profiles (kind 0), keyed by pubkey. */
     profiles?: Map<string, Profile>;
-    /** Render the cache/upstream badge on each event. */
+    /**
+     * Render the diagnostic cache/upstream badge on each event. On by default
+     * for direct users of this component (the demo site is one, and showing the
+     * cache working is its whole point); `<nostr-timeline>` gates it behind its
+     * `debug` attribute instead, so an embedded widget stays badge-free.
+     */
     showOrigin?: boolean;
     /** Render author avatars. */
     showAvatars?: boolean;

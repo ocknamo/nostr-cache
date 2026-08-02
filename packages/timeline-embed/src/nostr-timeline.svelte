@@ -8,7 +8,7 @@
       limit: { attribute: 'limit' },
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
-      showOrigin: { attribute: 'show-origin' },
+      debug: { attribute: 'debug' },
       showAvatars: { attribute: 'show-avatars' },
     },
   }}
@@ -17,7 +17,7 @@
 <script lang="ts">
   import Timeline from './components/Timeline.svelte';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
-  import { parseFilter, parseFreshness, parseRelays } from './lib/timeline-config.ts';
+  import { parseDebug, parseFilter, parseFreshness, parseRelays } from './lib/timeline-config.ts';
 
   interface Props {
     /** Comma-separated upstream relay URLs. Empty = cache-only. */
@@ -35,8 +35,15 @@
      * upstream. Defaults to a day; `0` re-asks on every lookup.
      */
     profileFreshness?: string;
-    /** Set to "false" to hide the cache/upstream badges. */
-    showOrigin?: string;
+    /**
+     * Set (`debug` / `debug="true"`) to render the diagnostic cache/upstream
+     * badges. Off by default — they are for checking that the cache works, not
+     * for the readers of the embedding page.
+     *
+     * Typed as a boolean too because a Svelte parent's bare `debug` sets the
+     * property rather than the attribute.
+     */
+    debug?: string | boolean;
     /**
      * Set to "false" to hide author avatars. Names are still fetched; this only
      * stops the widget from loading images from whatever host a profile names.
@@ -51,7 +58,7 @@
     limit,
     dbName,
     profileFreshness,
-    showOrigin,
+    debug,
     showAvatars,
   }: Props = $props();
 
@@ -110,7 +117,7 @@
     origins={state.origins}
     validationStatuses={state.validationStatuses}
     profiles={state.profiles}
-    showOrigin={showOrigin !== 'false'}
+    showOrigin={parseDebug(debug)}
     showAvatars={showAvatars !== 'false'}
     onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   />
