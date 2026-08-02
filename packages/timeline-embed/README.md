@@ -171,7 +171,7 @@ nostr-timeline {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **245 KB（gzip 約 84 KB）** の自己完結した IIFE です。
+`dist/nostr-timeline.js` は約 **252 KB（gzip 約 86 KB）** の自己完結した IIFE です。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）と
 署名検証用の `rx-nostr-crypto` で、これらはリレー本体の機能に必要です。
