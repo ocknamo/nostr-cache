@@ -75,6 +75,34 @@ function parseNumberList(value: string | null | undefined): number[] {
   return numbers;
 }
 
+/**
+ * Parse the kind 0 freshness window (`profile-freshness`) out of a string
+ * input.
+ *
+ * Whole seconds; `0` turns the window off, so every profile lookup is forwarded
+ * upstream. Anything unparseable is ignored with a warning, leaving the caller's
+ * default (`DEFAULT_PROFILE_FRESHNESS`) in place — a typo in an embed URL should
+ * cost the reader nothing more than the default behaviour.
+ *
+ * @param value Raw attribute or query-parameter value, e.g. `"3600"`
+ * @returns Seconds, or `undefined` when nothing usable was given
+ */
+export function parseFreshness(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  // Negatives are rejected rather than read as "off": the relay counts seconds,
+  // so a negative one is a mistake, and 0 already spells the disable case.
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(
+      `[nostr-timeline] Ignoring invalid profile-freshness (expected whole seconds, 0 to disable): ${value}`
+    );
+    return undefined;
+  }
+  return parsed;
+}
+
 export interface FilterInput {
   kinds?: string | null;
   authors?: string | null;
@@ -112,6 +140,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   relays: string[];
   filter: Filter;
   dbName: string | undefined;
+  /** Seconds a cached profile is served for; `undefined` keeps the default. */
+  profileFreshness: number | undefined;
   showOrigin: boolean;
 } {
   return {
@@ -122,6 +152,7 @@ export function configFromSearchParams(params: URLSearchParams): {
       limit: params.get('limit'),
     }),
     dbName: params.get('db-name') ?? undefined,
+    profileFreshness: parseFreshness(params.get('profile-freshness')),
     showOrigin: params.get('show-origin') !== 'false',
   };
 }

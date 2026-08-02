@@ -263,6 +263,34 @@ describe('Embeddable timeline E2E', () => {
     expect(upstream.reqCountForKind(0)).toBe(afterFirstLoad + 1);
   });
 
+  it('honours profile-freshness=0 from the iframe query string', async () => {
+    // The default window is a day, so without the parameter reaching the relay
+    // the reload below would serve both profiles from IndexedDB and no REQ
+    // would leave the page — which is exactly what this asserts against.
+    const url = embedUrl({ relays: upstream.url, 'profile-freshness': '0' });
+    const beforeFirstLoad = upstream.reqCountForKind(0);
+    page = await browser.newPage();
+
+    await page.goto(url);
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    await expect
+      .poll(() => upstream.reqCountForKind(0), { timeout: TIMEOUT })
+      .toBe(beforeFirstLoad + 2);
+    const afterFirstLoad = upstream.reqCountForKind(0);
+
+    await page.reload();
+    await page.waitForSelector('nostr-timeline .name:text-is("E2E テスト著者")', {
+      timeout: TIMEOUT,
+    });
+    // Both authors are looked up again and, with the window switched off, both
+    // lookups are forwarded upstream even though one profile is cached.
+    await expect
+      .poll(() => upstream.reqCountForKind(0), { timeout: TIMEOUT })
+      .toBe(afterFirstLoad + 2);
+  });
+
   it('honours show-avatars=false from the iframe query string', async () => {
     page = await browser.newPage();
     await page.goto(embedUrl({ relays: upstream.url, 'show-avatars': 'false' }));

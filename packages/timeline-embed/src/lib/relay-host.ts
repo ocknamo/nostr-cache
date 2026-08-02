@@ -46,10 +46,15 @@ export const DEFAULT_LAZY_VALIDATE_INTERVAL = 5;
  * asks for what it wants to display and lets the window suppress the redundant
  * upstream traffic.
  *
- * Five minutes comfortably covers a page view while still letting a profile
- * edit show up on a later visit.
+ * A day, because that is the timescale profiles actually change on: avatars and
+ * display names are edited rarely, while a reader who returns to the same page
+ * within the day is the common case. A shorter window spends an upstream REQ per
+ * visible author on every visit to re-fetch a profile that almost never differs.
+ * Embedders who want edits picked up sooner can shorten it — `profile-freshness`
+ * on the element / in the iframe query string, or `profileFreshness` when
+ * calling {@link acquireRelayHost} directly.
  */
-export const DEFAULT_PROFILE_FRESHNESS = 300;
+export const DEFAULT_PROFILE_FRESHNESS = 86_400;
 
 export interface RelayHostConfig {
   /** Upstream relay URLs (`wss://…`). Empty means a cache-only relay. */

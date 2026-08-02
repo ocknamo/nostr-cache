@@ -7,6 +7,7 @@
       authors: { attribute: 'authors' },
       limit: { attribute: 'limit' },
       dbName: { attribute: 'db-name' },
+      profileFreshness: { attribute: 'profile-freshness' },
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
     },
@@ -16,7 +17,7 @@
 <script lang="ts">
   import Timeline from './components/Timeline.svelte';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
-  import { parseFilter, parseRelays } from './lib/timeline-config.ts';
+  import { parseFilter, parseFreshness, parseRelays } from './lib/timeline-config.ts';
 
   interface Props {
     /** Comma-separated upstream relay URLs. Empty = cache-only. */
@@ -29,6 +30,11 @@
     limit?: string;
     /** IndexedDB database name for the shared cache. */
     dbName?: string;
+    /**
+     * Seconds a cached profile (kind 0) is shown before the relay re-asks
+     * upstream. Defaults to a day; `0` re-asks on every lookup.
+     */
+    profileFreshness?: string;
     /** Set to "false" to hide the cache/upstream badges. */
     showOrigin?: string;
     /**
@@ -38,7 +44,16 @@
     showAvatars?: string;
   }
 
-  const { relays, kinds, authors, limit, dbName, showOrigin, showAvatars }: Props = $props();
+  const {
+    relays,
+    kinds,
+    authors,
+    limit,
+    dbName,
+    profileFreshness,
+    showOrigin,
+    showAvatars,
+  }: Props = $props();
 
   let state = $state<TimelineState>({
     status: 'disconnected',
@@ -65,6 +80,10 @@
       host: {
         upstreamRelays: parseRelays(relays),
         dbName: dbName || undefined,
+        // Left undefined when unset so the host keeps its own default rather
+        // than this widget pinning one — which also keeps two widgets that both
+        // omit the attribute from looking like conflicting configurations.
+        profileFreshness: parseFreshness(profileFreshness),
       },
       onChange: (next) => {
         state = next;

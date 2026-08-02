@@ -40,6 +40,7 @@ export {
   DEFAULT_LIMIT,
   configFromSearchParams,
   parseFilter,
+  parseFreshness,
   parseRelays,
 } from './timeline-config.ts';
 export type { FilterInput } from './timeline-config.ts';

@@ -2,7 +2,12 @@
 import 'fake-indexeddb/auto';
 import { NostrCacheRelay, WebSocketServerEmulator } from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
+import {
+  DEFAULT_PROFILE_FRESHNESS,
+  type RelayHost,
+  acquireRelayHost,
+  getRelayHostRefCount,
+} from './relay-host.ts';
 
 /**
  * The shared relay host is the piece most likely to break the embedding page:
@@ -208,16 +213,25 @@ describe('acquireRelayHost', () => {
       return (host.relay as unknown as { freshnessGate?: unknown }).freshnessGate !== undefined;
     }
 
-    it('configures a kind 0 window by default', async () => {
+    /** Seconds the relay was actually given for kind 0, if any. */
+    function windowForKind0(host: RelayHost): number | undefined {
+      const gate = (host.relay as unknown as { freshnessGate?: { windows: Map<number, number> } })
+        .freshnessGate;
+      return gate?.windows.get(0);
+    }
+
+    it('configures a day-long kind 0 window by default', async () => {
       const host = await acquire();
 
       expect(hasFreshnessGate(host)).toBe(true);
+      expect(windowForKind0(host)).toBe(DEFAULT_PROFILE_FRESHNESS);
+      expect(DEFAULT_PROFILE_FRESHNESS).toBe(24 * 60 * 60);
     });
 
     it('accepts an overridden window', async () => {
       const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, profileFreshness: 30 });
 
-      expect(hasFreshnessGate(host)).toBe(true);
+      expect(windowForKind0(host)).toBe(30);
     });
 
     it('treats a non-positive window as "no window" rather than failing to start', async () => {

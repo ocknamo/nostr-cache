@@ -2,7 +2,11 @@
 // fake-indexeddb backs the DexieStorage the widget boots on mount.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { getRelayHostRefCount } from './lib/relay-host.ts';
+import {
+  DEFAULT_PROFILE_FRESHNESS,
+  acquireRelayHost,
+  getRelayHostRefCount,
+} from './lib/relay-host.ts';
 
 /**
  * Verifies the packaging contract of the embed bundle: importing the entry
@@ -58,6 +62,42 @@ describe('<nostr-timeline> custom element', () => {
     first.remove();
     await waitFor(() => getRelayHostRefCount() === 1, 'the first widget to release');
     expect(second.shadowRoot?.querySelector('.timeline')).toBeTruthy();
+  });
+
+  /**
+   * The `profile-freshness` attribute only matters if it reaches the relay, and
+   * nothing on screen would show it if the wiring were dropped — so join the
+   * running host (with a matching config, so no conflict is warned about) and
+   * read the window it was built with.
+   */
+  describe('profile-freshness attribute', () => {
+    async function windowForKind0(profileFreshness: number): Promise<number | undefined> {
+      const host = await acquireRelayHost({ profileFreshness });
+      try {
+        const gate = (host.relay as unknown as { freshnessGate?: { windows: Map<number, number> } })
+          .freshnessGate;
+        return gate?.windows.get(0);
+      } finally {
+        await host.release();
+      }
+    }
+
+    it('passes the configured window to the relay', async () => {
+      const element = document.createElement('nostr-timeline');
+      element.setAttribute('profile-freshness', '60');
+      document.body.appendChild(element);
+      await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+
+      expect(await windowForKind0(60)).toBe(60);
+    });
+
+    it('falls back to the default day-long window when the attribute is absent', async () => {
+      const element = document.createElement('nostr-timeline');
+      document.body.appendChild(element);
+      await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+
+      expect(await windowForKind0(DEFAULT_PROFILE_FRESHNESS)).toBe(DEFAULT_PROFILE_FRESHNESS);
+    });
   });
 
   it('reflects attributes into the rendered timeline', async () => {

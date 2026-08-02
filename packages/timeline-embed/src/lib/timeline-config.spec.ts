@@ -4,6 +4,7 @@ import {
   DEFAULT_LIMIT,
   configFromSearchParams,
   parseFilter,
+  parseFreshness,
   parseRelays,
 } from './timeline-config.ts';
 
@@ -87,11 +88,38 @@ describe('parseFilter', () => {
   });
 });
 
+describe('parseFreshness', () => {
+  it('parses whole seconds', () => {
+    expect(parseFreshness('3600')).toBe(3600);
+    expect(parseFreshness(' 60 ')).toBe(60);
+  });
+
+  it('reads zero as "no window" rather than as a missing value', () => {
+    expect(parseFreshness('0')).toBe(0);
+  });
+
+  it('returns undefined for empty or missing input, leaving the default in place', () => {
+    expect(parseFreshness(undefined)).toBeUndefined();
+    expect(parseFreshness(null)).toBeUndefined();
+    expect(parseFreshness('')).toBeUndefined();
+    expect(parseFreshness('   ')).toBeUndefined();
+  });
+
+  it('warns and falls back to the default for negative and unparseable values', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseFreshness('-1')).toBeUndefined();
+    expect(parseFreshness('1.5')).toBeUndefined();
+    expect(parseFreshness('a day')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe('configFromSearchParams', () => {
   it('reads the same options the custom element takes as attributes', () => {
     const config = configFromSearchParams(
       new URLSearchParams(
-        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&show-origin=false'
+        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&profile-freshness=600&show-origin=false'
       )
     );
 
@@ -99,6 +127,7 @@ describe('configFromSearchParams', () => {
       relays: ['wss://a.example'],
       filter: { kinds: [1, 7], authors: ['abc'], limit: 20 },
       dbName: 'demo',
+      profileFreshness: 600,
       showOrigin: false,
     });
   });
@@ -108,6 +137,7 @@ describe('configFromSearchParams', () => {
 
     expect(config.showOrigin).toBe(true);
     expect(config.dbName).toBeUndefined();
+    expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);
     expect(config.filter).toEqual({ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT });
   });
