@@ -201,6 +201,16 @@ describe('Embeddable timeline E2E', () => {
     expect(await originBadges(page)).toEqual(['upstream', 'upstream']);
   });
 
+  it('still honours the deprecated show-origin=true from an older embed URL', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url, 'show-origin': 'true' }));
+    await waitForEventCount(page, 2);
+
+    // Embeds written before the badges became opt-in asked for them explicitly;
+    // that request still stands, even though the attribute is deprecated.
+    expect(await originBadges(page)).toEqual(['upstream', 'upstream']);
+  });
+
   it('fetches kind 0 and renders the author with their name and avatar', async () => {
     page = await browser.newPage();
     await page.goto(embedUrl({ relays: upstream.url }));

@@ -3,12 +3,14 @@
   // the real widget rather than a lookalike.
   import '@nostr-cache/timeline-embed/embed';
   import {
+    DEFAULT_PROFILE_FRESHNESS,
     type MetricsSnapshot,
     type TimelineState,
     Timeline,
     TimelineController,
     getRelayHostRefCount,
     parseFilter,
+    parseFreshness,
     parseRelays,
   } from '@nostr-cache/timeline-embed';
   import { onMount, tick } from 'svelte';
@@ -22,6 +24,10 @@
     relays: 'wss://yabu.me',
     kinds: '1',
     limit: '50',
+    /** Seconds a cached kind 0 is served for — the widget's own default. */
+    profileFreshness: String(DEFAULT_PROFILE_FRESHNESS),
+    /** On here, unlike a real embed: the badges are what this page is showing. */
+    debug: true,
   };
   /** How often the IndexedDB row count is refreshed. */
   const STORED_COUNT_INTERVAL_MS = 2000;
@@ -57,13 +63,16 @@
 
   const relays = $derived(parseRelays(settings.relays));
   const filter = $derived(parseFilter({ kinds: settings.kinds, limit: settings.limit }));
+  // Undefined for an unparseable entry, which leaves the widget's own default in
+  // place — the same thing an embed with a typo'd attribute gets.
+  const profileFreshness = $derived(parseFreshness(settings.profileFreshness));
 
   let unsubscribeMetrics: (() => void) | undefined;
   let countTimer: ReturnType<typeof setInterval> | undefined;
 
   async function startSession(): Promise<void> {
     controller = new TimelineController({
-      host: { upstreamRelays: relays, dbName: DEMO_DB_NAME },
+      host: { upstreamRelays: relays, dbName: DEMO_DB_NAME, profileFreshness },
       onChange: (next) => {
         timeline = next;
       },
@@ -227,6 +236,8 @@
       bind:relays={draft.relays}
       bind:kinds={draft.kinds}
       bind:limit={draft.limit}
+      bind:profileFreshness={draft.profileFreshness}
+      bind:debug={draft.debug}
       busy={restarting}
       onApply={applySettings}
     />
@@ -276,6 +287,8 @@
       relays={settings.relays}
       kinds={settings.kinds}
       limit={settings.limit}
+      profileFreshness={settings.profileFreshness}
+      debug={settings.debug}
       dbName={DEMO_DB_NAME}
     />
   {/if}

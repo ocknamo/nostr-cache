@@ -7,6 +7,14 @@
     kinds: string;
     limit: string;
     /**
+     * Seconds a cached profile is served for. Passed through to both examples so
+     * the in-page one asks for the same relay the demo is already running — a
+     * page shares one relay, and a differing setting only earns a warning.
+     */
+    profileFreshness: string;
+    /** Render the diagnostic cache/upstream badges in both examples. */
+    debug: boolean;
+    /**
      * Database name the page's relay is already running with. The in-page
      * widget must ask for the same one: a page shares a single relay, and a
      * widget requesting different settings gets a console warning and the
@@ -15,26 +23,31 @@
     dbName: string;
   }
 
-  const { relays, kinds, limit, dbName }: Props = $props();
+  const { relays, kinds, limit, profileFreshness, debug, dbName }: Props = $props();
 
   const baseUrl = import.meta.env.BASE_URL;
   const origin = typeof location === 'undefined' ? '' : location.origin;
 
   const query = $derived(
-    // `debug` so the live examples below keep showing the cache/upstream
-    // badges: they are this page's whole point, and the widget hides them by
-    // default now (they are a diagnostic, not part of an embedded timeline).
-    new URLSearchParams({ relays, kinds, limit, debug: 'true' }).toString()
+    new URLSearchParams({
+      relays,
+      kinds,
+      limit,
+      'profile-freshness': profileFreshness,
+      // The badges are a diagnostic and the widget hides them by default; this
+      // page turns them on because showing them is its whole point.
+      ...(debug ? { debug: 'true' } : {}),
+    }).toString()
   );
   const iframeSrc = $derived(`${baseUrl}embed/?${query}`);
   const embedOrigin = $derived(`${origin}${baseUrl}`);
 
   const iframeSnippet = $derived(
-    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}&debug"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
+    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}&profile-freshness=${profileFreshness}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
   );
 
   const webComponentSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"\n  debug\n></nostr-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"\n  profile-freshness="${profileFreshness}"${debug ? '\n  debug' : ''}\n></nostr-timeline>`
   );
 
   /** Bounds on the height the embed page may ask for. */
@@ -127,11 +140,19 @@
         （対象外の URL は元の実装へそのまま通ります）。
       </p>
       <div class="live">
-        <!-- `debug="true"` rather than a bare `debug`: Svelte sets a bare
+        <!-- The string form rather than a bare `debug`: Svelte would set a bare
              attribute as the custom element's *property* (a real boolean),
-             while plain HTML sets the attribute — the widget accepts both, but
-             the explicit string is the one this page can be read off. -->
-        <nostr-timeline {relays} {kinds} {limit} db-name={dbName} debug="true"></nostr-timeline>
+             while plain HTML sets the attribute. The widget accepts both, but
+             the explicit string is also what turns the flag back off when the
+             form's checkbox is cleared. -->
+        <nostr-timeline
+          {relays}
+          {kinds}
+          {limit}
+          db-name={dbName}
+          profile-freshness={profileFreshness}
+          debug={debug ? 'true' : 'false'}
+        ></nostr-timeline>
       </div>
       <div class="snippet">
         <pre><code>{webComponentSnippet}</code></pre>
@@ -148,8 +169,9 @@
 
   <p class="footnote">
     <code>debug</code> を付けると各投稿に <code>cache</code> / <code>upstream</code>
-    バッジが出ます（上の 2 例はどちらも付けています）。動作確認用の表示なので、
-    実際の埋め込みでは外してください。
+    バッジが出ます（上の設定フォームで切り替えられます）。動作確認用の表示なので、
+    実際の埋め込みでは外してください。<code>profile-freshness</code> は
+    プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数です。
   </p>
 
   <p class="footnote">

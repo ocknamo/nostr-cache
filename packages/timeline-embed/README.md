@@ -69,6 +69,7 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `86400`（24 時間） |
 | `debug` | 動作確認用。付けると各投稿に `cache` / `upstream` バッジを表示する | なし（非表示） |
+| `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 
 `profile-freshness` は iframe（`&profile-freshness=3600`）と Web Component
@@ -80,6 +81,10 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 `debug` は値なしの `debug`（iframe なら `&debug`）でも `debug="true"` でも有効になります。
 `cache` / `upstream` バッジは**キャッシュが効いていることを埋め込む側が確認するための表示**なので、
 既定では出しません。実際のサイトに埋め込むときは付けないでください。
+
+旧称の `show-origin` も引き続き動きます（コンソールに非推奨の警告を 1 回出します）。
+`show-origin="true"` は `debug` と同じくバッジを表示します。ただし**属性を書かない場合は
+表示しません** — 以前は既定で表示されていましたが、そこが今回変わった点です。
 
 不正な値（WebSocket でない URL、整数でない kind、負の `profile-freshness` など）は
 警告を出して無視されます（既定値のまま動作します）。

@@ -7,6 +7,7 @@ import {
   parseFilter,
   parseFreshness,
   parseRelays,
+  parseShowOriginAlias,
 } from './timeline-config.ts';
 
 afterEach(() => {
@@ -144,7 +145,49 @@ describe('parseDebug', () => {
   });
 });
 
+describe('parseShowOriginAlias', () => {
+  it('still turns the badges on for an explicit show-origin', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseShowOriginAlias('true')).toBe(true);
+    expect(parseShowOriginAlias('')).toBe(true);
+  });
+
+  it('keeps them off for show-origin=false and for an absent attribute', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // An embed that never mentioned the attribute must get the new default;
+    // only an explicit opt-in carries over.
+    expect(parseShowOriginAlias(null)).toBe(false);
+    expect(parseShowOriginAlias(undefined)).toBe(false);
+    expect(parseShowOriginAlias('false')).toBe(false);
+  });
+
+  it('warns that the attribute is deprecated, once per page', async () => {
+    // A fresh copy of the module, because the notice is deduplicated for the
+    // life of the module and the specs above have already tripped it.
+    vi.resetModules();
+    const fresh = await import('./timeline-config.ts');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    fresh.parseShowOriginAlias('true');
+    fresh.parseShowOriginAlias('true');
+
+    // The element re-reads its props on every update, so warning per call would
+    // fill the console of any page still using the old attribute.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('deprecated');
+  });
+});
+
 describe('configFromSearchParams', () => {
+  it('accepts the deprecated show-origin as a way to ask for the badges', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(configFromSearchParams(new URLSearchParams('show-origin=true')).debug).toBe(true);
+    expect(configFromSearchParams(new URLSearchParams('show-origin=false')).debug).toBe(false);
+  });
+
   it('reads the same options the custom element takes as attributes', () => {
     const config = configFromSearchParams(
       new URLSearchParams(

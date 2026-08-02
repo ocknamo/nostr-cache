@@ -132,6 +132,35 @@ export function parseDebug(value: string | boolean | null | undefined): boolean 
   return normalized === '' || normalized === 'true' || normalized === '1';
 }
 
+/** Keeps the `show-origin` deprecation notice to one line per page. */
+let showOriginWarned = false;
+
+/**
+ * Read the deprecated `show-origin` switch, kept so embeds written against the
+ * older attribute keep working.
+ *
+ * It can only turn the badges *on*: they used to be on unless `show-origin` said
+ * otherwise, and honouring an absent attribute as "on" would give back the very
+ * default this flag was moved away from. So `show-origin="true"` still shows
+ * them (that embedder asked for them explicitly), `show-origin="false"` still
+ * hides them, and an embed that never mentioned either gets the new default.
+ *
+ * @param value Raw attribute or query-parameter value
+ * @returns Whether this legacy switch asks for the badges
+ */
+export function parseShowOriginAlias(value: string | boolean | null | undefined): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (!showOriginWarned) {
+    showOriginWarned = true;
+    console.warn(
+      '[nostr-timeline] show-origin is deprecated; use debug to render the cache/upstream badges. They are hidden by default now.'
+    );
+  }
+  return parseDebug(value);
+}
+
 export interface FilterInput {
   kinds?: string | null;
   authors?: string | null;
@@ -183,6 +212,6 @@ export function configFromSearchParams(params: URLSearchParams): {
     }),
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
-    debug: parseDebug(params.get('debug')),
+    debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
   };
 }

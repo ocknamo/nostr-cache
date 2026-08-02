@@ -9,6 +9,7 @@
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       debug: { attribute: 'debug' },
+      showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
     },
   }}
@@ -17,7 +18,13 @@
 <script lang="ts">
   import Timeline from './components/Timeline.svelte';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
-  import { parseDebug, parseFilter, parseFreshness, parseRelays } from './lib/timeline-config.ts';
+  import {
+    parseDebug,
+    parseFilter,
+    parseFreshness,
+    parseRelays,
+    parseShowOriginAlias,
+  } from './lib/timeline-config.ts';
 
   interface Props {
     /** Comma-separated upstream relay URLs. Empty = cache-only. */
@@ -45,6 +52,12 @@
      */
     debug?: string | boolean;
     /**
+     * Deprecated spelling of `debug`, kept for embeds written before the badges
+     * became opt-in. `show-origin="true"` still shows them; an absent attribute
+     * no longer does.
+     */
+    showOrigin?: string | boolean;
+    /**
      * Set to "false" to hide author avatars. Names are still fetched; this only
      * stops the widget from loading images from whatever host a profile names.
      */
@@ -59,6 +72,7 @@
     dbName,
     profileFreshness,
     debug,
+    showOrigin,
     showAvatars,
   }: Props = $props();
 
@@ -117,7 +131,7 @@
     origins={state.origins}
     validationStatuses={state.validationStatuses}
     profiles={state.profiles}
-    showOrigin={parseDebug(debug)}
+    showOrigin={parseDebug(debug) || parseShowOriginAlias(showOrigin)}
     showAvatars={showAvatars !== 'false'}
     onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   />
