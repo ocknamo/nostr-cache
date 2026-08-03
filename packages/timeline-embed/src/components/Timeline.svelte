@@ -70,7 +70,10 @@
   ul {
     list-style: none;
     margin: 0;
-    padding: 0;
+    /* Room for the first card's date tooltip, which opens above the
+       timestamp: without it, the first card has no space above it and the
+       tooltip clips against the embed's top edge. */
+    padding: var(--nt-tip-clearance, 48px) 0 0;
     display: flex;
     flex-direction: column;
     /* Cards read as one continuous feed, the way a Nostr client renders it.
