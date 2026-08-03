@@ -87,8 +87,20 @@
     quote: '引用',
   };
 
+  /**
+   * The time of day only.
+   *
+   * The date is dropped so the name and the timestamp always fit on one line;
+   * the full date stays available as the `title` and in the `datetime`
+   * attribute.
+   */
   function formatTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString();
+    return new Date(timestamp * 1000).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
   }
 </script>
 
@@ -121,7 +133,10 @@
             {origin === 'cache' ? 'cache' : 'upstream'}
           </span>
         {/if}
-        <time datetime={new Date(event.created_at * 1000).toISOString()}>
+        <time
+          datetime={new Date(event.created_at * 1000).toISOString()}
+          title={new Date(event.created_at * 1000).toLocaleString()}
+        >
           {formatTime(event.created_at)}
         </time>
       </span>
@@ -167,9 +182,9 @@
   header {
     display: flex;
     align-items: baseline;
-    /* Narrow screens cannot fit the name and the metadata on one line, so let
-       the metadata drop to its own line instead of overflowing the card. */
-    flex-wrap: wrap;
+    /* One line, always: the name and the handle give up width (and ellipsize)
+       so the timestamp stays on the same row however narrow the embed gets. */
+    flex-wrap: nowrap;
     gap: 2px 8px;
     margin-bottom: 4px;
   }
@@ -181,7 +196,8 @@
     /* The name may be long; let it shrink and ellipsize rather than shove the
        timestamp off the card. */
     min-width: 0;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    overflow: hidden;
   }
 
   .name {
@@ -190,6 +206,16 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* A flex item defaults to min-width:auto, which refuses to shrink below the
+       text's own width — without this the ellipsis never appears. */
+    min-width: 0;
+    /* Never shrink, but never exceed the row either: flex shrinking is
+       proportional, so a shrinkable name would give up a few pixels — and pick
+       up an ellipsis — even when only the handle is too long. Capping the width
+       instead makes the handle absorb the whole squeeze first, and still
+       ellipsizes a name that is too long on its own. */
+    max-width: 100%;
+    flex: 0 0 auto;
   }
 
   .handle {
@@ -198,7 +224,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    /* Give the display name the space first: the handle is the redundant half. */
+    min-width: 0;
+    /* The only shrinkable part of the row: the handle is the redundant half, so
+       it gives up its width — down to nothing — before the name loses any. */
     flex: 0 1 auto;
   }
 
@@ -212,8 +240,9 @@
     display: flex;
     gap: 2px 8px;
     align-items: baseline;
-    flex-wrap: wrap;
-    /* Stay right-aligned even once it has wrapped onto its own line. */
+    /* The badges and the time are all short and must not be split up. */
+    flex-wrap: nowrap;
+    /* Push the metadata to the right edge whatever the name's length. */
     margin-left: auto;
     color: var(--nt-muted, #657786);
     font-size: 0.8rem;

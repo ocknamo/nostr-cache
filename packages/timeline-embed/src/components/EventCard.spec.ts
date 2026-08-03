@@ -58,6 +58,18 @@ describe('EventCard', () => {
     expect(screen.queryByRole('img', { name: 'takeshi' })).not.toBeInTheDocument();
   });
 
+  it('shows the time of day only, keeping the full date on hover', () => {
+    const event = makeEvent({ created_at: 1_700_000_000 });
+    const { container } = render(EventCard, { props: { event } });
+
+    const time = container.querySelector('time');
+    // Only hh:mm:ss — the date is dropped so the header always fits one line.
+    expect(time?.textContent?.trim()).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    const at = new Date(event.created_at * 1000);
+    expect(time).toHaveAttribute('datetime', at.toISOString());
+    expect(time).toHaveAttribute('title', at.toLocaleString());
+  });
+
   it('marks a reply with the referenced event id', () => {
     const parent = 'b'.repeat(64);
     render(EventCard, {
