@@ -89,8 +89,37 @@
 
   const createdAt = $derived(new Date(event.created_at * 1000));
 
-  /** Whether the reader has asked for the date the header leaves out. */
-  let showFullDate = $state(false);
+  /** Held open by a tap or a keyboard press, until the next one. */
+  let pinned = $state(false);
+  /** Open for as long as a mouse rests on the timestamp. */
+  let hovered = $state(false);
+  const dateVisible = $derived(pinned || hovered);
+  /**
+   * Scoped to the shadow root the widget renders into, and unique within it:
+   * one card per event id.
+   */
+  const tooltipId = $derived(`nt-date-${event.id}`);
+
+  /**
+   * Escape closes the tooltip.
+   *
+   * A tooltip that appears on hover has to be dismissable without moving the
+   * pointer (WCAG 2.1 §1.4.13), and the listener only exists while one is
+   * open — a timeline is 50 cards by default.
+   */
+  $effect(() => {
+    if (!dateVisible) {
+      return;
+    }
+    const onKeydown = (keyboard: KeyboardEvent) => {
+      if (keyboard.key === 'Escape') {
+        pinned = false;
+        hovered = false;
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+    return () => document.removeEventListener('keydown', onKeydown);
+  });
 
   /**
    * The time of day only.
@@ -117,55 +146,64 @@
     <Avatar pubkey={event.pubkey} {profile} {name} />
   {/if}
   <div class="body">
-    <header>
-      <span class="identity" class:with-handle={handle} title={event.pubkey}>
-        <span class="name">{name}</span>
-        {#if handle}
-          <span class="handle">@{handle}</span>
-        {/if}
-      </span>
-      <span class="meta">
-        <!-- The ✓ lives here rather than beside the name on purpose: the name
-             is upstream-controlled text, and an author whose display_name ends
-             in "✓" could otherwise pass for a verified one. -->
-        {#if status === 'validated'}
-          <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
-        {/if}
-        {#if origin}
-          <span
-            class="origin {origin}"
-            title={origin === 'cache'
-              ? 'ローカルキャッシュ（IndexedDB）から配信'
-              : '上流リレーから取得してキャッシュに充填'}
+    <!-- The tooltip hangs off this wrapper rather than off the header, which
+         clips its own overflow to stay on one line. -->
+    <div class="header-row">
+      <header>
+        <span class="identity" class:with-handle={handle} title={event.pubkey}>
+          <span class="name">{name}</span>
+          {#if handle}
+            <span class="handle">@{handle}</span>
+          {/if}
+        </span>
+        <span class="meta">
+          <!-- The ✓ lives here rather than beside the name on purpose: the name
+               is upstream-controlled text, and an author whose display_name ends
+               in "✓" could otherwise pass for a verified one. -->
+          {#if status === 'validated'}
+            <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
+          {/if}
+          {#if origin}
+            <span
+              class="origin {origin}"
+              title={origin === 'cache'
+                ? 'ローカルキャッシュ（IndexedDB）から配信'
+                : '上流リレーから取得してキャッシュに充填'}
+            >
+              {origin === 'cache' ? 'cache' : 'upstream'}
+            </span>
+          {/if}
+          <!-- A button rather than bare text with a `title`: a native tooltip
+               needs a hover, and a touch reader has none. This one opens on
+               hover, on tap and from the keyboard. -->
+          <button
+            type="button"
+            class="timestamp"
+            aria-expanded={dateVisible}
+            aria-describedby={dateVisible ? tooltipId : undefined}
+            aria-label={dateVisible ? '日付を隠す' : '日付を表示'}
+            onclick={() => {
+              pinned = !pinned;
+            }}
+            onpointerenter={(pointer) => {
+              // Mouse only: a tap fires this too, and opening on it would let
+              // the click that follows immediately close the tooltip again.
+              hovered = pointer.pointerType === 'mouse';
+            }}
+            onpointerleave={() => {
+              hovered = false;
+            }}
           >
-            {origin === 'cache' ? 'cache' : 'upstream'}
-          </span>
-        {/if}
-        <!-- A button, not bare text: `title` is a hover affordance, and a
-             touch reader has no hover. Tapping the time reveals the date the
-             header drops. -->
-        <button
-          type="button"
-          class="timestamp"
-          title={createdAt.toLocaleString()}
-          aria-expanded={showFullDate}
-          aria-label={showFullDate ? '日付を隠す' : '日付を表示'}
-          onclick={() => {
-            showFullDate = !showFullDate;
-          }}
-        >
-          <time datetime={createdAt.toISOString()}>
-            {formatTime(createdAt)}
-          </time>
-        </button>
-      </span>
-    </header>
-    {#if showFullDate}
-      <!-- Below the header rather than inside it: the header is one line by
-           design and clips its overflow, so the date goes where it can neither
-           squeeze the name nor be cut off. -->
-      <p class="full-date">{createdAt.toLocaleString()}</p>
-    {/if}
+            <time datetime={createdAt.toISOString()}>
+              {formatTime(createdAt)}
+            </time>
+          </button>
+        </span>
+      </header>
+      {#if dateVisible}
+        <span class="date-tip" id={tooltipId} role="tooltip">{createdAt.toLocaleString()}</span>
+      {/if}
+    </div>
     {#if refs.length > 0}
       <ul class="refs">
         {#each refs as ref (ref.id)}
@@ -315,16 +353,32 @@
     text-decoration: underline dotted;
   }
 
-  .full-date {
-    margin: 0 0 4px;
-    color: var(--nt-muted, #657786);
-    font-size: 0.8rem;
-    /* Under the timestamp it was opened from, on the same side of the card. */
-    text-align: right;
-    /* The whole point is the date the header dropped, so it must not be the
-       next thing to get clipped. */
+  .header-row {
+    position: relative;
+  }
+
+  .date-tip {
+    position: absolute;
+    /* Just below the timestamp it belongs to, at the same edge of the card. */
+    top: calc(100% + 2px);
+    right: 0;
+    z-index: 1;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--nt-tip-bg, #0f1419);
+    color: var(--nt-tip-fg, #fff);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    box-shadow: 0 2px 8px rgb(15 20 25 / 25%);
+    /* Out of the flow, so opening it moves nothing: it floats over the card
+       rather than pushing the note down. */
+    max-width: 100%;
+    /* The whole point is the date the header dropped, so let it wrap on a
+       narrow embed rather than hang off the card. */
     white-space: normal;
     word-break: break-word;
+    /* Never swallow a tap meant for the card underneath. */
+    pointer-events: none;
   }
 
   .origin {

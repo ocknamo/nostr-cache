@@ -391,10 +391,10 @@ describe('Embeddable timeline E2E', () => {
     }
   });
 
-  it('reveals the date on a tap, where there is no hover to show it', async () => {
+  it('opens the date tooltip on a tap, where there is no hover to open it', async () => {
     // A real touch screen: `hasTouch` is what makes `tap()` dispatch touch
-    // events rather than a mouse click, and a touch reader is the one who can
-    // never see the timestamp's `title`.
+    // events rather than a mouse click, and a touch reader is the one who
+    // cannot open a tooltip by hovering.
     page = await browser.newPage({
       viewport: { width: 320, height: 600 },
       hasTouch: true,
@@ -403,31 +403,44 @@ describe('Embeddable timeline E2E', () => {
     await page.goto(embedUrl({ relays: upstream.url }));
     await waitForEventCount(page, 2);
 
-    const fullDates = () =>
-      page?.$$eval('nostr-timeline .full-date', (nodes) =>
+    const tooltips = () =>
+      page?.$$eval('nostr-timeline .date-tip', (nodes) =>
         nodes.map((node) => node.textContent?.trim() ?? '')
       ) ?? Promise.resolve([]);
-    const headerHeight = () =>
-      page?.$eval('nostr-timeline header', (header) => header.getBoundingClientRect().height) ??
+    /** Where the first card's note sits, to catch the tooltip shoving it. */
+    const noteTop = () =>
+      page?.$eval('nostr-timeline .content', (note) => note.getBoundingClientRect().top) ??
       Promise.resolve(0);
 
-    expect(await fullDates()).toEqual([]);
-    const oneLine = await headerHeight();
+    expect(await tooltips()).toEqual([]);
+    const before = await noteTop();
 
     const timestamps = await page.$$('nostr-timeline .timestamp');
     await timestamps[0].tap();
 
-    // Only the tapped card opens, and the date it shows is the one the header
+    // Only the tapped card opens, and what it shows is the date the header
     // leaves out.
-    const opened = await fullDates();
+    const opened = await tooltips();
     expect(opened).toHaveLength(1);
     expect(opened[0]).toContain('2023');
-    // The date is drawn below the header, so the one-line guarantee the header
-    // is built around survives being opened.
-    expect(await headerHeight()).toBe(oneLine);
+    // A tooltip floats over the card: opening one must not move the note under
+    // it, nor re-flow the header it hangs from.
+    expect(await noteTop()).toBe(before);
+
+    const box = await page.$eval('nostr-timeline .date-tip', (tip) => {
+      const { top, right, width } = tip.getBoundingClientRect();
+      const time = tip.closest('.header-row')?.querySelector('time')?.getBoundingClientRect() ?? {
+        bottom: 0,
+        right: 0,
+      };
+      return { belowTime: top >= time.bottom, alignedWithTime: right >= time.right, width };
+    });
+    expect(box.belowTime).toBe(true);
+    expect(box.alignedWithTime).toBe(true);
+    expect(box.width).toBeGreaterThan(0);
 
     await timestamps[0].tap();
-    expect(await fullDates()).toEqual([]);
+    expect(await tooltips()).toEqual([]);
   });
 
   it('serves the profile out of the local cache on a reload', async () => {
