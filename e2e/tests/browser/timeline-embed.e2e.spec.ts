@@ -427,6 +427,9 @@ describe('Embeddable timeline E2E', () => {
     // it, nor re-flow the header it hangs from.
     expect(await noteTop()).toBe(before);
 
+    // Checks relative position only, not viewport visibility: the first card
+    // has no room above it and the tooltip clips there (a known, accepted
+    // limitation), yet aboveTime is still true in that case.
     const box = await page.$eval('nostr-timeline .date-tip', (tip) => {
       const { bottom, right, width } = tip.getBoundingClientRect();
       const time = tip.closest('.header-row')?.querySelector('time')?.getBoundingClientRect() ?? {

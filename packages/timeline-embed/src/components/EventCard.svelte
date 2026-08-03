@@ -359,7 +359,9 @@
 
   .date-tip {
     position: absolute;
-    /* Just above the timestamp it belongs to, at the same edge of the card. */
+    /* Just above the timestamp it belongs to, at the same edge of the card.
+       Known limitation: a card with no room above it (e.g. the first one)
+       can clip the tooltip against the viewport or a scroll container. */
     bottom: calc(100% + 2px);
     right: 0;
     z-index: 1;
