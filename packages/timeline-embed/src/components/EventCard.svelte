@@ -360,8 +360,8 @@
   .date-tip {
     position: absolute;
     /* Just above the timestamp it belongs to, at the same edge of the card.
-       Known limitation: a card with no room above it (e.g. the first one)
-       can clip the tooltip against the viewport or a scroll container. */
+       The first card would otherwise have no room above it to open into —
+       see the list's top padding in Timeline.svelte. */
     bottom: calc(100% + 2px);
     right: 0;
     z-index: 1;

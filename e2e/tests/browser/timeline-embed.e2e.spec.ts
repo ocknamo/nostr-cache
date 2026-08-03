@@ -427,20 +427,21 @@ describe('Embeddable timeline E2E', () => {
     // it, nor re-flow the header it hangs from.
     expect(await noteTop()).toBe(before);
 
-    // Checks relative position only, not viewport visibility: the first card
-    // has no room above it and the tooltip clips there (a known, accepted
-    // limitation), yet aboveTime is still true in that case.
     const box = await page.$eval('nostr-timeline .date-tip', (tip) => {
-      const { bottom, right, width } = tip.getBoundingClientRect();
+      const { top, bottom, right, width } = tip.getBoundingClientRect();
       const time = tip.closest('.header-row')?.querySelector('time')?.getBoundingClientRect() ?? {
         top: 0,
         right: 0,
       };
-      return { aboveTime: bottom <= time.top, alignedWithTime: right >= time.right, width };
+      return { top, aboveTime: bottom <= time.top, alignedWithTime: right >= time.right, width };
     });
     expect(box.aboveTime).toBe(true);
     expect(box.alignedWithTime).toBe(true);
     expect(box.width).toBeGreaterThan(0);
+    // This is the first (and only visible) card, with nothing above it: the
+    // list's reserved top padding (see Timeline.svelte) is what keeps the
+    // tooltip from clipping off the top of the embed here.
+    expect(box.top).toBeGreaterThanOrEqual(0);
 
     await timestamps[0].tap();
     expect(await tooltips()).toEqual([]);
