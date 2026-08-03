@@ -100,38 +100,6 @@
    */
   const tooltipId = $derived(`nt-date-${event.id}`);
 
-  let tipEl: HTMLElement | undefined = $state();
-  /**
-   * Above the timestamp by default, but the first card in a timeline (or one
-   * scrolled flush to the top of its container) has no room up there — so
-   * fall back to below rather than clip the date off unreadably.
-   */
-  let placement: 'above' | 'below' = $state('above');
-
-  $effect(() => {
-    if (!dateVisible) {
-      // Re-try "above" on the next open: the available room may have
-      // changed since, e.g. the page scrolled.
-      placement = 'above';
-      return;
-    }
-    if (!tipEl) {
-      return;
-    }
-    const top = tipEl.getBoundingClientRect().top;
-    let boundary = 0;
-    for (let node = tipEl.parentElement; node; node = node.parentElement) {
-      const { overflowY } = getComputedStyle(node);
-      if (overflowY === 'auto' || overflowY === 'scroll') {
-        boundary = node.getBoundingClientRect().top;
-        break;
-      }
-    }
-    if (top < boundary) {
-      placement = 'below';
-    }
-  });
-
   /**
    * Escape closes the tooltip.
    *
@@ -233,13 +201,7 @@
         </span>
       </header>
       {#if dateVisible}
-        <span
-          class="date-tip"
-          class:below={placement === 'below'}
-          id={tooltipId}
-          role="tooltip"
-          bind:this={tipEl}>{createdAt.toLocaleString()}</span
-        >
+        <span class="date-tip" id={tooltipId} role="tooltip">{createdAt.toLocaleString()}</span>
       {/if}
     </div>
     {#if refs.length > 0}
@@ -397,8 +359,7 @@
 
   .date-tip {
     position: absolute;
-    /* Just above the timestamp it belongs to, at the same edge of the card.
-       Flipped below by the placement effect when there isn't room above. */
+    /* Just above the timestamp it belongs to, at the same edge of the card. */
     bottom: calc(100% + 2px);
     right: 0;
     z-index: 1;
@@ -418,11 +379,6 @@
     word-break: break-word;
     /* Never swallow a tap meant for the card underneath. */
     pointer-events: none;
-  }
-
-  .date-tip.below {
-    bottom: auto;
-    top: calc(100% + 2px);
   }
 
   .origin {
