@@ -63,9 +63,26 @@ describe('EventCard', () => {
     const { container } = render(EventCard, { props: { event } });
 
     const time = container.querySelector('time');
-    // Only hh:mm:ss — the date is dropped so the header always fits one line.
-    expect(time?.textContent?.trim()).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    const rendered = time?.textContent?.trim() ?? '';
     const at = new Date(event.created_at * 1000);
+
+    // Two digits, three parts, and nothing else: the date is dropped so the
+    // header always fits on one line. `\p{Nd}` rather than `\d` because the
+    // widget formats in the reader's locale, and not every locale numbers in
+    // ASCII.
+    expect(rendered).toMatch(/^\p{Nd}{2}\D\p{Nd}{2}\D\p{Nd}{2}$/u);
+    // The event's own time, not the wall clock — a plain `new Date()` would
+    // still satisfy the shape above.
+    expect(rendered).toBe(
+      at.toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      })
+    );
+    // The dropped date is still reachable, by hover and for machines.
+    expect(rendered).not.toContain(String(at.getFullYear()));
     expect(time).toHaveAttribute('datetime', at.toISOString());
     expect(time).toHaveAttribute('title', at.toLocaleString());
   });

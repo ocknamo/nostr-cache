@@ -327,6 +327,70 @@ describe('Embeddable timeline E2E', () => {
     expect(await page.$$('nostr-timeline img.avatar')).toHaveLength(0);
   });
 
+  it('keeps the name, the handle and the time on one line in a narrow embed', async () => {
+    // The card header's single-line layout is pure CSS, so the component tests
+    // (jsdom, which computes no layout) cannot see it. Its own upstream, for a
+    // profile whose name and handle are both far too long to fit.
+    const author = getRandomSecret();
+    const disposable = await startMockUpstreamRelay(
+      await Promise.all([
+        createTestEvent(author, { content: 'one line', created_at: 1_700_000_300 }),
+        createTestEvent(author, {
+          kind: 0,
+          created_at: 1_700_000_250,
+          tags: [],
+          content: JSON.stringify({
+            name: 'an_extremely_long_handle_that_cannot_possibly_fit',
+            display_name: 'とてもとても長い表示名がここに入りますよ本当に長い',
+          }),
+        }),
+      ])
+    );
+    try {
+      // Narrow enough that neither the name nor the handle fits, which is the
+      // case the layout is built for.
+      page = await browser.newPage({ viewport: { width: 320, height: 600 } });
+      await page.goto(embedUrl({ relays: disposable.url }));
+      await waitForEventCount(page, 1);
+      await page.waitForSelector('nostr-timeline .handle', { timeout: TIMEOUT });
+
+      const layout = await page.$eval('nostr-timeline header', (header) => {
+        const measure = (selector: string) => {
+          const node = header.querySelector(selector);
+          if (!(node instanceof HTMLElement)) {
+            return undefined;
+          }
+          const { top, bottom, width } = node.getBoundingClientRect();
+          return { top, bottom, width, clipped: node.scrollWidth > node.clientWidth };
+        };
+        return {
+          name: measure('.name'),
+          handle: measure('.handle'),
+          time: measure('time'),
+          headerOverflows: header.scrollWidth > header.clientWidth,
+          pageScrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        };
+      });
+
+      const { name, handle, time } = layout;
+      // One line: the name's box and the timestamp's box overlap vertically.
+      // Comparing their tops would fail on the baseline alignment alone, since
+      // the two are set at different sizes.
+      expect(name && time && name.top < time.bottom && time.top < name.bottom).toBe(true);
+      // Both are too long for the row, so both are cut short — and the handle
+      // keeps a box to cut short, rather than being squeezed out of existence.
+      expect(name?.clipped).toBe(true);
+      expect(handle?.clipped).toBe(true);
+      expect(handle?.width ?? 0).toBeGreaterThan(0);
+      // A header that grew past the card would hand the embedding page a
+      // horizontal scrollbar.
+      expect(layout.headerOverflows).toBe(false);
+      expect(layout.pageScrolls).toBe(false);
+    } finally {
+      await disposable.close();
+    }
+  });
+
   it('serves the profile out of the local cache on a reload', async () => {
     // Its own upstream, because this test shuts it down partway through and the
     // shared one has to stay usable for the rest of the suite.
