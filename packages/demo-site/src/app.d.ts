@@ -11,7 +11,8 @@ declare namespace svelteHTML {
       authors?: string;
       limit?: string;
       'db-name'?: string;
-      'show-origin'?: string;
+      'profile-freshness'?: string;
+      debug?: string | boolean;
     };
   }
 }

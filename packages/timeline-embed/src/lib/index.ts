@@ -39,8 +39,11 @@ export {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
   configFromSearchParams,
+  parseDebug,
   parseFilter,
+  parseFreshness,
   parseRelays,
+  parseShowOriginAlias,
 } from './timeline-config.ts';
 export type { FilterInput } from './timeline-config.ts';
 export { TimelineController } from './timeline-controller.ts';

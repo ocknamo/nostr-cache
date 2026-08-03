@@ -3,12 +3,14 @@
   // the real widget rather than a lookalike.
   import '@nostr-cache/timeline-embed/embed';
   import {
+    DEFAULT_PROFILE_FRESHNESS,
     type MetricsSnapshot,
     type TimelineState,
     Timeline,
     TimelineController,
     getRelayHostRefCount,
     parseFilter,
+    parseFreshness,
     parseRelays,
   } from '@nostr-cache/timeline-embed';
   import { onMount, tick } from 'svelte';
@@ -22,7 +24,19 @@
     relays: 'wss://yabu.me',
     kinds: '1',
     limit: '50',
+    /** Seconds a cached kind 0 is served for — the widget's own default. */
+    profileFreshness: String(DEFAULT_PROFILE_FRESHNESS),
   };
+  /**
+   * `debug` for everything this page renders — its own timeline and both embed
+   * examples — so the checkbox means one thing wherever the reader looks.
+   *
+   * Deliberately not part of `settings`: it only decides whether a badge is
+   * rendered, so making it wait for the "apply and restart" round trip — which
+   * also wipes the metrics and the benchmark result — would charge a relay
+   * restart for a display toggle.
+   */
+  let debug = $state(true);
   /** How often the IndexedDB row count is refreshed. */
   const STORED_COUNT_INTERVAL_MS = 2000;
   /**
@@ -57,13 +71,16 @@
 
   const relays = $derived(parseRelays(settings.relays));
   const filter = $derived(parseFilter({ kinds: settings.kinds, limit: settings.limit }));
+  // Undefined for an unparseable entry, which leaves the widget's own default in
+  // place — the same thing an embed with a typo'd attribute gets.
+  const profileFreshness = $derived(parseFreshness(settings.profileFreshness));
 
   let unsubscribeMetrics: (() => void) | undefined;
   let countTimer: ReturnType<typeof setInterval> | undefined;
 
   async function startSession(): Promise<void> {
     controller = new TimelineController({
-      host: { upstreamRelays: relays, dbName: DEMO_DB_NAME },
+      host: { upstreamRelays: relays, dbName: DEMO_DB_NAME, profileFreshness },
       onChange: (next) => {
         timeline = next;
       },
@@ -217,7 +234,8 @@
     <p class="panel-note">
       各イベントの <span class="chip cache">cache</span> /
       <span class="chip upstream">upstream</span> バッジが、そのイベントを IndexedDB
-      から返したのか上流から取ってきたのかを示します。ページをリロードすると、同じイベントが
+      から返したのか上流から取ってきたのかを示します（<code>debug</code> を外すと、
+      実際の埋め込みと同じくバッジは出ません）。ページをリロードすると、同じイベントが
       今度は <span class="chip cache">cache</span> で返るのが見えます。
       表示名とアバターは kind 0（プロフィール）を別途購読して取得しており、これもキャッシュ
       されるため、リロード後は上流を待たずに表示されます。上の計測値はこの取得分も含みます。
@@ -227,6 +245,8 @@
       bind:relays={draft.relays}
       bind:kinds={draft.kinds}
       bind:limit={draft.limit}
+      bind:profileFreshness={draft.profileFreshness}
+      bind:debug
       busy={restarting}
       onApply={applySettings}
     />
@@ -256,6 +276,7 @@
         events={timeline.events}
         eose={timeline.eose}
         origins={timeline.origins}
+        showOrigin={debug}
         validationStatuses={timeline.validationStatuses}
         profiles={timeline.profiles}
         onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
@@ -276,6 +297,8 @@
       relays={settings.relays}
       kinds={settings.kinds}
       limit={settings.limit}
+      profileFreshness={settings.profileFreshness}
+      {debug}
       dbName={DEMO_DB_NAME}
     />
   {/if}

@@ -75,6 +75,92 @@ function parseNumberList(value: string | null | undefined): number[] {
   return numbers;
 }
 
+/**
+ * Parse the kind 0 freshness window (`profile-freshness`) out of a string
+ * input.
+ *
+ * Whole seconds; `0` turns the window off, so every profile lookup is forwarded
+ * upstream. Anything unparseable is ignored with a warning, leaving the caller's
+ * default (`DEFAULT_PROFILE_FRESHNESS`) in place — a typo in an embed URL should
+ * cost the reader nothing more than the default behaviour.
+ *
+ * @param value Raw attribute or query-parameter value, e.g. `"3600"`
+ * @returns Seconds, or `undefined` when nothing usable was given
+ */
+export function parseFreshness(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  // Negatives are rejected rather than read as "off": the relay counts seconds,
+  // so a negative one is a mistake, and 0 already spells the disable case.
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(
+      `[nostr-timeline] Ignoring invalid profile-freshness (expected whole seconds, 0 to disable): ${value}`
+    );
+    return undefined;
+  }
+  return parsed;
+}
+
+/**
+ * Parse the `debug` switch that turns the widget's diagnostic UI on.
+ *
+ * Off unless asked for: the `cache` / `upstream` badges exist to show that the
+ * cache is working, which is a thing the *embedder* wants to verify — a reader
+ * of the embedding site has no use for them.
+ *
+ * A bare `debug` (attribute with no value, or `?debug` in an iframe URL) arrives
+ * as an empty string and counts as "on", matching how HTML boolean attributes
+ * read. Anything else — including `false` and `0` — leaves it off.
+ *
+ * Booleans are accepted as well as strings: a Svelte parent writing
+ * `<nostr-timeline debug>` sets the custom element's property rather than an
+ * attribute, so what arrives is `true`, not `""`.
+ *
+ * @param value Raw attribute, property or query-parameter value
+ * @returns Whether debug UI should be rendered
+ */
+export function parseDebug(value: string | boolean | null | undefined): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === '' || normalized === 'true' || normalized === '1';
+}
+
+/** Keeps the `show-origin` deprecation notice to one line per page. */
+let showOriginWarned = false;
+
+/**
+ * Read the deprecated `show-origin` switch, kept so embeds written against the
+ * older attribute keep working.
+ *
+ * It can only turn the badges *on*: they used to be on unless `show-origin` said
+ * otherwise, and honouring an absent attribute as "on" would give back the very
+ * default this flag was moved away from. So `show-origin="true"` still shows
+ * them (that embedder asked for them explicitly), `show-origin="false"` still
+ * hides them, and an embed that never mentioned either gets the new default.
+ *
+ * @param value Raw attribute or query-parameter value
+ * @returns Whether this legacy switch asks for the badges
+ */
+export function parseShowOriginAlias(value: string | boolean | null | undefined): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (!showOriginWarned) {
+    showOriginWarned = true;
+    console.warn(
+      '[nostr-timeline] show-origin is deprecated; use debug to render the cache/upstream badges. They are hidden by default now.'
+    );
+  }
+  return parseDebug(value);
+}
+
 export interface FilterInput {
   kinds?: string | null;
   authors?: string | null;
@@ -112,7 +198,12 @@ export function configFromSearchParams(params: URLSearchParams): {
   relays: string[];
   filter: Filter;
   dbName: string | undefined;
-  showOrigin: boolean;
+  /** Seconds a cached profile is served for; `undefined` keeps the default. */
+  profileFreshness: number | undefined;
+  /** Whether to render the diagnostic `cache` / `upstream` badges. */
+  debug: boolean;
+  /** Whether to render author avatars. */
+  showAvatars: boolean;
 } {
   return {
     relays: parseRelays(params.get('relays')),
@@ -122,6 +213,8 @@ export function configFromSearchParams(params: URLSearchParams): {
       limit: params.get('limit'),
     }),
     dbName: params.get('db-name') ?? undefined,
-    showOrigin: params.get('show-origin') !== 'false',
+    profileFreshness: parseFreshness(params.get('profile-freshness')),
+    debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
+    showAvatars: params.get('show-avatars') !== 'false',
   };
 }

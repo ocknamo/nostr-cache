@@ -119,7 +119,9 @@ describe('Embeddable timeline over https', async () => {
     'reads through to an upstream relay and caches from a secure origin',
     async () => {
       page = await context.newPage();
-      const url = `${site.embedUrl}?db-name=e2e-https-3&relays=${encodeURIComponent(upstream.url)}`;
+      // `debug` renders the origin badges this test reads them from; they are a
+      // diagnostic and the widget leaves them off unless asked.
+      const url = `${site.embedUrl}?db-name=e2e-https-3&debug&relays=${encodeURIComponent(upstream.url)}`;
 
       await page.goto(url);
       await waitForEventCount(page, 1);
