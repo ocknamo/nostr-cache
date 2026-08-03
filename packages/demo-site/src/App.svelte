@@ -28,10 +28,13 @@
     profileFreshness: String(DEFAULT_PROFILE_FRESHNESS),
   };
   /**
-   * `debug` for the embed examples. Deliberately not part of `settings`: it only
-   * decides whether a badge is rendered, so making it wait for the "apply and
-   * restart" round trip — which also wipes the metrics and the benchmark result
-   * — would charge a relay restart for a display toggle.
+   * `debug` for everything this page renders — its own timeline and both embed
+   * examples — so the checkbox means one thing wherever the reader looks.
+   *
+   * Deliberately not part of `settings`: it only decides whether a badge is
+   * rendered, so making it wait for the "apply and restart" round trip — which
+   * also wipes the metrics and the benchmark result — would charge a relay
+   * restart for a display toggle.
    */
   let debug = $state(true);
   /** How often the IndexedDB row count is refreshed. */
@@ -231,7 +234,8 @@
     <p class="panel-note">
       各イベントの <span class="chip cache">cache</span> /
       <span class="chip upstream">upstream</span> バッジが、そのイベントを IndexedDB
-      から返したのか上流から取ってきたのかを示します。ページをリロードすると、同じイベントが
+      から返したのか上流から取ってきたのかを示します（<code>debug</code> を外すと、
+      実際の埋め込みと同じくバッジは出ません）。ページをリロードすると、同じイベントが
       今度は <span class="chip cache">cache</span> で返るのが見えます。
       表示名とアバターは kind 0（プロフィール）を別途購読して取得しており、これもキャッシュ
       されるため、リロード後は上流を待たずに表示されます。上の計測値はこの取得分も含みます。
@@ -272,6 +276,7 @@
         events={timeline.events}
         eose={timeline.eose}
         origins={timeline.origins}
+        showOrigin={debug}
         validationStatuses={timeline.validationStatuses}
         profiles={timeline.profiles}
         onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}

@@ -6,7 +6,7 @@
     limit: string;
     /** Seconds a cached kind 0 is served for; empty or invalid = widget default. */
     profileFreshness: string;
-    /** Render the cache/upstream badges in the embed examples. Applies at once. */
+    /** Render the cache/upstream badges across the page. Applies at once. */
     debug: boolean;
     /** True while the relay is restarting, so the form cannot be double-submitted. */
     busy?: boolean;
@@ -56,7 +56,7 @@
   <!-- No "apply" needed: this one only decides whether a badge is drawn. -->
   <label class="check">
     <input type="checkbox" bind:checked={debug} />
-    <span>debug（埋め込み例のバッジ・即時反映）</span>
+    <span>debug（cache / upstream バッジ・即時反映）</span>
   </label>
   <button type="submit" disabled={busy}>{busy ? '再起動中…' : '適用してリレーを再起動'}</button>
 </form>
