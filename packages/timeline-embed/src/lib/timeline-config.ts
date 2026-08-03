@@ -202,6 +202,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   profileFreshness: number | undefined;
   /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
+  /** Whether to render author avatars. */
+  showAvatars: boolean;
 } {
   return {
     relays: parseRelays(params.get('relays')),
@@ -213,5 +215,6 @@ export function configFromSearchParams(params: URLSearchParams): {
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
+    showAvatars: params.get('show-avatars') !== 'false',
   };
 }

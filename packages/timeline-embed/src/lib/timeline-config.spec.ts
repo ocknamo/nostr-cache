@@ -201,6 +201,7 @@ describe('configFromSearchParams', () => {
       dbName: 'demo',
       profileFreshness: 600,
       debug: true,
+      showAvatars: true,
     });
   });
 
@@ -208,6 +209,7 @@ describe('configFromSearchParams', () => {
     const config = configFromSearchParams(new URLSearchParams(''));
 
     expect(config.debug).toBe(false);
+    expect(config.showAvatars).toBe(true);
     expect(config.dbName).toBeUndefined();
     expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);

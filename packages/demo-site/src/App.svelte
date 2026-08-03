@@ -26,9 +26,14 @@
     limit: '50',
     /** Seconds a cached kind 0 is served for — the widget's own default. */
     profileFreshness: String(DEFAULT_PROFILE_FRESHNESS),
-    /** On here, unlike a real embed: the badges are what this page is showing. */
-    debug: true,
   };
+  /**
+   * `debug` for the embed examples. Deliberately not part of `settings`: it only
+   * decides whether a badge is rendered, so making it wait for the "apply and
+   * restart" round trip — which also wipes the metrics and the benchmark result
+   * — would charge a relay restart for a display toggle.
+   */
+  let debug = $state(true);
   /** How often the IndexedDB row count is refreshed. */
   const STORED_COUNT_INTERVAL_MS = 2000;
   /**
@@ -237,7 +242,7 @@
       bind:kinds={draft.kinds}
       bind:limit={draft.limit}
       bind:profileFreshness={draft.profileFreshness}
-      bind:debug={draft.debug}
+      bind:debug
       busy={restarting}
       onApply={applySettings}
     />
@@ -288,7 +293,7 @@
       kinds={settings.kinds}
       limit={settings.limit}
       profileFreshness={settings.profileFreshness}
-      debug={settings.debug}
+      {debug}
       dbName={DEMO_DB_NAME}
     />
   {/if}

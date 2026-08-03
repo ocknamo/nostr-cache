@@ -6,7 +6,7 @@
     limit: string;
     /** Seconds a cached kind 0 is served for; empty or invalid = widget default. */
     profileFreshness: string;
-    /** Render the cache/upstream badges in the embed examples. */
+    /** Render the cache/upstream badges in the embed examples. Applies at once. */
     debug: boolean;
     /** True while the relay is restarting, so the form cannot be double-submitted. */
     busy?: boolean;
@@ -53,9 +53,10 @@
     </span>
     <input bind:value={profileFreshness} placeholder="86400" inputmode="numeric" />
   </label>
+  <!-- No "apply" needed: this one only decides whether a badge is drawn. -->
   <label class="check">
     <input type="checkbox" bind:checked={debug} />
-    <span>debug（埋め込み例のバッジ）</span>
+    <span>debug（埋め込み例のバッジ・即時反映）</span>
   </label>
   <button type="submit" disabled={busy}>{busy ? '再起動中…' : '適用してリレーを再起動'}</button>
 </form>
@@ -99,8 +100,8 @@
     width: auto;
   }
 
-  /* The relay list and the submit button each take a row of their own: the
-     other four controls are short, and a six-column row squeezed them all. */
+  /* The relay list and the submit button each take a row of their own, leaving
+     the four short controls to share the row between them. */
   .wide,
   button {
     grid-column: 1 / -1;

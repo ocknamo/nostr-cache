@@ -31,6 +31,10 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
   - 影響: 鮮度ウィンドウ（`upstreamFreshness`）を有効にしていると、上書き時に
     `cached_at` が現在時刻になるため **最大で窓の秒数ぶん stale な版が固定される**
     （無効時は次の REQ の上流問い合わせで自己修復する）
+  - **timeline-embed の既定窓が 300 秒から 86400 秒（24 時間）になったため、固定される
+    時間も 5 分から 24 時間に延びた**（`packages/timeline-embed/src/lib/relay-host.ts` の
+    `DEFAULT_PROFILE_FRESHNESS`）。埋め込みウィジェットは kind 0 の `picture` を実際に
+    画像として読みに行くので、この項目の優先度はそのぶん上がっている
   - 対応: 保存前に既存版の `created_at` と比較し、既存の方が新しければ保存をスキップする
     （同値なら NIP-01 に従い id の辞書順で小さい方を残す）。`handleEvent` の戻り値
     （`success` は OK 応答、`stored` は退避契機）と、上流由来イベントを

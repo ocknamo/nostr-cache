@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { DEFAULT_PROFILE_FRESHNESS } from '@nostr-cache/timeline-embed';
   import { onMount } from 'svelte';
 
   interface Props {
@@ -41,13 +42,19 @@
   );
   const iframeSrc = $derived(`${baseUrl}embed/?${query}`);
   const embedOrigin = $derived(`${origin}${baseUrl}`);
+  // Spelling out the default would teach readers to paste a value they do not
+  // need; the live examples above still pass it, because they share the page's
+  // relay and have to match whatever it was started with.
+  const freshnessAttr = $derived(
+    profileFreshness === String(DEFAULT_PROFILE_FRESHNESS) ? '' : profileFreshness
+  );
 
   const iframeSnippet = $derived(
-    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}&profile-freshness=${profileFreshness}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
+    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}${freshnessAttr ? `&profile-freshness=${freshnessAttr}` : ''}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
   );
 
   const webComponentSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"\n  profile-freshness="${profileFreshness}"${debug ? '\n  debug' : ''}\n></nostr-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"${freshnessAttr ? `\n  profile-freshness="${freshnessAttr}"` : ''}${debug ? '\n  debug' : ''}\n></nostr-timeline>`
   );
 
   /** Bounds on the height the embed page may ask for. */
@@ -169,7 +176,7 @@
 
   <p class="footnote">
     <code>debug</code> を付けると各投稿に <code>cache</code> / <code>upstream</code>
-    バッジが出ます（上の設定フォームで切り替えられます）。動作確認用の表示なので、
+    バッジが出ます（上の設定フォームのチェックボックスで即時に切り替わります）。動作確認用の表示なので、
     実際の埋め込みでは外してください。<code>profile-freshness</code> は
     プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数です。
   </p>
