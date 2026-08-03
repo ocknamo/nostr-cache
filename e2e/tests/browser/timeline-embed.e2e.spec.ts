@@ -428,14 +428,14 @@ describe('Embeddable timeline E2E', () => {
     expect(await noteTop()).toBe(before);
 
     const box = await page.$eval('nostr-timeline .date-tip', (tip) => {
-      const { top, right, width } = tip.getBoundingClientRect();
+      const { bottom, right, width } = tip.getBoundingClientRect();
       const time = tip.closest('.header-row')?.querySelector('time')?.getBoundingClientRect() ?? {
-        bottom: 0,
+        top: 0,
         right: 0,
       };
-      return { belowTime: top >= time.bottom, alignedWithTime: right >= time.right, width };
+      return { aboveTime: bottom <= time.top, alignedWithTime: right >= time.right, width };
     });
-    expect(box.belowTime).toBe(true);
+    expect(box.aboveTime).toBe(true);
     expect(box.alignedWithTime).toBe(true);
     expect(box.width).toBeGreaterThan(0);
 
