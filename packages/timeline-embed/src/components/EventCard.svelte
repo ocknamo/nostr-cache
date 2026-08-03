@@ -359,8 +359,8 @@
 
   .date-tip {
     position: absolute;
-    /* Just below the timestamp it belongs to, at the same edge of the card. */
-    top: calc(100% + 2px);
+    /* Just above the timestamp it belongs to, at the same edge of the card. */
+    bottom: calc(100% + 2px);
     right: 0;
     z-index: 1;
     padding: 3px 8px;
