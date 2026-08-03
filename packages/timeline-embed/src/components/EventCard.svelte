@@ -87,8 +87,57 @@
     quote: '引用',
   };
 
-  function formatTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString();
+  const createdAt = $derived(new Date(event.created_at * 1000));
+
+  /** Held open by a tap or a keyboard press, until the next one. */
+  let pinned = $state(false);
+  /** Open for as long as a mouse rests on the timestamp. */
+  let hovered = $state(false);
+  const dateVisible = $derived(pinned || hovered);
+  /**
+   * Scoped to the shadow root the widget renders into, and unique within it:
+   * one card per event id.
+   */
+  const tooltipId = $derived(`nt-date-${event.id}`);
+
+  /**
+   * Escape closes the tooltip.
+   *
+   * A tooltip that appears on hover has to be dismissable without moving the
+   * pointer (WCAG 2.1 §1.4.13), and the listener only exists while one is
+   * open — a timeline is 50 cards by default.
+   */
+  $effect(() => {
+    if (!dateVisible) {
+      return;
+    }
+    const onKeydown = (keyboard: KeyboardEvent) => {
+      if (keyboard.key === 'Escape') {
+        pinned = false;
+        hovered = false;
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+    return () => document.removeEventListener('keydown', onKeydown);
+  });
+
+  /**
+   * The time of day only.
+   *
+   * The date is dropped so the name and the timestamp always fit on one line;
+   * the full date stays available as the `title` and in the `datetime`
+   * attribute.
+   *
+   * `hourCycle` rather than `hour12: false`, which some engines resolve to the
+   * `h24` cycle — where midnight reads as `24:00:00`.
+   */
+  function formatTime(at: Date): string {
+    return at.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
   }
 </script>
 
@@ -97,35 +146,64 @@
     <Avatar pubkey={event.pubkey} {profile} {name} />
   {/if}
   <div class="body">
-    <header>
-      <span class="identity" title={event.pubkey}>
-        <span class="name">{name}</span>
-        {#if handle}
-          <span class="handle">@{handle}</span>
-        {/if}
-      </span>
-      <span class="meta">
-        <!-- The ✓ lives here rather than beside the name on purpose: the name
-             is upstream-controlled text, and an author whose display_name ends
-             in "✓" could otherwise pass for a verified one. -->
-        {#if status === 'validated'}
-          <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
-        {/if}
-        {#if origin}
-          <span
-            class="origin {origin}"
-            title={origin === 'cache'
-              ? 'ローカルキャッシュ（IndexedDB）から配信'
-              : '上流リレーから取得してキャッシュに充填'}
+    <!-- The tooltip hangs off this wrapper rather than off the header, which
+         clips its own overflow to stay on one line. -->
+    <div class="header-row">
+      <header>
+        <span class="identity" class:with-handle={handle} title={event.pubkey}>
+          <span class="name">{name}</span>
+          {#if handle}
+            <span class="handle">@{handle}</span>
+          {/if}
+        </span>
+        <span class="meta">
+          <!-- The ✓ lives here rather than beside the name on purpose: the name
+               is upstream-controlled text, and an author whose display_name ends
+               in "✓" could otherwise pass for a verified one. -->
+          {#if status === 'validated'}
+            <span class="verified" title="署名検証済み" aria-label="署名検証済み" role="img">✓</span>
+          {/if}
+          {#if origin}
+            <span
+              class="origin {origin}"
+              title={origin === 'cache'
+                ? 'ローカルキャッシュ（IndexedDB）から配信'
+                : '上流リレーから取得してキャッシュに充填'}
+            >
+              {origin === 'cache' ? 'cache' : 'upstream'}
+            </span>
+          {/if}
+          <!-- A button rather than bare text with a `title`: a native tooltip
+               needs a hover, and a touch reader has none. This one opens on
+               hover, on tap and from the keyboard. -->
+          <button
+            type="button"
+            class="timestamp"
+            aria-expanded={dateVisible}
+            aria-describedby={dateVisible ? tooltipId : undefined}
+            aria-label={dateVisible ? '日付を隠す' : '日付を表示'}
+            onclick={() => {
+              pinned = !pinned;
+            }}
+            onpointerenter={(pointer) => {
+              // Mouse only: a tap fires this too, and opening on it would let
+              // the click that follows immediately close the tooltip again.
+              hovered = pointer.pointerType === 'mouse';
+            }}
+            onpointerleave={() => {
+              hovered = false;
+            }}
           >
-            {origin === 'cache' ? 'cache' : 'upstream'}
-          </span>
-        {/if}
-        <time datetime={new Date(event.created_at * 1000).toISOString()}>
-          {formatTime(event.created_at)}
-        </time>
-      </span>
-    </header>
+            <time datetime={createdAt.toISOString()}>
+              {formatTime(createdAt)}
+            </time>
+          </button>
+        </span>
+      </header>
+      {#if dateVisible}
+        <span class="date-tip" id={tooltipId} role="tooltip">{createdAt.toLocaleString()}</span>
+      {/if}
+    </div>
     {#if refs.length > 0}
       <ul class="refs">
         {#each refs as ref (ref.id)}
@@ -167,21 +245,26 @@
   header {
     display: flex;
     align-items: baseline;
-    /* Narrow screens cannot fit the name and the metadata on one line, so let
-       the metadata drop to its own line instead of overflowing the card. */
-    flex-wrap: wrap;
-    gap: 2px 8px;
+    /* One line, always: the name and the handle give up width (and ellipsize)
+       so the timestamp stays on the same row however narrow the embed gets. */
+    flex-wrap: nowrap;
+    gap: 8px;
     margin-bottom: 4px;
+    /* Below roughly 180px of card there is not enough room even after the name
+       has collapsed. Clip what is left here rather than let a one-line header
+       widen the card and hand the embedding page a horizontal scrollbar. */
+    overflow: hidden;
   }
 
   .identity {
     display: flex;
     align-items: baseline;
     gap: 4px;
-    /* The name may be long; let it shrink and ellipsize rather than shove the
-       timestamp off the card. */
+    /* The name and the handle are what give up width when the row is tight,
+       rather than the timestamp. */
     min-width: 0;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    overflow: hidden;
   }
 
   .name {
@@ -190,6 +273,24 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* A flex item defaults to min-width:auto, which refuses to shrink below the
+       text's own width — without this the ellipsis never appears. */
+    min-width: 0;
+    /* Never shrink, but never exceed the row either: flex shrinking is
+       proportional, so a shrinkable name would give up a few pixels — and pick
+       up an ellipsis — even when only the handle is too long. Capping the width
+       instead makes the handle absorb the whole squeeze first, and still
+       ellipsizes a name that is too long on its own. */
+    max-width: 100%;
+    flex: 0 0 auto;
+  }
+
+  /* With a handle to its right, the cap leaves room for it: taking the whole
+     row would squeeze the handle out of existence — silently, since a box of
+     zero width has nowhere to draw an ellipsis. The name still keeps at least
+     60% of the row, so it stays the part that survives on a narrow embed. */
+  .with-handle .name {
+    max-width: max(60%, 100% - 4.5em);
   }
 
   .handle {
@@ -198,7 +299,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    /* Give the display name the space first: the handle is the redundant half. */
+    min-width: 0;
+    /* The only shrinkable part of the row: the handle is the redundant half, so
+       it gives up its width — down to nothing — before the name loses any. */
     flex: 0 1 auto;
   }
 
@@ -210,10 +313,11 @@
 
   .meta {
     display: flex;
-    gap: 2px 8px;
+    gap: 8px;
     align-items: baseline;
-    flex-wrap: wrap;
-    /* Stay right-aligned even once it has wrapped onto its own line. */
+    /* The badges and the time are all short and must not be split up. */
+    flex-wrap: nowrap;
+    /* Push the metadata to the right edge whatever the name's length. */
     margin-left: auto;
     color: var(--nt-muted, #657786);
     font-size: 0.8rem;
@@ -222,6 +326,59 @@
 
   .meta time {
     white-space: nowrap;
+  }
+
+  /* Reads as the plain timestamp it replaces: no button chrome, the meta row's
+     own colour and size. The vertical padding buys a tappable target and is
+     cancelled by the margin so the baseline does not move. */
+  .timestamp {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 4px 0;
+    margin: -4px 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    flex: none;
+    /* A tap should reveal the date, not paint the timestamp blue and leave the
+       text half-selected. */
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  .timestamp:hover time,
+  .timestamp:focus-visible time {
+    text-decoration: underline dotted;
+  }
+
+  .header-row {
+    position: relative;
+  }
+
+  .date-tip {
+    position: absolute;
+    /* Just below the timestamp it belongs to, at the same edge of the card. */
+    top: calc(100% + 2px);
+    right: 0;
+    z-index: 1;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--nt-tip-bg, #0f1419);
+    color: var(--nt-tip-fg, #fff);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    box-shadow: 0 2px 8px rgb(15 20 25 / 25%);
+    /* Out of the flow, so opening it moves nothing: it floats over the card
+       rather than pushing the note down. */
+    max-width: 100%;
+    /* The whole point is the date the header dropped, so let it wrap on a
+       narrow embed rather than hang off the card. */
+    white-space: normal;
+    word-break: break-word;
+    /* Never swallow a tap meant for the card underneath. */
+    pointer-events: none;
   }
 
   .origin {

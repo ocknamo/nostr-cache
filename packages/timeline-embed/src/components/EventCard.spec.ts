@@ -1,8 +1,21 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import EventCard from './EventCard.svelte';
+
+/**
+ * Fire a `pointerenter` that carries a `pointerType`.
+ *
+ * jsdom implements no `PointerEvent`, so `fireEvent.pointerEnter` delivers a
+ * bare `Event` and the property the card switches on would always be
+ * undefined — which is the one thing these tests are about.
+ */
+function pointerEnter(node: Element, pointerType: 'mouse' | 'touch'): Promise<boolean> {
+  const event = new Event('pointerenter');
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
+  return fireEvent(node, event);
+}
 
 describe('EventCard', () => {
   it('renders the content and a shortened pubkey that keeps the full one on hover', () => {
@@ -56,6 +69,87 @@ describe('EventCard', () => {
     });
 
     expect(screen.queryByRole('img', { name: 'takeshi' })).not.toBeInTheDocument();
+  });
+
+  it('shows the time of day only, keeping the full date one interaction away', () => {
+    const event = makeEvent({ created_at: 1_700_000_000 });
+    const { container } = render(EventCard, { props: { event } });
+
+    const time = container.querySelector('time');
+    const rendered = time?.textContent?.trim() ?? '';
+    const at = new Date(event.created_at * 1000);
+
+    // Two digits, three parts, and nothing else: the date is dropped so the
+    // header always fits on one line. `\p{Nd}` rather than `\d` because the
+    // widget formats in the reader's locale, and not every locale numbers in
+    // ASCII.
+    expect(rendered).toMatch(/^\p{Nd}{2}\D\p{Nd}{2}\D\p{Nd}{2}$/u);
+    // The event's own time, not the wall clock — a plain `new Date()` would
+    // still satisfy the shape above.
+    expect(rendered).toBe(
+      at.toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      })
+    );
+    // The dropped date stays machine-readable; the tooltip covers the reader.
+    expect(rendered).not.toContain(String(at.getFullYear()));
+    expect(time).toHaveAttribute('datetime', at.toISOString());
+  });
+
+  it('opens the date tooltip on a tap and closes it on the next one', async () => {
+    const event = makeEvent({ created_at: 1_700_000_000 });
+    render(EventCard, { props: { event } });
+    const full = new Date(event.created_at * 1000).toLocaleString();
+
+    // Hidden to start with: the date is what the header drops to stay on one
+    // line, and a card that showed it anyway would defeat the point.
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole('button', { name: '日付を表示' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // A tap: the reason this is a button at all is that a touch reader has no
+    // hover to open a tooltip with.
+    await pointerEnter(toggle, 'touch');
+    await fireEvent.click(toggle);
+
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent(full);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // Announced with the timestamp rather than left as loose text on the card.
+    expect(toggle).toHaveAttribute('aria-describedby', tooltip.id);
+    expect(screen.getByRole('button', { name: '日付を隠す' })).toBe(toggle);
+
+    // A tap leaves the pointer where it is, so the tooltip has to close on the
+    // next tap rather than waiting for a pointerleave that never comes.
+    await fireEvent.click(toggle);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('opens the date tooltip while a mouse rests on the timestamp', async () => {
+    render(EventCard, { props: { event: makeEvent({ created_at: 1_700_000_000 }) } });
+    const toggle = screen.getByRole('button', { name: '日付を表示' });
+
+    await pointerEnter(toggle, 'mouse');
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+
+    await fireEvent.pointerLeave(toggle);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('closes the date tooltip on Escape, without moving the pointer', async () => {
+    render(EventCard, { props: { event: makeEvent({ created_at: 1_700_000_000 }) } });
+    const toggle = screen.getByRole('button', { name: '日付を表示' });
+
+    await pointerEnter(toggle, 'mouse');
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+
+    // WCAG 2.1 §1.4.13: content shown on hover must be dismissable where it
+    // is, without having to move the pointer off the trigger.
+    await fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
   it('marks a reply with the referenced event id', () => {
