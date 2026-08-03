@@ -391,6 +391,45 @@ describe('Embeddable timeline E2E', () => {
     }
   });
 
+  it('reveals the date on a tap, where there is no hover to show it', async () => {
+    // A real touch screen: `hasTouch` is what makes `tap()` dispatch touch
+    // events rather than a mouse click, and a touch reader is the one who can
+    // never see the timestamp's `title`.
+    page = await browser.newPage({
+      viewport: { width: 320, height: 600 },
+      hasTouch: true,
+      isMobile: true,
+    });
+    await page.goto(embedUrl({ relays: upstream.url }));
+    await waitForEventCount(page, 2);
+
+    const fullDates = () =>
+      page?.$$eval('nostr-timeline .full-date', (nodes) =>
+        nodes.map((node) => node.textContent?.trim() ?? '')
+      ) ?? Promise.resolve([]);
+    const headerHeight = () =>
+      page?.$eval('nostr-timeline header', (header) => header.getBoundingClientRect().height) ??
+      Promise.resolve(0);
+
+    expect(await fullDates()).toEqual([]);
+    const oneLine = await headerHeight();
+
+    const timestamps = await page.$$('nostr-timeline .timestamp');
+    await timestamps[0].tap();
+
+    // Only the tapped card opens, and the date it shows is the one the header
+    // leaves out.
+    const opened = await fullDates();
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toContain('2023');
+    // The date is drawn below the header, so the one-line guarantee the header
+    // is built around survives being opened.
+    expect(await headerHeight()).toBe(oneLine);
+
+    await timestamps[0].tap();
+    expect(await fullDates()).toEqual([]);
+  });
+
   it('serves the profile out of the local cache on a reload', async () => {
     // Its own upstream, because this test shuts it down partway through and the
     // shared one has to stay usable for the rest of the suite.

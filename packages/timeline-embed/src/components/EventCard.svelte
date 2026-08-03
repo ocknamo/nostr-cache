@@ -89,6 +89,9 @@
 
   const createdAt = $derived(new Date(event.created_at * 1000));
 
+  /** Whether the reader has asked for the date the header leaves out. */
+  let showFullDate = $state(false);
+
   /**
    * The time of day only.
    *
@@ -138,11 +141,31 @@
             {origin === 'cache' ? 'cache' : 'upstream'}
           </span>
         {/if}
-        <time datetime={createdAt.toISOString()} title={createdAt.toLocaleString()}>
-          {formatTime(createdAt)}
-        </time>
+        <!-- A button, not bare text: `title` is a hover affordance, and a
+             touch reader has no hover. Tapping the time reveals the date the
+             header drops. -->
+        <button
+          type="button"
+          class="timestamp"
+          title={createdAt.toLocaleString()}
+          aria-expanded={showFullDate}
+          aria-label={showFullDate ? '日付を隠す' : '日付を表示'}
+          onclick={() => {
+            showFullDate = !showFullDate;
+          }}
+        >
+          <time datetime={createdAt.toISOString()}>
+            {formatTime(createdAt)}
+          </time>
+        </button>
       </span>
     </header>
+    {#if showFullDate}
+      <!-- Below the header rather than inside it: the header is one line by
+           design and clips its overflow, so the date goes where it can neither
+           squeeze the name nor be cut off. -->
+      <p class="full-date">{createdAt.toLocaleString()}</p>
+    {/if}
     {#if refs.length > 0}
       <ul class="refs">
         {#each refs as ref (ref.id)}
@@ -265,6 +288,43 @@
 
   .meta time {
     white-space: nowrap;
+  }
+
+  /* Reads as the plain timestamp it replaces: no button chrome, the meta row's
+     own colour and size. The vertical padding buys a tappable target and is
+     cancelled by the margin so the baseline does not move. */
+  .timestamp {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 4px 0;
+    margin: -4px 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    flex: none;
+    /* A tap should reveal the date, not paint the timestamp blue and leave the
+       text half-selected. */
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  .timestamp:hover time,
+  .timestamp:focus-visible time {
+    text-decoration: underline dotted;
+  }
+
+  .full-date {
+    margin: 0 0 4px;
+    color: var(--nt-muted, #657786);
+    font-size: 0.8rem;
+    /* Under the timestamp it was opened from, on the same side of the card. */
+    text-align: right;
+    /* The whole point is the date the header dropped, so it must not be the
+       next thing to get clipped. */
+    white-space: normal;
+    word-break: break-word;
   }
 
   .origin {

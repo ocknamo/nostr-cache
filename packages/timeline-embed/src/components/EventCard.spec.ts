@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import EventCard from './EventCard.svelte';
@@ -81,10 +81,34 @@ describe('EventCard', () => {
         hourCycle: 'h23',
       })
     );
-    // The dropped date is still reachable, by hover and for machines.
+    // The dropped date is still reachable: for machines on the element, and
+    // for a mouse on the control that wraps it.
     expect(rendered).not.toContain(String(at.getFullYear()));
     expect(time).toHaveAttribute('datetime', at.toISOString());
-    expect(time).toHaveAttribute('title', at.toLocaleString());
+    expect(time?.closest('button')).toHaveAttribute('title', at.toLocaleString());
+  });
+
+  it('reveals the full date when the timestamp is tapped, and hides it again', async () => {
+    const event = makeEvent({ created_at: 1_700_000_000 });
+    render(EventCard, { props: { event } });
+    const full = new Date(event.created_at * 1000).toLocaleString();
+
+    // Hidden to start with: the date is what the header drops to stay on one
+    // line, and a card that showed it anyway would defeat the point.
+    expect(screen.queryByText(full)).not.toBeInTheDocument();
+
+    // A tap, not a hover — the reason this is a button at all is that a touch
+    // reader can never see the `title`.
+    const toggle = screen.getByRole('button', { name: '日付を表示' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await fireEvent.click(toggle);
+
+    expect(screen.getByText(full)).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: '日付を隠す' })).toBe(toggle);
+
+    await fireEvent.click(toggle);
+    expect(screen.queryByText(full)).not.toBeInTheDocument();
   });
 
   it('marks a reply with the referenced event id', () => {
