@@ -202,7 +202,13 @@ describe('configFromSearchParams', () => {
       profileFreshness: 600,
       debug: true,
       showAvatars: true,
+      showMedia: true,
     });
+  });
+
+  it('turns media off only when asked', () => {
+    expect(configFromSearchParams(new URLSearchParams('show-media=false')).showMedia).toBe(false);
+    expect(configFromSearchParams(new URLSearchParams('show-media=true')).showMedia).toBe(true);
   });
 
   it('keeps the debug badges off and takes no explicit database name by default', () => {
@@ -210,6 +216,7 @@ describe('configFromSearchParams', () => {
 
     expect(config.debug).toBe(false);
     expect(config.showAvatars).toBe(true);
+    expect(config.showMedia).toBe(true);
     expect(config.dbName).toBeUndefined();
     expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);

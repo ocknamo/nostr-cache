@@ -327,6 +327,87 @@ describe('Embeddable timeline E2E', () => {
     expect(await page.$$('nostr-timeline img.avatar')).toHaveLength(0);
   });
 
+  describe('rich note bodies', () => {
+    /** A note carrying a link, an image and a `nostr:` mention. */
+    const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
+
+    async function startRichUpstream(): Promise<MockUpstreamRelay> {
+      return startMockUpstreamRelay(
+        await Promise.all([
+          createTestEvent(getRandomSecret(), {
+            created_at: 1_700_000_400,
+            content: `link https://example.com/a and ${site.avatarUrl} plus nostr:${NPUB}`,
+          }),
+        ])
+      );
+    }
+
+    it('links URLs, embeds images and decorates mentions', async () => {
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        await page.goto(embedUrl({ relays: disposable.url }));
+        await waitForEventCount(page, 1);
+
+        // The plain URL becomes a real link, opened without handing the target
+        // a window handle or the embedding page's referrer.
+        const links = await page.$$eval('nostr-timeline .content a', (nodes) =>
+          nodes.map((node) => ({
+            href: node.getAttribute('href'),
+            rel: node.getAttribute('rel'),
+            target: node.getAttribute('target'),
+          }))
+        );
+        expect(links).toEqual([
+          { href: 'https://example.com/a', rel: 'noopener noreferrer nofollow', target: '_blank' },
+        ]);
+
+        // The image URL is lifted out of the text and rendered as an
+        // attachment, which really loads from the host that served it.
+        const image = await page.waitForSelector('nostr-timeline .media img', {
+          timeout: TIMEOUT,
+        });
+        expect(await image.getAttribute('src')).toBe(site.avatarUrl);
+        expect(await image.getAttribute('referrerpolicy')).toBe('no-referrer');
+        expect(await image.evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(1);
+
+        // The mention is decoration, not a link: the widget has no client to
+        // send a reader to.
+        const mention = await page.waitForSelector('nostr-timeline .mention', { timeout: TIMEOUT });
+        expect((await mention.textContent())?.trim()).toBe('npub10elf…jptg');
+        expect(await page.$$('nostr-timeline .mention a')).toHaveLength(0);
+
+        const text = await page.$eval(
+          'nostr-timeline .content',
+          (node) => node.textContent?.trim() ?? ''
+        );
+        expect(text).not.toContain(site.avatarUrl);
+      } finally {
+        await disposable.close();
+      }
+    });
+
+    it('honours show-media=false from the iframe query string', async () => {
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        await page.goto(embedUrl({ relays: disposable.url, 'show-media': 'false' }));
+        await waitForEventCount(page, 1);
+        await page.waitForSelector('nostr-timeline .content a', { timeout: TIMEOUT });
+
+        // Nothing is fetched from the image host, but the URL is still there as
+        // a link — the reader loses the preview, not the information.
+        expect(await page.$$('nostr-timeline .media')).toHaveLength(0);
+        const hrefs = await page.$$eval('nostr-timeline .content a', (nodes) =>
+          nodes.map((node) => node.getAttribute('href'))
+        );
+        expect(hrefs).toEqual(['https://example.com/a', site.avatarUrl]);
+      } finally {
+        await disposable.close();
+      }
+    });
+  });
+
   it('keeps the name, the handle and the time on one line in a narrow embed', async () => {
     // The card header's single-line layout is pure CSS, so the component tests
     // (jsdom, which computes no layout) cannot see it. Its own upstream, for a

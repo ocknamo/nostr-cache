@@ -187,6 +187,14 @@
     （iframe なら <code>&amp;show-avatars=false</code>）を指定してください。表示名は
     そのまま表示されます。
   </p>
+
+  <p class="footnote">
+    本文中の URL はリンクになり、画像・動画・音声は投稿者が指定したホストから直接埋め込まれます
+    （アバターと同じく閲覧者の IP がそのホストに渡ります）。避けたい場合は
+    <code>show-media="false"</code>（iframe なら <code>&amp;show-media=false</code>）を
+    指定してください。URL はリンクとして残ります。<code>nostr:</code> のメンションは
+    短縮表示するだけで、リンクにはしません。
+  </p>
 </section>
 
 <style>

@@ -12,6 +12,8 @@
 
 export { default as Avatar } from './components/Avatar.svelte';
 export { default as EventCard } from './components/EventCard.svelte';
+export { default as MediaAttachment } from './components/MediaAttachment.svelte';
+export { default as NoteContent } from './components/NoteContent.svelte';
 export { default as Timeline } from './components/Timeline.svelte';
 export { default as NostrTimeline } from './nostr-timeline.svelte';
 
