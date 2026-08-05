@@ -28,6 +28,8 @@ export function createMockStorage(overrides: Partial<MockStorage> = {}): MockSto
   return {
     saveEvent: vi.fn().mockResolvedValue(true),
     getEvents: vi.fn().mockResolvedValue([]),
+    // 既定は「その座標にはまだ何も保存されていない」= 置換可能イベントは常に保存される
+    getCurrentVersion: vi.fn().mockResolvedValue(undefined),
     deleteEvent: vi.fn().mockResolvedValue(true),
     clear: vi.fn().mockResolvedValue(undefined),
     count: vi.fn().mockResolvedValue(0),

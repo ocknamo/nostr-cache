@@ -148,6 +148,30 @@ describe('UpstreamCoordinator', () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it('does not deliver an event superseded by a newer cached version', async () => {
+    // 上流が古い版の replaceable イベントを返した場合、キャッシュは保存していない。
+    // 配信するとクライアントの手元で新しい版が古い版に上書きされうる
+    const { pool, coordinator, deliver, ingest } = makeHarness(async () => ({
+      success: true,
+      stored: false,
+      superseded: true,
+    }));
+    coordinator.openForSubscription('client', 'sub', [{ kinds: [0] }], []);
+    const subId = pool.lastSubId();
+    const event = makeEvent('a', 0);
+    pool.emitEvent(subId, event);
+    await flush();
+
+    expect(deliver).not.toHaveBeenCalled();
+
+    // 同じ古い版が別の上流から届いても ingest はやり直さない
+    pool.emitEvent(subId, event);
+    await flush();
+
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it('delivers accepted-but-unstored (ephemeral) events', async () => {
     const { pool, coordinator, deliver } = makeHarness(async () => ({
       success: true,

@@ -21,6 +21,9 @@ import { EventHandler } from './event/event-handler.js';
 // cache-relay と同じ定義で書くために必要なものだけを公開する
 import { DELETION_EVENT_KIND } from './event/event-kind.js';
 import { EventValidator } from './event/event-validator.js';
+// NIP-01 の置換可能イベントの版比較（最新の1件だけを保持する）。これも Dexie 非依存の
+// 純関数で、SQLite アダプタが `getCurrentVersion` を同じ順序規則で実装するために共有する
+import { addressOf, selectCurrentVersion, supersedes } from './event/replaceable.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
 // タグの平坦化（"k:v" 形式・100 件上限・優先タグソート）。Dexie 非依存の純関数で、
@@ -77,6 +80,11 @@ export {
   DELETION_EVENT_KIND,
   isDeletableAddress,
   matchesAddressIdentifier,
+  // Replaceable / addressable version comparison (NIP-01) — storage adapters
+  // resolve "the current version of a coordinate" with the same ordering
+  addressOf,
+  selectCurrentVersion,
+  supersedes,
   // Storage
   StorageAdapter,
   CacheStrategy,

@@ -3,6 +3,7 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
 import { isDeletableAddress, matchesAddressIdentifier } from '../event/deletion.js';
 import { DELETION_EVENT_KIND } from '../event/event-kind.js';
+import { selectCurrentVersion } from '../event/replaceable.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
 import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
@@ -173,6 +174,32 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       }
     }
     return statuses;
+  }
+
+  /**
+   * Get the stored version of the replaceable / addressable event at `address`.
+   *
+   * The `[pubkey+kind]` index gives the coordinate's rows directly (normally at
+   * most one, since writes replace); the `d` identifier is then matched with
+   * cache-relay's shared predicate, and `selectCurrentVersion` applies NIP-01's
+   * ordering to whatever is left. Does NOT track access: this backs a write-path
+   * precondition, not a read on a client's behalf.
+   *
+   * Deliberately has no try/catch — see {@link StorageAdapter.getCurrentVersion}:
+   * a swallowed error would read as "no version stored" and let an older event
+   * overwrite a newer one.
+   *
+   * @param address Coordinate to look up (kind / pubkey / d value)
+   * @returns Promise resolving to the stored version, or undefined if none
+   */
+  async getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined> {
+    const rows = await this.events
+      .where('[pubkey+kind]')
+      .equals([address.pubkey, address.kind])
+      .toArray();
+    return selectCurrentVersion(
+      rows.filter((row) => matchesAddressIdentifier(row.tags, address)).map(rowToEvent)
+    );
   }
 
   /**

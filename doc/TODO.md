@@ -20,25 +20,40 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
 | timeline-embed | 埋め込みウィジェット + 共通ライブラリ層 |
 | demo-site | GitHub Pages 公開用デモ |
 
-## 優先度: 高（NIP-01 準拠）
+## 優先度: 中（NIP-01 の版比較の残課題）
 
-- [ ] **replaceable / addressable の置換で `created_at` を比較していない**
-  （`packages/cache-relay/src/event/event-handler.ts` の `handleReplaceableEvent` /
-  `handleAddressableEvent`）
-  - 現状: 同じ (pubkey, kind[, d]) の既存版を無条件に削除してから保存するため、
-    **古い署名済みイベントを1通投げるだけで新しい版を上書きできる**。NIP-01 の
-    「最新の1件だけを保持する」に非準拠
-  - 影響: 鮮度ウィンドウ（`upstreamFreshness`）を有効にしていると、上書き時に
-    `cached_at` が現在時刻になるため **最大で窓の秒数ぶん stale な版が固定される**
-    （無効時は次の REQ の上流問い合わせで自己修復する）
-  - **timeline-embed の既定窓が 300 秒から 86400 秒（24 時間）になったため、固定される
-    時間も 5 分から 24 時間に延びた**（`packages/timeline-embed/src/lib/relay-host.ts` の
-    `DEFAULT_PROFILE_FRESHNESS`）。埋め込みウィジェットは kind 0 の `picture` を実際に
-    画像として読みに行くので、この項目の優先度はそのぶん上がっている
-  - 対応: 保存前に既存版の `created_at` と比較し、既存の方が新しければ保存をスキップする
-    （同値なら NIP-01 に従い id の辞書順で小さい方を残す）。`handleEvent` の戻り値
-    （`success` は OK 応答、`stored` は退避契機）と、上流由来イベントを
-    クライアントへ配信するかの判断もあわせて決める必要がある
+replaceable / addressable の版比較（NIP-01「最新の1件だけを保持する」）を入れた際に
+残した課題。いずれも比較そのものは正しく動くが、周辺の穴。
+
+- [ ] **`created_at` の未来方向の上限チェックが無い**
+  - 現状: 遠未来の `created_at` を持つイベントは常に版比較に勝つ。既定の
+    `IMMEDIATELY` では署名検証があるため他人になりすました版は作れないが、
+    **`validateEventsType: 'NONE'`（server の `relay.validateEvents: false`）では、
+    未検証の遠未来イベントが1通入ると、その座標の正当な更新が以後すべて落ち続ける**
+    （`LAZY` は背景検証が不正イベントを削除するまでの一時的な影響）
+  - 版比較を入れる前は「古い版が無条件に上書き」だったため次の正当な版で自己修復して
+    いた。塞いだのは版比較なので、対で入れるべきだったのはこの上限チェック
+  - 対応: 一般的なリレーと同様に「now + 許容幅」を超える `created_at` を
+    `invalid:` で拒否する（許容幅は設定可能にする）。検証状態（`validated`）で
+    比較対象を絞る案は、`NONE` では比較が丸ごと無効化され、`LAZY` では pending の
+    新しい版が無視されて元のバグに戻るため不可
+- [ ] **superseded 時に鮮度ウィンドウが再武装されない**
+  - 現状: 上流が「キャッシュより古い版」を返したとき、そのイベントは保存しないので
+    `cached_at` が更新されない。`FreshnessGate.markRevalidated` は既に配信済みの
+    id（`onDuplicate`）でしか発火しないため、**キャッシュが上流より新しい座標では
+    窓が失効したまま、以後の REQ が毎回上流へ抜ける**
+  - 上流が古い版しか持たないなら「キャッシュの版で十分新鮮」と判断してよいので、
+    superseded 時に現行版の `cached_at` を打ち直すのが筋。`IngestResult` に現行版の
+    id を載せて coordinator から `FreshnessGate` に渡す形になる
+- [ ] **複数版が保存されている場合に REQ 応答を最新1件へ畳んでいない**
+  - NIP-01: 「複数の版を持っていても REQ には最新のものだけを返すべき（SHOULD）」
+  - 版比較を通る経路では版は1つに収束するが、`publishEvent()` 経由（下記「API の
+    一貫性」の項目）や、比較導入前に書かれた行では複数版が同居しうる
+- [ ] **`d` タグの無いアドレサブルイベントの扱いが揃っていない**
+  - 現状: `handleAddressableEvent` は `d` タグが無いと保存しないが、`handleEvent` は
+    `success: true` を返すため**保存されないのに購読者へ配信され上流へも転送される**
+  - 一方、座標解決（`addressOf` / `matchesAddressIdentifier`）と適合性テストは NIP-01 に
+    従い「`d` 無し = 空識別子」で揃っている。保存側も空識別子として扱うのが筋
 
 ## 優先度: 中（NIP 対応の拡張）
 
@@ -72,7 +87,8 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
     呼ぶため、transport 経由 `EVENT` では `EventHandler` が行っているイベント種別の処理を
     まるごと飛ばしている。**in-process で kind 0 / 3 / 10000番台を publish しても古い版が
     削除されず**（replaceable にならない）、30000番台の d タグ置換も効かず、
-    ephemeral（20000番台）も保存されてしまう
+    ephemeral（20000番台）も保存されてしまう。NIP-01 の版比較（古い版を保存しない）も
+    同じ理由で通らないため、**in-process 経路では古い版を publish すると併存する**
   - NIP-09 については同じ穴を避けるため `publishEvent()` にも削除適用を明示的に追加したが、
     種別処理そのものを二重に持つのは筋が悪い。`EventHandler.handleEvent()` に寄せて
     ローカル購読通知だけを `publishEvent()` 側に残すのが本筋
@@ -149,6 +165,9 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
   小数 `limit` / 境界が一部分岐で排他だった）
 - NIP-09（イベント削除・kind 5）の対応。kind 5 は全モードで同期検証し、
   TTL スイープ対象外・退避は最後
+- replaceable / addressable の版比較（NIP-01「最新の1件だけを保持する」）。
+  保存前に既存版と `created_at` を比較し、古い版は保存も配信も上流転送もしない
+  （同値は id の辞書順）。座標の現行版は `StorageAdapter.getCurrentVersion` で引く
 
 **server**
 - ビルド型エラーの修正と CI 復旧、`tsc --noEmit` による typecheck の CI 組み込み

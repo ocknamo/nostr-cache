@@ -69,6 +69,117 @@ describe('Event Handler Integration', () => {
       expect(storedEvents[0].content).toBe('Second version');
     });
 
+    it('should keep the newest version when an older one arrives afterwards', async () => {
+      // NIP-01: 置換可能イベントは最新の1件だけを保持する。古い署名済みイベントを
+      // 後から投げるだけで新しい版を上書きできてはならない
+      const seckey = getRandomSecret();
+      const newer = await createTestEvent(seckey, {
+        kind: 0,
+        created_at: 2000,
+        content: 'Second version',
+      });
+      const older = await createTestEvent(seckey, {
+        kind: 0,
+        created_at: 1000,
+        content: 'First version',
+      });
+
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', newer]);
+
+      const okMessages: NostrWireMessage[] = [];
+      const broadcasts: NostrWireMessage[] = [];
+      // 古い版を配信させないため、先に購読しておく
+      await testBase.messageHandler.handleMessage('test-client', [
+        'REQ',
+        'sub1',
+        { kinds: [0], authors: [newer.pubkey] },
+      ]);
+      testBase.messageHandler.onResponse((_clientId, msg) => {
+        if (msg[0] === 'OK') okMessages.push(msg);
+        if (msg[0] === 'EVENT') broadcasts.push(msg);
+      });
+
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', older]);
+
+      // 保存されているのは新しい版のみ
+      const storedEvents = await testBase.storage.getEvents([
+        { kinds: [0], authors: [newer.pubkey] },
+      ]);
+      expect(storedEvents).toHaveLength(1);
+      expect(storedEvents[0].id).toBe(newer.id);
+      expect(storedEvents[0].content).toBe('Second version');
+
+      // 受理はするが（OK true）、購読者へは配信しない
+      expect(okMessages).toHaveLength(1);
+      expect(okMessages[0][1]).toBe(older.id);
+      expect(okMessages[0][2]).toBe(true);
+      expect(okMessages[0][3]).toMatch(/^duplicate: /);
+      expect(broadcasts).toHaveLength(0);
+    });
+
+    it('should keep the lowest id when two versions share created_at', async () => {
+      const seckey = getRandomSecret();
+      const first = await createTestEvent(seckey, {
+        kind: 0,
+        created_at: 1000,
+        content: 'first',
+      });
+      const second = await createTestEvent(seckey, {
+        kind: 0,
+        created_at: 1000,
+        content: 'second',
+      });
+      // NIP-01 の同着タイブレークは id の辞書順（到着順に依存しない）
+      const [lower, higher] = [first, second].sort((a, b) => (a.id < b.id ? -1 : 1));
+
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', higher]);
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', lower]);
+
+      const afterBoth = await testBase.storage.getEvents([{ kinds: [0], authors: [first.pubkey] }]);
+      expect(afterBoth).toHaveLength(1);
+      expect(afterBoth[0].id).toBe(lower.id);
+
+      // 逆順で再送しても結果は変わらない
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', higher]);
+      const afterResend = await testBase.storage.getEvents([
+        { kinds: [0], authors: [first.pubkey] },
+      ]);
+      expect(afterResend).toHaveLength(1);
+      expect(afterResend[0].id).toBe(lower.id);
+    });
+
+    it('should keep the newest version per d tag for addressable events', async () => {
+      const seckey = getRandomSecret();
+      const newer = await createTestEvent(seckey, {
+        kind: 30023,
+        created_at: 2000,
+        tags: [['d', 'slug']],
+        content: 'newer',
+      });
+      const older = await createTestEvent(seckey, {
+        kind: 30023,
+        created_at: 1000,
+        tags: [['d', 'slug']],
+        content: 'older',
+      });
+      // 別の d タグは別の座標なので、古くても保存される
+      const otherSlug = await createTestEvent(seckey, {
+        kind: 30023,
+        created_at: 1000,
+        tags: [['d', 'other']],
+        content: 'other slug',
+      });
+
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', newer]);
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', older]);
+      await testBase.messageHandler.handleMessage('test-client', ['EVENT', otherSlug]);
+
+      const storedEvents = await testBase.storage.getEvents([
+        { kinds: [30023], authors: [newer.pubkey] },
+      ]);
+      expect(storedEvents.map((event) => event.id).sort()).toEqual([newer.id, otherSlug.id].sort());
+    });
+
     it('should handle ephemeral events', async () => {
       // Create an ephemeral event (kind 20000+)
       const event = await createTestEvent(getRandomSecret(), {

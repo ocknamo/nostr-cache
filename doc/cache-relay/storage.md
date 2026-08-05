@@ -33,6 +33,7 @@ StorageAdapterインターフェースの実装
 - markValidated(ids): 検証済みフラグの一括付与（存在しない id は no-op）
 - getValidationStatus(ids): id ごとの検証状態（`validated` / `pending` / `unknown`）を一括取得（主キー bulkGet。アクセス追跡しない）
 - deleteEventsByIdsForPubkey(ids, pubkey): NIP-09 の `e` タグに対応する削除。`pubkey` が一致する行のみ削除し、kind 5 は削除しない（両方ともストレージ側で保証する）
+- getCurrentVersion(address): 座標（kind / pubkey / `d` 値）に保存されている置換可能・アドレサブルイベントを取得。複数版があれば NIP-01 の順序（`created_at` の新しい方、同値は id の辞書順で小さい方）で 1 件を返す。リレーが「受信イベントを保存してよいか」の判定に使う書き込み経路の事前確認のため、アクセス追跡はしない。失敗は握り潰さず伝播させる（「未保存」と誤認すると古い版で新しい版を上書きしてしまうため）
 - deleteEventsByAddress(address, until): NIP-09 の `a` タグに対応する削除。`created_at <= until` の版のみ削除。アドレサブル kind では `d` タグの一致を要求し、置換可能 kind では `identifier` を無視する（判定は cache-relay の共通純関数 `matchesAddressIdentifier`）
 
 ## 3. データベース設計

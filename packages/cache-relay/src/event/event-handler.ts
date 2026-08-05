@@ -7,7 +7,7 @@
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
-import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { EventAddress, StorageAdapter } from '../storage/storage-adapter.js';
 import { applyDeletionRequest } from './deletion.js';
 import {
   isAddressableKind,
@@ -16,6 +16,7 @@ import {
   isReplaceableKind,
 } from './event-kind.js';
 import { EventValidator } from './event-validator.js';
+import { addressOf, getDTagValue, supersedes } from './replaceable.js';
 
 /** How events are validated as they enter the relay. */
 export type ValidateEventsType = 'NONE' | 'IMMEDIATELY' | 'LAZY';
@@ -25,6 +26,42 @@ interface Subscription {
   id: string;
   filters: Filter[];
   createdAt: number;
+}
+
+/**
+ * OK message returned for an event the relay accepts but drops because it
+ * already holds a newer version of the same replaceable / addressable event.
+ * `duplicate:` is NIP-01's machine-readable prefix for "the relay's state
+ * already covers this event"; it is sent with `OK true`, since nothing about
+ * the event is wrong — it simply lost the NIP-01 version comparison.
+ */
+const SUPERSEDED_MESSAGE = 'duplicate: a newer version of this event is already stored';
+
+/** Outcome of storing one replaceable / addressable event. */
+interface ReplaceOutcome {
+  /** Whether the event was persisted. */
+  stored: boolean;
+  /** Whether it was dropped in favour of a newer stored version. */
+  superseded: boolean;
+}
+
+/** Result of handling one event. */
+export interface HandleEventResult {
+  /** Whether the event was accepted (OK true). */
+  success: boolean;
+  /** OK message; `'success'` when there is nothing to report. */
+  message: string;
+  /** Whether the event was persisted (false for ephemeral / not-stored). */
+  stored: boolean;
+  /**
+   * Whether the event lost the NIP-01 version comparison against the version
+   * already stored at its coordinate. Such an event is accepted but neither
+   * stored nor delivered — broadcasting it would push a version the relay
+   * itself refuses to keep.
+   */
+  superseded?: boolean;
+  /** Subscriptions the event must be broadcast to, by client id. */
+  matches?: Map<string, Subscription[]>;
 }
 
 /**
@@ -57,13 +94,7 @@ export class EventHandler {
    * @param event Event to handle
    * @returns Promise resolving to object containing success status and matching subscriptions
    */
-  async handleEvent(event: NostrEvent): Promise<{
-    success: boolean;
-    message: string;
-    /** Whether the event was persisted (false for ephemeral / not-stored). */
-    stored: boolean;
-    matches?: Map<string, Subscription[]>;
-  }> {
+  async handleEvent(event: NostrEvent): Promise<HandleEventResult> {
     const mustValidateNow = this.mustValidateNow(event);
     if (mustValidateNow) {
       try {
@@ -99,7 +130,10 @@ export class EventHandler {
       try {
         // Replaceableイベントの処理
         // 同じpubkeyとkindの組み合わせに対して最新のものだけ保存
-        const stored = await this.handleReplaceableEvent(event, mustValidateNow);
+        const { stored, superseded } = await this.handleReplaceableEvent(event, mustValidateNow);
+        if (superseded) {
+          return this.supersededResult();
+        }
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, stored, message: 'success', matches };
       } catch (error) {
@@ -114,7 +148,10 @@ export class EventHandler {
       try {
         // Addressableイベントの処理
         // 同じpubkey、kind、dタグ値の組み合わせに対して最新のものだけ保存
-        const stored = await this.handleAddressableEvent(event, mustValidateNow);
+        const { stored, superseded } = await this.handleAddressableEvent(event, mustValidateNow);
+        if (superseded) {
+          return this.supersededResult();
+        }
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, stored, message: 'success', matches };
       } catch (error) {
@@ -262,26 +299,76 @@ export class EventHandler {
    * @private
    */
   private getDTagValue(event: NostrEvent): string | undefined {
-    const dTag = event.tags.find((tag) => tag[0] === 'd');
-    return dTag ? dTag[1] : undefined;
+    return getDTagValue(event.tags);
+  }
+
+  /**
+   * Result for an event the relay accepts but drops because it already holds a
+   * newer version of the same coordinate. No `matches`: the event must not be
+   * broadcast, since the relay itself refuses to keep it.
+   *
+   * @returns The `superseded` handling result
+   * @private
+   */
+  private supersededResult(): HandleEventResult {
+    return { success: true, stored: false, superseded: true, message: SUPERSEDED_MESSAGE };
+  }
+
+  /**
+   * Whether the version already stored at `event`'s coordinate wins over
+   * `event`, per NIP-01 (newer `created_at`, ties broken by the lowest id).
+   *
+   * Without this check any older signed event would overwrite the newest one —
+   * a replayed copy of a stale profile is enough — because storing a
+   * replaceable event deletes every other version of the coordinate first.
+   *
+   * The lookup and the delete + save that follow it are separate awaits, so two
+   * events for the same coordinate handled concurrently can still interleave and
+   * leave the older one stored. That race is inherent in the delete-then-save
+   * shape this predates; the fix here removes the case that needs no
+   * concurrency at all.
+   *
+   * @param event Event being ingested
+   * @param address Coordinate of the event
+   * @returns Promise resolving to true if the incoming event must be dropped
+   * @private
+   */
+  private async isSuperseded(event: NostrEvent, address: EventAddress): Promise<boolean> {
+    const current = await this.storage.getCurrentVersion(address);
+    if (current === undefined || !supersedes(current, event)) {
+      return false;
+    }
+    logger.info(
+      `Dropped ${event.id} (kind ${event.kind}): a newer version (${current.id}) is already stored`
+    );
+    return true;
   }
 
   /**
    * Handle a replaceable event
-   * Deletes older events with the same pubkey and kind
+   * Keeps only the newest event with the same pubkey and kind
    *
    * @param event Event to handle
    * @param verified Whether the signature was verified before this save
-   * @returns Promise resolving to boolean indicating success
+   * @returns Promise resolving to whether the event was stored / superseded
    * @private
    */
-  private async handleReplaceableEvent(event: NostrEvent, verified: boolean): Promise<boolean> {
+  private async handleReplaceableEvent(
+    event: NostrEvent,
+    verified: boolean
+  ): Promise<ReplaceOutcome> {
     try {
+      // 既存版のほうが新しければ保存しない（NIP-01: 最新の1件だけを保持する）
+      if (await this.isSuperseded(event, addressOf(event))) {
+        return { stored: false, superseded: true };
+      }
+
       // 同じpubkeyとkindの古いイベントを削除
       await this.storage.deleteEventsByPubkeyAndKind(event.pubkey, event.kind);
 
       // 新しいイベントを保存
-      return await this.storage.saveEvent(event, this.saveOptions(verified));
+      const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
+      return { stored, superseded: false };
     } catch (error) {
       logger.info('Error handling replaceable event:', error);
       throw error;
@@ -290,27 +377,38 @@ export class EventHandler {
 
   /**
    * Handle an addressable event
-   * Deletes older events with the same pubkey, kind, and d tag value
+   * Keeps only the newest event with the same pubkey, kind, and d tag value
    *
    * @param event Event to handle
    * @param verified Whether the signature was verified before this save
-   * @returns Promise resolving to boolean indicating success
+   * @returns Promise resolving to whether the event was stored / superseded
    * @private
    */
-  private async handleAddressableEvent(event: NostrEvent, verified: boolean): Promise<boolean> {
+  private async handleAddressableEvent(
+    event: NostrEvent,
+    verified: boolean
+  ): Promise<ReplaceOutcome> {
     try {
       const dTagValue = this.getDTagValue(event);
 
       if (dTagValue === undefined) {
         logger.info('Addressable event missing d tag');
-        return false;
+        return { stored: false, superseded: false };
+      }
+
+      // 既存版のほうが新しければ保存しない（NIP-01: 最新の1件だけを保持する）。
+      // 座標は addressOf が組み立てる（アドレサブル kind では identifier =
+      // dTagValue になる）ので、置換可能側と同じ 1 か所の定義を通す
+      if (await this.isSuperseded(event, addressOf(event))) {
+        return { stored: false, superseded: true };
       }
 
       // 同じpubkey、kind、dタグ値の古いイベントを削除
       await this.storage.deleteEventsByPubkeyKindAndDTag(event.pubkey, event.kind, dTagValue);
 
       // 新しいイベントを保存
-      return await this.storage.saveEvent(event, this.saveOptions(verified));
+      const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
+      return { stored, superseded: false };
     } catch (error) {
       logger.info('Error handling addressable event:', error);
       throw error;

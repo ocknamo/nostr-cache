@@ -535,6 +535,112 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
       });
     });
 
+    describe('getCurrentVersion (NIP-01 replaceable / addressable)', () => {
+      const withTags = (event: NostrEvent, tags: string[][]): NostrEvent => ({ ...event, tags });
+
+      it('should return undefined when the coordinate holds no event', async () => {
+        expect(
+          await storage.getCurrentVersion({ kind: 0, pubkey: 'author1', identifier: '' })
+        ).toBeUndefined();
+      });
+
+      it('should return the stored version of a replaceable coordinate', async () => {
+        await storage.saveEvent(eventBy('profile1', 1000, 'author1', 0));
+        // 別 author / 別 kind は同じ座標ではない
+        await storage.saveEvent(eventBy('profile2', 2000, 'author2', 0));
+        await storage.saveEvent(eventBy('follows', 3000, 'author1', 3));
+
+        const current = await storage.getCurrentVersion({
+          kind: 0,
+          pubkey: 'author1',
+          identifier: '',
+        });
+        expect(current?.id).toBe('profile1');
+      });
+
+      it('should ignore the identifier for replaceable kinds', async () => {
+        // 置換可能 kind は d タグを持たない（あっても座標には含まれない）
+        await storage.saveEvent(withTags(eventBy('profile1', 1000, 'author1', 0), [['d', 'x']]));
+
+        const current = await storage.getCurrentVersion({
+          kind: 0,
+          pubkey: 'author1',
+          identifier: 'ignored',
+        });
+        expect(current?.id).toBe('profile1');
+      });
+
+      it('should pick the newest version when several are stored', async () => {
+        // 版比較が入る前に書かれた行・他の書き手が入れた行を想定
+        await storage.saveEvent(eventBy('old', 1000, 'author1', 0));
+        await storage.saveEvent(eventBy('new', 3000, 'author1', 0));
+        await storage.saveEvent(eventBy('mid', 2000, 'author1', 0));
+
+        const current = await storage.getCurrentVersion({
+          kind: 0,
+          pubkey: 'author1',
+          identifier: '',
+        });
+        expect(current?.id).toBe('new');
+      });
+
+      it('should break created_at ties by the lowest id', async () => {
+        await storage.saveEvent(eventBy('bbbb', 1000, 'author1', 0));
+        await storage.saveEvent(eventBy('aaaa', 1000, 'author1', 0));
+        await storage.saveEvent(eventBy('cccc', 1000, 'author1', 0));
+
+        const current = await storage.getCurrentVersion({
+          kind: 0,
+          pubkey: 'author1',
+          identifier: '',
+        });
+        expect(current?.id).toBe('aaaa');
+      });
+
+      it('should match the d identifier for addressable kinds', async () => {
+        await storage.saveEvent(withTags(eventBy('slug-a', 1000, 'author1', 30023), [['d', 'a']]));
+        await storage.saveEvent(
+          withTags(eventBy('slug-b', 2000, 'author1', 30023), [
+            ['e', 'other'],
+            ['d', 'b'],
+          ])
+        );
+        // d タグ無しは空識別子（NIP-01）
+        await storage.saveEvent(eventBy('no-d', 3000, 'author1', 30023));
+
+        expect(
+          (await storage.getCurrentVersion({ kind: 30023, pubkey: 'author1', identifier: 'a' }))?.id
+        ).toBe('slug-a');
+        expect(
+          (await storage.getCurrentVersion({ kind: 30023, pubkey: 'author1', identifier: 'b' }))?.id
+        ).toBe('slug-b');
+        expect(
+          (await storage.getCurrentVersion({ kind: 30023, pubkey: 'author1', identifier: '' }))?.id
+        ).toBe('no-d');
+        expect(
+          await storage.getCurrentVersion({ kind: 30023, pubkey: 'author1', identifier: 'none' })
+        ).toBeUndefined();
+      });
+
+      it('should return the event as stored', async () => {
+        const event = withTags(eventBy('profile1', 1000, 'author1', 0), [['p', 'someone']]);
+        await storage.saveEvent(event);
+
+        expect(
+          await storage.getCurrentVersion({ kind: 0, pubkey: 'author1', identifier: '' })
+        ).toEqual(event);
+      });
+
+      it('should not count as a read access (LRU/LFU)', async () => {
+        await storage.saveEvent(eventBy('profile1', 1000, 'author1', 0));
+
+        await storage.getCurrentVersion({ kind: 0, pubkey: 'author1', identifier: '' });
+
+        // 挿入の 1 回のみ。書き込み経路の事前確認は読み出しではない
+        expect((await bookkeeping('profile1')).accessCount).toBe(1);
+      });
+    });
+
     describe('Additional getEvents Patterns', () => {
       // created_at 1000..5000 / kind 1..5 / author1..author5、#p は user1/user2 交互
       const events: NostrEvent[] = Array.from({ length: 5 }, (_, i) => {

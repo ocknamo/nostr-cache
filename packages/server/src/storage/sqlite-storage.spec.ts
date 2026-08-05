@@ -74,6 +74,9 @@ describe('SqliteStorage (SQLite-specific)', () => {
   // close 済みの DB への操作は投げずにフォールバック値を返す（server の
   // stop() → start() が既定モードと対称に振る舞うための前提）。
   // 失敗時の切り分けができるよう、読み・書き・void 返しで分けて検証する。
+  // 唯一の例外が getCurrentVersion で、これは意図的に例外を伝播させる:
+  // フォールバック（undefined）は「その座標に版が無い」と読めてしまい、
+  // 古い版で新しい版を上書きする経路そのものになるため。
   describe('error fallbacks after close', () => {
     beforeEach(async () => {
       await storage.saveEvent(mockEvent);
@@ -100,6 +103,14 @@ describe('SqliteStorage (SQLite-specific)', () => {
       expect(await storage.deleteExpired(999_999_999)).toBe(0);
       expect(await storage.enforceLimit(1)).toBe(0);
       expect(await storage.touchCachedAt([mockEvent.id])).toBe(0);
+    });
+
+    it('should propagate a getCurrentVersion failure instead of reporting "no version"', async () => {
+      // 失敗を undefined（＝未保存）として返すと、置換可能イベントの版比較が
+      // 「保存済みの版は無い」と誤り、古い版で新しい版を上書きしてしまう
+      await expect(
+        storage.getCurrentVersion({ kind: 0, pubkey: mockEvent.pubkey, identifier: '' })
+      ).rejects.toThrow();
     });
 
     it('should not throw from the void-returning methods', async () => {

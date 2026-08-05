@@ -32,6 +32,47 @@ NIP-01 message processing, subscription management, and event validation.
 - **NIP-02**: kind 3（フォローリスト）を置換可能イベントとして扱う / kind 3 treated as replaceable
 - **NIP-09**: 削除リクエスト（kind 5）。詳細は下記 / deletion requests (kind 5), see below
 
+##### 置換可能 / アドレサブルイベント / Replaceable and addressable events
+
+置換可能 kind（0 / 3 / 10000–19999）は (pubkey, kind) ごとに、アドレサブル kind
+（30000–39999）は (pubkey, kind, `d` タグ値) ごとに、**最新の 1 件だけ**を保持します
+（NIP-01）。保存前に既存版と `created_at` を比較し、既存版のほうが新しければ受信した
+イベントは保存しません。`created_at` が同値の場合は id の辞書順で小さい方を残すため、
+どちらが先に届いても結果は同じになります。
+
+保存されなかったイベントには **`OK` を `true`** で返しますが（イベント自体は正当なので）、
+メッセージに機械可読な `duplicate:` 接頭辞を付け、**購読者への配信も上流への転送も
+行いません**。上流リレーが古い版を返した場合も同様に破棄します。
+
+現状の制約 / Known limitations:
+
+- 版比較が働くのは transport 経由の `EVENT`（および上流からの充填）だけです。
+  in-process の **`publishEvent()` は `EventHandler` を経由しない**ため、版比較も
+  古い版の削除も行われません（`doc/TODO.md` の「API の一貫性」項目）
+- `created_at` の**未来方向の上限チェックはありません**。既定の `IMMEDIATELY` では
+  署名検証があるため他人になりすました版は作れませんが、`validateEventsType: 'NONE'`
+  （`server` の `relay.validateEvents: false`）では、遠未来の `created_at` を持つ
+  未検証イベントが 1 通入ると、その座標の正当な更新が以後すべて `duplicate:` で
+  落ち続けます（`LAZY` は背景検証が不正イベントを削除するまでの一時的な影響）
+- 複数の版が保存されている状態（`publishEvent()` 経由など）で、`REQ` 応答を最新 1 件に
+  畳む処理はありません（NIP-01 の SHOULD）
+
+/ The comparison covers the transport `EVENT` path and upstream backfill only — the
+in-process `publishEvent()` bypasses `EventHandler`, so it neither compares versions nor
+deletes older ones. There is no upper bound on `created_at`: under the default
+`IMMEDIATELY` mode signatures are verified so nobody can forge another author's version,
+but with `validateEventsType: 'NONE'` a single unverified event dated far in the future
+blocks every later update of that coordinate (under `LAZY` this lasts only until the
+background validator removes it). Finally, when several versions are stored, `REQ`
+responses are not folded down to the newest one (a NIP-01 SHOULD).
+
+Only the newest version is kept — per (pubkey, kind) for replaceable kinds and per
+(pubkey, kind, `d`) for addressable ones. An incoming event is compared against the stored
+version first and dropped when the stored one is newer (ties broken by the lowest id, so
+arrival order does not matter). A dropped event still gets `OK true` — it is a valid event —
+with a `duplicate:` prefixed message, but it is neither broadcast to subscribers nor
+forwarded upstream. Older versions arriving from upstream relays are dropped the same way.
+
 ##### NIP-09（イベント削除リクエスト） / Event deletion requests
 
 kind 5 のイベントを受け取ると、リレーは `e` タグ（イベント id）と `a` タグ
@@ -189,10 +230,11 @@ interface NostrRelayOptions {
 あります。
 
 > **互換性の注意 / Compatibility note:** NIP-09 対応で `deleteEventsByIdsForPubkey` と
-> `deleteEventsByAddress` が**必須メソッドとして追加**されました（`deleteExpired` /
-> `enforceLimit` のような optional ではありません）。独自の `StorageAdapter` 実装を
-> 持っている場合は両メソッドの実装が必要です。
-> / Both methods were added as **required** members of `StorageAdapter`, so
+> `deleteEventsByAddress` が、NIP-01 の版比較対応で `getCurrentVersion` が、いずれも
+> **必須メソッドとして追加**されました（`deleteExpired` / `enforceLimit` のような
+> optional ではありません）。独自の `StorageAdapter` 実装を持っている場合は
+> これらの実装が必要です。
+> / These methods were added as **required** members of `StorageAdapter`, so
 > external adapter implementations must add them.
 
 ```typescript
@@ -212,6 +254,7 @@ interface StorageAdapter {
   ): Promise<boolean>;
   deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number>;
   deleteEventsByAddress(address: EventAddress, until: number): Promise<number>;
+  getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined>;
   getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
   markValidated(ids: string[]): Promise<void>;
   getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
@@ -267,6 +310,25 @@ interface EventAddress {
   `created_at <= until`; for addressable kinds the `d` tag must equal
   `address.identifier` (a missing `d` tag counts as the empty identifier), while for
   replaceable kinds the identifier is ignored.
+- `getCurrentVersion` は座標（`EventAddress`）に保存されている置換可能 / アドレサブル
+  イベントを返します。リレーは受信イベントを保存してよいかの判定（NIP-01 の版比較）に
+  使うため、複数の版が保存されている場合は NIP-01 の順序（`created_at` の新しい方、
+  同値なら id の辞書順で小さい方）で 1 件を返します。アドレサブル kind では `d` タグ値が
+  `address.identifier` と一致する必要があり（`d` タグ無しは空文字列）、置換可能 kind では
+  `identifier` を無視します。`getValidationStatus` と同様、LRU/LFU のアクセス追跡には
+  影響しません。**他のメソッドと違い、失敗を握り潰してはいけません**: 「保存されていない」
+  （＝受信イベントを保存してよい）と「読み出しに失敗した」を呼び出し側が区別できず、
+  後者を前者として返すことは古い版で新しい版を上書きする経路そのものだからです。
+  例外はそのまま伝播させ、リレー側がイベントを拒否します。
+  / Returns the event stored at the coordinate — the version NIP-01 retains (newest
+  `created_at`, ties by lowest id) if several are present — backing the relay's version
+  comparison on the write path. For addressable kinds the `d` tag must equal
+  `address.identifier` (a missing `d` tag counts as the empty identifier); for replaceable
+  kinds the identifier is ignored. Never affects LRU/LFU tracking. **Unlike the other
+  methods it must not swallow errors**: callers cannot distinguish "nothing stored" (which
+  permits the save) from "the lookup failed", and reporting the latter as the former is
+  exactly how an older version overwrites a newer one. Let it throw and the relay rejects
+  the event instead.
 - `getEvents` のフィルタ解釈は NIP-01 準拠で、`DexieStorage` と `SqliteStorage` で一致します。
   この一致は共通の適合性テスト（`cache-relay/src/test/storage-conformance.ts`）で担保しており、
   両アダプタの spec が同じテスト群を実行します。独自アダプタを実装する場合も、
