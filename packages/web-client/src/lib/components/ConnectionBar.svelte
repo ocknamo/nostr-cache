@@ -17,6 +17,9 @@
   const statusLabels: Record<ConnectionStatus, string> = {
     disconnected: '未接続',
     connecting: '接続中…',
+    // 一度つながった後に切れた状態。rx-nostr が自動で再試行しているので
+    // ユーザーの操作は要らない、という点で「接続中…」と区別する。
+    reconnecting: '再接続中…',
     connected: '接続済み',
     error: 'エラー',
   };
@@ -71,6 +74,11 @@
   .status-connected {
     background-color: #e7f5ec;
     color: #0a7d33;
+  }
+
+  .status-reconnecting {
+    background-color: #fff4e5;
+    color: #8a5300;
   }
 
   .status-error {

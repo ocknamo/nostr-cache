@@ -1,10 +1,17 @@
 import type { NostrEvent } from '@nostr-cache/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionStatus } from './relay-connection.ts';
 import { RelayConnection } from './relay-connection.ts';
 
+const RELAY_URL = 'ws://nostr-cache.invalid';
+
 /**
  * Minimal WebSocket stand-in with manual event triggers.
+ *
+ * Only `addEventListener` is implemented, because that is all rx-nostr uses —
+ * it never touches the `on*` properties — and the close event carries the
+ * status code the caller passed, as a real socket does. rx-nostr reads that
+ * code to tell its own deliberate closes from a connection that dropped.
  */
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -12,63 +19,107 @@ class FakeWebSocket {
   readonly url: string;
   readyState = 0; // CONNECTING
   sent: string[] = [];
-  closed = false;
-  onopen: ((event: unknown) => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: ((event: unknown) => void) | null = null;
-  onerror: ((event: unknown) => void) | null = null;
+  closedWith: number[] = [];
+
+  private listeners = new Map<string, Set<(event: unknown) => void>>();
 
   constructor(url: string) {
     this.url = url;
     FakeWebSocket.instances.push(this);
   }
 
+  addEventListener(type: string, callback: (event: never) => void): void {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(callback as (event: unknown) => void);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, callback: (event: never) => void): void {
+    this.listeners.get(type)?.delete(callback as (event: unknown) => void);
+  }
+
   send(data: string): void {
     this.sent.push(data);
   }
 
-  close(): void {
-    this.closed = true;
+  close(code = 1000): void {
+    if (this.readyState === 3) {
+      return;
+    }
     this.readyState = 3; // CLOSED
-    this.onclose?.({});
+    this.closedWith.push(code);
+    this.emit('close', { type: 'close', code, reason: '' });
   }
 
   simulateOpen(): void {
     this.readyState = 1; // OPEN
-    this.onopen?.({});
+    this.emit('open', { type: 'open' });
   }
 
   simulateMessage(message: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(message) });
+    this.simulateRawMessage(JSON.stringify(message));
   }
 
   simulateRawMessage(data: string): void {
-    this.onmessage?.({ data });
+    this.emit('message', { type: 'message', data });
   }
 
-  simulateError(): void {
-    this.onerror?.({});
+  /** Drop the connection the way a relay going away does. */
+  simulateServerClose(): void {
+    this.close(1006);
   }
+
+  /** Everything the connection has sent, parsed back into NIP-01 messages. */
+  get messages(): unknown[] {
+    return this.sent.map((raw) => JSON.parse(raw));
+  }
+
+  private emit(type: string, event: unknown): void {
+    for (const listener of [...(this.listeners.get(type) ?? [])]) {
+      listener(event);
+    }
+  }
+}
+
+/** The wire subscription ID rx-nostr derives from a caller-supplied one. */
+function wireSubId(subId: string): string {
+  return `${subId}:0`;
 }
 
 function createConnection(options: ConstructorParameters<typeof RelayConnection>[0] = {}) {
   FakeWebSocket.instances = [];
-  const connection = new RelayConnection({
+  return new RelayConnection({
     ...options,
     webSocketCtor: FakeWebSocket as unknown as typeof WebSocket,
   });
-  return connection;
 }
 
+/**
+ * rx-nostr opens the socket synchronously, so the instance exists as soon as
+ * connect() has been called.
+ */
 async function createOpenConnection(
   options: ConstructorParameters<typeof RelayConnection>[0] = {}
 ) {
   const connection = createConnection(options);
-  const promise = connection.connect('ws://nostr-cache.invalid');
+  const promise = connection.connect(RELAY_URL);
   const socket = FakeWebSocket.instances[0];
   socket.simulateOpen();
   await promise;
   return { connection, socket };
+}
+
+/**
+ * Let rx-nostr's internal promises settle.
+ *
+ * REQs are dispatched through a queue that consults (skipped) NIP-11 limits,
+ * and events are delivered through an async filter, so neither is synchronous
+ * with the call that triggered it.
+ */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
 }
 
 function sampleEvent(id: string, createdAt = 1000): NostrEvent {
@@ -84,12 +135,16 @@ function sampleEvent(id: string, createdAt = 1000): NostrEvent {
 }
 
 describe('RelayConnection', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   describe('connect()', () => {
     it('resolves on open and reports status transitions', async () => {
       const statuses: ConnectionStatus[] = [];
       const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
-      const promise = connection.connect('ws://nostr-cache.invalid');
+      const promise = connection.connect(RELAY_URL);
       expect(statuses).toEqual(['connecting']);
 
       FakeWebSocket.instances[0].simulateOpen();
@@ -99,23 +154,30 @@ describe('RelayConnection', () => {
       expect(connection.isConnected).toBe(true);
     });
 
-    it('rejects and reports error when the socket errors before opening', async () => {
+    it('rejects and reports error when the socket closes before opening', async () => {
       const statuses: ConnectionStatus[] = [];
       const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
-      const promise = connection.connect('ws://nostr-cache.invalid');
-      FakeWebSocket.instances[0].simulateError();
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateServerClose();
 
       await expect(promise).rejects.toThrow('Failed to connect');
+      // Reported as an error, not as a reconnection: the first attempt never
+      // landed, so there is nothing for the reader to wait out.
       expect(statuses).toEqual(['connecting', 'error']);
       expect(connection.isConnected).toBe(false);
     });
 
-    it('rejects when the socket closes before opening', async () => {
+    it('does not keep retrying after a failed first attempt', async () => {
+      vi.useFakeTimers();
       const connection = createConnection();
-      const promise = connection.connect('ws://nostr-cache.invalid');
-      FakeWebSocket.instances[0].close();
-      await expect(promise).rejects.toThrow('closed before opening');
+
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateServerClose();
+      await expect(promise).rejects.toThrow('Failed to connect');
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(FakeWebSocket.instances).toHaveLength(1);
     });
   });
 
@@ -124,25 +186,29 @@ describe('RelayConnection', () => {
       const { connection, socket } = await createOpenConnection();
 
       connection.subscribe('sub-1', [{ kinds: [1], limit: 10 }], { onEvent: vi.fn() });
+      await flush();
 
-      expect(socket.sent).toEqual([JSON.stringify(['REQ', 'sub-1', { kinds: [1], limit: 10 }])]);
+      expect(socket.messages).toEqual([['REQ', wireSubId('sub-1'), { kinds: [1], limit: 10 }]]);
     });
 
     it('sends CLOSE and stops routing after unsubscribe', async () => {
       const { connection, socket } = await createOpenConnection();
       const onEvent = vi.fn();
       connection.subscribe('sub-1', [{}], { onEvent });
+      await flush();
 
       connection.unsubscribe('sub-1');
-      expect(socket.sent[1]).toBe(JSON.stringify(['CLOSE', 'sub-1']));
+      expect(socket.messages[1]).toEqual(['CLOSE', wireSubId('sub-1')]);
 
-      socket.simulateMessage(['EVENT', 'sub-1', sampleEvent('a')]);
+      socket.simulateMessage(['EVENT', wireSubId('sub-1'), sampleEvent('a')]);
+      await flush();
       expect(onEvent).not.toHaveBeenCalled();
     });
 
     it('does not send CLOSE for unknown subscription IDs', async () => {
       const { connection, socket } = await createOpenConnection();
       connection.unsubscribe('nope');
+      await flush();
       expect(socket.sent).toEqual([]);
     });
   });
@@ -154,9 +220,11 @@ describe('RelayConnection', () => {
       const second = vi.fn();
       connection.subscribe('sub-1', [{}], { onEvent: first });
       connection.subscribe('sub-2', [{}], { onEvent: second });
+      await flush();
 
       const event = sampleEvent('a');
-      socket.simulateMessage(['EVENT', 'sub-1', event]);
+      socket.simulateMessage(['EVENT', wireSubId('sub-1'), event]);
+      await flush();
 
       expect(first).toHaveBeenCalledWith(event);
       expect(second).not.toHaveBeenCalled();
@@ -164,15 +232,17 @@ describe('RelayConnection', () => {
 
     it('ignores EVENT for unknown subscriptions', async () => {
       const { socket } = await createOpenConnection();
-      expect(() => socket.simulateMessage(['EVENT', 'unknown', sampleEvent('a')])).not.toThrow();
+      socket.simulateMessage(['EVENT', 'unknown', sampleEvent('a')]);
+      await expect(flush()).resolves.toBeUndefined();
     });
 
     it('routes EOSE to the subscription', async () => {
       const { connection, socket } = await createOpenConnection();
       const onEose = vi.fn();
       connection.subscribe('sub-1', [{}], { onEvent: vi.fn(), onEose });
+      await flush();
 
-      socket.simulateMessage(['EOSE', 'sub-1']);
+      socket.simulateMessage(['EOSE', wireSubId('sub-1')]);
       expect(onEose).toHaveBeenCalledTimes(1);
     });
 
@@ -181,11 +251,13 @@ describe('RelayConnection', () => {
       const onClosed = vi.fn();
       const onEvent = vi.fn();
       connection.subscribe('sub-1', [{}], { onEvent, onClosed });
+      await flush();
 
-      socket.simulateMessage(['CLOSED', 'sub-1', 'shutting down']);
+      socket.simulateMessage(['CLOSED', wireSubId('sub-1'), 'shutting down']);
       expect(onClosed).toHaveBeenCalledWith('shutting down');
 
-      socket.simulateMessage(['EVENT', 'sub-1', sampleEvent('a')]);
+      socket.simulateMessage(['EVENT', wireSubId('sub-1'), sampleEvent('a')]);
+      await flush();
       expect(onEvent).not.toHaveBeenCalled();
     });
 
@@ -203,12 +275,84 @@ describe('RelayConnection', () => {
 
     it('silently ignores malformed and unknown messages', async () => {
       const { socket } = await createOpenConnection();
-      expect(() => {
-        socket.simulateRawMessage('not json');
-        socket.simulateMessage({ not: 'an array' });
-        socket.simulateMessage(['UNKNOWN', 'x']);
-        socket.simulateMessage([42]);
-      }).not.toThrow();
+      socket.simulateRawMessage('not json');
+      socket.simulateMessage({ not: 'an array' });
+      socket.simulateMessage(['UNKNOWN', 'x']);
+      socket.simulateMessage([42]);
+      await expect(flush()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('reconnection', () => {
+    it('reopens the socket and re-sends open REQs after the relay goes away', async () => {
+      vi.useFakeTimers();
+      const statuses: ConnectionStatus[] = [];
+      const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
+
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateOpen();
+      await promise;
+
+      connection.subscribe('sub-1', [{ kinds: [1] }], { onEvent: vi.fn() });
+      await flush();
+
+      FakeWebSocket.instances[0].simulateServerClose();
+      expect(connection.isConnected).toBe(false);
+      expect(statuses).toContain('reconnecting');
+
+      // The backoff ladder starts at a second.
+      await vi.advanceTimersByTimeAsync(5_000);
+      const reopened = FakeWebSocket.instances[1];
+      expect(reopened).toBeDefined();
+
+      reopened.simulateOpen();
+      await flush();
+
+      expect(reopened.messages).toEqual([['REQ', wireSubId('sub-1'), { kinds: [1] }]]);
+      expect(connection.isConnected).toBe(true);
+    });
+
+    it('delivers events on the reconnected socket', async () => {
+      vi.useFakeTimers();
+      const connection = createConnection();
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateOpen();
+      await promise;
+
+      const onEvent = vi.fn();
+      connection.subscribe('sub-1', [{}], { onEvent });
+      await flush();
+
+      FakeWebSocket.instances[0].simulateServerClose();
+      await vi.advanceTimersByTimeAsync(5_000);
+      const reopened = FakeWebSocket.instances[1];
+      reopened.simulateOpen();
+      await flush();
+
+      const event = sampleEvent('a');
+      reopened.simulateMessage(['EVENT', wireSubId('sub-1'), event]);
+      await flush();
+
+      expect(onEvent).toHaveBeenCalledWith(event);
+    });
+
+    it('sends a REQ issued while the socket is down once it is back', async () => {
+      vi.useFakeTimers();
+      const connection = createConnection();
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateOpen();
+      await promise;
+
+      FakeWebSocket.instances[0].simulateServerClose();
+      connection.subscribe('sub-1', [{ kinds: [1] }], { onEvent: vi.fn() });
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      const reopened = FakeWebSocket.instances[1];
+      reopened.simulateOpen();
+      await flush();
+
+      expect(reopened.messages).toContainEqual(['REQ', wireSubId('sub-1'), { kinds: [1] }]);
     });
   });
 
@@ -216,8 +360,11 @@ describe('RelayConnection', () => {
     it('sends EVENT with the event payload', async () => {
       const { connection, socket } = await createOpenConnection();
       const event = sampleEvent('a');
+
       connection.publish(event);
-      expect(socket.sent).toEqual([JSON.stringify(['EVENT', event])]);
+      await flush();
+
+      expect(socket.messages).toEqual([['EVENT', event]]);
     });
   });
 
@@ -228,12 +375,26 @@ describe('RelayConnection', () => {
         onStatusChange: (s) => statuses.push(s),
       });
       connection.subscribe('sub-1', [{}], { onEvent: vi.fn() });
+      await flush();
 
       connection.disconnect();
 
-      expect(socket.closed).toBe(true);
+      expect(socket.readyState).toBe(3);
       expect(connection.isConnected).toBe(false);
       expect(statuses).toEqual(['connecting', 'connected', 'disconnected']);
+    });
+
+    it('does not reconnect after an explicit disconnect', async () => {
+      vi.useFakeTimers();
+      const connection = createConnection();
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateOpen();
+      await promise;
+
+      connection.disconnect();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(FakeWebSocket.instances).toHaveLength(1);
     });
 
     it('does not crash when sending after disconnect', async () => {
@@ -244,18 +405,6 @@ describe('RelayConnection', () => {
         connection.publish(sampleEvent('a'));
         connection.unsubscribe('sub-1');
       }).not.toThrow();
-    });
-
-    it('clears subscriptions when the server closes the socket', async () => {
-      const { connection, socket } = await createOpenConnection();
-      const onEvent = vi.fn();
-      connection.subscribe('sub-1', [{}], { onEvent });
-
-      socket.close();
-
-      expect(connection.isConnected).toBe(false);
-      socket.simulateMessage(['EVENT', 'sub-1', sampleEvent('a')]);
-      expect(onEvent).not.toHaveBeenCalled();
     });
   });
 });

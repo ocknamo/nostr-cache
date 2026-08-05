@@ -272,6 +272,35 @@ describe('WebSocketServerEmulator', () => {
       expect(disconnected).toHaveLength(1);
       expect(emulator.getConnectionCount()).toBe(0);
     });
+
+    it("should report the client's status code on the close event", async () => {
+      await emulator.start();
+      const ws = await openSocket(defaultUrl);
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        ws.onclose = (event) => resolve(event as CloseEvent);
+      });
+      // Clients read this code back to tell their own deliberate closes from a
+      // connection that dropped; rx-nostr, for one, uses private codes for an
+      // idle disconnect and a disposal and reconnects after anything else.
+      ws.close(4537, 'idle');
+      const event = await closed;
+
+      expect(event.code).toBe(4537);
+      expect(event.reason).toBe('idle');
+    });
+
+    it('should default the close code to a normal closure', async () => {
+      await emulator.start();
+      const ws = await openSocket(defaultUrl);
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        ws.onclose = (event) => resolve(event as CloseEvent);
+      });
+      ws.close();
+
+      expect((await closed).code).toBe(1000);
+    });
   });
 
   describe('send()', () => {

@@ -138,8 +138,16 @@ export class EmulatedWebSocket extends EventTarget {
 
   /**
    * Close the connection.
+   *
+   * The status code is echoed back on the close event, as a real WebSocket
+   * does for a clean client-initiated close. Clients read it to tell their own
+   * deliberate closes from a connection that dropped: rx-nostr, which is what
+   * `timeline-embed` connects with, closes with private codes for an idle
+   * disconnect and a disposal, and reconnects after anything else. Reporting
+   * every close as 1000 made an idle disconnect indistinguishable from a
+   * dropped connection, and so a reconnect loop.
    */
-  close(_code?: number, _reason?: string): void {
+  close(code = 1000, reason = ''): void {
     if (
       this.readyState === EmulatedWebSocket.CLOSING ||
       this.readyState === EmulatedWebSocket.CLOSED
@@ -148,11 +156,11 @@ export class EmulatedWebSocket extends EventTarget {
     }
     this.readyState = EmulatedWebSocket.CLOSED;
     // CloseEvent is not available in every runtime (e.g. older Node.js);
-    // fall back to a plain Event there.
+    // fall back to a plain Event carrying the same fields there.
     this.dispatchEvent(
       typeof CloseEvent !== 'undefined'
-        ? new CloseEvent('close', { code: 1000, wasClean: true })
-        : new Event('close')
+        ? new CloseEvent('close', { code, reason, wasClean: true })
+        : Object.assign(new Event('close'), { code, reason, wasClean: true })
     );
     this.hooks.onClose(this);
   }

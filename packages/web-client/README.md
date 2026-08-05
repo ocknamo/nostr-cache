@@ -22,10 +22,13 @@ DexieStorage (IndexedDB)
   + NostrCacheRelay
 ```
 
-クライアント側 (`RelayConnection`) は素の `new WebSocket(url)` を使うだけです。
-既定の `ws://nostr-cache.invalid` への接続はエミュレータが横取りし、**ネットワークに
-一切出ずに**ブラウザ内リレーへ NIP-01 で届きます。投稿はブラウザの IndexedDB に
-永続化されるため、リロード後も再購読で再生されます。
+クライアント側 (`RelayConnection`) は [rx-nostr](https://penpenpng.github.io/rx-nostr/)
+に接続管理を任せた NIP-01 クライアントです。既定の `ws://nostr-cache.invalid` への接続は
+エミュレータが横取りし、**ネットワークに一切出ずに**ブラウザ内リレーへ NIP-01 で
+届きます。接続が切れた場合は rx-nostr が指数バックオフで自動再接続し、開いていた REQ を
+張り直します（接続状態バーは再接続中を `再接続中…` と表示）。イベント署名の検証は
+リレー側が行って結果を永続化するので、rx-nostr 側の検証は `skipVerify` で切っています。
+投稿はブラウザの IndexedDB に永続化されるため、リロード後も再購読で再生されます。
 
 URL を `wss://nos.lol` など実リレーに変更すると、そのまま実リレーへ直結できます
 （同一 UI で両対応）。

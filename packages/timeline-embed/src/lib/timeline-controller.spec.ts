@@ -34,6 +34,17 @@ describe('TimelineController', () => {
     return { controller, states };
   }
 
+  /**
+   * The subscription ID the relay sees for one of the controller's.
+   *
+   * The controller names its subscriptions `timeline-N` / `profile-N`, and
+   * rx-nostr puts a forward-strategy REQ on the wire as `${id}:0` — the child
+   * index is pinned to 0 because a forward REQ overwrites its predecessor.
+   */
+  function wireSubId(id: string): string {
+    return `${id}:0`;
+  }
+
   /** The subscriptions the controller currently has open on the relay. */
   function openSubscriptions(controller: TimelineController): { id: string; filters: Filter[] }[] {
     const relay = controller.host?.relay as unknown as {
@@ -57,6 +68,17 @@ describe('TimelineController', () => {
     controller: TimelineController
   ): { id: string; filters: Filter[] } | undefined {
     return profileSubscriptions(controller)[0];
+  }
+
+  /**
+   * Lookups holding one of the controller's in-flight slots.
+   *
+   * Read from the controller rather than the relay because that is the budget
+   * under test, and because it is taken synchronously — rx-nostr dispatches the
+   * REQ itself a microtask later, through a queue that consults NIP-11 limits.
+   */
+  function inFlightProfiles(controller: TimelineController): number {
+    return (controller as unknown as { profileSubs: Map<string, unknown> }).profileSubs.size;
   }
 
   /**
@@ -112,7 +134,10 @@ describe('TimelineController', () => {
 
     // Lookups are driven by cards scrolling into view, so a timeline nobody has
     // looked at yet costs exactly one subscription.
-    expect(openSubscriptionIds(controller)).toContain('timeline-1');
+    await waitFor(
+      () => openSubscriptionIds(controller).includes(wireSubId('timeline-1')),
+      'the timeline subscription'
+    );
     expect(profileSubscription(controller)).toBeUndefined();
   });
 
@@ -129,7 +154,7 @@ describe('TimelineController', () => {
     controller.suspend();
 
     await waitFor(
-      () => !openSubscriptionIds(controller).includes('timeline-1'),
+      () => !openSubscriptionIds(controller).includes(wireSubId('timeline-1')),
       'the timeline subscription to close'
     );
     // A profile subscription surviving here would keep reading through to
@@ -144,10 +169,10 @@ describe('TimelineController', () => {
     controller.applyFilter({ kinds: [1], limit: 5 });
 
     await waitFor(
-      () => openSubscriptionIds(controller).includes('timeline-2'),
+      () => openSubscriptionIds(controller).includes(wireSubId('timeline-2')),
       'the replacement subscription'
     );
-    expect(openSubscriptionIds(controller)).not.toContain('timeline-1');
+    expect(openSubscriptionIds(controller)).not.toContain(wireSubId('timeline-1'));
   });
 
   it('keeps profiles across a filter change so authors do not flicker', async () => {
@@ -172,6 +197,7 @@ describe('TimelineController', () => {
 
     controller.requestProfile('alice');
     controller.requestProfile('bob');
+    await waitFor(() => profileSubscriptions(controller).length === 2, 'both lookups to open');
 
     // One author per filter is what lets the relay's freshness window decide
     // per author: a filter naming several is forwarded upstream in full as soon
@@ -191,12 +217,13 @@ describe('TimelineController', () => {
     // The cards are still on screen while the demo measures a cold cache, so
     // one scrolling into view must not read through and refill it.
     controller.requestProfile('alice');
-    expect(profileSubscriptions(controller)).toHaveLength(0);
+    expect(inFlightProfiles(controller)).toBe(0);
 
     controller.applyFilter({ kinds: [1], limit: 10 });
     controller.requestProfile('alice');
 
-    expect(profileSubscriptions(controller)).toHaveLength(1);
+    expect(inFlightProfiles(controller)).toBe(1);
+    await waitFor(() => profileSubscriptions(controller).length === 1, 'the resumed lookup');
   });
 
   it('gives a slot back when the relay answers a lookup with nothing at all', async () => {
@@ -218,13 +245,13 @@ describe('TimelineController', () => {
     // Without the watchdog the four slots stay taken for good and every later
     // author is stuck on a shortened pubkey until the page is reloaded.
     await waitFor(
-      () => (controller as unknown as { profileSubs: Map<string, unknown> }).profileSubs.size === 0,
+      () => inFlightProfiles(controller) === 0,
       'the stuck lookups to time out',
       // Longer than PROFILE_REQUEST_TIMEOUT_MS, which is what is under test.
       8000
     );
     controller.requestProfile('f');
-    expect(profileSubscriptions(controller)).toHaveLength(1);
+    await waitFor(() => profileSubscriptions(controller).length === 1, 'the recovered slot');
   }, 10000);
 
   it('ignores a repeat request for an author already asked about', async () => {
@@ -236,7 +263,8 @@ describe('TimelineController', () => {
     controller.requestProfile('alice');
     controller.requestProfile('alice');
 
-    expect(profileSubscriptions(controller)).toHaveLength(1);
+    expect(inFlightProfiles(controller)).toBe(1);
+    await waitFor(() => profileSubscriptions(controller).length === 1, 'the single lookup');
   });
 
   it('caps how many lookups run at once, then drains the queue', async () => {
@@ -262,7 +290,7 @@ describe('TimelineController', () => {
 
     // The relay caps a client at 20 subscriptions and an iframe sized to its
     // content can have every card visible at once, so the burst has to queue.
-    expect(profileSubscriptions(controller)).toHaveLength(4);
+    expect(inFlightProfiles(controller)).toBe(4);
 
     await waitFor(
       () => (states.at(-1)?.profiles.size ?? 0) === authors.length,
