@@ -396,13 +396,10 @@ export class EventHandler {
         return { stored: false, superseded: false };
       }
 
-      // 既存版のほうが新しければ保存しない（NIP-01: 最新の1件だけを保持する）
-      const address: EventAddress = {
-        kind: event.kind,
-        pubkey: event.pubkey,
-        identifier: dTagValue,
-      };
-      if (await this.isSuperseded(event, address)) {
+      // 既存版のほうが新しければ保存しない（NIP-01: 最新の1件だけを保持する）。
+      // 座標は addressOf が組み立てる（アドレサブル kind では identifier =
+      // dTagValue になる）ので、置換可能側と同じ 1 か所の定義を通す
+      if (await this.isSuperseded(event, addressOf(event))) {
         return { stored: false, superseded: true };
       }
 

@@ -41,6 +41,13 @@ describe('replaceable', () => {
     it('should return undefined without a d tag', () => {
       expect(getDTagValue([['e', 'x']])).toBeUndefined();
     });
+
+    it('should return undefined for a d tag without a value', () => {
+      // 値を持たない ['d'] は「d タグ無し」と同じ扱い。座標としては
+      // addressOf が空識別子に落とすので matchesAddressIdentifier と揃う
+      expect(getDTagValue([['d']])).toBeUndefined();
+      expect(addressOf({ ...event('a', 1, { kind: 30023, tags: [['d']] }) }).identifier).toBe('');
+    });
   });
 
   describe('addressOf', () => {

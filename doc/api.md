@@ -44,6 +44,28 @@ NIP-01 message processing, subscription management, and event validation.
 メッセージに機械可読な `duplicate:` 接頭辞を付け、**購読者への配信も上流への転送も
 行いません**。上流リレーが古い版を返した場合も同様に破棄します。
 
+現状の制約 / Known limitations:
+
+- 版比較が働くのは transport 経由の `EVENT`（および上流からの充填）だけです。
+  in-process の **`publishEvent()` は `EventHandler` を経由しない**ため、版比較も
+  古い版の削除も行われません（`doc/TODO.md` の「API の一貫性」項目）
+- `created_at` の**未来方向の上限チェックはありません**。既定の `IMMEDIATELY` では
+  署名検証があるため他人になりすました版は作れませんが、`validateEventsType: 'NONE'`
+  （`server` の `relay.validateEvents: false`）では、遠未来の `created_at` を持つ
+  未検証イベントが 1 通入ると、その座標の正当な更新が以後すべて `duplicate:` で
+  落ち続けます（`LAZY` は背景検証が不正イベントを削除するまでの一時的な影響）
+- 複数の版が保存されている状態（`publishEvent()` 経由など）で、`REQ` 応答を最新 1 件に
+  畳む処理はありません（NIP-01 の SHOULD）
+
+/ The comparison covers the transport `EVENT` path and upstream backfill only — the
+in-process `publishEvent()` bypasses `EventHandler`, so it neither compares versions nor
+deletes older ones. There is no upper bound on `created_at`: under the default
+`IMMEDIATELY` mode signatures are verified so nobody can forge another author's version,
+but with `validateEventsType: 'NONE'` a single unverified event dated far in the future
+blocks every later update of that coordinate (under `LAZY` this lasts only until the
+background validator removes it). Finally, when several versions are stored, `REQ`
+responses are not folded down to the newest one (a NIP-01 SHOULD).
+
 Only the newest version is kept — per (pubkey, kind) for replaceable kinds and per
 (pubkey, kind, `d`) for addressable ones. An incoming event is compared against the stored
 version first and dropped when the stored one is newer (ties broken by the lowest id, so

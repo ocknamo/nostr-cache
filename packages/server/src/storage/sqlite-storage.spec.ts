@@ -74,6 +74,9 @@ describe('SqliteStorage (SQLite-specific)', () => {
   // close 済みの DB への操作は投げずにフォールバック値を返す（server の
   // stop() → start() が既定モードと対称に振る舞うための前提）。
   // 失敗時の切り分けができるよう、読み・書き・void 返しで分けて検証する。
+  // 唯一の例外が getCurrentVersion で、これは意図的に例外を伝播させる:
+  // フォールバック（undefined）は「その座標に版が無い」と読めてしまい、
+  // 古い版で新しい版を上書きする経路そのものになるため。
   describe('error fallbacks after close', () => {
     beforeEach(async () => {
       await storage.saveEvent(mockEvent);
