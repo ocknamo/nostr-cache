@@ -170,6 +170,25 @@ describe('EventCard', () => {
     expect(screen.getByText('引用')).toBeInTheDocument();
   });
 
+  it('renders the body through NoteContent, keeping the .content hook', () => {
+    const event = makeEvent({ content: 'see https://example.com/a' });
+    const { container } = render(EventCard, { props: { event, showAvatar: false } });
+
+    // The class is what the browser E2E suite reaches through the shadow root
+    // for, so it has to survive the body moving into its own component.
+    expect(container.querySelector('.content')).toHaveTextContent('see https://example.com/a');
+    expect(screen.getByRole('link', { name: 'https://example.com/a' })).toBeInTheDocument();
+  });
+
+  it('passes showMedia down to the body', () => {
+    const event = makeEvent({ content: 'https://cdn.example.com/a.jpg' });
+    const { container } = render(EventCard, {
+      props: { event, showAvatar: false, showMedia: false },
+    });
+
+    expect(container.querySelector('img')).toBeNull();
+  });
+
   it('shows no reference row on a standalone note', () => {
     render(EventCard, { props: { event: makeEvent() } });
 

@@ -97,4 +97,27 @@ describe('Timeline', () => {
 
     expect(screen.queryByRole('img', { name: 'alice' })).not.toBeInTheDocument();
   });
+
+  it('hides note attachments when showMedia is false', () => {
+    const events = [makeEvent({ id: 'a', content: 'https://cdn.example.com/a.jpg' })];
+    const { container } = render(Timeline, {
+      props: { events, showMedia: false, showAvatars: false, eose: true },
+    });
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'https://cdn.example.com/a.jpg' })).toBeInTheDocument();
+  });
+
+  it('lets a card name a mention using another author on the timeline', () => {
+    const mentioned = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
+    const npub = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
+    const events = [makeEvent({ id: 'a', pubkey: 'alice', content: `hi nostr:${npub}` })];
+    const profiles = new Map<string, Profile>([
+      ['alice', { displayName: 'アリス' }],
+      [mentioned, { displayName: 'たけし' }],
+    ]);
+    render(Timeline, { props: { events, profiles, eose: true } });
+
+    expect(screen.getByText('@たけし')).toBeInTheDocument();
+  });
 });

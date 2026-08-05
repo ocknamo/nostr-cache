@@ -71,6 +71,7 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | `debug` | 動作確認用。付けると各投稿に `cache` / `upstream` バッジを表示する | なし（非表示） |
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
+| `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
 
 `profile-freshness` は iframe（`&profile-freshness=3600`）と Web Component
 （`profile-freshness="3600"`）のどちらでも同じように指定できます。プロフィールの更新を
@@ -121,6 +122,14 @@ nostr-timeline {
   --nt-quote-bar: #4a7dff;      /* 返信 / 引用チップの縦線 */
   --nt-tip-bg: #0f1419;         /* 日付ツールチップの背景 */
   --nt-tip-fg: #ffffff;         /* 日付ツールチップの文字色 */
+
+  /* 本文（リンク・メンション・添付） */
+  --nt-link-fg: #58a6ff;        /* 本文中のリンク */
+  --nt-mention-fg: #58a6ff;     /* nostr: メンション */
+  --nt-mention-bg: transparent;
+  --nt-media-max-height: 400px; /* 添付画像・動画の高さの上限 */
+  --nt-media-radius: 10px;
+  --nt-media-bg: #161b22;       /* 読み込み中の添付の背景 */
 }
 ```
 
@@ -131,6 +140,32 @@ nostr-timeline {
 
 カードは既定で**区切り線で連なるリスト**です（一般的な Nostr クライアントの見え方）。
 `--nt-gap` を指定すると、従来どおり間隔の空いたブロックとして並びます。
+
+## 本文の描画
+
+本文はプレーンテキストではなく、次のものを解釈して描画します。
+
+| 対象 | 描画 |
+|---|---|
+| `http(s)` の URL | `<a target="_blank" rel="noopener noreferrer nofollow">` |
+| 画像 URL（`.jpg` `.jpeg` `.png` `.gif` `.webp` `.avif`） | `<img>`。クリックで原寸を新規タブに開く |
+| 動画 URL（`.mp4` `.webm` `.ogv` `.mov`） | `<video controls preload="none">` |
+| 音声 URL（`.mp3` `.ogg` `.oga` `.wav` `.m4a`） | `<audio controls preload="none">` |
+| `nostr:npub1…` / `nprofile` / `note` / `nevent` / `naddr`（`nostr:` 無しの裸の形も可） | 短縮表示のチップ。**リンクにはしません** |
+
+**HTML は一切組み立てません。** 解析結果は「元の文字列のどの範囲が何か」というトークン列で、
+描画は Svelte の通常の補間だけで行います（`{@html}` も `innerHTML` もこのパッケージには
+存在しません）。したがって `javascript:` や `data:` の URL は**リンクにならずただの文字**として
+残ります。双方向制御文字（bidi override）は、リンクの見た目を偽装できてしまうため本文から
+除去します（改行は `white-space: pre-wrap` の表示に必要なので残します）。
+
+添付は本文の下にまとめて表示し、その URL は本文中から取り除きます。1 投稿あたりの添付は
+先頭 8 件までで、超えた分は普通のリンクとして本文に残ります。
+
+`nostr:` メンションを**リンクにしないのは意図的**です。ウィジェットは Nostr クライアントでは
+ないので、送り先として妥当な URL を持っていません。**すでにタイムライン上にいる著者**への
+メンションは `@表示名` に解決されますが、それ以外は短縮 npub のままです
+（メンション先のプロフィールを追加取得すると、カードごとに購読が増えるため行いません）。
 
 ## 制約
 
@@ -147,6 +182,13 @@ nostr-timeline {
   渡ります**。`referrerpolicy="no-referrer"` を付けているので埋め込み先の URL は送られませんが、
   接続自体は避けられません。気になる場合は `show-avatars="false"` を指定してください
   （表示名と `@handle` は引き続き表示されます）
+- **本文中の添付も同様に、投稿者が書いた任意のホストから読み込まれます。** 画像には
+  アバターと同じく `referrerpolicy="no-referrer"` と遅延読み込みを付けていますが、
+  **閲覧者の IP アドレスはその配信元に渡ります**。動画・音声には `referrerpolicy` に
+  相当する属性が HTML に無いため、再生すると埋め込み先 URL も送られます
+  （`preload="none"` なので、**再生ボタンを押すまで通信は発生しません**）。
+  避けたい場合は `show-media="false"` を指定してください。URL はリンクとして残るので、
+  閲覧者が自分で開くことは引き続きできます
 - **NIP-05 は検証していません。** kind 0 の `nip05` はパースしますが、`.well-known/nostr.json`
   との照合を行わないため、著者の自己申告にすぎません。誤解を招かないよう画面には表示していません
 - **プロフィールはカードが画面に入ってから取得します**（`IntersectionObserver`）。
@@ -191,7 +233,7 @@ nostr-timeline {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **252 KB（gzip 約 86 KB）** の自己完結した IIFE です。
+`dist/nostr-timeline.js` は約 **266 KB（gzip 約 91 KB）** の自己完結した IIFE です。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）と
 署名検証用の `rx-nostr-crypto` で、これらはリレー本体の機能に必要です。
@@ -223,7 +265,8 @@ import {
 | `RelayConnection` | 素の WebSocket 上の最小 NIP-01 クライアント |
 | `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
 | `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
-| `Timeline` / `EventCard` / `Avatar` | 表示コンポーネント |
+| `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
+| `Timeline` / `EventCard` / `NoteContent` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 
 `Timeline` を直接使う場合、`showOrigin` の既定は **`true`**（バッジ表示）です。

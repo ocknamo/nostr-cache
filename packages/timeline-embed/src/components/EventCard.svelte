@@ -5,6 +5,7 @@
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import Avatar from './Avatar.svelte';
+  import NoteContent from './NoteContent.svelte';
 
   interface Props {
     event: NostrEvent;
@@ -14,8 +15,16 @@
     status?: ValidationStatus;
     /** The author's kind 0 profile, once it has been fetched. */
     profile?: Profile;
+    /**
+     * Every profile the timeline has, keyed by pubkey. Used only to put a name
+     * on a `nostr:` mention in the body; the author's own name comes from
+     * `profile`.
+     */
+    profiles?: Map<string, Profile>;
     /** Render the author's avatar. */
     showAvatar?: boolean;
+    /** Render image / video / audio attachments found in the body. */
+    showMedia?: boolean;
     /**
      * Called once, when the card first enters the viewport. The timeline uses
      * this to look up the author's profile only for cards a reader can see.
@@ -23,7 +32,16 @@
     onVisible?: () => void;
   }
 
-  const { event, origin, status, profile, showAvatar = true, onVisible }: Props = $props();
+  const {
+    event,
+    origin,
+    status,
+    profile,
+    profiles,
+    showAvatar = true,
+    showMedia = true,
+    onVisible,
+  }: Props = $props();
 
   /**
    * Report the card's first appearance on screen, then stop watching.
@@ -216,7 +234,7 @@
         {/each}
       </ul>
     {/if}
-    <p class="content">{event.content}</p>
+    <NoteContent content={event.content} {showMedia} {profiles} />
   </div>
 </article>
 
@@ -433,10 +451,4 @@
     white-space: nowrap;
   }
 
-  .content {
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    line-height: 1.5;
-  }
 </style>

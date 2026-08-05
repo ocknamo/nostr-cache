@@ -204,6 +204,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   debug: boolean;
   /** Whether to render author avatars. */
   showAvatars: boolean;
+  /** Whether to render media attachments found in a note's body. */
+  showMedia: boolean;
 } {
   return {
     relays: parseRelays(params.get('relays')),
@@ -216,5 +218,6 @@ export function configFromSearchParams(params: URLSearchParams): {
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
     showAvatars: params.get('show-avatars') !== 'false',
+    showMedia: params.get('show-media') !== 'false',
   };
 }

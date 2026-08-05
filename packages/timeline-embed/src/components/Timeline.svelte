@@ -23,6 +23,11 @@
     /** Render author avatars. */
     showAvatars?: boolean;
     /**
+     * Render image / video / audio attachments found in a note's body. On by
+     * default; turning it off leaves the URLs in the text as links.
+     */
+    showMedia?: boolean;
+    /**
      * Called with an author's pubkey the first time one of their cards scrolls
      * into view, so profiles are fetched for what the reader actually sees.
      */
@@ -37,6 +42,7 @@
     profiles = new Map(),
     showOrigin = true,
     showAvatars = true,
+    showMedia = true,
     onAuthorVisible,
   }: Props = $props();
 </script>
@@ -53,7 +59,9 @@
             origin={showOrigin ? origins.get(event.id) : undefined}
             status={validationStatuses.get(event.id)}
             profile={profiles.get(event.pubkey)}
+            {profiles}
             showAvatar={showAvatars}
+            {showMedia}
             onVisible={onAuthorVisible && (() => onAuthorVisible(event.pubkey))}
           />
         </li>

@@ -11,6 +11,7 @@
       debug: { attribute: 'debug' },
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
+      showMedia: { attribute: 'show-media' },
     },
   }}
 />
@@ -62,6 +63,12 @@
      * stops the widget from loading images from whatever host a profile names.
      */
     showAvatars?: string;
+    /**
+     * Set to "false" to stop rendering images, video and audio found in a
+     * note's body. The URLs stay in the text as links, so nothing is hidden —
+     * this only stops the widget from fetching from whatever host a note names.
+     */
+    showMedia?: string;
   }
 
   const {
@@ -74,6 +81,7 @@
     debug,
     showOrigin,
     showAvatars,
+    showMedia,
   }: Props = $props();
 
   let state = $state<TimelineState>({
@@ -133,6 +141,7 @@
     profiles={state.profiles}
     showOrigin={parseDebug(debug) || parseShowOriginAlias(showOrigin)}
     showAvatars={showAvatars !== 'false'}
+    showMedia={showMedia !== 'false'}
     onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   />
 </div>

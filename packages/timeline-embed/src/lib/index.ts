@@ -12,6 +12,21 @@
 
 export { CacheMetrics } from './cache-metrics.ts';
 export type { EventOrigin, MetricsSnapshot } from './cache-metrics.ts';
+export {
+  abbreviateBech32,
+  inlineParts,
+  mediaAsLinks,
+  mediaParts,
+  parseContent,
+} from './content-parts.ts';
+export type {
+  ContentPart,
+  EntityPart,
+  LinkPart,
+  MediaKind,
+  MediaPart,
+  TextPart,
+} from './content-parts.ts';
 export { parseRefs } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
