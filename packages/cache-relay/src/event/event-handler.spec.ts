@@ -316,7 +316,7 @@ describe('EventHandler', () => {
 
       const result = await eventHandler['handleAddressableEvent'](eventWithoutDTag, true);
 
-      expect(result).toBe(false);
+      expect(result).toEqual({ stored: false, superseded: false });
       expect(mockStorage.deleteEventsByPubkeyKindAndDTag).not.toHaveBeenCalled();
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
     });
@@ -337,6 +337,166 @@ describe('EventHandler', () => {
         eventHandler['handleAddressableEvent'](addressableEvent, true)
       ).rejects.toThrow();
       expect(mockStorage.deleteEventsByPubkeyKindAndDTag).toHaveBeenCalled();
+    });
+  });
+
+  describe('replaceable version comparison (NIP-01)', () => {
+    // 保存済みの版（すべて同じ座標: pubkey 'abc' / kind 0）
+    const storedProfile: NostrEvent = {
+      id: 'bbbb',
+      pubkey: 'abc',
+      created_at: 2000,
+      kind: 0,
+      tags: [],
+      content: '{"name":"current"}',
+      sig: 'xyz',
+    };
+    const olderProfile: NostrEvent = {
+      ...storedProfile,
+      id: 'aaaa',
+      created_at: 1000,
+      content: '{"name":"old"}',
+    };
+    const newerProfile: NostrEvent = {
+      ...storedProfile,
+      id: 'cccc',
+      created_at: 3000,
+      content: '{"name":"new"}',
+    };
+
+    const storedArticle: NostrEvent = {
+      id: 'bbbb',
+      pubkey: 'abc',
+      created_at: 2000,
+      kind: 30023,
+      tags: [['d', 'slug']],
+      content: 'current',
+      sig: 'xyz',
+    };
+
+    beforeEach(() => {
+      mockEventValidator.validate.mockResolvedValue(true);
+      mockStorage.saveEvent.mockResolvedValue(true);
+      mockStorage.getCurrentVersion.mockResolvedValue(undefined);
+      mockSubscriptionManager.findMatchingSubscriptions.mockReturnValue(new Map());
+    });
+
+    it('should drop a replaceable event older than the stored version', async () => {
+      mockStorage.getCurrentVersion.mockResolvedValue(storedProfile);
+
+      const result = await eventHandler.handleEvent(olderProfile);
+
+      // 受理はする（イベント自体は正当）が、保存も配信もしない
+      expect(result.success).toBe(true);
+      expect(result.stored).toBe(false);
+      expect(result.superseded).toBe(true);
+      expect(result.message).toMatch(/^duplicate: /);
+      expect(result.matches).toBeUndefined();
+      expect(mockStorage.deleteEventsByPubkeyAndKind).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('should look up the stored version at the event coordinate', async () => {
+      await eventHandler.handleEvent(newerProfile);
+
+      expect(mockStorage.getCurrentVersion).toHaveBeenCalledWith({
+        kind: 0,
+        pubkey: 'abc',
+        identifier: '',
+      });
+    });
+
+    it('should replace the stored version with a newer one', async () => {
+      mockStorage.getCurrentVersion.mockResolvedValue(storedProfile);
+
+      const result = await eventHandler.handleEvent(newerProfile);
+
+      expect(result.success).toBe(true);
+      expect(result.stored).toBe(true);
+      expect(result.superseded).toBeUndefined();
+      expect(mockStorage.deleteEventsByPubkeyAndKind).toHaveBeenCalledWith('abc', 0);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(newerProfile, { validated: true });
+    });
+
+    it('should keep the lowest id when created_at ties', async () => {
+      // 同じ created_at なら id の辞書順で小さい方を残す（NIP-01）
+      mockStorage.getCurrentVersion.mockResolvedValue(storedProfile);
+      const sameTimeHigherId: NostrEvent = { ...storedProfile, id: 'cccc' };
+
+      const result = await eventHandler.handleEvent(sameTimeHigherId);
+
+      expect(result.superseded).toBe(true);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('should replace on a created_at tie when the incoming id is lower', async () => {
+      mockStorage.getCurrentVersion.mockResolvedValue(storedProfile);
+      const sameTimeLowerId: NostrEvent = { ...storedProfile, id: 'aaaa' };
+
+      const result = await eventHandler.handleEvent(sameTimeLowerId);
+
+      expect(result.stored).toBe(true);
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(sameTimeLowerId, { validated: true });
+    });
+
+    it('should re-save the very same event (not superseded by itself)', async () => {
+      // 同一 id は「古い版」ではなく同じイベント。再保存で cached_at / TTL が
+      // 従来どおり打ち直され、クライアントへの配信対象にも残る
+      mockStorage.getCurrentVersion.mockResolvedValue(storedProfile);
+
+      const result = await eventHandler.handleEvent({ ...storedProfile });
+
+      expect(result.stored).toBe(true);
+      expect(result.superseded).toBeUndefined();
+      expect(mockStorage.saveEvent).toHaveBeenCalled();
+    });
+
+    it('should drop an addressable event older than the stored version', async () => {
+      mockStorage.getCurrentVersion.mockResolvedValue(storedArticle);
+      const olderArticle: NostrEvent = { ...storedArticle, id: 'aaaa', created_at: 1000 };
+
+      const result = await eventHandler.handleEvent(olderArticle);
+
+      expect(result.superseded).toBe(true);
+      expect(mockStorage.getCurrentVersion).toHaveBeenCalledWith({
+        kind: 30023,
+        pubkey: 'abc',
+        identifier: 'slug',
+      });
+      expect(mockStorage.deleteEventsByPubkeyKindAndDTag).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('should not compare against another d tag value', async () => {
+      // 別の座標（d タグ違い）の版は比較対象ではない
+      mockStorage.getCurrentVersion.mockResolvedValue(undefined);
+      const otherSlug: NostrEvent = {
+        ...storedArticle,
+        id: 'aaaa',
+        created_at: 1000,
+        tags: [['d', 'other']],
+      };
+
+      const result = await eventHandler.handleEvent(otherSlug);
+
+      expect(mockStorage.getCurrentVersion).toHaveBeenCalledWith({
+        kind: 30023,
+        pubkey: 'abc',
+        identifier: 'other',
+      });
+      expect(result.stored).toBe(true);
+    });
+
+    it('should reject the event when the version lookup fails', async () => {
+      // 「保存済みの版が読めない」を「版が無い」と同一視すると、まさに防ごうと
+      // している上書きが起きる。エラーとして返し、保存しない
+      mockStorage.getCurrentVersion.mockRejectedValueOnce(new Error('Storage error'));
+
+      const result = await eventHandler.handleEvent(olderProfile);
+
+      expect(result.success).toBe(false);
+      expect(result.stored).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
     });
   });
 

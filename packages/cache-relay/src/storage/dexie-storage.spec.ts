@@ -76,5 +76,20 @@ describe('DexieStorage (Dexie-specific)', () => {
         await storage.deleteEventsByPubkeyKindAndDTag(CONFORMANCE_MOCK_EVENT.pubkey, 30001, 'test1')
       ).toBe(false);
     });
+
+    it('should propagate a getCurrentVersion failure instead of reporting "no version"', async () => {
+      // 失敗を undefined（＝未保存）として返すと、置換可能イベントの版比較が
+      // 「保存済みの版は無い」と誤り、古い版で新しい版を上書きしてしまう
+      await storage.saveEvent({ ...CONFORMANCE_MOCK_EVENT, kind: 0 });
+      lockNextQuery();
+
+      await expect(
+        storage.getCurrentVersion({
+          kind: 0,
+          pubkey: CONFORMANCE_MOCK_EVENT.pubkey,
+          identifier: '',
+        })
+      ).rejects.toThrow('Database is locked');
+    });
   });
 });

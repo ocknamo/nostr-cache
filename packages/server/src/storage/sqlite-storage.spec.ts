@@ -102,6 +102,14 @@ describe('SqliteStorage (SQLite-specific)', () => {
       expect(await storage.touchCachedAt([mockEvent.id])).toBe(0);
     });
 
+    it('should propagate a getCurrentVersion failure instead of reporting "no version"', async () => {
+      // 失敗を undefined（＝未保存）として返すと、置換可能イベントの版比較が
+      // 「保存済みの版は無い」と誤り、古い版で新しい版を上書きしてしまう
+      await expect(
+        storage.getCurrentVersion({ kind: 0, pubkey: mockEvent.pubkey, identifier: '' })
+      ).rejects.toThrow();
+    });
+
     it('should not throw from the void-returning methods', async () => {
       await expect(storage.markValidated([mockEvent.id])).resolves.toBeUndefined();
       await expect(storage.clear()).resolves.toBeUndefined();

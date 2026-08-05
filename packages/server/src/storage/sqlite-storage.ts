@@ -21,6 +21,7 @@ import {
   hasPriorityRules,
   isDeletableAddress,
   matchesAddressIdentifier,
+  selectCurrentVersion,
 } from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { logger } from '@nostr-cache/shared';
@@ -323,6 +324,35 @@ export class SqliteStorage implements StorageAdapter {
       }
     }
     return statuses;
+  }
+
+  /**
+   * Get the stored version of the replaceable / addressable event at `address`.
+   *
+   * The `(pubkey, kind, created_at)` index serves the coordinate; the `d`
+   * identifier is matched against the full `tags` JSON (not `event_tags`) so the
+   * 100-entry tag index cap cannot change the outcome, and the winner is picked
+   * with cache-relay's shared NIP-01 ordering — the same predicates the Dexie
+   * adapter uses. Does NOT track access (a write-path precondition, not a read).
+   *
+   * Deliberately has no try/catch, mirroring `DexieStorage`: a swallowed error
+   * would read as "no version stored" and let an older event overwrite a newer
+   * one.
+   *
+   * @param address Coordinate to look up (kind / pubkey / d value)
+   * @returns Promise resolving to the stored version, or undefined if none
+   */
+  async getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined> {
+    const rows = this.db
+      .select()
+      .from(events)
+      .where(and(eq(events.pubkey, address.pubkey), eq(events.kind, address.kind)))
+      .all();
+    return selectCurrentVersion(
+      rows
+        .filter((row) => matchesAddressIdentifier(JSON.parse(row.tags) as string[][], address))
+        .map(rowToEvent)
+    );
   }
 
   /**

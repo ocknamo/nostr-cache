@@ -20,26 +20,6 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
 | timeline-embed | 埋め込みウィジェット + 共通ライブラリ層 |
 | demo-site | GitHub Pages 公開用デモ |
 
-## 優先度: 高（NIP-01 準拠）
-
-- [ ] **replaceable / addressable の置換で `created_at` を比較していない**
-  （`packages/cache-relay/src/event/event-handler.ts` の `handleReplaceableEvent` /
-  `handleAddressableEvent`）
-  - 現状: 同じ (pubkey, kind[, d]) の既存版を無条件に削除してから保存するため、
-    **古い署名済みイベントを1通投げるだけで新しい版を上書きできる**。NIP-01 の
-    「最新の1件だけを保持する」に非準拠
-  - 影響: 鮮度ウィンドウ（`upstreamFreshness`）を有効にしていると、上書き時に
-    `cached_at` が現在時刻になるため **最大で窓の秒数ぶん stale な版が固定される**
-    （無効時は次の REQ の上流問い合わせで自己修復する）
-  - **timeline-embed の既定窓が 300 秒から 86400 秒（24 時間）になったため、固定される
-    時間も 5 分から 24 時間に延びた**（`packages/timeline-embed/src/lib/relay-host.ts` の
-    `DEFAULT_PROFILE_FRESHNESS`）。埋め込みウィジェットは kind 0 の `picture` を実際に
-    画像として読みに行くので、この項目の優先度はそのぶん上がっている
-  - 対応: 保存前に既存版の `created_at` と比較し、既存の方が新しければ保存をスキップする
-    （同値なら NIP-01 に従い id の辞書順で小さい方を残す）。`handleEvent` の戻り値
-    （`success` は OK 応答、`stored` は退避契機）と、上流由来イベントを
-    クライアントへ配信するかの判断もあわせて決める必要がある
-
 ## 優先度: 中（NIP 対応の拡張）
 
 いずれも「リレーとしての正しさ」または「キャッシュとしての正しさ」に効く。
@@ -72,7 +52,8 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
     呼ぶため、transport 経由 `EVENT` では `EventHandler` が行っているイベント種別の処理を
     まるごと飛ばしている。**in-process で kind 0 / 3 / 10000番台を publish しても古い版が
     削除されず**（replaceable にならない）、30000番台の d タグ置換も効かず、
-    ephemeral（20000番台）も保存されてしまう
+    ephemeral（20000番台）も保存されてしまう。NIP-01 の版比較（古い版を保存しない）も
+    同じ理由で通らないため、**in-process 経路では古い版を publish すると併存する**
   - NIP-09 については同じ穴を避けるため `publishEvent()` にも削除適用を明示的に追加したが、
     種別処理そのものを二重に持つのは筋が悪い。`EventHandler.handleEvent()` に寄せて
     ローカル購読通知だけを `publishEvent()` 側に残すのが本筋
@@ -149,6 +130,9 @@ git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは
   小数 `limit` / 境界が一部分岐で排他だった）
 - NIP-09（イベント削除・kind 5）の対応。kind 5 は全モードで同期検証し、
   TTL スイープ対象外・退避は最後
+- replaceable / addressable の版比較（NIP-01「最新の1件だけを保持する」）。
+  保存前に既存版と `created_at` を比較し、古い版は保存も配信も上流転送もしない
+  （同値は id の辞書順）。座標の現行版は `StorageAdapter.getCurrentVersion` で引く
 
 **server**
 - ビルド型エラーの修正と CI 復旧、`tsc --noEmit` による typecheck の CI 組み込み

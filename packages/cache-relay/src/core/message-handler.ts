@@ -139,10 +139,23 @@ export class MessageHandler {
     const event = message.event;
 
     try {
-      const { success, message: resultMessage, matches } = await this.ingestEvent(event);
+      const {
+        success,
+        message: resultMessage,
+        superseded,
+        matches,
+      } = await this.ingestEvent(event);
 
       if (!success) {
         this.sendOK(clientId, event.id, false, resultMessage);
+        return;
+      }
+
+      // NIP-01 の版比較で負けた replaceable / addressable イベント（キャッシュが
+      // より新しい版を持っている）。イベント自体に問題は無いので OK は true で
+      // 返すが、保存していない以上、配信も上流への転送もしない
+      if (superseded) {
+        this.sendOK(clientId, event.id, true, resultMessage);
         return;
       }
 
@@ -228,15 +241,18 @@ export class MessageHandler {
    * decides delivery (dedup, routing to the owning subscription).
    *
    * @param event Event fetched from upstream
-   * @returns Whether it was accepted (success) and persisted (stored)
+   * @returns Whether it was accepted (success), persisted (stored), and whether
+   *   it lost the NIP-01 version comparison (superseded)
    */
-  async ingestUpstreamEvent(event: NostrEvent): Promise<{ success: boolean; stored: boolean }> {
+  async ingestUpstreamEvent(
+    event: NostrEvent
+  ): Promise<{ success: boolean; stored: boolean; superseded: boolean }> {
     try {
-      const { success, stored } = await this.ingestEvent(event);
-      return { success, stored };
+      const { success, stored, superseded } = await this.ingestEvent(event);
+      return { success, stored, superseded: superseded === true };
     } catch (error) {
       logger.error('Error ingesting upstream event:', error);
-      return { success: false, stored: false };
+      return { success: false, stored: false, superseded: false };
     }
   }
 

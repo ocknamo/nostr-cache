@@ -109,6 +109,34 @@ export interface StorageAdapter {
   getEvents(filters: Filter[]): Promise<NostrEvent[]>;
 
   /**
+   * Get the stored version of a replaceable / addressable event at `address`,
+   * i.e. the one NIP-01 says to retain (newest `created_at`, ties broken by the
+   * lowest id). Backs the relay's "only the newest version is kept" rule: an
+   * incoming event is compared against this before it may replace anything.
+   *
+   * `address.kind` must be replaceable (0 / 3 / 10000–19999) or addressable
+   * (30000–39999). For addressable kinds the stored event's `d` tag value must
+   * equal `address.identifier` (a missing `d` tag counts as the empty
+   * identifier); for replaceable kinds the identifier is ignored — the same
+   * coordinate semantics as {@link deleteEventsByAddress}.
+   *
+   * Like {@link getValidationStatus}, this must not count as a read access for
+   * LRU/LFU eviction purposes: it is a write-path precondition check, not a read
+   * of the event on anyone's behalf.
+   *
+   * Unlike most methods here it must **not** swallow storage errors: the caller
+   * cannot tell "nothing stored" (which permits the incoming event to be saved)
+   * from "the lookup failed", and reporting the latter as the former is exactly
+   * how a newer version would get overwritten by an older one. Let the error
+   * propagate and the relay rejects the event instead.
+   *
+   * @param address Coordinate to look up (kind / pubkey / d value)
+   * @returns Promise resolving to the stored version, or undefined if the
+   *   coordinate holds no event
+   */
+  getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined>;
+
+  /**
    * Get the cache insertion time (in milliseconds) of the given event ids —
    * the same clock the TTL sweep expires against, i.e. when the event was
    * written into this cache, not the event's own `created_at`.

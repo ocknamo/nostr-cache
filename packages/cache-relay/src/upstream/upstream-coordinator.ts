@@ -26,6 +26,12 @@ import type { UpstreamPool } from './upstream-types.js';
 export interface IngestResult {
   success: boolean;
   stored: boolean;
+  /**
+   * The upstream relay returned an older version of a replaceable / addressable
+   * event than the one the cache already holds (NIP-01 keeps only the newest).
+   * Accepted, but neither stored nor deliverable.
+   */
+  superseded?: boolean;
 }
 
 export interface UpstreamCoordinatorDeps {
@@ -237,6 +243,14 @@ export class UpstreamCoordinator {
         return;
       }
       if (!result.success || state.closed) {
+        return;
+      }
+      if (result.superseded) {
+        // 上流が古い版を返した（キャッシュにはより新しい版がある）。保存されて
+        // いないものを配信すると、クライアントの手元で新しい版が古い版に
+        // 上書きされうるため落とす。id は記録しておき、同じ古い版が別の上流から
+        // 届いても再度 ingest しないようにする
+        this.addSentId(state, event.id);
         return;
       }
       this.addSentId(state, event.id);

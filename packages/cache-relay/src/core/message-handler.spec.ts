@@ -180,6 +180,48 @@ describe('MessageHandler', () => {
         expect(responseCallback).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
       });
 
+      it('should accept but neither broadcast nor forward a superseded event', async () => {
+        // NIP-01 の版比較で負けた（キャッシュにより新しい版がある）replaceable
+        // イベント。保存しない以上、購読者への配信も上流への転送もしない
+        const signer = seckeySigner(getRandomSecret());
+        const pubkey = await signer.getPublicKey();
+        const older = await signer.signEvent({
+          pubkey,
+          created_at: 1000,
+          kind: 0,
+          tags: [],
+          content: '{"name":"old"}',
+        });
+        const newer = await signer.signEvent({
+          pubkey,
+          created_at: 2000,
+          kind: 0,
+          tags: [],
+          content: '{"name":"new"}',
+        });
+        (mockStorage.getCurrentVersion as Mock).mockResolvedValueOnce(newer);
+        (mockSubscriptionManager.findMatchingSubscriptions as Mock).mockReturnValue(
+          new Map([['client2', [{ id: 'sub1', filters: [{ kinds: [0] }] }]]])
+        );
+        const coordinator = { publish: vi.fn(), markDelivered: vi.fn() };
+        messageHandler.setUpstreamCoordinator(coordinator as never);
+
+        await messageHandler.handleMessage('client1', ['EVENT', older]);
+
+        expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+        expect(mockStorage.deleteEventsByPubkeyAndKind).not.toHaveBeenCalled();
+        // OK は true（イベント自体は正当）で、機械可読な duplicate: 接頭辞を付ける
+        expect(responseCallback).toHaveBeenCalledWith('client1', [
+          'OK',
+          older.id,
+          true,
+          expect.stringMatching(/^duplicate: /),
+        ]);
+        // OK 以外は何も送っていない（EVENT のブロードキャスト無し）
+        expect(responseCallback).toHaveBeenCalledTimes(1);
+        expect(coordinator.publish).not.toHaveBeenCalled();
+      });
+
       describe('validateEventsType modes', () => {
         // A structurally-present but cryptographically invalid event
         const invalidEvent: NostrEvent = { ...sampleEvent, id: 'invalid-event', sig: 'deadbeef' };
@@ -835,7 +877,7 @@ describe('MessageHandler', () => {
     it('ingestUpstreamEvent stores without sending OK or broadcasting', async () => {
       const result = await messageHandler.ingestUpstreamEvent(sampleEvent);
 
-      expect(result).toEqual({ success: true, stored: true });
+      expect(result).toEqual({ success: true, stored: true, superseded: false });
       expect(mockStorage.saveEvent).toHaveBeenCalledWith(sampleEvent, { validated: true });
       // No OK / EVENT broadcast is emitted for a backfilled event.
       expect(responseCallback).not.toHaveBeenCalled();
@@ -845,7 +887,7 @@ describe('MessageHandler', () => {
       const invalidEvent: NostrEvent = { ...sampleEvent, id: 'invalid-event', sig: 'deadbeef' };
       const result = await messageHandler.ingestUpstreamEvent(invalidEvent);
 
-      expect(result).toEqual({ success: false, stored: false });
+      expect(result).toEqual({ success: false, stored: false, superseded: false });
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
     });
 
@@ -857,7 +899,7 @@ describe('MessageHandler', () => {
 
       const result = await messageHandler.ingestUpstreamEvent(deletion);
 
-      expect(result).toEqual({ success: true, stored: true });
+      expect(result).toEqual({ success: true, stored: true, superseded: false });
       expect(mockStorage.deleteEventsByIdsForPubkey).toHaveBeenCalledWith(
         [target],
         deletion.pubkey
@@ -874,7 +916,7 @@ describe('MessageHandler', () => {
 
       const result = await noneHandler.ingestUpstreamEvent(forged);
 
-      expect(result).toEqual({ success: false, stored: false });
+      expect(result).toEqual({ success: false, stored: false, superseded: false });
       expect(mockStorage.saveEvent).not.toHaveBeenCalled();
       expect(mockStorage.deleteEventsByIdsForPubkey).not.toHaveBeenCalled();
     });
