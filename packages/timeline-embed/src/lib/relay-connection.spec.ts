@@ -152,30 +152,47 @@ describe('RelayConnection', () => {
       expect(connection.isConnected).toBe(true);
     });
 
-    it('rejects and reports error when the socket closes before opening', async () => {
+    it('retries a first attempt that fails, and resolves when one lands', async () => {
+      vi.useFakeTimers();
       const statuses: ConnectionStatus[] = [];
       const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
       const promise = connection.connect(RELAY_URL);
       FakeWebSocket.instances[0].simulateServerClose();
 
-      await expect(promise).rejects.toThrow('Failed to connect');
-      // Reported as an error, not as a reconnection: the first attempt never
-      // landed, so there is nothing for the reader to wait out.
-      expect(statuses).toEqual(['connecting', 'error']);
-      expect(connection.isConnected).toBe(false);
+      // A failed first attempt is not the caller's problem: rx-nostr puts it on
+      // the same retry ladder as any other drop, so connect() waits it out.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(FakeWebSocket.instances.length).toBeGreaterThan(1);
+      expect(statuses).toContain('reconnecting');
+
+      FakeWebSocket.instances.at(-1)?.simulateOpen();
+      await expect(promise).resolves.toBeUndefined();
+      expect(connection.isConnected).toBe(true);
     });
 
-    it('does not keep retrying after a failed first attempt', async () => {
+    it('rejects once rx-nostr has spent its retries', async () => {
       vi.useFakeTimers();
-      const connection = createConnection();
+      const statuses: ConnectionStatus[] = [];
+      const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
       const promise = connection.connect(RELAY_URL);
-      FakeWebSocket.instances[0].simulateServerClose();
-      await expect(promise).rejects.toThrow('Failed to connect');
+      // Fail every attempt, including each retry, until the ladder runs out.
+      for (let i = 0; i < 20; i++) {
+        FakeWebSocket.instances.at(-1)?.simulateServerClose();
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
 
+      await expect(promise).rejects.toThrow('Failed to connect');
+      expect(statuses.at(-1)).toBe('error');
+      expect(connection.isConnected).toBe(false);
+
+      // rx-nostr's default ladder is five attempts, so the retries really are
+      // bounded rather than this having simply run out of patience.
+      const settled = FakeWebSocket.instances.length;
       await vi.advanceTimersByTimeAsync(120_000);
-      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(FakeWebSocket.instances).toHaveLength(settled);
+      expect(settled).toBe(6); // the first attempt plus five retries
     });
   });
 

@@ -1,12 +1,5 @@
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import type {
-  ConnectionState,
-  EventSigner,
-  LazyFilter,
-  MessagePacket,
-  RetryConfig,
-  RxNostr,
-} from 'rx-nostr';
+import type { ConnectionState, EventSigner, LazyFilter, MessagePacket, RxNostr } from 'rx-nostr';
 import { createRxForwardReq, createRxNostr } from 'rx-nostr';
 
 export type ConnectionStatus =
@@ -29,18 +22,6 @@ export interface RelayConnectionOptions {
   onNotice?: (message: string) => void;
   onOk?: (eventId: string, accepted: boolean, message?: string) => void;
 }
-
-/**
- * Auto-reconnection policy.
- *
- * The relay on the other end is in this very page, so holding the socket open
- * costs nothing and a drop is always worth chasing: it means the page's relay
- * was torn down and restarted, not that a server is refusing us. Hence a longer
- * retry ladder than rx-nostr's default of five — exponential backoff caps the
- * traffic anyway, and giving up would leave the widget stuck on a stale
- * timeline with no way back.
- */
-const RETRY: RetryConfig = { strategy: 'exponential', maxCount: 10, initialDelay: 1000 };
 
 /**
  * The widget never signs: {@link RelayConnection.publish} takes an event that
@@ -70,11 +51,11 @@ function wireSubId(subId: string): string {
 }
 
 /**
- * Map rx-nostr's connection state onto the four states the UI renders.
+ * Map rx-nostr's connection state onto the states the UI renders.
  *
  * `waiting-for-retrying` and `retrying` are the auto-reconnect ladder, and are
- * reported apart from the first `connecting` so the UI can say "reconnecting"
- * rather than implying the user is waiting on an initial connection.
+ * reported apart from `connecting` so the UI can say the connection is being
+ * retried rather than implying a first attempt is still in flight.
  */
 function toStatus(state: ConnectionState): ConnectionStatus {
   switch (state) {
@@ -92,21 +73,6 @@ function toStatus(state: ConnectionState): ConnectionStatus {
       // `initialized`, `dormant` and `terminated`: no socket, nothing pending.
       return 'disconnected';
   }
-}
-
-/**
- * Whether a state means the connection attempt in progress has failed.
- *
- * `error` and `rejected` are terminal, and the two retry states say rx-nostr
- * has given up on the current attempt and fallen back to the backoff ladder.
- */
-function isFailedAttempt(state: ConnectionState): boolean {
-  return (
-    state === 'error' ||
-    state === 'rejected' ||
-    state === 'waiting-for-retrying' ||
-    state === 'retrying'
-  );
 }
 
 /** What we hold on to for one live subscription. */
@@ -155,15 +121,17 @@ export class RelayConnection {
   }
 
   /**
-   * Connect to a relay. Resolves once the socket is open; rejects if the first
-   * attempt fails. An existing connection is closed first.
+   * Connect to a relay. Resolves once the socket is open; rejects once rx-nostr
+   * has given up on it. An existing connection is closed first.
    *
-   * Only the *first* attempt is reported to the caller: once it has succeeded,
-   * later drops are rx-nostr's to recover from and are visible through
-   * {@link RelayConnectionOptions.onStatusChange} instead. A first attempt that
-   * fails tears the client down rather than retrying in the background, so a
-   * rejected connect() leaves nothing running — which is what callers that
-   * report "接続に失敗しました" and stop already assume.
+   * "Given up" is rx-nostr's call, not this class's: a connection that drops —
+   * whether or not it ever came up — goes onto its retry ladder, and only the
+   * terminal `error`/`rejected` states mean nobody is trying any more. So a
+   * first attempt that fails does not reject here; it is reported as
+   * `reconnecting` through {@link RelayConnectionOptions.onStatusChange} and
+   * resolves normally if a later attempt lands. A rejected connect() leaves
+   * nothing running, which is what callers that report a failure and stop
+   * already assume.
    */
   connect(url: string): Promise<void> {
     this.disconnect();
@@ -179,34 +147,29 @@ export class RelayConnection {
       // after ten seconds, which for an in-page relay buys nothing and costs a
       // reconnect on the next profile lookup.
       connectionStrategy: 'aggressive',
-      retry: RETRY,
       signer: PASSTHROUGH_SIGNER,
       // Left undefined, rx-nostr reads globalThis.WebSocket when it opens the
       // socket — which is after the emulator has patched it, as it must be.
       websocketCtor: this.options.webSocketCtor,
+      // `retry` is deliberately left at rx-nostr's default (exponential backoff
+      // with jitter, five attempts). Reconnection is the reason this class went
+      // through rx-nostr at all, so there is no policy of our own to impose.
     });
     this.rxNostr = rxNostr;
 
     return new Promise<void>((resolve, reject) => {
       this.pendingConnect = { resolve, reject };
-      let connectedOnce = false;
 
       const states = rxNostr.createConnectionStateObservable().subscribe(({ state }) => {
-        if (state === 'connected') {
-          connectedOnce = true;
-          this.setStatus('connected');
-          this.settleConnect(null);
-          return;
-        }
-        if (!connectedOnce && isFailedAttempt(state)) {
-          // Report it as an error rather than as a reconnection: nobody has
-          // been connected yet, so there is nothing to reconnect *to* from the
-          // caller's point of view, and connect() is about to reject.
-          this.teardownClient('error');
-          this.settleConnect(new Error(`Failed to connect to ${url}`));
-          return;
-        }
         this.setStatus(toStatus(state));
+        if (state === 'connected') {
+          this.settleConnect(null);
+        } else if (state === 'error' || state === 'rejected') {
+          // Terminal: the retries are spent, or the relay told us not to come
+          // back. Nothing is going to change on its own from here.
+          this.settleConnect(new Error(`Failed to connect to ${url}`));
+          this.teardownClient('error');
+        }
       });
       this.teardown.push(() => states.unsubscribe());
 
