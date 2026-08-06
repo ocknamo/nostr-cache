@@ -306,8 +306,11 @@ export class RelayConnection {
    */
   publish(event: NostrEvent): void {
     // OK is routed from the shared message stream with every other
-    // relay-to-client message, so this subscription only drives the send.
-    this.rxNostr?.send(event as never).subscribe({ error: () => {} });
+    // relay-to-client message, so this subscription only drives the send and is
+    // done the moment the EVENT has gone out. Waiting for the OK here — the
+    // default — would instead hold it open until every relay has answered or
+    // the 30s timeout expires, once per published event.
+    this.rxNostr?.send(event as never, { completeOn: 'sent' }).subscribe({ error: () => {} });
   }
 
   private settleConnect(error: Error | null): void {

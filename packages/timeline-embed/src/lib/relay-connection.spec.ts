@@ -19,7 +19,6 @@ class FakeWebSocket {
   readonly url: string;
   readyState = 0; // CONNECTING
   sent: string[] = [];
-  closedWith: number[] = [];
 
   private listeners = new Map<string, Set<(event: unknown) => void>>();
 
@@ -47,7 +46,6 @@ class FakeWebSocket {
       return;
     }
     this.readyState = 3; // CLOSED
-    this.closedWith.push(code);
     this.emit('close', { type: 'close', code, reason: '' });
   }
 
