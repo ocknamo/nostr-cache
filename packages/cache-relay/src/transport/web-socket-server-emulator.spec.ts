@@ -243,6 +243,22 @@ describe('WebSocketServerEmulator', () => {
       expect(disconnectedClientId).toBe(connectedClientId);
     });
 
+    it('should tell clients not to reconnect when stopped', async () => {
+      await emulator.start();
+      const ws = await openSocket(defaultUrl);
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        ws.onclose = (event) => resolve(event as CloseEvent);
+      });
+      await emulator.stop();
+
+      // stop() also un-patches the global WebSocket, so the URL this client was
+      // talking to stops being intercepted. A client that reconnected out of
+      // habit would open a *real* socket to `ws://nostr-cache.invalid` and put
+      // the page on the network. 4000 is NIP-01's "do not reconnect".
+      expect((await closed).code).toBe(4000);
+    });
+
     it('should cancel sockets that are still connecting when stopped', async () => {
       const connected: string[] = [];
       emulator.onConnect((clientId) => connected.push(clientId));
@@ -271,6 +287,35 @@ describe('WebSocketServerEmulator', () => {
 
       expect(disconnected).toHaveLength(1);
       expect(emulator.getConnectionCount()).toBe(0);
+    });
+
+    it("should report the client's status code on the close event", async () => {
+      await emulator.start();
+      const ws = await openSocket(defaultUrl);
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        ws.onclose = (event) => resolve(event as CloseEvent);
+      });
+      // Clients read this code back to tell their own deliberate closes from a
+      // connection that dropped; rx-nostr, for one, uses private codes for an
+      // idle disconnect and a disposal and reconnects after anything else.
+      ws.close(4537, 'idle');
+      const event = await closed;
+
+      expect(event.code).toBe(4537);
+      expect(event.reason).toBe('idle');
+    });
+
+    it('should default the close code to a normal closure', async () => {
+      await emulator.start();
+      const ws = await openSocket(defaultUrl);
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        ws.onclose = (event) => resolve(event as CloseEvent);
+      });
+      ws.close();
+
+      expect((await closed).code).toBe(1000);
     });
   });
 

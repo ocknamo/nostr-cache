@@ -7,6 +7,18 @@ import {
 import type { TransportAdapter } from './transport-adapter.js';
 
 /**
+ * Close code telling clients not to reconnect (NIP-01).
+ *
+ * `stop()` does not just drop the connections, it un-patches the global
+ * `WebSocket` — so the URL these clients were talking to stops being
+ * intercepted. A client that reconnects out of habit (rx-nostr retries any
+ * close it did not ask for) would then open a *real* socket to
+ * `ws://nostr-cache.invalid` and put the page on the network, which is the one
+ * thing this emulator exists to avoid. Saying "gone for good" is what stops it.
+ */
+const SHUTTING_DOWN = 4000;
+
+/**
  * WebSocket emulator for browser environment
  *
  * Overrides the global WebSocket so that connections to the configured relay
@@ -80,7 +92,7 @@ export class WebSocketServerEmulator implements TransportAdapter {
     // Close every created socket, including ones still CONNECTING (their
     // pending open timer then becomes a no-op).
     for (const socket of [...this.allSockets]) {
-      socket.close();
+      socket.close(SHUTTING_DOWN);
     }
     this.allSockets.clear();
     this.sockets.clear();

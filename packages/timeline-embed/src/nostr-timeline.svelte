@@ -133,6 +133,14 @@
   {#if state.error}
     <p class="error" part="error">{state.error}</p>
   {/if}
+  <!--
+    Shown rather than swapped in for the timeline: rx-nostr keeps retrying and
+    re-issues the subscriptions when it gets back, so the events already on
+    screen stay readable and simply resume updating.
+  -->
+  {#if state.status === 'reconnecting'}
+    <p class="reconnecting" part="reconnecting">リレーに再接続しています…</p>
+  {/if}
   <Timeline
     events={state.events}
     eose={state.eose}
@@ -168,6 +176,15 @@
     border-radius: var(--nt-radius, 10px);
     background: var(--nt-error-bg, #fdecea);
     color: var(--nt-error-fg, #a4262c);
+    font-size: 0.85rem;
+  }
+
+  .reconnecting {
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border-radius: var(--nt-radius, 10px);
+    background: var(--nt-notice-bg, #fff4e5);
+    color: var(--nt-notice-fg, #8a5300);
     font-size: 0.85rem;
   }
 </style>

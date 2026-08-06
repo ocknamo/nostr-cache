@@ -9,6 +9,10 @@
   目で確認するための動作確認用。既定では表示しません）
 - 署名検証はリレーがバックグラウンドで実行し、検証済みイベントに ✓ を表示
   （クライアント側で暗号処理をしない）
+- ページ内リレーへの接続管理は [rx-nostr](https://penpenpng.github.io/rx-nostr/) に委譲。
+  接続が切れても自動再接続し（rx-nostr 既定の指数バックオフ + jitter・5 回）、開いていた REQ を張り直すので、
+  リレーが作り直されてもタイムラインとプロフィール取得が復帰します
+  （再接続中は「リレーに再接続しています…」を表示）
 - アバター・表示名・`@handle` を kind 0（プロフィール）から表示。kind 0 は replaceable として
   同じキャッシュに載り、`upstreamFreshness` の鮮度ウィンドウ（既定 24 時間・
   `profile-freshness` で変更可）が効くため、リロード後は上流に問い合わせず即座に出ます
@@ -235,10 +239,11 @@ nostr-timeline {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **266 KB（gzip 約 91 KB）** の自己完結した IIFE です。
+`dist/nostr-timeline.js` は約 **325 KB（gzip 約 108 KB）** の自己完結した IIFE です。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
-別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）と
-署名検証用の `rx-nostr-crypto` で、これらはリレー本体の機能に必要です。
+別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、
+署名検証用の `rx-nostr-crypto`、そしてリレー接続管理の `rx-nostr`（+ RxJS）で、
+いずれもリレー本体とクライアント接続の機能に必要です。
 
 ## ライブラリとしての利用
 
@@ -264,7 +269,7 @@ import {
 | `CacheMetrics` | イベント由来（cache / upstream）の分類とカウンタ |
 | `InstrumentedUpstreamPool` | `UpstreamPool` デコレータ。cache-relay 無改変で上流トラフィックを計測 |
 | `RequestTimer` | REQ → 初回イベント → EOSE の計測 |
-| `RelayConnection` | 素の WebSocket 上の最小 NIP-01 クライアント |
+| `RelayConnection` | rx-nostr を使った NIP-01 クライアント。切断時の自動再接続と REQ の再送を担う |
 | `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
 | `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |

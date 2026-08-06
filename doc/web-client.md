@@ -12,8 +12,9 @@ Svelte 5 + Vite の開発用クライアントである。`npm run dev:web` で�
 
 起動時に `startLocalRelay()`（`src/lib/local-relay.ts`）が
 `DexieStorage`（IndexedDB）+ `WebSocketServerEmulator` + `NostrCacheRelay` を組み立て、
-クライアントは素の `new WebSocket('ws://nostr-cache.invalid')` で接続する
+クライアントは rx-nostr 経由で `ws://nostr-cache.invalid` へ接続する
 （エミュレータが横取りするため、この URL への通信はネットワークに出ない）。
+接続が切れた場合の再接続と REQ の張り直しは rx-nostr が行う。
 仕組みの詳細は [transparent-cache.md](./transparent-cache.md) を参照。
 
 ```

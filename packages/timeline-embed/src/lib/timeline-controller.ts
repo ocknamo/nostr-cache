@@ -93,6 +93,8 @@ export class TimelineController {
   private validationFetchTimer?: ReturnType<typeof setTimeout>;
   private validationPollTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  /** Whether the connection ever came up, so a later error means it was lost. */
+  private connectedOnce = false;
   /** Set by suspend(), cleared by the next subscribe(). */
   private suspended = false;
   /** Settles on stop(), so a pending connect() cannot leave start() hanging. */
@@ -105,7 +107,27 @@ export class TimelineController {
       this.signalStopped = resolve;
     });
     this.connection = new RelayConnection({
-      onStatusChange: (status) => this.patch({ status }),
+      onStatusChange: (status) => {
+        this.patch({ status });
+        if (status === 'connected') {
+          // A reconnect gives the queue somewhere to drain to again. The
+          // timeline REQ needs no help — rx-nostr re-sends the subscriptions it
+          // was holding — but profile lookups are opened one at a time by this
+          // class, so the ones parked while the socket was down have to be
+          // started from here.
+          this.patch({ error: undefined });
+          this.pumpProfileQueue();
+        } else if (status === 'error' && this.connectedOnce) {
+          // Reconnection gave up. Say so, or the widget goes on showing a
+          // timeline that stopped updating some minutes ago with nothing to
+          // suggest anything is wrong. A failed *first* connection is not this
+          // case: start() reports that one with the reason it failed for.
+          this.patch({
+            error: 'リレーとの接続が切れました。ページを再読み込みしてください',
+          });
+        }
+        this.connectedOnce ||= status === 'connected';
+      },
     });
   }
 
@@ -220,7 +242,7 @@ export class TimelineController {
       error: undefined,
     });
 
-    if (!this.connection.isConnected) {
+    if (!this.connection.isConnected && !this.isRecovering()) {
       // Say so rather than leaving the UI on "読み込み中…" forever.
       this.patch({ error: 'リレーに接続していないため購読できません' });
       return;
@@ -283,7 +305,7 @@ export class TimelineController {
     // into view would read through to upstream and refill the very cache being
     // measured. Nothing else stops it — unlike the old design, where lookups
     // could only be triggered by timeline events that suspend() had cut off.
-    if (this.stopped || this.suspended || !this.canQueueProfiles()) {
+    if (this.stopped || this.suspended) {
       return;
     }
     if (this.requestedProfiles.has(pubkey)) {
@@ -295,20 +317,6 @@ export class TimelineController {
   }
 
   /**
-   * Whether a lookup queued now could ever run.
-   *
-   * Nothing retries if the socket is down: `RelayConnection` never reconnects
-   * on its own (the caller re-invokes connect()), and the timeline subscription
-   * died with the same socket, so there is no path back to a working widget for
-   * a retry to help. Queuing anyway would just grow an array nobody drains —
-   * one entry per author the dead connection keeps rendering. Names stay on the
-   * shortened pubkey instead.
-   */
-  private canQueueProfiles(): boolean {
-    return this.connection.isConnected;
-  }
-
-  /**
    * Start as many queued lookups as the in-flight budget allows.
    *
    * The relay caps each *client* at `maxSubscriptions` (20, set in
@@ -316,6 +324,13 @@ export class TimelineController {
    * second widget on the page has its own budget). Every visible card can ask
    * at once — an iframe embed sized to its content has *every* card in the
    * viewport — so without a budget a first paint would run past that cap.
+   *
+   * Nothing is started while the socket is down. rx-nostr would happily buffer
+   * the REQ and send it on reconnect, but a lookup that is merely buffered
+   * still burns an in-flight slot and still runs down its watchdog
+   * ({@link PROFILE_REQUEST_TIMEOUT_MS}), so a reconnect that takes a while
+   * would time the whole budget out for nothing. Authors wait in the queue
+   * instead, and the `connected` status handler pumps it again.
    */
   private pumpProfileQueue(): void {
     if (this.stopped || this.suspended || !this.connection.isConnected) {
@@ -487,6 +502,18 @@ export class TimelineController {
         void this.refreshValidationStatuses();
       }, VALIDATION_POLL_INTERVAL_MS);
     }
+  }
+
+  /**
+   * Whether the socket is down but on its way back.
+   *
+   * A REQ issued now is not lost — rx-nostr holds it and sends it once the
+   * connection returns — so a filter change mid-reconnect should go through
+   * quietly rather than being refused with an error the reader would be stuck
+   * on after the connection recovered.
+   */
+  private isRecovering(): boolean {
+    return this.state.status === 'connecting' || this.state.status === 'reconnecting';
   }
 
   private clearTimers(): void {

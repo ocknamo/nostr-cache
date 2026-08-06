@@ -1,6 +1,13 @@
-import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
+import type { ConnectionState, EventSigner, LazyFilter, MessagePacket, RxNostr } from 'rx-nostr';
+import { createRxForwardReq, createRxNostr } from 'rx-nostr';
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'reconnecting'
+  | 'connected'
+  | 'error';
 
 export interface SubscriptionHandlers {
   onEvent: (event: NostrEvent) => void;
@@ -16,20 +23,93 @@ export interface RelayConnectionOptions {
   onOk?: (eventId: string, accepted: boolean, message?: string) => void;
 }
 
-const READY_STATE_OPEN = 1;
+/**
+ * The widget never signs: {@link RelayConnection.publish} takes an event that
+ * is already signed, so "signing" is the identity function. Declaring it keeps
+ * rx-nostr's default NIP-07 signer — and its reach for `window.nostr` — out of
+ * a widget that has no business prompting for a browser extension.
+ */
+const PASSTHROUGH_SIGNER: EventSigner = {
+  signEvent: async (event) => event as never,
+  getPublicKey: async () => {
+    throw new Error('RelayConnection does not sign; publish() takes a signed event');
+  },
+};
 
 /**
- * Minimal NIP-01 relay client over a WebSocket.
+ * Wire subscription ID rx-nostr uses for a forward-strategy REQ.
+ *
+ * rx-nostr builds it as `${rxReqId}:${childId}`, and the child ID is pinned to
+ * 0 under the forward strategy (a forward REQ overwrites its predecessor rather
+ * than opening a second one). Passing the caller's ID as the `rxReqId` therefore
+ * makes the wire ID derivable, which is what lets EOSE and CLOSED — which arrive
+ * on the shared message stream, not through `use()` — be routed back to the
+ * right handlers.
+ */
+function wireSubId(subId: string): string {
+  return `${subId}:0`;
+}
+
+/**
+ * Map rx-nostr's connection state onto the states the UI renders.
+ *
+ * `waiting-for-retrying` and `retrying` are the auto-reconnect ladder, and are
+ * reported apart from `connecting` so the UI can say the connection is being
+ * retried rather than implying a first attempt is still in flight.
+ */
+function toStatus(state: ConnectionState): ConnectionStatus {
+  switch (state) {
+    case 'connecting':
+      return 'connecting';
+    case 'connected':
+      return 'connected';
+    case 'waiting-for-retrying':
+    case 'retrying':
+      return 'reconnecting';
+    case 'error':
+    case 'rejected':
+      return 'error';
+    default:
+      // `initialized`, `dormant` and `terminated`: no socket, nothing pending.
+      return 'disconnected';
+  }
+}
+
+/** What we hold on to for one live subscription. */
+interface ActiveSubscription {
+  handlers: SubscriptionHandlers;
+  /** Unsubscribing sends CLOSE and stops routing events. */
+  events: { unsubscribe(): void };
+}
+
+/**
+ * NIP-01 relay client backed by rx-nostr.
  *
  * Framework-agnostic: all UI state is driven through the callbacks in
  * {@link RelayConnectionOptions} and {@link SubscriptionHandlers}. The
- * WebSocket constructor is injectable for tests. No automatic reconnect:
- * the caller re-invokes connect() (and re-subscribes) when needed.
+ * WebSocket constructor is injectable for tests.
+ *
+ * Relay management — reconnecting with exponential backoff, re-issuing the REQs
+ * that were open when the socket dropped, buffering messages sent while it is
+ * down — is rx-nostr's job, not this class's. That is the whole reason it is
+ * here: a subscription now survives the page's relay being torn down and
+ * restarted, where the previous hand-rolled client dropped every subscription
+ * on close and left the widget with no way back.
+ *
+ * Signature verification is deliberately switched off (`skipVerify`). The cache
+ * relay this talks to verifies every event itself and persists the verdict — see
+ * `relay-host.ts` — so verifying again here would spend the reader's CPU on
+ * crypto that has already been done, and pull a second signature implementation
+ * into the embed bundle.
  */
 export class RelayConnection {
-  private ws: WebSocket | null = null;
-  private subscriptions = new Map<string, SubscriptionHandlers>();
+  private rxNostr?: RxNostr;
+  /** Live subscriptions, keyed by their wire subscription ID. */
+  private subscriptions = new Map<string, ActiveSubscription>();
+  private teardown: (() => void)[] = [];
   private status: ConnectionStatus = 'disconnected';
+  /** Settles the in-flight connect(), if there is one. */
+  private pendingConnect?: { resolve: () => void; reject: (error: Error) => void };
   private readonly options: RelayConnectionOptions;
 
   constructor(options: RelayConnectionOptions = {}) {
@@ -37,60 +117,75 @@ export class RelayConnection {
   }
 
   get isConnected(): boolean {
-    return this.ws !== null && this.ws.readyState === READY_STATE_OPEN;
+    return this.status === 'connected';
   }
 
   /**
-   * Connect to a relay. Resolves once the socket is open; rejects if the
-   * socket errors or closes before opening. An existing connection is closed
-   * first.
+   * Connect to a relay. Resolves once the socket is open; rejects once rx-nostr
+   * has given up on it. An existing connection is closed first.
+   *
+   * "Given up" is rx-nostr's call, not this class's: a connection that drops —
+   * whether or not it ever came up — goes onto its retry ladder, and only the
+   * terminal `error`/`rejected` states mean nobody is trying any more. So a
+   * first attempt that fails does not reject here; it is reported as
+   * `reconnecting` through {@link RelayConnectionOptions.onStatusChange} and
+   * resolves normally if a later attempt lands. A rejected connect() leaves
+   * nothing running, which is what callers that report a failure and stop
+   * already assume.
    */
   connect(url: string): Promise<void> {
     this.disconnect();
-    const Ctor = this.options.webSocketCtor ?? globalThis.WebSocket;
     this.setStatus('connecting');
 
-    return new Promise((resolve, reject) => {
-      let ws: WebSocket;
-      try {
-        ws = new Ctor(url);
-      } catch (error) {
-        this.setStatus('error');
-        reject(error instanceof Error ? error : new Error(String(error)));
-        return;
-      }
-      this.ws = ws;
-      let settled = false;
+    const rxNostr = createRxNostr({
+      // The cache relay verifies signatures itself and persists the verdict.
+      skipVerify: true,
+      // The in-page relay is a WebSocket and nothing else: there is no HTTP
+      // origin to serve a NIP-11 document, and `.invalid` never resolves.
+      skipFetchNip11: true,
+      // Hold the socket open. The default ("lazy") drops an idle connection
+      // after ten seconds, which for an in-page relay buys nothing and costs a
+      // reconnect on the next profile lookup.
+      connectionStrategy: 'aggressive',
+      signer: PASSTHROUGH_SIGNER,
+      // Left undefined, rx-nostr reads globalThis.WebSocket when it opens the
+      // socket — which is after the emulator has patched it, as it must be.
+      websocketCtor: this.options.webSocketCtor,
+      // `retry` is deliberately left at rx-nostr's default (exponential backoff
+      // with jitter, five attempts). Reconnection is the reason this class went
+      // through rx-nostr at all, so there is no policy of our own to impose.
+    });
+    this.rxNostr = rxNostr;
 
-      ws.onopen = () => {
-        settled = true;
-        this.setStatus('connected');
-        resolve();
-      };
-      ws.onmessage = (event) => {
-        this.handleMessage(String(event.data));
-      };
-      ws.onerror = () => {
-        this.setStatus('error');
-        if (!settled) {
-          settled = true;
-          reject(new Error(`Failed to connect to ${url}`));
+    return new Promise<void>((resolve, reject) => {
+      this.pendingConnect = { resolve, reject };
+
+      const states = rxNostr.createConnectionStateObservable().subscribe(({ state }) => {
+        this.setStatus(toStatus(state));
+        if (state === 'connected') {
+          this.settleConnect(null);
+        } else if (state === 'error' || state === 'rejected') {
+          // Terminal: the retries are spent, or the relay told us not to come
+          // back. Nothing is going to change on its own from here.
+          this.settleConnect(new Error(`Failed to connect to ${url}`));
+          this.teardownClient('error');
         }
-      };
-      ws.onclose = () => {
-        // Server-side subscriptions die with the socket.
-        this.subscriptions.clear();
-        if (this.ws === ws) {
-          this.ws = null;
-        }
-        if (!settled) {
-          settled = true;
-          this.setStatus('error');
-          reject(new Error(`Connection to ${url} closed before opening`));
-        } else if (this.status !== 'error') {
-          this.setStatus('disconnected');
-        }
-      };
+      });
+      this.teardown.push(() => states.unsubscribe());
+
+      // EOSE, CLOSED, NOTICE and OK do not come through `use()` — it carries
+      // events only — so one shared stream routes them.
+      const messages = rxNostr
+        .createAllMessageObservable()
+        .subscribe((packet) => this.handleMessage(packet));
+      this.teardown.push(() => messages.unsubscribe());
+
+      try {
+        rxNostr.setDefaultRelays([url]);
+      } catch (error) {
+        this.teardownClient('error');
+        this.settleConnect(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -98,42 +193,100 @@ export class RelayConnection {
    * Close the connection (if any) and drop all subscriptions.
    */
   disconnect(): void {
-    const ws = this.ws;
-    this.ws = null;
+    this.teardownClient('disconnected');
+    this.settleConnect(new Error('Connection closed before opening'));
+  }
+
+  /**
+   * Drop the rx-nostr client and everything hanging off it.
+   *
+   * @param status Status to report, but only if there was a client to drop —
+   *   calling disconnect() on an idle connection stays silent, as it always has.
+   */
+  private teardownClient(status: ConnectionStatus): void {
+    const rxNostr = this.rxNostr;
+    this.rxNostr = undefined;
+
+    for (const { events } of this.subscriptions.values()) {
+      events.unsubscribe();
+    }
     this.subscriptions.clear();
-    if (ws) {
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onerror = null;
-      ws.onclose = null;
-      ws.close();
-      this.setStatus('disconnected');
+
+    // Detach before disposing so rx-nostr's own `terminated` transition does
+    // not race the status this reports.
+    const teardown = this.teardown;
+    this.teardown = [];
+    for (const off of teardown) {
+      off();
+    }
+
+    if (rxNostr) {
+      rxNostr.dispose();
+      this.setStatus(status);
     }
   }
 
   /**
    * Open a subscription: sends REQ and routes matching EVENT/EOSE/CLOSED
    * messages to the given handlers.
+   *
+   * A REQ issued while the socket is down is not lost: rx-nostr buffers it and
+   * sends it on connect, and re-sends it after a reconnect for as long as the
+   * subscription is open.
    */
   subscribe(subId: string, filters: Filter[], handlers: SubscriptionHandlers): void {
-    this.subscriptions.set(subId, handlers);
-    this.send(['REQ', subId, ...filters]);
+    const rxNostr = this.rxNostr;
+    if (!rxNostr) {
+      return;
+    }
+    // Reusing an ID replaces the subscription rather than shadowing it.
+    this.unsubscribe(subId);
+
+    const req = createRxForwardReq(subId);
+    // Subscribe before emitting: the request stream is hot, so a filter emitted
+    // first would be dropped and no REQ would ever be sent.
+    const events = rxNostr.use(req).subscribe(({ event }) => {
+      handlers.onEvent(event as NostrEvent);
+    });
+    this.subscriptions.set(wireSubId(subId), { handlers, events });
+    req.emit(filters as LazyFilter[]);
   }
 
   /**
    * Close a subscription: sends CLOSE and stops routing its messages.
    */
   unsubscribe(subId: string): void {
-    if (this.subscriptions.delete(subId)) {
-      this.send(['CLOSE', subId]);
+    const entry = this.subscriptions.get(wireSubId(subId));
+    if (!entry) {
+      return;
     }
+    this.subscriptions.delete(wireSubId(subId));
+    entry.events.unsubscribe();
   }
 
   /**
    * Publish an event. The result arrives via the onOk callback.
    */
   publish(event: NostrEvent): void {
-    this.send(['EVENT', event]);
+    // OK is routed from the shared message stream with every other
+    // relay-to-client message, so this subscription only drives the send and is
+    // done the moment the EVENT has gone out. Waiting for the OK here — the
+    // default — would instead hold it open until every relay has answered or
+    // the 30s timeout expires, once per published event.
+    this.rxNostr?.send(event as never, { completeOn: 'sent' }).subscribe({ error: () => {} });
+  }
+
+  private settleConnect(error: Error | null): void {
+    const pending = this.pendingConnect;
+    if (!pending) {
+      return;
+    }
+    this.pendingConnect = undefined;
+    if (error) {
+      pending.reject(error);
+    } else {
+      pending.resolve();
+    }
   }
 
   private setStatus(status: ConnectionStatus): void {
@@ -144,57 +297,34 @@ export class RelayConnection {
     this.options.onStatusChange?.(status);
   }
 
-  private send(message: NostrWireMessage): void {
-    if (!this.isConnected || !this.ws) {
-      return;
-    }
-    this.ws.send(JSON.stringify(message));
-  }
-
-  private handleMessage(raw: string): void {
-    let message: unknown;
-    try {
-      message = JSON.parse(raw);
-    } catch {
-      return; // Ignore malformed JSON.
-    }
-    if (!Array.isArray(message) || typeof message[0] !== 'string') {
-      return;
-    }
-
-    switch (message[0]) {
-      case 'EVENT': {
-        // Relay-to-client EVENT always carries the subscription ID.
-        const [, subId, event] = message as ['EVENT', string, NostrEvent];
-        if (event && typeof event === 'object') {
-          this.subscriptions.get(subId)?.onEvent(event);
-        }
-        break;
-      }
+  private handleMessage(packet: MessagePacket): void {
+    switch (packet.type) {
       case 'EOSE': {
-        const [, subId] = message as ['EOSE', string];
-        this.subscriptions.get(subId)?.onEose?.();
+        this.subscriptions.get(packet.subId)?.handlers.onEose?.();
         break;
       }
       case 'CLOSED': {
-        const [, subId, reason] = message as ['CLOSED', string, string?];
-        const handlers = this.subscriptions.get(subId);
-        this.subscriptions.delete(subId);
-        handlers?.onClosed?.(reason);
+        const entry = this.subscriptions.get(packet.subId);
+        if (entry) {
+          // The relay has already dropped it, so stop routing before telling
+          // the caller. rx-nostr knows it is gone too and sends no CLOSE.
+          this.subscriptions.delete(packet.subId);
+          entry.events.unsubscribe();
+          entry.handlers.onClosed?.(packet.notice);
+        }
         break;
       }
       case 'NOTICE': {
-        const [, notice] = message as ['NOTICE', string];
-        this.options.onNotice?.(notice);
+        this.options.onNotice?.(packet.notice);
         break;
       }
       case 'OK': {
-        const [, eventId, accepted, reason] = message as ['OK', string, boolean, string?];
-        this.options.onOk?.(eventId, accepted, reason);
+        this.options.onOk?.(packet.eventId, packet.ok, packet.notice);
         break;
       }
       default:
-        break; // Ignore unknown message types.
+        // EVENT is delivered through use(); anything else is not ours.
+        break;
     }
   }
 }
