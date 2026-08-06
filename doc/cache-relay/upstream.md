@@ -282,8 +282,8 @@ kind のイベントだけが対象なので、通常 kind の大量トラフィ
   `globalThis.WebSocket` を差し替えるため、上流には差し替え前のオリジナル
   （`TransportAdapter.getOriginalWebSocket()`）を使う。これにより、実リレー URL を
   横取りしつつ同じ URL を上流に指定した場合の**自己接続ループを構造的に防ぐ**。
-  評価は `UpstreamRelayPool.start()`（構築時ではなく）で 1 回だけ行い、
-  `RxNostr` の `websocketCtor` に渡す。
+  評価は構築時ではなく `RxNostr` の生成時（`start()`、またはそれより前に REQ が
+  届いたならそのとき）で、結果を `websocketCtor` に渡す。
 - **接続レイヤーは自前で持たない**。指数バックオフ再接続・再接続後の REQ 再送・
   複数リレーのファンアウトはいずれも rx-nostr が持っており、クライアント側
   （`timeline-embed` の `RelayConnection`）で同じ依存をすでに使っている。

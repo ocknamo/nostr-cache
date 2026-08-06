@@ -114,9 +114,22 @@ describe('UpstreamRelayPool', () => {
     expect(onEose).toHaveBeenCalledTimes(1);
   });
 
-  it('fires EOSE immediately (next tick) when no relay is connected', async () => {
-    const { onEose } = await startPool(['wss://a'], { connect: false });
+  it('fires EOSE immediately (next tick) when nothing can answer', async () => {
+    const { pool, onEose } = await startPool(['wss://a'], { connect: false });
     expect(onEose).toHaveBeenCalledTimes(1);
+
+    // Reusing the id replaces the subscription and queues a second microtask.
+    // Only the live one fires; the replaced one was closed, not answered.
+    pool.openSubscription('up1', [{ kinds: [1] }]);
+    pool.openSubscription('up1', [{ kinds: [1] }]);
+    await flush();
+    expect(onEose).toHaveBeenCalledTimes(2);
+
+    // rx-nostr drops an empty filter list, so no REQ goes out and no relay
+    // would ever answer — that must not hang on the coordinator's timeout.
+    pool.openSubscription('up2', []);
+    await flush();
+    expect(onEose).toHaveBeenCalledWith('up2');
   });
 
   it('only counts relays connected at subscription time (late relay does not stall)', async () => {
@@ -154,15 +167,19 @@ describe('UpstreamRelayPool', () => {
     expect(onEose).toHaveBeenCalledTimes(1);
   });
 
-  it('forwards every relay copy of an event, unverified, with its relay url', async () => {
-    // Both properties are load-bearing. The coordinator re-arms the freshness
+  it('forwards every relay copy of an event, unverified and unexpired, with its relay url', async () => {
+    // Three properties, all load-bearing. The coordinator re-arms the freshness
     // window from an upstream returning an already-delivered id, so collapsing
-    // the copies would take that signal away (upstream.md §5); and verifying
-    // here would double what MessageHandler.ingestUpstreamEvent does — even
-    // under `validateEventsType: 'NONE'`.
+    // the copies would take that signal away (upstream.md §5). Verifying here
+    // would double what MessageHandler.ingestUpstreamEvent does — even under
+    // `validateEventsType: 'NONE'`. And dropping expired events (NIP-40) would
+    // apply on the upstream path only, which the relay itself does not do.
     const { socket, onEvent } = await startPool(['wss://a', 'wss://b']);
 
-    const event = makeEvent('shared', { sig: 'not-a-signature' });
+    const event = makeEvent('shared', {
+      sig: 'not-a-signature',
+      tags: [['expiration', '1']],
+    });
     socket('wss://a').mockMessage(['EVENT', 'up1:0', event]);
     socket('wss://b').mockMessage(['EVENT', 'up1:0', event]);
     await flush();
@@ -254,7 +271,20 @@ describe('UpstreamRelayPool', () => {
       }
     }
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Still nothing just short of the cooldown: the socket below is the pool's
+    // re-arm, not another rung of rx-nostr's ladder.
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(fake.sockets.length).toBe(exhausted);
+
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(fake.sockets.length).toBe(exhausted + 1);
+
+    // stop() must take the pending re-arm with it.
+    fake.last().close();
+    await vi.advanceTimersByTimeAsync(40_000);
+    const beforeStop = fake.sockets.length;
+    await pool.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fake.sockets.length).toBe(beforeStop);
   });
 });

@@ -121,24 +121,30 @@ export class UpstreamRelayPool implements UpstreamPool {
     // Reusing an id replaces the subscription rather than shadowing it.
     this.closeSubscription(upstreamSubId);
 
-    // Snapshot the relays connected right now; only those owe an EOSE.
-    const connectedUrls = new Set(this.connectedUrls());
+    // Snapshot the relays connected right now; only those owe an EOSE. An empty
+    // filter list is dropped by rx-nostr, so no REQ goes out and nobody would
+    // ever answer — nothing owes an EOSE in that case either.
+    const connectedUrls = new Set(filters.length > 0 ? this.connectedUrls() : []);
     this.pendingEose.set(upstreamSubId, connectedUrls);
 
-    const req = createRxForwardReq(upstreamSubId);
-    // Subscribe before emitting: the request stream is hot, so a filter emitted
-    // first would be dropped and no REQ would ever be sent.
-    const events = rxNostr.use(req).subscribe(({ event, from }) => {
-      this.eventCallback?.(upstreamSubId, event as NostrEvent, from);
-    });
-    this.subscriptions.set(upstreamSubId, events);
-    req.emit(filters as LazyFilter[]);
+    if (filters.length > 0) {
+      const req = createRxForwardReq(upstreamSubId);
+      // Subscribe before emitting: the request stream is hot, so a filter
+      // emitted first would be dropped and no REQ would ever be sent.
+      const events = rxNostr.use(req).subscribe(({ event, from }) => {
+        this.eventCallback?.(upstreamSubId, event as NostrEvent, from);
+      });
+      this.subscriptions.set(upstreamSubId, events);
+      req.emit(filters as LazyFilter[]);
+    }
 
-    // No relay connected → nothing will ever answer; fire EOSE on the next tick.
+    // Nobody will ever answer → fire EOSE on the next tick. The guard compares
+    // the Set by identity, not by size: reusing the id in the same tick leaves
+    // two microtasks queued, and a size check would let the first one fire the
+    // second subscription's EOSE and leave the second with none.
     if (connectedUrls.size === 0) {
       queueMicrotask(() => {
-        // Guard against a CLOSE that arrived before the microtask ran.
-        if (this.pendingEose.get(upstreamSubId)?.size === 0) {
+        if (this.pendingEose.get(upstreamSubId) === connectedUrls) {
           this.fireEose(upstreamSubId);
         }
       });
@@ -174,7 +180,12 @@ export class UpstreamRelayPool implements UpstreamPool {
    * an upstream subscription, instead of silently going without one.
    */
   private connect(): RxNostr | undefined {
-    if (this.rxNostr || this.stopped) {
+    // `stopped` first: a stop() that threw part-way through may have left the
+    // client behind, and nothing may reconnect through it after that.
+    if (this.stopped) {
+      return undefined;
+    }
+    if (this.rxNostr) {
       return this.rxNostr;
     }
     const rxNostr = createRxNostr({
@@ -262,7 +273,13 @@ export class UpstreamRelayPool implements UpstreamPool {
         from,
         setTimeout(() => {
           this.recoveryTimers.delete(from);
-          this.rxNostr?.reconnect(from);
+          try {
+            this.rxNostr?.reconnect(from);
+          } catch (error) {
+            // reconnect() throws for a relay it does not know; an uncaught
+            // throw in a timer would take a relay process down with it.
+            logger.debug(`Upstream ${from}: reconnect failed:`, error);
+          }
         }, delay)
       );
     }
