@@ -204,7 +204,8 @@ interface NostrRelayOptions {
   port?: number;                    // WebSocket ポート (Node.js)
   upstreamRelays?: string[];        // 上流実リレー URL。指定時のみリード/ライトスルー有効（未指定で独立リレー）
   upstreamEoseTimeout?: number;     // 上流 EOSE を待ってクライアントへ EOSE を返す上限 ms (default: 3000)
-  upstreamConnectionTimeout?: number; // 上流への接続タイムアウト ms (default: 5000)
+  upstreamConnectionTimeout?: number; // ※非推奨・無視される。上流の接続管理を持つ rx-nostr に
+                                    // 接続タイムアウトの設定が無いため
   upstreamFreshness?: Record<number, number>; // 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが窓の内側なら
                                     // そのフィルタを上流へ転送せず即 EOSE を返す（HTTP の max-age 相当）。
                                     // replaceable な kind（0 / 3 / 10000-19999）のみ指定可、他は生成時に例外。
@@ -218,7 +219,7 @@ interface NostrRelayOptions {
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /
-`UpstreamConnection` / `UpstreamCoordinator` と型 `UpstreamPool` / `UpstreamPoolOptions` が
+`UpstreamCoordinator` と型 `UpstreamPool` / `UpstreamPoolOptions` が
 `@nostr-cache/cache-relay`（および `/browser`）から公開されています。設計は
 [doc/cache-relay/upstream.md](./cache-relay/upstream.md) を参照してください。
 
@@ -402,8 +403,7 @@ await server.start();
 await server.stop();
 ```
 
-`relay.upstreamRelays`（+ `upstreamEoseTimeout` / `upstreamConnectionTimeout` /
-`upstreamFreshness`）を指定すると、このサーバーは上流実リレー群の手前に挟まる透過
+`relay.upstreamRelays`（+ `upstreamEoseTimeout` / `upstreamFreshness`）を指定すると、このサーバーは上流実リレー群の手前に挟まる透過
 キャッシュ（リード/ライトスルー）として動作します。
 
 ```typescript

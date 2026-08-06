@@ -143,10 +143,13 @@ export interface NostrRelayOptions {
   upstreamEoseTimeout?: number;
 
   /**
-   * 上流リレーへの接続タイムアウト (ms)。既定は `DEFAULT_CONNECTION_TIMEOUT`。
+   * @deprecated 無視される。上流の接続管理は rx-nostr が持っており、接続
+   * タイムアウトに相当する設定が無い。開かないソケットは WebSocket 自身の
+   * タイムアウトで close になり、そこから再接続ラダーが動く。
    *
-   * Connect timeout (ms) for each upstream relay. Defaults to
-   * `DEFAULT_CONNECTION_TIMEOUT`.
+   * @deprecated Ignored. rx-nostr owns the upstream connection lifecycle and
+   * has no connect timeout; a socket that never opens is closed by the
+   * WebSocket's own timeout, which starts the reconnect ladder.
    */
   upstreamConnectionTimeout?: number;
 

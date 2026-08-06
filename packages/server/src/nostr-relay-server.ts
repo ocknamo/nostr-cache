@@ -56,7 +56,7 @@ interface NostrRelayServerOptions {
     upstreamRelays?: string[];
     // 上流の EOSE を待ってクライアントへ EOSE を返す上限（ミリ秒）
     upstreamEoseTimeout?: number;
-    // 上流リレーへの接続タイムアウト（ミリ秒）
+    /** @deprecated 無視される。上流の接続管理は rx-nostr 側にあり接続タイムアウトを持たない */
     upstreamConnectionTimeout?: number;
     // 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが N 秒以内に投入された
     // ものなら、その REQ を上流へ転送しない。replaceable な kind のみ指定可

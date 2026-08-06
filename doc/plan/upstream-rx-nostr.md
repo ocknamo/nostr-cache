@@ -1,8 +1,15 @@
 # 上流接続層を rx-nostr へ寄せる計画
 
-> **状況**: 未着手。実装は別 PR。
-> 前提となる rx-nostr の導入（クライアント側 `RelayConnection`）は完了済み。
-> 現状の上流レイヤーの設計は [cache-relay/upstream.md](../cache-relay/upstream.md) を参照。
+> **状況（2026-08 時点）**: 実装済み。移行手順（第6節）のチェックボックスは実装
+> 状況に合わせて更新してある。第5節で「着手前に決める」としていた 2 点の結論は
+> 各項に追記した。移行後の設計は
+> [cache-relay/upstream.md](../cache-relay/upstream.md) 第2.1節が正となる。
+>
+> **実測**: `upstream-connection.ts`（249 行）を削除し、`upstream-relay-pool.ts` は
+> 169 → 323 行。コメント・空行を除いた実コード行は上流レイヤー本体で 312 → 190 行
+> （−39%）、テストで 331 → 243 行（−27%）。第2節の見込みほどは減っていない。
+> 差の主因は EOSE 集約が残ること（第4.3節）と、第5.1節の再接続方針を
+> 「rx-nostr 既定 + 再武装」で実装したぶんの上乗せ。
 
 ## 1. 目的
 
@@ -29,15 +36,20 @@
 
 ## 2. 削減見込み
 
-| ファイル | 現状 | 見込み |
-|---|---|---|
-| `upstream-connection.ts` | 249 行 | **削除** |
-| `upstream-connection.spec.ts` | 210 行 | **削除** |
-| `upstream-relay-pool.ts` | 169 行 | 100 行前後（第 4.3 節の EOSE 集約が残るため） |
-| `upstream-relay-pool.spec.ts` | 191 行 | 同程度（フェイクの作り方だけ変わる） |
+| ファイル | 現状 | 見込み | 実績 |
+|---|---|---|---|
+| `upstream-connection.ts` | 249 行 | **削除** | **削除** |
+| `upstream-connection.spec.ts` | 210 行 | **削除** | **削除** |
+| `upstream-relay-pool.ts` | 169 行 | 100 行前後（第 4.3 節の EOSE 集約が残るため） | 323 行 |
+| `upstream-relay-pool.spec.ts` | 191 行 | 同程度（フェイクの作り方だけ変わる） | 331 行 |
 
 本体で約 300 行、テストで約 200 行の削減。`upstream-coordinator.ts`（319 行）と
 `freshness.ts`（271 行）は**変更しない**。
+
+実績は見込みほど減らなかった（コメント・空行を除いた実コード行で本体 312 → 190 行、
+テスト 331 → 243 行）。EOSE 集約が丸ごと残ること（第 4.3 節）に加え、第 5.1 節の
+再接続方針と、rx-nostr へ渡す設定ひとつひとつが「なぜその値なのか」を説明する
+コメントを要求したため。
 
 ## 3. 方針: `UpstreamPool` インターフェースは変えない
 
@@ -157,6 +169,15 @@ rx-nostr の既定は 5 回で打ち切り、以後は `error` 状態で止ま�
 違う（ページは再読み込みできるが、サーバープロセスはできない）ので、
 同じ「既定に任せる」判断をそのまま持ち込まないこと。
 
+**結論**: 後者（復帰口）を採った。`retry` は `exponential`・5 回・`initialDelay`
+は `reconnectBaseDelay`（既定 1 秒）で rx-nostr の既定どおりにし、`error` 状態を
+`createConnectionStateObservable()` で検知して `reconnectMaxDelay`（既定 60 秒）後に
+`rxNostr.reconnect(url)` を呼ぶ。これで**再接続は従来どおり無制限**のまま、
+一時的な断は 30 秒以内のラダーで復帰し、恒久的に落ちている URL への再接続も
+60 秒に 1 回までに収まる。長い `linear` 一本にしなかったのは、最初の再試行まで
+`interval` ぶん待つことになり、ありふれた瞬断の復帰が目に見えて遅くなるため。
+`rejected`（リレーが 4000 で閉じた = 二度と来るなの意思表示）は再武装しない。
+
 ### 5.2 `upstreamConnectionTimeout` が実現できなくなる
 
 rx-nostr に接続タイムアウトの設定は無い（`disconnectTimeout` / `eoseTimeout` /
@@ -165,6 +186,11 @@ rx-nostr に接続タイムアウトの設定は無い（`disconnectTimeout` / `
 
 実害は小さい。現状これは「開かないソケットを強制的に閉じて再接続を早める」ための
 もので、WebSocket 自体のタイムアウトでいずれ `close` は来る。
+
+**結論**: 非推奨として残し、無視する。`NostrRelayOptions` も
+`NostrRelayServerOptions.relay` も公開オプションなので、削除すると利用側の
+コンパイルが落ちる。`UpstreamPoolOptions.connectionTimeout` も同様に
+`@deprecated` を付けて残した（渡しても何も起きない）。
 
 ### 5.3 `relayUrl` が正規化される
 
@@ -185,19 +211,20 @@ rx-nostr は既定で各リレーの NIP-11 ドキュメントを HTTP で取得
 
 ## 6. 移行手順
 
-- [ ] `UpstreamRelayPool` を rx-nostr ベースで書き直す（`UpstreamPool` は変更しない）
-  - [ ] `createRxNostr` の設定（4.2 節）。`skipVerify: true` を忘れないこと
-  - [ ] forward req による購読と `${subId}:0` の相互変換
-  - [ ] EOSE 集約を `getAllRelayStatus()` / `createConnectionStateObservable()` /
+- [x] `UpstreamRelayPool` を rx-nostr ベースで書き直す（`UpstreamPool` は変更しない）
+  - [x] `createRxNostr` の設定（4.2 節）。`skipVerify: true` を忘れないこと
+  - [x] forward req による購読と `${subId}:0` の相互変換
+  - [x] EOSE 集約を `getAllRelayStatus()` / `createConnectionStateObservable()` /
         `createAllMessageObservable()` の上で組み直す（4.3 節）
-  - [ ] `publish` の passthrough signer
-- [ ] 5.1 の再接続方針を決めて `retry` を設定する
-- [ ] `upstream-connection.ts` と `upstream-connection.spec.ts` を削除
-- [ ] `UpstreamPoolOptions` の整理（`reconnectBaseDelay` / `reconnectMaxDelay` /
-      `connectionTimeout` の扱いを決める。互換のため残すなら無視する旨をコメントに書く）
-- [ ] `NostrRelayOptions.upstreamConnectionTimeout` の扱いを決める（5.2 節）
-- [ ] `packages/cache-relay/package.json` に `rx-nostr` を追加
-- [ ] [cache-relay/upstream.md](../cache-relay/upstream.md) の第 2.1 / 2.2 節と
+  - [x] `publish` の passthrough signer
+- [x] 5.1 の再接続方針を決めて `retry` を設定する（`error` 状態からの再武装を併用）
+- [x] `upstream-connection.ts` と `upstream-connection.spec.ts` を削除
+- [x] `UpstreamPoolOptions` の整理。`reconnectBaseDelay` は rx-nostr の
+      `retry.initialDelay` へ、`reconnectMaxDelay` は再武装の待ち時間へ読み替え、
+      `connectionTimeout` は `@deprecated` で残して無視する
+- [x] `NostrRelayOptions.upstreamConnectionTimeout` の扱いを決める（5.2 節）
+- [x] `packages/cache-relay/package.json` に `rx-nostr` を追加
+- [x] [cache-relay/upstream.md](../cache-relay/upstream.md) の第 2.1 / 2.2 節と
       「既知の制限」の再接続の項を更新
 
 ## 7. テスト方針
