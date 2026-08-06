@@ -100,6 +100,22 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
   - 公開 API の破壊的変更になるため、ハンドラのシグネチャ変更（`(event, subscriptionId)`）で
     進めるかを決めてから着手する
 
+## 優先度: 中（重複実装の解消）
+
+- [ ] **上流接続層を rx-nostr へ寄せる** — 設計は
+      [plan/upstream-rx-nostr.md](./plan/upstream-rx-nostr.md)
+  - クライアント側（`timeline-embed` の `RelayConnection`）を rx-nostr に寄せた結果、
+    同じ依存がすでにツリーに入っている。`upstream/` の接続レイヤーは指数バックオフ
+    再接続・接続タイムアウト・再接続後の REQ 再送・複数リレーのファンアウトを
+    手書きしており、これらはすべて rx-nostr が持っている
+  - `UpstreamPool` インターフェースは変えずに `UpstreamRelayPool` の中身だけ
+    差し替える。`upstream-connection.ts`（249 行）は削除。本体 300 行・テスト 200 行
+    ほどの削減見込み。`UpstreamCoordinator` / `FreshnessGate` は対象外
+  - **着手前に決めることが 2 つある**: 再接続を無制限から有限（rx-nostr 既定は 5 回）に
+    変える是非と、`upstreamConnectionTimeout` の廃止。詳細は設計書の第 5 節
+  - EOSE 集約は rx-nostr では吸収できない（backward strategy の機能で、上流購読は
+    EOSE 後も開いたままにする必要があるため）。設計書 4.3 節
+
 ## 優先度: 中（server）
 
 - [ ] 時間窓ベースのレート制限（メッセージ / EVENT 投稿の頻度制限）の実装とテスト
