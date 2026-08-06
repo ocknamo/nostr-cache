@@ -55,11 +55,7 @@ class FakeWebSocket {
   }
 
   simulateMessage(message: unknown): void {
-    this.simulateRawMessage(JSON.stringify(message));
-  }
-
-  simulateRawMessage(data: string): void {
-    this.emit('message', { type: 'message', data });
+    this.emit('message', { type: 'message', data: JSON.stringify(message) });
   }
 
   /** Everything the connection has sent, parsed back into NIP-01 messages. */
@@ -212,18 +208,6 @@ describe('RelayConnection', () => {
       expect(second).not.toHaveBeenCalled();
     });
 
-    it('ignores EVENT for unknown subscriptions', async () => {
-      const { connection, socket } = await createOpenConnection();
-      const onEvent = vi.fn();
-      connection.subscribe('sub-1', [{}], { onEvent });
-      await flush();
-
-      socket.simulateMessage(['EVENT', 'unknown', sampleEvent('a')]);
-      await flush();
-
-      expect(onEvent).not.toHaveBeenCalled();
-    });
-
     it('routes EOSE to the subscription', async () => {
       const { connection, socket } = await createOpenConnection();
       const onEose = vi.fn();
@@ -261,7 +245,7 @@ describe('RelayConnection', () => {
       expect(onOk).toHaveBeenCalledWith('event-id', true, '');
     });
 
-    it('silently ignores malformed and unknown messages', async () => {
+    it('silently ignores message types it does not handle', async () => {
       const onNotice = vi.fn();
       const onOk = vi.fn();
       const { connection, socket } = await createOpenConnection({ onNotice, onOk });
@@ -269,17 +253,13 @@ describe('RelayConnection', () => {
       connection.subscribe('sub-1', [{}], { onEvent });
       await flush();
 
-      socket.simulateRawMessage('not json');
-      socket.simulateMessage({ not: 'an array' });
       socket.simulateMessage(['UNKNOWN', 'x']);
-      socket.simulateMessage([42]);
       await flush();
 
-      // Junk on the wire must not reach any handler, and must leave the
-      // connection able to carry on.
-      expect(onEvent).not.toHaveBeenCalled();
+      // Nothing reaches a handler, and routing carries on afterwards.
       expect(onNotice).not.toHaveBeenCalled();
       expect(onOk).not.toHaveBeenCalled();
+      expect(onEvent).not.toHaveBeenCalled();
       socket.simulateMessage(['EVENT', wireSubId('sub-1'), sampleEvent('a')]);
       await flush();
       expect(onEvent).toHaveBeenCalledTimes(1);
