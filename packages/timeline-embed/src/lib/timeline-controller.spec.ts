@@ -106,6 +106,25 @@ describe('TimelineController', () => {
     throw new Error(`Timed out waiting for ${what}`);
   }
 
+  /**
+   * Hand out the sockets the controller opens.
+   *
+   * It builds its own connection, so the only way to reach the socket is to
+   * wrap the constructor it resolves at connect time — which is the emulator's
+   * patched global, already installed by the time the host has been acquired.
+   * Closing one is how a test makes the relay drop a client.
+   */
+  function captureSockets(): WebSocket[] {
+    const patched = globalThis.WebSocket;
+    const sockets: WebSocket[] = [];
+    globalThis.WebSocket = function Capturing(url: string) {
+      const socket = new patched(url);
+      sockets.push(socket);
+      return socket;
+    } as unknown as typeof WebSocket;
+    return sockets;
+  }
+
   afterEach(async () => {
     for (const controller of controllers.splice(0)) {
       await controller.stop();
@@ -303,6 +322,43 @@ describe('TimelineController', () => {
       'every lookup to close itself'
     );
   });
+
+  it('resumes queued profile lookups after the connection comes back', async () => {
+    const dbName = `controller-${crypto.randomUUID()}`;
+    await seedCache(dbName, [
+      makeEvent({ id: 'e1', pubkey: 'alice' }),
+      makeEvent({
+        id: 'p-alice',
+        pubkey: 'alice',
+        kind: 0,
+        content: JSON.stringify({ name: 'alice' }),
+      }),
+    ]);
+    const sockets = captureSockets();
+    const { controller, states } = createController(dbName);
+    await controller.start({ kinds: [1], limit: 10 });
+    await waitFor(() => sockets.length > 0, "the controller's socket");
+
+    // Drop the connection the way a relay going away does.
+    sockets[0].close(1006);
+    await waitFor(() => states.at(-1)?.status !== 'connected', 'the drop to be noticed');
+
+    // Asking now must not be thrown away. The lookup cannot be opened while the
+    // socket is down — it would burn an in-flight slot and run down its
+    // watchdog — so it waits in the queue instead.
+    controller.requestProfile('alice');
+    expect(inFlightProfiles(controller)).toBe(0);
+
+    await waitFor(() => states.at(-1)?.status === 'connected', 'the reconnection', 8000);
+    // Reconnecting is what drains the queue: nothing else would, because the
+    // cards that asked have already been rendered.
+    await waitFor(
+      () => states.at(-1)?.profiles.get('alice') !== undefined,
+      'the queued lookup to run once reconnected',
+      8000
+    );
+    expect(states.at(-1)?.profiles.get('alice')).toEqual({ name: 'alice' });
+  }, 20000);
 
   it('renders a delivered profile and ignores an older copy of it', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;

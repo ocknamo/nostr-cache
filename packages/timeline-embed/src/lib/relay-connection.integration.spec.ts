@@ -117,6 +117,24 @@ describe('RelayConnection against the in-page relay', () => {
     await waitFor(() => events.some((event) => event.id === 'e1'), 'the cached event to arrive');
   }, 15000);
 
+  it('stops retrying when the relay itself shuts down', async () => {
+    const { host, connection, sockets } = await start();
+    connection.subscribe('sub-1', [{ kinds: [1] }], { onEvent: () => {} });
+    await waitFor(() => openSubscriptions(host).length === 1, 'the subscription');
+    const opened = sockets.length;
+
+    // Releasing the host stops the emulator, which also un-patches the global
+    // WebSocket — so a client that retried here would open a *real* socket to
+    // `ws://nostr-cache.invalid` and put the page on the network. The relay
+    // says "gone for good" on the way out precisely to prevent that.
+    hosts.length = 0;
+    await host.release();
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    expect(sockets).toHaveLength(opened);
+    expect(connection.isConnected).toBe(false);
+  }, 15000);
+
   it('stops for good once disconnected', async () => {
     const { host, connection, sockets } = await start();
     connection.subscribe('sub-1', [{ kinds: [1] }], { onEvent: () => {} });

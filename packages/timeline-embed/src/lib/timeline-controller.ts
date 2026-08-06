@@ -93,6 +93,8 @@ export class TimelineController {
   private validationFetchTimer?: ReturnType<typeof setTimeout>;
   private validationPollTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
+  /** Whether the connection ever came up, so a later error means it was lost. */
+  private connectedOnce = false;
   /** Set by suspend(), cleared by the next subscribe(). */
   private suspended = false;
   /** Settles on stop(), so a pending connect() cannot leave start() hanging. */
@@ -113,8 +115,18 @@ export class TimelineController {
           // was holding — but profile lookups are opened one at a time by this
           // class, so the ones parked while the socket was down have to be
           // started from here.
+          this.patch({ error: undefined });
           this.pumpProfileQueue();
+        } else if (status === 'error' && this.connectedOnce) {
+          // Reconnection gave up. Say so, or the widget goes on showing a
+          // timeline that stopped updating some minutes ago with nothing to
+          // suggest anything is wrong. A failed *first* connection is not this
+          // case: start() reports that one with the reason it failed for.
+          this.patch({
+            error: 'リレーとの接続が切れました。ページを再読み込みしてください',
+          });
         }
+        this.connectedOnce ||= status === 'connected';
       },
     });
   }

@@ -229,9 +229,15 @@ describe('RelayConnection', () => {
     });
 
     it('ignores EVENT for unknown subscriptions', async () => {
-      const { socket } = await createOpenConnection();
+      const { connection, socket } = await createOpenConnection();
+      const onEvent = vi.fn();
+      connection.subscribe('sub-1', [{}], { onEvent });
+      await flush();
+
       socket.simulateMessage(['EVENT', 'unknown', sampleEvent('a')]);
-      await expect(flush()).resolves.toBeUndefined();
+      await flush();
+
+      expect(onEvent).not.toHaveBeenCalled();
     });
 
     it('routes EOSE to the subscription', async () => {
@@ -272,12 +278,27 @@ describe('RelayConnection', () => {
     });
 
     it('silently ignores malformed and unknown messages', async () => {
-      const { socket } = await createOpenConnection();
+      const onNotice = vi.fn();
+      const onOk = vi.fn();
+      const { connection, socket } = await createOpenConnection({ onNotice, onOk });
+      const onEvent = vi.fn();
+      connection.subscribe('sub-1', [{}], { onEvent });
+      await flush();
+
       socket.simulateRawMessage('not json');
       socket.simulateMessage({ not: 'an array' });
       socket.simulateMessage(['UNKNOWN', 'x']);
       socket.simulateMessage([42]);
-      await expect(flush()).resolves.toBeUndefined();
+      await flush();
+
+      // Junk on the wire must not reach any handler, and must leave the
+      // connection able to carry on.
+      expect(onEvent).not.toHaveBeenCalled();
+      expect(onNotice).not.toHaveBeenCalled();
+      expect(onOk).not.toHaveBeenCalled();
+      socket.simulateMessage(['EVENT', wireSubId('sub-1'), sampleEvent('a')]);
+      await flush();
+      expect(onEvent).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -363,6 +384,36 @@ describe('RelayConnection', () => {
       await flush();
 
       expect(socket.messages).toEqual([['EVENT', event]]);
+    });
+
+    it("reports the relay's OK for a published event", async () => {
+      const onOk = vi.fn();
+      const { connection, socket } = await createOpenConnection({ onOk });
+      const event = sampleEvent('a');
+
+      connection.publish(event);
+      await flush();
+      socket.simulateMessage(['OK', event.id, true, '']);
+
+      expect(onOk).toHaveBeenCalledWith(event.id, true, '');
+    });
+
+    it('does not hold anything open waiting for an OK that never comes', async () => {
+      vi.useFakeTimers();
+      const connection = createConnection();
+      const promise = connection.connect(RELAY_URL);
+      FakeWebSocket.instances[0].simulateOpen();
+      await promise;
+
+      const idle = vi.getTimerCount();
+      connection.publish(sampleEvent('a'));
+      await flush();
+
+      // The send completes once the EVENT is out, so publishing leaves nothing
+      // of its own ticking. Waiting for the OK instead — rx-nostr's default —
+      // arms its 30s timeout per published event and holds the subscription
+      // open until then.
+      expect(vi.getTimerCount()).toBe(idle);
     });
   });
 
