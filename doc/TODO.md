@@ -116,6 +116,26 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
   - EOSE 集約は rx-nostr では吸収できない（backward strategy の機能で、上流購読は
     EOSE 後も開いたままにする必要があるため）。設計書 4.3 節
 
+- [ ] **`rx-nostr-crypto` を後継の `@rx-nostr/crypto` へ移す**
+  - 現状: 署名検証（`cache-relay/src/event/event-validator.ts` の `verifier`）と署名
+    （`web-client/src/lib/event-signer.ts` / `e2e/src/test-events.ts` /
+    `examples/node-relay-demo.mjs` の `seckeySigner`）が `rx-nostr-crypto@3.1.3` に
+    乗っているが、このパッケージは npm 上で **deprecated**（"Package no longer
+    supported"）になっている。**リレーとしての正しさの土台（署名検証）が非推奨
+    パッケージに乗っている**状態
+  - 後継は `@rx-nostr/crypto`（現行 3.1.6）。`index.d.ts` の export も `verifier` /
+    `seckeySigner` の型シグネチャも**旧版と完全に一致**しているので、作業は
+    import 指定子と package.json の書き換えが主
+  - 依存ツリーは動く: `@noble/curves` `^1` → `^2`、`@noble/hashes` `^1.3` → `^2`、
+    `@scure/base` `^1.1` → `^2`、`nostr-typedef` `^0.9` → `^0.13` とメジャーが
+    上がるため、**バンドルサイズと既存の署名・検証テストの通過を実測で確認すること**
+    （`event-validator.spec.ts` と e2e の署名済みイベントが実質の受け入れ条件）
+  - 対象: `packages/cache-relay` / `packages/web-client` / `packages/server` /
+    `e2e` の package.json と、上記 4 ファイルの import
+  - ついでの検討材料: 後継版は `startVerificationServiceHost` /
+    `createVerificationServiceClient`（検証をワーカーへ逃がす仕組み）を公開している。
+    `LAZY` 検証をメインスレッドから外せる可能性があるが、移行とは別タスク
+
 ## 優先度: 中（server）
 
 - [ ] 時間窓ベースのレート制限（メッセージ / EVENT 投稿の頻度制限）の実装とテスト
