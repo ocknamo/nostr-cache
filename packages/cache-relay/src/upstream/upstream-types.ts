@@ -63,26 +63,31 @@ export interface UpstreamPool {
 }
 
 /**
- * Options for {@link UpstreamRelayPool} (and, individually, each connection).
+ * Options for {@link UpstreamRelayPool}.
  */
 export interface UpstreamPoolOptions {
-  /** Per-connection connect timeout in ms. Default `DEFAULT_CONNECTION_TIMEOUT`. */
-  connectionTimeout?: number;
   /**
    * Maximum number of relays to connect to. URLs beyond this are ignored with a
    * warning. Default `DEFAULT_MAX_CONCURRENT_RELAYS`.
    */
   maxRelays?: number;
-  /** Base delay in ms for exponential reconnect backoff. Default 1000. */
+  /**
+   * First delay in ms of the exponential reconnect ladder that follows a
+   * dropped connection. Default 1000.
+   */
   reconnectBaseDelay?: number;
-  /** Maximum reconnect backoff delay in ms. Default 60000. */
+  /**
+   * How long in ms to wait before trying a relay again once the reconnect
+   * ladder has been exhausted, which is what makes reconnection unlimited
+   * rather than giving up after a handful of attempts. Default 60000.
+   */
   reconnectMaxDelay?: number;
   /**
-   * Lazy factory for the `WebSocket` constructor to use. Evaluated at connect
-   * time (not construction) so that, in the browser, the connector reaches the
-   * pre-patch `WebSocket` even when the emulator later replaces the global —
-   * avoiding a self-connection loop for an intercepted upstream URL. Defaults
-   * to `() => globalThis.WebSocket`.
+   * Lazy factory for the `WebSocket` constructor to use. Evaluated once when
+   * the pool starts (not at construction) so that, in the browser, upstream
+   * connections reach the pre-patch `WebSocket` even when the emulator later
+   * replaces the global — avoiding a self-connection loop for an intercepted
+   * upstream URL. Defaults to `() => globalThis.WebSocket`.
    */
   webSocketFactory?: () => typeof WebSocket;
 }

@@ -41,7 +41,6 @@ import {
   isFreshnessEligible,
   narrowFiltersByFreshness,
 } from './upstream/freshness.js';
-import { UpstreamConnection } from './upstream/upstream-connection.js';
 import { UpstreamCoordinator } from './upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from './upstream/upstream-relay-pool.js';
 import type { UpstreamPool, UpstreamPoolOptions } from './upstream/upstream-types.js';
@@ -74,7 +73,6 @@ export {
   WebSocketServerEmulator,
   // Upstream
   UpstreamRelayPool,
-  UpstreamConnection,
   UpstreamCoordinator,
   type UpstreamPool,
   type UpstreamPoolOptions,

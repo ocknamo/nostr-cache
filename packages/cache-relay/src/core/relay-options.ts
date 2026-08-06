@@ -143,14 +143,6 @@ export interface NostrRelayOptions {
   upstreamEoseTimeout?: number;
 
   /**
-   * 上流リレーへの接続タイムアウト (ms)。既定は `DEFAULT_CONNECTION_TIMEOUT`。
-   *
-   * Connect timeout (ms) for each upstream relay. Defaults to
-   * `DEFAULT_CONNECTION_TIMEOUT`.
-   */
-  upstreamConnectionTimeout?: number;
-
-  /**
    * 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」。
    * `{ 0: 3600 }` なら「1時間以内にキャッシュした kind 0 は上流に問い合わせない」。
    *

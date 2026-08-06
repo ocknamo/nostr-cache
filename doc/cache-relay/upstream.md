@@ -22,38 +22,63 @@
                                             │
                      NostrCacheRelay ─── UpstreamCoordinator（購読対応表 / 重複排除 /
                                             │                  EOSE 集約 / backfill）
-                                            └─ UpstreamRelayPool（複数リレーへのファンアウト）
-                                                  └─ UpstreamConnection × N（1リレー1ソケット、
-                                                        再接続・購読再確立）
+                                            └─ UpstreamRelayPool（EOSE 集約）
+                                                  └─ RxNostr（1 インスタンスで全上流リレーを保持。
+                                                        接続・再接続・購読再確立）
 ```
 
-`upstream/` に 3 つのクラスと型定義を新設する。
+`upstream/` に 2 つのクラスと型定義を置く。
 
-### 2.1 UpstreamConnection（`upstream/upstream-connection.ts`）
+### 2.1 UpstreamRelayPool（`upstream/upstream-relay-pool.ts`）
 
-1 つの上流リレーとの WebSocket 接続を担う。
+上流リレー群への `REQ` / `EVENT` / `CLOSE` のファンアウトを担う。
 
-- 接続タイムアウト、切断/エラー時の**指数バックオフ再接続**を所有する。
-- 再接続に成功したら、その接続で開いていた全購読の `REQ` を自動で再送する
-  （アクティブ購読を内部の Map に保持）。
-- 受信メッセージのうち `EVENT` / `EOSE` のみをコールバックで上げる。
-  `OK` / `NOTICE` / `CLOSED` は debug ログのみ。
-- 標準の `WebSocket` API しか使わないため、Node.js（Node 22 のネイティブ
-  `globalThis.WebSocket`）とブラウザの両方で動作する。**`ws` パッケージには依存しない**。
+**接続の寿命管理は [rx-nostr](https://github.com/penpenpng/rx-nostr) が持つ**。
+`RxNostr` を 1 インスタンス生成し、全上流リレーを既定リレー
+（`setDefaultRelays`、`connectionStrategy: 'aggressive'`）として登録する。
+ソケットの開閉・再接続・再接続後の `REQ` 再送・URL の正規化と重複排除は
+すべてライブラリ側の責務で、このクラスには無い。
 
-### 2.2 UpstreamRelayPool（`upstream/upstream-relay-pool.ts`）
+`createRxNostr` の設定のうち、外せないものは次の 2 つ。
 
-複数の `UpstreamConnection` を束ね、`REQ` / `EVENT` / `CLOSE` を全リレーへ
-ファンアウトする。中心的な役割は **EOSE の集約**である。
+- **`skipVerify: true`**: 上流イベントの検証は `MessageHandler.ingestUpstreamEvent`
+  が `validateEventsType` に従って行う。ここで検証すると二重処理になり、
+  `NONE` を指定しても検証されてしまう
+- **`skipExpirationCheck: true`**: NIP-40 はリレー本体が未対応。既定のままだと
+  上流経路だけ期限切れイベントが落ちるという非対称が生まれる
+
+`skipFetchNip11: true`（上流リレーごとの HTTP リクエストを増やさない）と
+passthrough signer（上流へ流すのは署名済みイベントだけなので、既定の NIP-07
+signer を使わせない）も指定する。**重複排除は行わない**（`uniq()` を挟まない）。
+各リレーのコピーがすべて届くことが、第5節「窓の再武装」の前提だからである。
+
+このクラスに残っているのは **EOSE の集約**で、これは rx-nostr では吸収できない。
+rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を閉じてしまうが、
+上流購読は EOSE 後も開いたままにする必要がある（第3節）ため forward strategy を
+使う。forward strategy では `use()` に EVENT しか流れず、EOSE は
+`createAllMessageObservable()` から拾うことになる。
 
 - `openSubscription` 時点で**接続確立済みだったリレー集合**を記録し、それら全員が
   `EOSE` を返したときに 1 回だけ `onEose` を発火する（0 台なら次の tick で即発火）。
 - 後から接続（再接続含む）したリレーは集約対象に加えない。落ちているリレーによって
   クライアントの EOSE が永遠に遅延する事故を防ぐため。
+- 集約中のリレーが落ちたら（`createConnectionStateObservable()` が `connected` 以外を
+  報告したら）その集合から除く。空になれば発火する。
 - `maxRelays`（既定 `DEFAULT_MAX_CONCURRENT_RELAYS`）を超える URL は警告して無視する。
-  URL は重複排除する。
 
-### 2.3 UpstreamCoordinator（`upstream/upstream-coordinator.ts`）
+購読 id は、coordinator が採番した `upstreamSubId`（`up1` 形式）をそのまま
+`createRxForwardReq()` の id に渡す。ワイヤ上の id は forward strategy では
+`${upstreamSubId}:0` に固定されるため、共有メッセージストリームで届く EOSE から
+元の `upstreamSubId` を一意に引き直せる。
+
+**再接続は無制限に試み続ける**。rx-nostr の自動リトライ（指数バックオフ・
+`reconnectBaseDelay` 起点・5 回）を使い切ったリレーは `error` 状態で止まるので、
+`reconnectMaxDelay`（既定 60 秒）待ってから `rxNostr.reconnect(url)` で再武装する。
+ブラウザのタブと違いリレープロセスは再読み込みできず、一度のネットワーク断で上流を
+恒久的に失うわけにはいかないため。リレーが 4000 で閉じた（`rejected`）場合は
+「二度と来るな」の意思表示なので再武装しない。
+
+### 2.2 UpstreamCoordinator（`upstream/upstream-coordinator.ts`）
 
 リレー内部と上流プールの橋渡し。オーケストレーションの中心。
 
@@ -81,7 +106,8 @@ client ── ["EVENT", ev] ──▶ MessageHandler.handleEventMessage
   ├─ client ◀── ["OK", id, true]（ローカル保存の成否で即応答。上流は待たない）
   ├─ ローカル購読へブロードキャスト（従来どおり）
   └─ coordinator.publish(ev) → pool: 接続済み全上流へ ["EVENT", ev]
-       （fire-and-forget。上流の OK は debug ログのみ。切断中リレーへはドロップ）
+       （fire-and-forget。送信できた時点で完了とし上流の OK は待たない。
+         切断中リレーへは実質ドロップ = 再接続時に再送されない）
 ```
 
 ### REQ（リードスルー）
@@ -136,7 +162,6 @@ relay.disconnect() ──▶ coordinator.stop()（全 EOSE タイマー解除 + 
 |---|---|---|
 | `upstreamRelays?: string[]` | なし | 上流リレー URL。指定時のみリード/ライトスルーが有効 |
 | `upstreamEoseTimeout?: number` | `DEFAULT_SUBSCRIPTION_TIMEOUT`（3000ms） | クライアント EOSE を上流 EOSE まで待つ上限 |
-| `upstreamConnectionTimeout?: number` | `DEFAULT_CONNECTION_TIMEOUT`（5000ms） | 上流への接続タイムアウト |
 | `upstreamFreshness?: Record<number, number>` | なし | 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」（第5節参照）。replaceable な kind のみ指定可 |
 | `upstreamPool?: UpstreamPool` | なし | テスト・高度用途。プール実装を差し替える（`upstreamRelays` より優先） |
 
@@ -257,7 +282,14 @@ kind のイベントだけが対象なので、通常 kind の大量トラフィ
   `globalThis.WebSocket` を差し替えるため、上流には差し替え前のオリジナル
   （`TransportAdapter.getOriginalWebSocket()`）を使う。これにより、実リレー URL を
   横取りしつつ同じ URL を上流に指定した場合の**自己接続ループを構造的に防ぐ**。
-  評価は接続時（構築時ではなく）なので、`connect()` 前後どちらでも安全。
+  評価は構築時ではなく `RxNostr` の生成時（`start()`、またはそれより前に REQ が
+  届いたならそのとき）で、結果を `websocketCtor` に渡す。
+- **接続レイヤーは自前で持たない**。指数バックオフ再接続・再接続後の REQ 再送・
+  複数リレーのファンアウトはいずれも rx-nostr が持っており、クライアント側
+  （`timeline-embed` の `RelayConnection`）で同じ依存をすでに使っている。
+  一方で**キャッシュとしての判断（リードスルー / 重複排除 / backfill / 鮮度
+  ウィンドウ）はライブラリで置き換わるものではない**ので、`UpstreamCoordinator` と
+  `freshness.ts` はそのまま自前で持つ。
 
 ## 7. 既知の制限（将来課題）
 
@@ -269,9 +301,17 @@ kind のイベントだけが対象なので、通常 kind の大量トラフィ
   大量のイベントが流れる購読では、ごく稀に既送イベントの再配信が起こりうる。
 - **再接続時の再送で TTL が延びる**: 再接続で同じイベントが再送されると、`DexieStorage`
   の `put` 冪等性で重複保存は防げるが、`cached_at` がリセットされ TTL が延びる。
-- **再接続は無制限リトライ**: 切断された上流へは指数バックオフ（上限 60 秒）で
-  `close()` されるまで再接続を試み続ける。到達不能な URL を誤設定すると再接続ログが
-  出続ける。リトライ回数上限やサーキットブレーカは未実装。
+- **再接続は無制限リトライ**: 切断された上流へは、rx-nostr の自動リトライ（指数
+  バックオフ・5 回）と `reconnectMaxDelay`（既定 60 秒）ごとの再武装で、`stop()`
+  されるまで再接続を試み続ける（第2.1節）。到達不能な URL を誤設定すると再接続が
+  60 秒おきに走り続ける。サーキットブレーカは未実装。
+- **接続タイムアウトが無い**: rx-nostr に接続タイムアウトの設定が無いため、
+  かつての `upstreamConnectionTimeout` オプションは削除した。開かないソケットは
+  WebSocket 自身のタイムアウトで `close` になり、そこから再接続ラダーが動く。
+- **`relayUrl` は正規化後の文字列**: rx-nostr が URL を正規化して保持する
+  （末尾スラッシュ・hash の除去、クエリのソート）ため、`onEvent` の第3引数は
+  設定値そのままとは限らない（`wss://nos.lol/` → `wss://nos.lol`）。
+  `CacheMetrics.recordUpstreamEvent` 経由でデモの計測表示に出る値もこれになる。
 - **上流 AUTH（NIP-42）などは未対応**: 認証が必要な上流リレーには接続できない。
 - **鮮度ウィンドウは replaceable の置換バグを増幅する（要修正）**: `EventHandler` の
   `handleReplaceableEvent` / `handleAddressableEvent` は `created_at` を比較せず、

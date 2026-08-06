@@ -102,20 +102,6 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
 
 ## 優先度: 中（重複実装の解消）
 
-- [ ] **上流接続層を rx-nostr へ寄せる** — 設計は
-      [plan/upstream-rx-nostr.md](./plan/upstream-rx-nostr.md)
-  - クライアント側（`timeline-embed` の `RelayConnection`）を rx-nostr に寄せた結果、
-    同じ依存がすでにツリーに入っている。`upstream/` の接続レイヤーは指数バックオフ
-    再接続・接続タイムアウト・再接続後の REQ 再送・複数リレーのファンアウトを
-    手書きしており、これらはすべて rx-nostr が持っている
-  - `UpstreamPool` インターフェースは変えずに `UpstreamRelayPool` の中身だけ
-    差し替える。`upstream-connection.ts`（249 行）は削除。本体 300 行・テスト 200 行
-    ほどの削減見込み。`UpstreamCoordinator` / `FreshnessGate` は対象外
-  - **着手前に決めることが 2 つある**: 再接続を無制限から有限（rx-nostr 既定は 5 回）に
-    変える是非と、`upstreamConnectionTimeout` の廃止。詳細は設計書の第 5 節
-  - EOSE 集約は rx-nostr では吸収できない（backward strategy の機能で、上流購読は
-    EOSE 後も開いたままにする必要があるため）。設計書 4.3 節
-
 - [ ] **`rx-nostr-crypto` を後継の `@rx-nostr/crypto` へ移す**
   - 現状: 署名検証（`cache-relay/src/event/event-validator.ts` の `verifier`）と署名
     （`web-client/src/lib/event-signer.ts` / `e2e/src/test-events.ts` /
@@ -188,6 +174,9 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
 - GitHub Pages の公開デモサイト（`packages/demo-site`）と埋め込みウィジェット
   （`packages/timeline-embed`。iframe / Web Component の 2 形態）
 - cache-relay を無改変での上流トラフィック計測（`InstrumentedUpstreamPool`）
+- 上流接続層を rx-nostr へ寄せて重複実装を解消（`upstream-connection.ts` を削除。
+  接続・再接続・購読再確立はライブラリ側へ。EOSE 集約だけが自前で残る）。
+  移行後の設計は [cache-relay/upstream.md](./cache-relay/upstream.md) 第2.1節
 - https ページからの `ws://` インターセプトの検証（自動テスト化）
 
 **cache-relay コア**

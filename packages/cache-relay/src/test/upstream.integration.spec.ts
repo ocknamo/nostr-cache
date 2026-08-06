@@ -83,7 +83,7 @@ describe('Upstream read/write-through integration', () => {
 
     cacheStorage = new DexieStorage('CacheRelayUpstreamIntegrationDb');
     cacheServer = new WebSocketServer(0);
-    pool = new UpstreamRelayPool([upstream.getServerUrl()], { connectionTimeout: 2000 });
+    pool = new UpstreamRelayPool([upstream.getServerUrl()]);
     cacheRelay = new NostrCacheRelay(cacheStorage, cacheServer, {
       upstreamPool: pool,
       upstreamEoseTimeout: 500,
@@ -281,7 +281,7 @@ describe('Freshness window integration', () => {
 
     cacheStorage = new DexieStorage('CacheRelayFreshnessIntegrationDb');
     cacheServer = new WebSocketServer(0);
-    pool = new UpstreamRelayPool([upstream.getServerUrl()], { connectionTimeout: 2000 });
+    pool = new UpstreamRelayPool([upstream.getServerUrl()]);
   });
 
   afterEach(async () => {

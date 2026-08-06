@@ -56,8 +56,6 @@ interface NostrRelayServerOptions {
     upstreamRelays?: string[];
     // 上流の EOSE を待ってクライアントへ EOSE を返す上限（ミリ秒）
     upstreamEoseTimeout?: number;
-    // 上流リレーへの接続タイムアウト（ミリ秒）
-    upstreamConnectionTimeout?: number;
     // 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが N 秒以内に投入された
     // ものなら、その REQ を上流へ転送しない。replaceable な kind のみ指定可
     upstreamFreshness?: Record<number, number>;
@@ -121,7 +119,6 @@ export class NostrRelayServer {
       // 上流リレー（リード/ライトスルー）。未指定なら独立リレーのまま
       upstreamRelays: this.options.relay?.upstreamRelays,
       upstreamEoseTimeout: this.options.relay?.upstreamEoseTimeout,
-      upstreamConnectionTimeout: this.options.relay?.upstreamConnectionTimeout,
       upstreamFreshness: this.options.relay?.upstreamFreshness,
     });
 

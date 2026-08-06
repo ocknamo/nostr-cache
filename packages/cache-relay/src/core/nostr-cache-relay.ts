@@ -183,8 +183,7 @@ export class NostrCacheRelay {
     const pool =
       this.options.upstreamPool ??
       new UpstreamRelayPool(this.options.upstreamRelays as string[], {
-        connectionTimeout: this.options.upstreamConnectionTimeout,
-        // WebSocket コンストラクタは接続時に評価する（遅延ファクトリ）。ブラウザで
+        // WebSocket コンストラクタは接続開始時に評価する（遅延ファクトリ）。ブラウザで
         // エミュレータがグローバル WebSocket を差し替えても、上流には差し替え前の
         // オリジナルを使うことで自己接続ループを防ぐ。
         webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
