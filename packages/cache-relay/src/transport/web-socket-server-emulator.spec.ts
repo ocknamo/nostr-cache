@@ -243,6 +243,22 @@ describe('WebSocketServerEmulator', () => {
       expect(disconnectedClientId).toBe(connectedClientId);
     });
 
+    it('should tell clients not to reconnect when stopped', async () => {
+      await emulator.start();
+      const ws = await openSocket(defaultUrl);
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        ws.onclose = (event) => resolve(event as CloseEvent);
+      });
+      await emulator.stop();
+
+      // stop() also un-patches the global WebSocket, so the URL this client was
+      // talking to stops being intercepted. A client that reconnected out of
+      // habit would open a *real* socket to `ws://nostr-cache.invalid` and put
+      // the page on the network. 4000 is NIP-01's "do not reconnect".
+      expect((await closed).code).toBe(4000);
+    });
+
     it('should cancel sockets that are still connecting when stopped', async () => {
       const connected: string[] = [];
       emulator.onConnect((clientId) => connected.push(clientId));

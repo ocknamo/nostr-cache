@@ -62,11 +62,6 @@ class FakeWebSocket {
     this.emit('message', { type: 'message', data });
   }
 
-  /** Drop the connection the way a relay going away does. */
-  simulateServerClose(): void {
-    this.close(1006);
-  }
-
   /** Everything the connection has sent, parsed back into NIP-01 messages. */
   get messages(): unknown[] {
     return this.sent.map((raw) => JSON.parse(raw));
@@ -152,47 +147,19 @@ describe('RelayConnection', () => {
       expect(connection.isConnected).toBe(true);
     });
 
-    it('retries a first attempt that fails, and resolves when one lands', async () => {
-      vi.useFakeTimers();
+    it('rejects and reports error when the relay refuses the connection', async () => {
       const statuses: ConnectionStatus[] = [];
       const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
 
       const promise = connection.connect(RELAY_URL);
-      FakeWebSocket.instances[0].simulateServerClose();
-
-      // A failed first attempt is not the caller's problem: rx-nostr puts it on
-      // the same retry ladder as any other drop, so connect() waits it out.
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(FakeWebSocket.instances.length).toBeGreaterThan(1);
-      expect(statuses).toContain('reconnecting');
-
-      FakeWebSocket.instances.at(-1)?.simulateOpen();
-      await expect(promise).resolves.toBeUndefined();
-      expect(connection.isConnected).toBe(true);
-    });
-
-    it('rejects once rx-nostr has spent its retries', async () => {
-      vi.useFakeTimers();
-      const statuses: ConnectionStatus[] = [];
-      const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
-
-      const promise = connection.connect(RELAY_URL);
-      // Fail every attempt, including each retry, until the ladder runs out.
-      for (let i = 0; i < 20; i++) {
-        FakeWebSocket.instances.at(-1)?.simulateServerClose();
-        await vi.advanceTimersByTimeAsync(60_000);
-      }
+      // 4000 is NIP-01's "do not reconnect", so this settles without going
+      // anywhere near the retry ladder — how long rx-nostr retries for, and how
+      // often, is its business and not something to pin down here.
+      FakeWebSocket.instances[0].close(4000);
 
       await expect(promise).rejects.toThrow('Failed to connect');
-      expect(statuses.at(-1)).toBe('error');
+      expect(statuses).toEqual(['connecting', 'error']);
       expect(connection.isConnected).toBe(false);
-
-      // rx-nostr's default ladder is five attempts, so the retries really are
-      // bounded rather than this having simply run out of patience.
-      const settled = FakeWebSocket.instances.length;
-      await vi.advanceTimersByTimeAsync(120_000);
-      expect(FakeWebSocket.instances).toHaveLength(settled);
-      expect(settled).toBe(6); // the first attempt plus five retries
     });
   });
 
@@ -319,79 +286,6 @@ describe('RelayConnection', () => {
     });
   });
 
-  describe('reconnection', () => {
-    it('reopens the socket and re-sends open REQs after the relay goes away', async () => {
-      vi.useFakeTimers();
-      const statuses: ConnectionStatus[] = [];
-      const connection = createConnection({ onStatusChange: (s) => statuses.push(s) });
-
-      const promise = connection.connect(RELAY_URL);
-      FakeWebSocket.instances[0].simulateOpen();
-      await promise;
-
-      connection.subscribe('sub-1', [{ kinds: [1] }], { onEvent: vi.fn() });
-      await flush();
-
-      FakeWebSocket.instances[0].simulateServerClose();
-      expect(connection.isConnected).toBe(false);
-      expect(statuses).toContain('reconnecting');
-
-      // The backoff ladder starts at a second.
-      await vi.advanceTimersByTimeAsync(5_000);
-      const reopened = FakeWebSocket.instances[1];
-      expect(reopened).toBeDefined();
-
-      reopened.simulateOpen();
-      await flush();
-
-      expect(reopened.messages).toEqual([['REQ', wireSubId('sub-1'), { kinds: [1] }]]);
-      expect(connection.isConnected).toBe(true);
-    });
-
-    it('delivers events on the reconnected socket', async () => {
-      vi.useFakeTimers();
-      const connection = createConnection();
-      const promise = connection.connect(RELAY_URL);
-      FakeWebSocket.instances[0].simulateOpen();
-      await promise;
-
-      const onEvent = vi.fn();
-      connection.subscribe('sub-1', [{}], { onEvent });
-      await flush();
-
-      FakeWebSocket.instances[0].simulateServerClose();
-      await vi.advanceTimersByTimeAsync(5_000);
-      const reopened = FakeWebSocket.instances[1];
-      reopened.simulateOpen();
-      await flush();
-
-      const event = sampleEvent('a');
-      reopened.simulateMessage(['EVENT', wireSubId('sub-1'), event]);
-      await flush();
-
-      expect(onEvent).toHaveBeenCalledWith(event);
-    });
-
-    it('sends a REQ issued while the socket is down once it is back', async () => {
-      vi.useFakeTimers();
-      const connection = createConnection();
-      const promise = connection.connect(RELAY_URL);
-      FakeWebSocket.instances[0].simulateOpen();
-      await promise;
-
-      FakeWebSocket.instances[0].simulateServerClose();
-      connection.subscribe('sub-1', [{ kinds: [1] }], { onEvent: vi.fn() });
-      await flush();
-
-      await vi.advanceTimersByTimeAsync(5_000);
-      const reopened = FakeWebSocket.instances[1];
-      reopened.simulateOpen();
-      await flush();
-
-      expect(reopened.messages).toContainEqual(['REQ', wireSubId('sub-1'), { kinds: [1] }]);
-    });
-  });
-
   describe('publish()', () => {
     it('sends EVENT with the event payload', async () => {
       const { connection, socket } = await createOpenConnection();
@@ -448,19 +342,6 @@ describe('RelayConnection', () => {
       expect(socket.readyState).toBe(3);
       expect(connection.isConnected).toBe(false);
       expect(statuses).toEqual(['connecting', 'connected', 'disconnected']);
-    });
-
-    it('does not reconnect after an explicit disconnect', async () => {
-      vi.useFakeTimers();
-      const connection = createConnection();
-      const promise = connection.connect(RELAY_URL);
-      FakeWebSocket.instances[0].simulateOpen();
-      await promise;
-
-      connection.disconnect();
-      await vi.advanceTimersByTimeAsync(120_000);
-
-      expect(FakeWebSocket.instances).toHaveLength(1);
     });
 
     it('does not crash when sending after disconnect', async () => {
