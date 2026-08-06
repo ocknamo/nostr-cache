@@ -122,7 +122,6 @@ new WebSocketServerEmulator(['wss://relay.example.com', 'wss://nos.lol']);
 | `ttl` | キャッシュ投入からの生存秒数（バックグラウンドスイープで削除） | 無効 |
 | `upstreamRelays` | 上流実リレーの URL 群。指定するとリード/ライトスルーが有効 | 無効（独立リレー） |
 | `upstreamEoseTimeout` | 上流 EOSE を待ってクライアントへ EOSE を返す上限（ms） | 3000 |
-| ~~`upstreamConnectionTimeout`~~ | **非推奨・無視される**（上流の接続管理を持つ rx-nostr が接続タイムアウトを持たない） | — |
 | `upstreamFreshness` | 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが窓の内側なら上流に問い合わせない | 無効 |
 
 ## 上流リレーへのリードスルー / ライトスルー（透過キャッシュ）

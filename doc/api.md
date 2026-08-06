@@ -204,8 +204,6 @@ interface NostrRelayOptions {
   port?: number;                    // WebSocket ポート (Node.js)
   upstreamRelays?: string[];        // 上流実リレー URL。指定時のみリード/ライトスルー有効（未指定で独立リレー）
   upstreamEoseTimeout?: number;     // 上流 EOSE を待ってクライアントへ EOSE を返す上限 ms (default: 3000)
-  upstreamConnectionTimeout?: number; // ※非推奨・無視される。上流の接続管理を持つ rx-nostr に
-                                    // 接続タイムアウトの設定が無いため
   upstreamFreshness?: Record<number, number>; // 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが窓の内側なら
                                     // そのフィルタを上流へ転送せず即 EOSE を返す（HTTP の max-age 相当）。
                                     // replaceable な kind（0 / 3 / 10000-19999）のみ指定可、他は生成時に例外。

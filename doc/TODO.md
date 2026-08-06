@@ -176,7 +176,7 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
 - cache-relay を無改変での上流トラフィック計測（`InstrumentedUpstreamPool`）
 - 上流接続層を rx-nostr へ寄せて重複実装を解消（`upstream-connection.ts` を削除。
   接続・再接続・購読再確立はライブラリ側へ。EOSE 集約だけが自前で残る）。
-  設計と決定事項は [plan/upstream-rx-nostr.md](./plan/upstream-rx-nostr.md)
+  移行後の設計は [cache-relay/upstream.md](./cache-relay/upstream.md) 第2.1節
 - https ページからの `ws://` インターセプトの検証（自動テスト化）
 
 **cache-relay コア**

@@ -162,7 +162,6 @@ relay.disconnect() ──▶ coordinator.stop()（全 EOSE タイマー解除 + 
 |---|---|---|
 | `upstreamRelays?: string[]` | なし | 上流リレー URL。指定時のみリード/ライトスルーが有効 |
 | `upstreamEoseTimeout?: number` | `DEFAULT_SUBSCRIPTION_TIMEOUT`（3000ms） | クライアント EOSE を上流 EOSE まで待つ上限 |
-| ~~`upstreamConnectionTimeout?: number`~~ | — | **非推奨・無視される**。接続管理を持つ rx-nostr に接続タイムアウトの設定が無い（第7節） |
 | `upstreamFreshness?: Record<number, number>` | なし | 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」（第5節参照）。replaceable な kind のみ指定可 |
 | `upstreamPool?: UpstreamPool` | なし | テスト・高度用途。プール実装を差し替える（`upstreamRelays` より優先） |
 
@@ -307,7 +306,7 @@ kind のイベントだけが対象なので、通常 kind の大量トラフィ
   されるまで再接続を試み続ける（第2.1節）。到達不能な URL を誤設定すると再接続が
   60 秒おきに走り続ける。サーキットブレーカは未実装。
 - **接続タイムアウトが無い**: rx-nostr に接続タイムアウトの設定が無いため、
-  `upstreamConnectionTimeout` は**非推奨で無視される**。開かないソケットは
+  かつての `upstreamConnectionTimeout` オプションは削除した。開かないソケットは
   WebSocket 自身のタイムアウトで `close` になり、そこから再接続ラダーが動く。
 - **`relayUrl` は正規化後の文字列**: rx-nostr が URL を正規化して保持する
   （末尾スラッシュ・hash の除去、クエリのソート）ため、`onEvent` の第3引数は

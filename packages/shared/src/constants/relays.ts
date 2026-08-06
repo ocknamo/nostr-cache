@@ -14,11 +14,6 @@ export const DEFAULT_RELAY_URLS = [
 ];
 
 /**
- * Default connection timeout in milliseconds
- */
-export const DEFAULT_CONNECTION_TIMEOUT = 5000;
-
-/**
  * Default subscription timeout in milliseconds
  */
 export const DEFAULT_SUBSCRIPTION_TIMEOUT = 3000;

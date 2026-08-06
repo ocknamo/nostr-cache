@@ -67,12 +67,6 @@ export interface UpstreamPool {
  */
 export interface UpstreamPoolOptions {
   /**
-   * @deprecated Ignored. rx-nostr, which now owns the connection lifecycle, has
-   * no connect timeout — the socket's own timeout eventually reports a close,
-   * and the reconnect ladder takes it from there.
-   */
-  connectionTimeout?: number;
-  /**
    * Maximum number of relays to connect to. URLs beyond this are ignored with a
    * warning. Default `DEFAULT_MAX_CONCURRENT_RELAYS`.
    */

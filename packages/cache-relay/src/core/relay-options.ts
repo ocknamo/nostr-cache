@@ -143,17 +143,6 @@ export interface NostrRelayOptions {
   upstreamEoseTimeout?: number;
 
   /**
-   * @deprecated 無視される。上流の接続管理は rx-nostr が持っており、接続
-   * タイムアウトに相当する設定が無い。開かないソケットは WebSocket 自身の
-   * タイムアウトで close になり、そこから再接続ラダーが動く。
-   *
-   * @deprecated Ignored. rx-nostr owns the upstream connection lifecycle and
-   * has no connect timeout; a socket that never opens is closed by the
-   * WebSocket's own timeout, which starts the reconnect ladder.
-   */
-  upstreamConnectionTimeout?: number;
-
-  /**
    * 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」。
    * `{ 0: 3600 }` なら「1時間以内にキャッシュした kind 0 は上流に問い合わせない」。
    *
