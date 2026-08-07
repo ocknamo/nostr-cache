@@ -137,7 +137,7 @@ describe('TimelineController', () => {
 
   it('publishes a profile map from the very first snapshot', async () => {
     const { controller, states } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     // Consumers destructure this before any kind 0 has arrived, so it has to be
     // a Map from the start rather than undefined.
@@ -149,7 +149,7 @@ describe('TimelineController', () => {
 
   it('opens no profile subscription until a card asks for one', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     // Lookups are driven by cards scrolling into view, so a timeline nobody has
     // looked at yet costs exactly one subscription.
@@ -164,7 +164,7 @@ describe('TimelineController', () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
     const { controller } = createController(dbName);
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     // Wait for the profile subscription to exist, or the assertion below would
     // hold just as well against a suspend() that closes nothing.
     controller.requestProfile('alice');
@@ -183,9 +183,9 @@ describe('TimelineController', () => {
 
   it('replaces the subscription on applyFilter instead of accumulating them', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
-    controller.applyFilter({ kinds: [1], limit: 5 });
+    controller.applyFilter([{ kinds: [1], limit: 5 }]);
 
     await waitFor(
       () => openSubscriptionIds(controller).includes(wireSubId('timeline-2')),
@@ -194,12 +194,35 @@ describe('TimelineController', () => {
     expect(openSubscriptionIds(controller)).not.toContain(wireSubId('timeline-1'));
   });
 
+  it('sends every filter on one subscription rather than one REQ each', async () => {
+    const { controller } = createController();
+    await controller.start([{ kinds: [1], limit: 10 }]);
+
+    controller.applyFilter([
+      { kinds: [1], limit: 10 },
+      { kinds: [6], limit: 5 },
+    ]);
+
+    await waitFor(
+      () => openSubscriptionIds(controller).includes(wireSubId('timeline-2')),
+      'the replacement subscription'
+    );
+    const timelineSubs = openSubscriptions(controller).filter(
+      (sub) => sub.id === wireSubId('timeline-2')
+    );
+    expect(timelineSubs).toHaveLength(1);
+    expect(timelineSubs[0].filters).toEqual([
+      { kinds: [1], limit: 10 },
+      { kinds: [6], limit: 5 },
+    ]);
+  });
+
   it('keeps profiles across a filter change so authors do not flicker', async () => {
     const { controller, states } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     const before = states.at(-1)?.profiles;
 
-    controller.applyFilter({ kinds: [1], limit: 5 });
+    controller.applyFilter([{ kinds: [1], limit: 5 }]);
 
     // Events and origins are cleared for the new subscription; profiles are
     // deliberately not, because re-fetching them would blank every author name.
@@ -212,7 +235,7 @@ describe('TimelineController', () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
     const { controller } = createController(dbName);
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     controller.requestProfile('alice');
     controller.requestProfile('bob');
@@ -230,7 +253,7 @@ describe('TimelineController', () => {
 
   it('opens no lookup while suspended, and resumes with the next filter', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     controller.suspend();
     // The cards are still on screen while the demo measures a cold cache, so
@@ -238,7 +261,7 @@ describe('TimelineController', () => {
     controller.requestProfile('alice');
     expect(inFlightProfiles(controller)).toBe(0);
 
-    controller.applyFilter({ kinds: [1], limit: 10 });
+    controller.applyFilter([{ kinds: [1], limit: 10 }]);
     controller.requestProfile('alice');
 
     expect(inFlightProfiles(controller)).toBe(1);
@@ -247,7 +270,7 @@ describe('TimelineController', () => {
 
   it('gives a slot back when the relay answers a lookup with nothing at all', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     // A REQ the relay refuses gets a NOTICE and no EOSE or CLOSED — that is
     // what a storage read failure or the subscription cap looks like from here.
     const connection = (controller as unknown as { connection: { subscribe: () => void } })
@@ -275,7 +298,7 @@ describe('TimelineController', () => {
 
   it('ignores a repeat request for an author already asked about', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     // Synchronous, so neither lookup can have finished in between: the same
     // card scrolling out and back must not re-open a subscription.
@@ -301,7 +324,7 @@ describe('TimelineController', () => {
       ),
     ]);
     const { controller, states } = createController(dbName);
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     for (const pubkey of authors) {
       controller.requestProfile(pubkey);
@@ -336,7 +359,7 @@ describe('TimelineController', () => {
     ]);
     const sockets = captureSockets();
     const { controller, states } = createController(dbName);
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     await waitFor(() => sockets.length > 0, "the controller's socket");
 
     // Drop the connection the way a relay going away does.
@@ -384,7 +407,7 @@ describe('TimelineController', () => {
     ]);
     const { controller, states } = createController(dbName);
 
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     controller.requestProfile('alice');
     await waitFor(
       () => states.at(-1)?.profiles.get('alice') !== undefined,
@@ -410,7 +433,7 @@ describe('TimelineController', () => {
     ]);
     const { controller } = createController(dbName);
 
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     controller.requestProfile('alice');
     await waitFor(
       () => (controller.metrics?.snapshot().delivered ?? 0) >= 2,
@@ -427,7 +450,7 @@ describe('TimelineController', () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
     const { controller } = createController(dbName);
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     controller.requestProfile('alice');
     await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
 
@@ -442,7 +465,7 @@ describe('TimelineController', () => {
 
   it('releases the shared relay on stop', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
     expect(getRelayHostRefCount()).toBe(1);
 
     await controller.stop();
@@ -453,7 +476,7 @@ describe('TimelineController', () => {
 
   it('is safe to stop twice', async () => {
     const { controller } = createController();
-    await controller.start({ kinds: [1], limit: 10 });
+    await controller.start([{ kinds: [1], limit: 10 }]);
 
     await controller.stop();
     await expect(controller.stop()).resolves.toBeUndefined();

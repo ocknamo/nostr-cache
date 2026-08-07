@@ -256,10 +256,25 @@ export function isValidFilterShape(filter: Filter): boolean {
     (filter.ids !== undefined && Array.isArray(filter.ids)) ||
     (filter.authors !== undefined && Array.isArray(filter.authors)) ||
     (filter.kinds !== undefined && Array.isArray(filter.kinds) && filter.kinds.length > 0) ||
-    (filter['#e'] !== undefined && Array.isArray(filter['#e'])) ||
-    (filter['#p'] !== undefined && Array.isArray(filter['#p'])) ||
+    hasTagCondition(filter) ||
     (filter.since !== undefined && typeof filter.since === 'number') ||
     (filter.until !== undefined && typeof filter.until === 'number') ||
     (filter.limit !== undefined && typeof filter.limit === 'number')
+  );
+}
+
+/**
+ * Whether the filter carries a usable single-letter tag condition (`#e`, `#p`,
+ * `#t`, …).
+ *
+ * NIP-01 defines the whole `#<single-letter>` family, not just `#e` and `#p`,
+ * and both the storage query builder and {@link eventMatchesFilter} already
+ * treat them generically — only this shape check used to stop at the two named
+ * ones, so a `#t` hashtag filter was refused before it ever reached them.
+ */
+function hasTagCondition(filter: Filter): boolean {
+  return Object.entries(filter).some(
+    ([key, value]) =>
+      key.length === 2 && key.startsWith('#') && /^[a-zA-Z]$/.test(key[1]) && Array.isArray(value)
   );
 }

@@ -145,6 +145,29 @@ describe('Embeddable timeline E2E', () => {
     expect(await originBadges(page)).toEqual(['upstream', 'upstream']);
   });
 
+  it('subscribes with the filters JSON in place of kinds/limit', async () => {
+    page = await browser.newPage();
+    // `embedUrl` always sets `kinds=1`, which would render the two notes. Asking
+    // for kind 0 through `filters` and getting the profile event instead is what
+    // shows the JSON drove the REQ and took precedence.
+    await page.goto(embedUrl({ relays: upstream.url, filters: '[{"kinds":[0],"limit":10}]' }));
+    await waitForEventCount(page, 1);
+  });
+
+  it('subscribes with every filter in the JSON array', async () => {
+    page = await browser.newPage();
+    await page.goto(
+      embedUrl({
+        relays: upstream.url,
+        filters: '[{"kinds":[1],"limit":10},{"kinds":[0],"limit":10}]',
+      })
+    );
+
+    // Both notes and the profile event: the two filters travel as one REQ, so
+    // everything matching either lands in the same timeline.
+    await waitForEventCount(page, 3);
+  });
+
   it('serves the same events from the local cache after a reload', async () => {
     const url = embedUrl({ relays: upstream.url, debug: 'true' });
     page = await browser.newPage();

@@ -4,10 +4,12 @@
  *
  * Everything here is pure and string-in/value-out so both entry points (the
  * custom element and the iframe page) share one interpretation of `relays`,
- * `kinds`, `authors` and `limit`.
+ * `filters`, `kinds`, `authors` and `limit`. The JSON `filters` attribute is
+ * involved enough to live on its own, in `filter-json.ts`.
  */
 
 import type { Filter } from '@nostr-cache/shared';
+import { parseFilterList } from './filter-json.ts';
 
 export const DEFAULT_LIMIT = 50;
 export const DEFAULT_KINDS = [1];
@@ -162,6 +164,11 @@ export function parseShowOriginAlias(value: string | boolean | null | undefined)
 }
 
 export interface FilterInput {
+  /**
+   * JSON array of NIP-01 filters. When it parses to at least one usable filter
+   * the three fields below are ignored — see {@link parseFilters}.
+   */
+  filters?: string | null;
   kinds?: string | null;
   authors?: string | null;
   limit?: string | null;
@@ -189,6 +196,36 @@ export function parseFilter(input: FilterInput): Filter {
   return filter;
 }
 
+/** Keeps the `filters` precedence notice to one line per page. */
+let filtersPrecedenceWarned = false;
+
+/**
+ * Build the filter list for the timeline subscription.
+ *
+ * `filters` wins outright when it yields anything usable: it can describe
+ * things `kinds` / `authors` / `limit` cannot (several filters, `since`, tag
+ * filters), so merging the two would produce a query the embedder never wrote.
+ * The narrower attributes are the fallback — including when every filter in the
+ * JSON turned out to be unusable, so a typo costs the reader a default timeline
+ * rather than a blank one.
+ */
+export function parseFilters(input: FilterInput): Filter[] {
+  const filters = parseFilterList(input.filters);
+  if (!filters) {
+    return [parseFilter(input)];
+  }
+  if (!filtersPrecedenceWarned && (input.kinds || input.authors || input.limit)) {
+    filtersPrecedenceWarned = true;
+    console.warn('[nostr-timeline] filters is set; ignoring kinds, authors and limit.');
+  }
+  // An unbounded filter would have the relay hand back everything it has cached
+  // and then ask upstream for the same, on every page load. The widget's
+  // documented default applies unless the embedder named their own.
+  return filters.map((filter) =>
+    filter.limit === undefined ? { ...filter, limit: DEFAULT_LIMIT } : filter
+  );
+}
+
 /**
  * Read the widget config out of an iframe URL's query string, so
  * `embed/?relays=wss://nos.lol&kinds=1&limit=20` configures the same things the
@@ -196,7 +233,8 @@ export function parseFilter(input: FilterInput): Filter {
  */
 export function configFromSearchParams(params: URLSearchParams): {
   relays: string[];
-  filter: Filter;
+  /** Filters for the timeline REQ; always at least one. */
+  filters: Filter[];
   dbName: string | undefined;
   /** Seconds a cached profile is served for; `undefined` keeps the default. */
   profileFreshness: number | undefined;
@@ -209,7 +247,8 @@ export function configFromSearchParams(params: URLSearchParams): {
 } {
   return {
     relays: parseRelays(params.get('relays')),
-    filter: parseFilter({
+    filters: parseFilters({
+      filters: params.get('filters'),
       kinds: params.get('kinds'),
       authors: params.get('authors'),
       limit: params.get('limit'),

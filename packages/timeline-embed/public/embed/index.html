@@ -29,6 +29,10 @@
 
       Configured through the query string, e.g.
         embed/?relays=wss://nos.lol&kinds=1&limit=20
+
+      `filters` takes a URL-encoded JSON array of NIP-01 filters when the
+      comma-separated attributes are not expressive enough, e.g.
+        embed/?filters=%5B%7B%22kinds%22%3A%5B1%5D%2C%22limit%22%3A10%7D%5D
     -->
     <script src="../nostr-timeline.js"></script>
     <script>
@@ -40,6 +44,7 @@
         // Web Component tag configure the widget the same way.
         [
           'relays',
+          'filters',
           'kinds',
           'authors',
           'limit',

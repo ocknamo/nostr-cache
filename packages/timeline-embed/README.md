@@ -67,6 +67,7 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | 名前 | 内容 | 既定値 |
 |---|---|---|
 | `relays` | 上流リレー URL（カンマ区切り）。空ならキャッシュ済みイベントのみ表示 | なし |
+| `filters` | NIP-01 フィルタ配列の JSON。指定すると `kinds` / `authors` / `limit` は無視される（[下記](#filters-で細かく絞り込む)） | なし |
 | `kinds` | イベント種別（カンマ区切り） | `1` |
 | `authors` | 著者 pubkey（hex・カンマ区切り） | 指定なし |
 | `limit` | 取得件数 | `50` |
@@ -95,6 +96,53 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 警告を出して無視されます（既定値のまま動作します）。
 **https のページからは `ws://` の上流リレーを指定できません**（ブラウザが混在コンテンツ
 として遮断するため）。`wss://` を使ってください。
+
+## `filters` で細かく絞り込む
+
+`kinds` / `authors` / `limit` はカンマ区切りの手軽さと引き換えに、NIP-01 のフィルタの
+一部（`since`・`until`・`ids`・タグフィルタ）に届きませんし、フィルタを 1 つしか
+書けません。`filters` にはフィルタ配列を JSON でそのまま書けます。
+
+```html
+<nostr-timeline filters='[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]'></nostr-timeline>
+```
+
+配列内のフィルタは **1 本の REQ** として送られるので、どれかに一致したイベントが
+同じタイムラインに並びます。
+
+```js
+// テキストノート（kind 1）
+'[{"kinds":[1],"limit":10}]';
+
+// 特定の著者の投稿
+'[{"kinds":[1],"authors":["npub1...","npub2..."],"limit":5}]';
+
+// 特定のハッシュタグが付いた投稿
+'[{"kinds":[1],"#t":["nostr","bitcoin"],"limit":10}]';
+
+// 直近 1 時間の投稿
+'[{"kinds":[1],"since":' + (Math.floor(Date.now() / 1000) - 3600) + ',"limit":20}]';
+
+// あるノートへの返信
+'[{"kinds":[1],"#e":["note1abc..."],"limit":10}]';
+
+// 複数の kind
+'[{"kinds":[1,6,7],"limit":15}]';
+```
+
+- HTML 属性なので、JSON はシングルクォートで囲んでください。iframe で使う場合は
+  URL エンコードします（`embed/?filters=%5B%7B%22kinds%22%3A%5B1%5D%7D%5D`）。
+- `authors` と `#p` は hex でも `npub` / `nprofile` でも、`ids` と `#e` は hex でも
+  `note` / `nevent` でも書けます（内部で hex に変換して送ります）。
+  それ以外のタグ（`#t` など）の値はそのまま渡します。
+- `limit` を書かなかったフィルタには既定の `50` が入ります。
+- フィルタは**最大 10 個**まで。11 個目以降は警告を出して無視します。
+- リレーが解釈できないフィルタは REQ ごと拒否されてしまうため、`search` のような
+  未対応のキーや型の合わない値は、警告を出してこちら側で落とします。
+  絞り込み条件（`authors` など）の値が全滅したフィルタは、条件が消えて検索範囲が
+  広がってしまわないよう、そのフィルタごと捨てます。
+- JSON が壊れている、あるいは全フィルタが使えなかった場合は
+  `kinds` / `authors` / `limit`（未指定なら kind 1・50 件）に戻ります。
 
 ## 見た目のカスタマイズ
 
@@ -275,6 +323,7 @@ import {
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
 | `Timeline` / `EventCard` / `NoteContent` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
+| `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |
 
 `Timeline` を直接使う場合、`showOrigin` の既定は **`true`**（バッジ表示）です。
 既定で非表示なのは `<nostr-timeline>` 側の話で、コンポーネントを直接組み込む利用者は

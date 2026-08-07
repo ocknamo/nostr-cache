@@ -215,6 +215,12 @@ npm run dev:web   # http://localhost:5173 で起動
 <!-- B. Web Component: 埋め込み先ページ内で動き、globalThis.WebSocket を差し替える -->
 <script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
 <nostr-timeline relays="wss://nos.lol" kinds="1" limit="50"></nostr-timeline>
+
+<!-- kinds/authors/limit で足りない場合は NIP-01 フィルタ配列をそのまま渡せる -->
+<nostr-timeline
+  relays="wss://nos.lol"
+  filters='[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]'
+></nostr-timeline>
 ```
 
 B は本ドキュメントの手順そのもの（パターン A の専用ローカル URL 方式）を内部で
