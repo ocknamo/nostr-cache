@@ -117,6 +117,15 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     NIP-01 準拠のまま N 件で打ち切れる。それ以外の分岐（`kind` / `pubkey` / タグ index）は
     走査順が `created_at` と無関係なため全件走査が必要で、この最適化は使えない
   - 着手時は「どの分岐で早期打ち切りしたか」がテストから見えるようにすること
+  - **フォロータイムライン（[doc/plan/follow-timeline.md](./plan/follow-timeline.md)）は
+    ここに正面から当たる**。`{kinds:[1],authors:[…500],limit:50}` は時間範囲を持たないので
+    `[pubkey+kind]` 分岐に入り、早期打ち切りが使えない側になる。フィルタに `since` を
+    足せば時間範囲分岐へ移せるが、その場合 `isFreshnessEligible` を通らなくなる
+- [ ] `eventMatchesFilter` の `authors` / `kinds` / `ids` 照合を Set 化する
+  - 現状は毎回 `Array.prototype.includes` の線形探索（`utils/filter-utils.ts:76` ほか）。
+    authors が数百件あるフィルタでは候補行 × authors 件数の比較になる
+  - ただし上記の「全件 materialize」のほうが主項なので、**効くのはそちらを直したあと**。
+    先に測ること
 - [ ] 統合テストのポート採番を衝突しない方式にする
   - 現状は spec ファイルごとに `Math.floor(Math.random() * 10000) + <帯>` で採番しており
     （9000 / 20000 / 30000 / 40000 / 50000 番台に手で振り分けている）、同一帯の中で
@@ -141,8 +150,13 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     フォロー中の pubkey の kind 1 を購読する」拡張案があった。リレー側は kind 3 を
     replaceable として扱えるため下地はあるが、クライアント（web-client /
     timeline-embed）側は未実装で、`{ kinds: [1], authors: [...] }` を手で入れる必要がある
-  - 実装するなら timeline-embed の `timeline-config.ts` に「pubkey を起点に
-    フォローリストを引いて authors を展開する」経路を足す形になる
+  - **設計検討済み: [doc/plan/follow-timeline.md](./plan/follow-timeline.md)**（実装は未着手）。
+    当初ここに書いていた「`timeline-config.ts` に経路を足す」案は採らない。フィルタが
+    実行時にリレーから決まる 2 段階購読になるため、`timeline-config.ts`（文字列 → 値の
+    純粋関数）には収まらない。新モジュール `lib/follow-list.ts` +
+    `TimelineController` の `FilterSource` に置く形を推している
+  - 未解決事項（`max-follows` の既定値、鮮度ウィンドウの秒数、要素名など）は
+    上記文書の §17 を参照
 
 ## 完了済み
 
