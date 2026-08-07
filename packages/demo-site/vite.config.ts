@@ -13,6 +13,14 @@ const EMBED_ASSETS: Record<string, { file: string; type: string }> = {
   'nostr-timeline.js': { file: 'nostr-timeline.js', type: 'text/javascript; charset=utf-8' },
   'embed/': { file: 'embed/index.html', type: 'text/html; charset=utf-8' },
   'embed/index.html': { file: 'embed/index.html', type: 'text/html; charset=utf-8' },
+  // Shared by both iframe pages: the query-string forwarding and the height
+  // postMessage the embedding page listens for.
+  'embed/embed-host.js': { file: 'embed/embed-host.js', type: 'text/javascript; charset=utf-8' },
+  'embed/follow/': { file: 'embed/follow/index.html', type: 'text/html; charset=utf-8' },
+  'embed/follow/index.html': {
+    file: 'embed/follow/index.html',
+    type: 'text/html; charset=utf-8',
+  },
 };
 
 /**

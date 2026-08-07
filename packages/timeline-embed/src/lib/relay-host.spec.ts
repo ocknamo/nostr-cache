@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { NostrCacheRelay, WebSocketServerEmulator } from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_FOLLOWS_FRESHNESS,
   DEFAULT_PROFILE_FRESHNESS,
   type RelayHost,
   acquireRelayHost,
@@ -207,39 +208,79 @@ describe('acquireRelayHost', () => {
    * package would notice if this stopped being passed to the relay, so the
    * wiring itself is what these pin down.
    */
-  describe('profile freshness window', () => {
-    /** The relay only builds a gate when a window was configured. */
+  describe('freshness windows', () => {
+    /** The relay only builds a gate when at least one window was configured. */
     function hasFreshnessGate(host: RelayHost): boolean {
       return (host.relay as unknown as { freshnessGate?: unknown }).freshnessGate !== undefined;
     }
 
-    /** Seconds the relay was actually given for kind 0, if any. */
-    function windowForKind0(host: RelayHost): number | undefined {
+    /** Seconds the relay was actually given for a kind, if any. */
+    function windowForKind(host: RelayHost, kind: number): number | undefined {
       const gate = (host.relay as unknown as { freshnessGate?: { windows: Map<number, number> } })
         .freshnessGate;
-      return gate?.windows.get(0);
+      return gate?.windows.get(kind);
     }
 
     it('configures a day-long kind 0 window by default', async () => {
       const host = await acquire();
 
       expect(hasFreshnessGate(host)).toBe(true);
-      expect(windowForKind0(host)).toBe(DEFAULT_PROFILE_FRESHNESS);
+      expect(windowForKind(host, 0)).toBe(DEFAULT_PROFILE_FRESHNESS);
       expect(DEFAULT_PROFILE_FRESHNESS).toBe(24 * 60 * 60);
+    });
+
+    it('configures a ten-minute kind 3 window by default', async () => {
+      const host = await acquire();
+
+      // This is what makes a follow timeline's second load skip the upstream
+      // round trip it needs before it can even build the timeline REQ.
+      expect(windowForKind(host, 3)).toBe(DEFAULT_FOLLOWS_FRESHNESS);
+      expect(DEFAULT_FOLLOWS_FRESHNESS).toBe(10 * 60);
     });
 
     it('accepts an overridden window', async () => {
       const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, profileFreshness: 30 });
 
-      expect(windowForKind0(host)).toBe(30);
+      expect(windowForKind(host, 0)).toBe(30);
+    });
+
+    it('accepts an overridden follow-list window', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, followsFreshness: 45 });
+
+      expect(windowForKind(host, 3)).toBe(45);
     });
 
     it('treats a non-positive window as "no window" rather than failing to start', async () => {
       // The relay rejects a non-positive window outright, which would take the
       // whole widget down — a surprising way to spell "turn this off".
-      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, profileFreshness: 0 });
+      const host = await acquire({
+        dbName: `test-${crypto.randomUUID()}`,
+        profileFreshness: 0,
+        followsFreshness: 0,
+      });
 
       expect(hasFreshnessGate(host)).toBe(false);
+    });
+
+    it('keeps the kind 3 window when profiles are switched off', async () => {
+      // The two windows are independent switches. Assembling the record as one
+      // expression made "no profile window" delete kind 3's as well.
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, profileFreshness: 0 });
+
+      expect(hasFreshnessGate(host)).toBe(true);
+      expect(windowForKind(host, 0)).toBeUndefined();
+      expect(windowForKind(host, 3)).toBe(DEFAULT_FOLLOWS_FRESHNESS);
+    });
+
+    it('keeps the kind 0 window when follow lists are switched off', async () => {
+      // A non-positive window must be omitted, not passed through as `{3: 0}`:
+      // the relay throws on one, and `relay.connect()` failing means the widget
+      // never starts at all.
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, followsFreshness: 0 });
+
+      expect(hasFreshnessGate(host)).toBe(true);
+      expect(windowForKind(host, 0)).toBe(DEFAULT_PROFILE_FRESHNESS);
+      expect(windowForKind(host, 3)).toBeUndefined();
     });
   });
 });

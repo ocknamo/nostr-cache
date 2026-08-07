@@ -30,6 +30,8 @@ export interface EmbedSiteServer {
   baseUrl: string;
   /** URL of the iframe host page. */
   embedUrl: string;
+  /** URL of the follow-timeline iframe host page. */
+  followEmbedUrl: string;
   /** URL of a real image, for use as a profile's `picture`. */
   avatarUrl: string;
   close: () => Promise<void>;
@@ -56,9 +58,13 @@ export async function startEmbedSiteServer(
 ): Promise<EmbedSiteServer> {
   let bundle: string;
   let embedPage: string;
+  let followEmbedPage: string;
+  let embedHost: string;
   try {
     bundle = await readFile(resolve(EMBED_DIST, 'nostr-timeline.js'), 'utf8');
     embedPage = await readFile(resolve(EMBED_DIST, 'embed/index.html'), 'utf8');
+    followEmbedPage = await readFile(resolve(EMBED_DIST, 'embed/follow/index.html'), 'utf8');
+    embedHost = await readFile(resolve(EMBED_DIST, 'embed/embed-host.js'), 'utf8');
   } catch (error) {
     throw new Error(
       `Embed bundle missing from ${EMBED_DIST}. Run "npm run build:embed" first. (${
@@ -77,6 +83,18 @@ export async function startEmbedSiteServer(
     if (path === '/embed/' || path === '/embed/index.html') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(embedPage);
+      return;
+    }
+    if (path === '/embed/follow/' || path === '/embed/follow/index.html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(followEmbedPage);
+      return;
+    }
+    // Both pages load this for the query-string forwarding and the height
+    // protocol, so a 404 here means neither of them mounts anything.
+    if (path === '/embed/embed-host.js') {
+      res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' });
+      res.end(embedHost);
       return;
     }
     // Stands in for the avatar host a real profile's `picture` points at, so
@@ -104,6 +122,7 @@ export async function startEmbedSiteServer(
     port,
     baseUrl,
     embedUrl: `${baseUrl}/embed/`,
+    followEmbedUrl: `${baseUrl}/embed/follow/`,
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };

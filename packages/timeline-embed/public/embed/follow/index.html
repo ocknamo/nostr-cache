@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Nostr Follow Timeline (embed)</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+      }
+      body {
+        padding: 8px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      iframe host page for the follow timeline.
+
+      A page of its own rather than a `?pubkey` branch inside `embed/`. The
+      elements were split so that `authors` / `filters` could not collide with
+      `pubkey`; a shared page would bring that collision straight back, because
+      a query string has no element type — `?pubkey=…&filters=…` would land on
+      an element with no `filters` attribute and be dropped without a word.
+
+      Configured through the query string, e.g.
+        embed/follow/?pubkey=npub1...&relays=wss://nos.lol&limit=50
+    -->
+    <script src="../../nostr-timeline.js"></script>
+    <script src="../embed-host.js"></script>
+    <script>
+      mountNostrEmbed('nostr-follow-timeline', [
+        'pubkey',
+        'relays',
+        'kinds',
+        'limit',
+        'max-follows',
+        'include-self',
+        'since-days',
+        'follows-freshness',
+        'db-name',
+        'profile-freshness',
+        'debug',
+        'show-avatars',
+        'show-media',
+      ]);
+    </script>
+  </body>
+</html>

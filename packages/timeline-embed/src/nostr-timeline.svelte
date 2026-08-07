@@ -9,6 +9,7 @@
       limit: { attribute: 'limit' },
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
+      followsFreshness: { attribute: 'follows-freshness' },
       debug: { attribute: 'debug' },
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
@@ -18,7 +19,7 @@
 />
 
 <script lang="ts">
-  import Timeline from './components/Timeline.svelte';
+  import TimelineView from './components/TimelineView.svelte';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
   import {
     parseDebug,
@@ -55,6 +56,17 @@
      */
     profileFreshness?: string;
     /**
+     * Seconds a cached follow list (kind 3) is used before the relay re-asks
+     * upstream.
+     *
+     * This element never fetches one — it exists so a page that also carries a
+     * `<nostr-follow-timeline>` can be given matching settings. Both widgets
+     * share one relay and the first to mount configures it, so without this
+     * attribute the conflict warning would name a setting the other element has
+     * no way to spell.
+     */
+    followsFreshness?: string;
+    /**
      * Set (`debug` / `debug="true"`) to render the diagnostic cache/upstream
      * badges. Off by default — they are for checking that the cache works, not
      * for the readers of the embedding page.
@@ -90,6 +102,7 @@
     limit,
     dbName,
     profileFreshness,
+    followsFreshness,
     debug,
     showOrigin,
     showAvatars,
@@ -125,6 +138,7 @@
         // than this widget pinning one — which also keeps two widgets that both
         // omit the attribute from looking like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
+        followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
       },
       onChange: (next) => {
         state = next;
@@ -141,62 +155,11 @@
   });
 </script>
 
-<div class="widget" part="widget">
-  {#if state.error}
-    <p class="error" part="error">{state.error}</p>
-  {/if}
-  <!--
-    Shown rather than swapped in for the timeline: rx-nostr keeps retrying and
-    re-issues the subscriptions when it gets back, so the events already on
-    screen stay readable and simply resume updating.
-  -->
-  {#if state.status === 'reconnecting'}
-    <p class="reconnecting" part="reconnecting">リレーに再接続しています…</p>
-  {/if}
-  <Timeline
-    events={state.events}
-    eose={state.eose}
-    origins={state.origins}
-    validationStatuses={state.validationStatuses}
-    profiles={state.profiles}
-    showOrigin={parseDebug(debug) || parseShowOriginAlias(showOrigin)}
-    showAvatars={showAvatars !== 'false'}
-    showMedia={showMedia !== 'false'}
-    onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
-  />
-</div>
-
-<style>
-  .widget {
-    display: block;
-    font-family: var(
-      --nt-font,
-      system-ui,
-      -apple-system,
-      'Segoe UI',
-      'Helvetica Neue',
-      sans-serif
-    );
-    font-size: var(--nt-font-size, 14px);
-    background: var(--nt-bg, transparent);
-    color: var(--nt-fg, #0f1419);
-  }
-
-  .error {
-    margin: 0 0 10px;
-    padding: 8px 12px;
-    border-radius: var(--nt-radius, 10px);
-    background: var(--nt-error-bg, #fdecea);
-    color: var(--nt-error-fg, #a4262c);
-    font-size: 0.85rem;
-  }
-
-  .reconnecting {
-    margin: 0 0 10px;
-    padding: 8px 12px;
-    border-radius: var(--nt-radius, 10px);
-    background: var(--nt-notice-bg, #fff4e5);
-    color: var(--nt-notice-fg, #8a5300);
-    font-size: 0.85rem;
-  }
-</style>
+<TimelineView
+  {state}
+  showOrigin={parseDebug(debug) || parseShowOriginAlias(showOrigin)}
+  debug={parseDebug(debug)}
+  showAvatars={showAvatars !== 'false'}
+  showMedia={showMedia !== 'false'}
+  onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
+/>

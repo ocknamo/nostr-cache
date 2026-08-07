@@ -145,18 +145,20 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     `LAZY` 検証をメインスレッドから外せる可能性がある
   - これは移行で新しく生えた API ではなく旧 `rx-nostr-crypto@3.1.3` にもあったもの。
     着手するなら実際にメインスレッドの占有が問題になっているかの計測が先
-- [ ] フォローリスト由来のタイムライン表示（NIP-02）をクライアントに出すか決める
-  - 旧 Angular 製 POC の設計書に「特定ユーザーのフォローリスト（kind 3）を取得し、
-    フォロー中の pubkey の kind 1 を購読する」拡張案があった。リレー側は kind 3 を
-    replaceable として扱えるため下地はあるが、クライアント（web-client /
-    timeline-embed）側は未実装で、`{ kinds: [1], authors: [...] }` を手で入れる必要がある
-  - **設計検討済み: [doc/plan/follow-timeline.md](./plan/follow-timeline.md)**（実装は未着手）。
-    当初ここに書いていた「`timeline-config.ts` に経路を足す」案は採らない。フィルタが
-    実行時にリレーから決まる 2 段階購読になるため、`timeline-config.ts`（文字列 → 値の
-    純粋関数）には収まらない。新モジュール `lib/follow-list.ts` +
-    `TimelineController` の `FilterSource` に置く形を推している
-  - 未解決事項（`max-follows` の既定値、鮮度ウィンドウの秒数、要素名など）は
-    上記文書の §17 を参照
+- [x] フォローリスト由来のタイムライン表示（NIP-02）をクライアントに出すか決める
+  - **実装済み**: `<nostr-follow-timeline>`（`packages/timeline-embed`）。設計は
+    [doc/plan/follow-timeline.md](./plan/follow-timeline.md)、使い方は
+    [packages/timeline-embed/README.md](../packages/timeline-embed/README.md)
+  - §17 の未解決事項は次のとおり決着した
+    - `max-follows` の既定は **2000**。実測（§7.2）で上流は 982 authors を問題なく捌いており、
+      残る根拠はクライアント側（Dexie の全件 materialize と ingest の直列化）だが**未計測**。
+      測るまでは「病的なリストへの安全弁」に徹する大きめの値にしてある。切り捨ては先頭から N 件
+    - `follows-freshness` の既定は **600 秒**（`doc/cache-relay/upstream.md` の例と同じ）
+    - kind 3 の `invalid` 検出は**初回スコープに入れた**（`TimelineController.watchValidation`）
+    - `since` は `since-days` 属性として入れたが**既定オフ**。静かなフォローリストが空の
+      タイムラインになる副作用があるため、埋め込む側が明示したときだけ効く
+  - 残っている計測（`max-follows` の既定を締めるために必要）は下の
+    「`DexieStorage` の `limit` クエリ…」および「`eventMatchesFilter` の Set 化」と同じ土俵
 
 ## 完了済み
 

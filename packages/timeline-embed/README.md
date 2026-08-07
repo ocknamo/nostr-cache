@@ -4,6 +4,13 @@
 `@nostr-cache/cache-relay` を上流リレーの手前に**透過キャッシュ**として挟み、
 イベントを IndexedDB に貯めながら表示します。
 
+要素は 2 つあります。
+
+| 要素 | 内容 |
+|---|---|
+| `<nostr-timeline>` | フィルタを直接書く。kind / 著者 / `filters` JSON を指定する |
+| `<nostr-follow-timeline>` | **人を 1 人指定すると、その人のホームタイムラインが出る**（[下記](#フォロータイムライン)） |
+
 - 初回は上流リレーから取得、2 回目以降はローカルキャッシュから即座に表示
 - `debug` を付けると各イベントに `cache` / `upstream` バッジを表示（キャッシュが効いているのを
   目で確認するための動作確認用。既定では表示しません）
@@ -17,6 +24,9 @@
   同じキャッシュに載り、`upstreamFreshness` の鮮度ウィンドウ（既定 24 時間・
   `profile-freshness` で変更可）が効くため、リロード後は上流に問い合わせず即座に出ます
 - 返信・引用（`e` / `q` タグ）がある投稿には参照チップを表示（参照先の本文は取得しません）
+- フォローリスト（kind 3）も replaceable として同じキャッシュに載り、鮮度ウィンドウ
+  （既定 10 分・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
+  2 回目以降のロードは**上流に問い合わせずフォローリストがキャッシュから即座に出ます**
 
 公開デモ: <https://ocknamo.github.io/nostr-cache/>
 
@@ -62,7 +72,9 @@ window.addEventListener('message', (event) => {
 Nostr クライアントとキャッシュを共有できます。対象外の URL への接続は元の実装へ
 そのまま委譲されるので、他の通信には影響しません。詳細は下の「制約」を参照。
 
-## 属性 / クエリパラメータ
+## 属性 / クエリパラメータ（`<nostr-timeline>`）
+
+`<nostr-follow-timeline>` の属性は[フォロータイムライン](#フォロータイムライン)を参照してください。
 
 | 名前 | 内容 | 既定値 |
 |---|---|---|
@@ -73,6 +85,7 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | `limit` | 取得件数 | `50` |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `86400`（24 時間） |
+| `follows-freshness` | フォローリスト（kind 3）の同じ設定。**この要素自身は kind 3 を取得しません** — 同じページに `<nostr-follow-timeline>` を置く場合に設定を揃えるためのものです（[下記](#フォロータイムライン)） | `600`（10 分） |
 | `debug` | 動作確認用。付けると各投稿に `cache` / `upstream` バッジを表示する | なし（非表示） |
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
@@ -96,6 +109,106 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 警告を出して無視されます（既定値のまま動作します）。
 **https のページからは `ws://` の上流リレーを指定できません**（ブラウザが混在コンテンツ
 として遮断するため）。`wss://` を使ってください。
+
+## フォロータイムライン
+
+`<nostr-follow-timeline>` は **指定した pubkey が NIP-02（kind 3・フォローリスト）で
+フォローしている人たちの投稿**を並べます。`<nostr-timeline>` が「フィルタを直接書く」ものなのに対し、
+こちらは「人を 1 人指定すると、その人のホームタイムラインが出る」ものです。
+
+```html
+<script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
+
+<nostr-follow-timeline
+  pubkey="npub1..."
+  relays="wss://nos.lol,wss://relay.damus.io"
+></nostr-follow-timeline>
+```
+
+iframe は**別のページ**（`embed/follow/`）です:
+
+```html
+<iframe
+  src="https://ocknamo.github.io/nostr-cache/embed/follow/?pubkey=npub1...&relays=wss://nos.lol&limit=50"
+  style="width: 100%; height: 480px; border: 0"
+  title="Nostr follow timeline"
+></iframe>
+```
+
+高さの `postMessage` は `embed/` とまったく同じ仕組みです（同じスクリプトを共有しています）。
+
+入口を分けているのは、要素を分けたのと同じ理由です。この要素には `authors` も `filters` も
+**ありません**（`pubkey` と意味が衝突するため）。1 つのページで両方を受けると、
+`?pubkey=…&filters=…` のような URL が「`filters` が黙って無視される」形で通ってしまいます。
+
+### 動作
+
+購読は 2 段階です。
+
+1. `{"kinds":[3],"authors":["<pubkey>"]}` でフォローリストを取得する
+2. その `p` タグから `authors` を組み立て、`{"kinds":[1],"authors":[…],"limit":50}` を購読する
+
+**フォローリストが取得できなかった場合・`p` タグが 0 件だった場合は、購読を張らずに
+「フォローリストが見つかりませんでした」を表示します。** `authors` の無い kind 1 フィルタへ
+フォールバックすることはありません（上流リレー群にグローバルフィード全体を要求することになり、
+埋め込み先のページが意図せず帯域を焼くため）。
+
+### 属性 / クエリパラメータ
+
+| 名前 | 内容 | 既定値 |
+|---|---|---|
+| `pubkey` | 誰のフォローを辿るか。hex / `npub` / `nprofile` | **必須** |
+| `relays` | 上流リレー URL（カンマ区切り） | なし |
+| `kinds` | 並べるイベント種別（カンマ区切り） | `1` |
+| `limit` | 取得件数 | `50` |
+| `max-follows` | `authors` に載せるフォロー先の上限（病的なリストへの安全弁） | `2000` |
+| `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
+| `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
+| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
+| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` | `<nostr-timeline>` と同じ | 同じ |
+
+`pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
+「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
+
+`max-follows` の既定 `2000` は**チューニング用のつまみではなく安全弁**です。実測では
+上流リレー 2 本とも 982 人ぶんの `authors` を問題なく捌き、500 人に減らしても
+レイテンシは約 10ms しか変わりませんでした。上限を低くすると、速くなるのではなく
+**「その人のホームタイムライン」として間違ったものが出る**ことになります。
+切り捨てはリストの**先頭から**採ります（NIP-02 は新しいフォローを末尾に追記すべきと
+していますが、実クライアントが守っている保証がないため順序に意味を仮定していません）。
+`debug` を付けると、切り捨てが起きたときに「N 人中 M 人を表示しています」を出します。
+
+`since-days` は**既定で無効**です。付けるとローカルクエリの走査範囲が狭まりますが、
+**フォロー先が静かなときにタイムラインが空になり**、読者には「投稿が無いのか、
+窓で切れたのか」が区別できません。入れる場合も 30 日程度の長めの窓から始めてください。
+
+### 制約（フォロータイムライン固有）
+
+- **フォローリストの署名が未検証のまま authors を組みます。** リレーは遅延検証で動くため、
+  なりすまし kind 3（新しい `created_at` を持つもの）が上流から返ると、
+  **表示される母集団そのもの**が別人の人選になります。カード 1 枚が混じるのとは
+  影響の桁が違う点に注意してください。
+  緩和として、取得した kind 3 がキャッシュに残っているかをポーリングし、**消えていたら
+  タイムラインを畳んで「フォローリストがキャッシュから失われたため、表示を中止しました」を
+  表示**します。リレーが署名不正と判断して削除した場合はこれで拾えます。
+  ただし**「署名検証に失敗した」とは言いません** — リレーは理由を区別せず「無い」としか
+  答えないためです（不正削除のほか、NIP-09 による削除、`storageMaxSize` 下での退避、
+  ストレージ読み取り失敗も同じ `unknown` になります）。
+  なお `validated`（検証済み）になった時点で監視は終了します
+- **リレーヒントは使いません。** kind 3 の `p` タグ 2 番目の要素にも NIP-65（kind 10002）にも
+  リレー URL が入りますが、上流リレー集合はページ共有・起動時固定なので実行時に変えられません
+- **画面を開いたままフォローリストの更新は反映されません。** kind 3 の購読は取得後に閉じます。
+  開いたまま `authors` を張り替えるとタイムラインの REQ を作り直すことになり、画面が飛ぶためです
+- **kind 3 を一度も公開していない pubkey では鮮度ウィンドウが効きません。** キャッシュに
+  一度も入らないものは「新鮮」と判定しようがないため、毎回 1 往復 + 最大 5 秒待って
+  「見つかりませんでした」に落ちます（表示は正しいですが、上流に定期的な負荷がかかります）
+- **`kinds` に `6`（リポスト）を入れると表示が壊れます。** 実クライアントのホーム
+  タイムラインにはリポストが並びますが、このウィジェットのカードは kind 6 を解釈しません。
+  kind 6 の `content` は空かリポスト元イベントの JSON 文字列なので、**空カードか生 JSON**が出ます
+- **NIP-51（kind 30000 のフォローセット）は対象外**です。addressable なので鮮度ウィンドウの
+  対象にもなりません
+- `storageMaxSize` を設定した構成では kind 3 が退避されると毎回上流へ戻ります
+  （`cachePriority: { kinds: [3] }` で守れます。現状 embed は `storageMaxSize` を設定していません）
 
 ## `filters` で細かく絞り込む
 
@@ -255,7 +368,10 @@ nostr-timeline {
   取得したてのプロフィールを取りこぼします）。同時に走るのは 4 本までで、残りは
   順番待ちです。応答が無いまま 5 秒経った購読は打ち切って枠を返します。
   カードの 200px 手前で取得を始めるので、通常は表示までに名前が揃います。
-  `IntersectionObserver` が無い環境では、遅延せず即座に取得します
+  `IntersectionObserver` が無い環境では、遅延せず即座に取得します。
+  フォロータイムラインは著者が散るぶん重複が最も少ない条件ですが、実測では
+  50 件で 13〜19 人程度（よく投稿する人が複数件を占めるため）。4 本並列で数波なので、
+  全員の名前がそろうまで数秒かかることがあります（カードは順次埋まります）
 - **上流へ問い合わせ直すかどうかはリレーが判断します**（`upstreamFreshness` の kind 0 の窓。
   既定 86400 秒 = 24 時間。属性・クエリパラメータの `profile-freshness`、または JS から
   `acquireRelayHost` を使う場合は `profileFreshness` で変更できます）。
@@ -291,7 +407,8 @@ nostr-timeline {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **325 KB（gzip 約 108 KB）** の自己完結した IIFE です。
+`dist/nostr-timeline.js` は約 **334 KB（gzip 約 111 KB）** の自己完結した IIFE です
+（`<nostr-timeline>` と `<nostr-follow-timeline>` の両方を含みます）。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、
 署名検証用の `@rx-nostr/crypto`、そしてリレー接続管理の `rx-nostr`（+ RxJS）で、
@@ -328,6 +445,9 @@ import {
 | `Timeline` / `EventCard` / `NoteContent` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 | `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |
+| `parseFollowList` / `selectAuthors` | kind 3 の `p` タグ解釈と `authors` の組み立て（純粋関数。DOM もリレーも要らない） |
+| `followFilterSource` | フォローリストを引いてタイムラインフィルタを返す `FilterSource` |
+| `fetchLatestReplaceable` | replaceable イベントを 1 件だけ引く one-shot REQ（EOSE グレース・`created_at` 最大採用・ウォッチドッグ込み） |
 
 `Timeline` を直接使う場合、`showOrigin` の既定は **`true`**（バッジ表示）です。
 既定で非表示なのは `<nostr-timeline>` 側の話で、コンポーネントを直接組み込む利用者は
@@ -340,7 +460,7 @@ import {
 # 依存パッケージのビルドが前提
 npm run build -w packages/shared -w packages/cache-relay
 
-npm run build:embed    # dist/nostr-timeline.js + dist/embed/index.html
+npm run build:embed    # dist/nostr-timeline.js + dist/embed/{,follow/}index.html
 npm run test -w packages/timeline-embed
 npm run typecheck -w packages/timeline-embed
 ```
@@ -353,5 +473,13 @@ npm run typecheck -w packages/timeline-embed
   フレームワーク非依存に保っています（単体テスト容易性のため）
 - `customElement: true` は**カスタム要素サポートを有効にするだけ**で、実際に
   カスタム要素になるのは `<svelte:options customElement="..." />` を持つ
-  `nostr-timeline.svelte` のみです。他のコンポーネントは通常の Svelte
-  コンポーネントとしてライブラリ利用できます
+  `nostr-timeline.svelte` と `nostr-follow-timeline.svelte` のみです。
+  他のコンポーネントは通常の Svelte コンポーネントとしてライブラリ利用できます
+- 2 つのカスタム要素が重複して持つのは**props 宣言だけ**です。Svelte のカスタム要素は
+  `<svelte:options customElement>` で props を静的に宣言する必要があるためで、
+  中身（エラー表示・再接続表示・`Timeline` の描画・スタイル）は
+  `components/TimelineView.svelte` に切り出して共有しています。バンドルも 1 本のままです
+- iframe ページも 2 枚（`public/embed/` と `public/embed/follow/`）ありますが、
+  クエリパラメータの転送と高さの `postMessage` は `public/embed/embed-host.js` に
+  1 つだけあります。各ページが持つのは「どの要素にどの属性を渡すか」の一覧だけで、
+  その一覧が要素の宣言と食い違っていないことは `embed-page.spec.ts` が検査します
