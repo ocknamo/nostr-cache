@@ -1,7 +1,11 @@
 # フォロータイムライン埋め込みの設計検討
 
 > **状況**: 未着手。この文書は実装方針の検討結果であり、確定した仕様ではない。
-> 「要検討」と書いた箇所は実装時に実測・判断が要る。
+> 「要検討」と書いた箇所は実装時に実測・判断が要る。未解決事項の一覧は §17。
+>
+> 関連: [doc/TODO.md](../TODO.md)（この項目の入口）、
+> [doc/cache-relay/upstream.md](../cache-relay/upstream.md)（鮮度ウィンドウ。kind 3 の例あり）、
+> [doc/nips/nip-02.md](../nips/nip-02.md)
 
 ## 1. 何を作るのか
 
@@ -25,10 +29,13 @@
 フォロータイムラインは **2 段階**になる。
 
 ```
-1. REQ {"kinds":[3],"authors":[<subject>],"limit":1}   → kind 3 を得る
+1. REQ {"kinds":[3],"authors":[<subject>]}             → kind 3 を得る
 2. p タグ → authors を組み立てる
 3. REQ {"kinds":[1],"authors":[<follows…>],"limit":50} → タイムライン
 ```
+
+1 段目に `limit` は付けない。kind 3 は replaceable で (pubkey, kind) ごとに 1 件しか無いため
+不要であり、`limit` 付きでも鮮度判定（§8）は通るが、付けない形で一貫させる。
 
 **フィルタが実行時にリレーから決まる**のはこれが初めてで、設計上の争点はほぼここに集約される。
 残りは「フォロー数が多い」ことに由来する量の問題。
@@ -67,6 +74,16 @@ embed/?pubkey=npub1...&relays=wss://nos.lol&limit=50   → <nostr-follow-timelin
 embed/?kinds=1&relays=wss://nos.lol                     → <nostr-timeline>（従来）
 ```
 
+**ただしこの案は、上で案 A を却下した理由をそのまま持ち込む。** 現在のページは
+パラメータ名の配列を**無条件に**転送している（`public/embed/index.html:45-63`）ので、
+`?pubkey=…&authors=…` や `?pubkey=…&filters=…` を書かれると、フォロー要素には
+`authors` / `filters` が存在しないぶん**黙って無視される**。属性版では要素を分けたことで
+消えていた問題が、クエリ文字列には要素の型が無いぶん復活する。
+
+→ ページ側で `pubkey` と `authors` / `filters` の同時指定を検出し、警告を出したうえで
+`pubkey` を優先する（転送する属性名の配列も要素ごとに分ける）。この分岐を書く気がないなら、
+iframe だけ 2 ページに分けるほうが正直である。**要検討。**
+
 ## 4. フォローリスト解決の置き場所
 
 `TimelineController.start()` は「ホスト取得 → connect → subscribe」の 3 段。
@@ -90,6 +107,18 @@ NIP-02 の知識は新モジュール `lib/follow-list.ts` に閉じる。
 **代案（controller に `mode: 'follows'` を持たせる）は採らない。** controller が NIP-02 を
 知ることになり、フォローリスト解釈のテストが毎回リレー起動込みになる。
 
+### 解決中に停止されたときの後始末
+
+`FilterSource` は最長でウォッチドッグ分（5 秒）ブロックする。その間に `stop()` が呼ばれうる
+（属性変更で `$effect` の cleanup が走る、要素が DOM から外れる）。既存の `start()` は
+各 await の直後に `if (this.stopped) return` を置く規律で書かれている
+（`timeline-controller.ts:164, 177`）ので、`FilterSource` の await 直後にも同じ確認が要る。
+
+さらに **kind 3 の one-shot REQ は既存の解放経路から漏れる**。`subscribe()` /
+`suspend()` / `stop()` はいずれも `closeProfiles()` を呼ぶが、これが閉じるのは
+`profileSubs` に登録された購読だけ（同 457-465）。kind 3 の購読は別管理になるため、
+明示的に閉じる経路を用意しないと、停止後もリレー側に購読が残る。
+
 ## 5. kind 3 の取得は、プロフィール取得と同じ罠を踏む
 
 `timeline-controller.ts` の `openProfileRequest` は、kind 0 を 1 件引くために 3 つの対策を
@@ -112,13 +141,32 @@ NIP-02 の知識は新モジュール `lib/follow-list.ts` に閉じる。
 export function fetchLatestReplaceable(
   connection: RelayConnection,
   filter: Filter,
-  options?: { graceMs?: number; timeoutMs?: number }
+  options?: {
+    graceMs?: number;
+    timeoutMs?: number;
+    /** 中断（stop / suspend / 属性変更）。§4 の後始末で必要 */
+    signal?: AbortSignal;
+    /** 採用しなかった版も含め、届いた 1 件ごとに呼ぶ。下記の理由で必須 */
+    onEvent?: (event: NostrEvent) => void;
+  }
 ): Promise<NostrEvent | undefined>;
 ```
 
 切り出さずに書き下ろすと、上の 3 つのうちどれかを落として同じバグを 2 箇所で踏む。
-先にプロフィール側をこのヘルパに載せ替えて既存テストが緑のままであることを確認してから、
-フォローリスト側で使う。
+
+**ただし「プロフィール取得をこのヘルパに載せ替える」のは自明ではない。** 既存のプロフィール
+取得は単発の Promise ではなく、次の 4 つに絡み合っている。
+
+1. 4 並列の in-flight 予算（`MAX_CONCURRENT_PROFILE_REQUESTS`、`timeline-controller.ts:29, 336-349`）
+2. `suspend()` / `stop()` による一括キャンセル（同 457-465）
+3. **受信 1 件ごと**の副作用 `metrics.classifyDelivered(event.id)`（同 432）。
+   `created_at` 比較で採用しなかった版も計上する必要がある（計上しないと cache/upstream の
+   カウンタが配信された母集団より小さくなる）
+4. 再接続時の `pumpProfileQueue()` 再駆動（同 119）
+
+`signal` と `onEvent` があれば 2 と 3 は表現できるが、1 と 4 のキュー管理は依然 controller 側に
+残る。**§16 の手順 2 は「ヘルパを新規に足し、プロフィール側の載せ替えは別タスク」に留めるのが
+安全**。載せ替えを同時にやるなら、それ自体を独立した変更として先に緑にすること。
 
 ## 6. フォローリストが無い / 空のとき
 
@@ -130,8 +178,19 @@ export function fetchLatestReplaceable(
 - kind 3 はあるが `p` タグが 0 件
 
 いずれも **購読を張らずに終了**し、「フォローリストが見つかりませんでした」を表示する。
-`{"kinds":[1],"authors":[]}` も送らない（空配列の解釈は NIP-01 上あいまいで、上流リレーごとに
-「何にもマッチしない」と「条件なし」で割れうる）。
+
+`{"kinds":[1],"authors":[]}` も送らない。NIP-01 上あいまいというだけでなく、
+**本リポジトリの中ですら解釈が 2 層に割れている**。
+
+- `buildOptimizedQuery` は `authors?.length` で分岐するので、空配列を「条件なし」とみなして
+  kinds ブランチへ落とす（`query-builder.ts:91, 104`）
+- `eventMatchesFilter` は `filter.authors && !includes` なので「何にもマッチしない」と判定する
+  （`filter-utils.ts:76`）
+- `isFreshnessEligible` は `authors` 非空を要求するので、空 authors の REQ は
+  **必ず上流へ転送される**（`freshness.ts:113`）
+
+つまり空 authors は、ローカルでは 2 段の絞り込みが食い違ったまま、上流へは必ず抜けていく。
+送ってよい形ではない。
 
 ## 7. フォロー数の上限
 
@@ -139,16 +198,38 @@ export function fetchLatestReplaceable(
 
 - **ワイヤ**: 1000 authors は 64 文字 × 1000 ≒ 66 KB の REQ。上流リレーの実装によっては
   フィルタ長で拒否される
-- **ローカルクエリ**: `buildOptimizedQuery` の `authors + kinds` 分岐は
-  `[pubkey+kind]` 複合インデックスに `anyOf(authors × kinds)` を渡す
-  （`packages/cache-relay/src/storage/dexie/query-builder.ts:91`）。1000 authors → 1000 キー。
-  さらに最終判定の `eventMatchesFilter` が `filter.authors.includes(event.pubkey)` の線形探索を
-  候補行ごとに行う（`packages/cache-relay/src/utils/filter-utils.ts:76`）
+- **ローカルクエリ**: ここが主項。`DexieStorage.getEvents` は **`limit` 適用前に一致行を
+  全件 materialize する**（`packages/cache-relay/src/storage/dexie-storage.ts:289-299` の
+  実装コメントが明言している。NIP-01 の `limit` は「最新 N 件」だが Dexie の
+  `Collection.limit()` は選ばれたインデックス順の先頭 N 件になるため、全件取ってから
+  `capEvents` で切るしかない）。
+  `{"kinds":[1],"authors":[…500],"limit":50}` は `since`/`until` を持たないので
+  `buildOptimizedQuery` の `authors + kinds` 分岐に入り
+  （`packages/cache-relay/src/storage/dexie/query-builder.ts:91`）、
+  **500 人分の kind 1 キャッシュ行が全部 IndexedDB から取り出され、`rowToEvent` され、
+  `eventRowMatchesFilter` を通ってから 50 件に切られる**。
+  `eventMatchesFilter` の `filter.authors.includes(event.pubkey)` 線形探索
+  （`packages/cache-relay/src/utils/filter-utils.ts:76`）はこの上に乗る二次的なコスト
 - **`limit` の意味論**: `limit` はフィルタ単位。1000 人に対する limit 50 は「全体で最新 50 件」で、
   アクティブな数人で埋まる。ただしこれは実クライアントのホームタイムラインと同じ挙動なので
   問題ではない
 
 → **`max-follows` 属性（既定 500）で切る。** 超過分は警告ログを出して捨てる。
+
+ただし上のとおり、支配的なコストはワイヤの 66 KB ではなく
+**「キャッシュに溜まった kind 1 の量 × フォロー数」**である。`max-follows` の既定値は
+そちらで見積もる必要があり、REQ サイズだけを根拠に決めてはいけない。
+
+**あわせて検討すべき対策: タイムラインフィルタに `since`（例: 直近 N 日）を入れる。**
+`since`/`until` があると `query-builder.ts:75-82` の別分岐に落ちて `created_at` インデックスで
+走査範囲そのものが絞られるため、全件 materialize の母数が直接小さくなる。`max-follows` で
+人数を削るより素直に効く可能性がある。ただし `since` 付きフィルタは
+`isFreshnessEligible` を通らなくなる（§8）ので、**kind 1 側にだけ入れて kind 3 側には
+入れない**こと。
+
+なお `doc/TODO.md` の「`DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する」は
+**時間範囲分岐にしか適用できない**と書かれている。`since` を入れるかどうかは、その最適化の
+恩恵を受けられる側に立つかどうかの選択でもある。
 
 切る側は **先頭から N 件**を採る。NIP-02 は「新しいフォローは末尾に追記すべき」と言っているが、
 実クライアントが守っている保証はなく、順序に意味を仮定しない方が安全。**既定値 500 と
@@ -156,13 +237,23 @@ export function fetchLatestReplaceable(
 
 **分割（authors を 100 人ずつ複数フィルタに割る）は既定では採らない。**
 cache-relay はフィルタごとに storage クエリと上流 REQ を行うため負荷がフィルタ数倍になり、
-`MAX_FILTERS = 10` にも当たり、limit の意味論も崩れる（10 × 50 = 500 件）。
+limit の意味論も崩れる（10 × 50 = 500 件）。
+なお `MAX_FILTERS = 10` はここでは効かない — あれは `filters` 属性の JSON を読む
+`parseFilterList` 専用の上限（`packages/timeline-embed/src/lib/filter-json.ts:28,236`）で、
+§4 の `FilterSource` はそこを通らない。cache-relay 側に REQ あたりのフィルタ本数上限は無い
+（`message-handler.ts:296-309` は非空配列と各フィルタの形状しか見ていない）。
 
-**cache-relay 側の改善余地**（このウィジェットとは別タスク）: `eventMatchesFilter` が
-`authors` / `kinds` / `ids` を毎回 `includes` で線形探索している。呼び出し側で Set を作れば
-authors が多いフィルタで効く。`doc/TODO.md` 行き。
+**cache-relay 側の改善余地**（このウィジェットとは別タスク・`doc/TODO.md` に追記済み）:
+`eventMatchesFilter` が `authors` / `kinds` / `ids` を毎回 `includes` で線形探索している。
+呼び出し側で Set を作れば authors が多いフィルタで効く。ただし上記のとおり全件 materialize が
+主項なので、**先に効くのはそちら**。
 
 ## 8. 鮮度ウィンドウを kind 3 にも張る（これが一番効く）
+
+**これは新しい発見ではない。** `doc/cache-relay/upstream.md:186` に
+`upstreamFreshness: { 0: 3600, 3: 600 } // プロフィールは1時間、フォローリストは10分`
+という kind 3 を使った実例が既に載っており、リレー側は最初からこの用途を想定している。
+未実装なのはウィジェット側だけである。
 
 `upstreamFreshness` は replaceable kind（0 / 3 / 10000–19999）を受け付ける
 （`normalizeFreshnessWindows`、`packages/cache-relay/src/core/relay-options.ts:261`）。
@@ -170,15 +261,34 @@ authors が多いフィルタで効く。`doc/TODO.md` 行き。
 `ids` / `since` / `until` / タグ条件が無く、`kinds` は非空で全部 replaceable かつ窓あり、
 `authors` も非空（`packages/cache-relay/src/upstream/freshness.ts:110`）。
 
-つまり `relay-host.ts` の `upstreamFreshness` に `3: followsFreshness` を足すだけで、
+したがって `relay-host.ts` の `upstreamFreshness` に kind 3 の窓を載せれば、
 **2 回目以降のロードでは上流に一切問い合わせずフォローリストがキャッシュから即座に出る**。
 このプロジェクトの売り（透過キャッシュ）がそのまま効く題材で、デモとしても分かりやすい。
 
 - 属性 `follows-freshness`（秒。`0` で毎回上流へ）
-- **既定 3600（1 時間）** — プロフィール（24 時間）より短くする。フォローの増減は表示名や
-  アバターより動くため。ただし**要検討**
+- **既定値は要検討。** 既存ドキュメントの例は 600 秒（10 分）。プロフィールが 24 時間なのは
+  「表示名とアバターはめったに変わらない」からで、フォローの増減はもう少し動く。
+  ドキュメントの例に寄せて 600 にするか、埋め込み用途に合わせて延ばすかを決め、
+  **決めた側に `upstream.md` の例も揃える**
 - `RelayHostConfig` はページ共有・最初の 1 つ勝ちなので、値が食い違うと `warnOnConflict` が出る。
   既存の `profileFreshness` と同じ扱いで一貫している
+
+**「窓を 1 つ足すだけ」では済まない点に注意。** 現状の組み立ては
+`config.profileFreshness > 0 ? { 0: config.profileFreshness } : undefined` という
+三項演算 1 本（`packages/timeline-embed/src/lib/relay-host.ts:192`）で、そのまま kind 3 を
+足すと 2 つの壊れ方をする。
+
+- `profileFreshness = 0`（プロフィールは毎回上流へ）かつ `followsFreshness = 3600` のとき、
+  窓レコード全体が `undefined` になり kind 3 の窓も消える
+- `followsFreshness = 0` を `{ 3: 0 }` として渡すと `normalizeFreshnessWindows` が
+  **throw** し（`relay-options.ts:266-270`、窓は正の有限数のみ）、`relay.connect()` ごと
+  失敗してウィジェットが起動しない
+
+→ kind ごとに条件付きでレコードを組む形へ直す。`relay-host.ts:70-77` のコメントが
+まさにこの罠（「非正の窓はリレーが拒否する = 起動が落ちる。それは "無効化" の綴りとして
+驚きがある」）を既に説明している。`follows-freshness` の入力側も `parseFreshness`
+（`timeline-config.ts:92-106`）と同じ規約 —「負値は typo として警告して既定値、`0` は無効化」—
+に揃える。
 
 **副次的な注意**: `storageMaxSize` を設定した構成では kind 3 が退避されると毎回上流へ戻る。
 `cachePriority: { kinds: [3] }` で守れるが、現状 embed は `storageMaxSize` を設定していないので
@@ -213,10 +323,22 @@ authors が多いフィルタで効く。`doc/TODO.md` 行き。
 版比較（#50）が入っているので古い版での上書きはされないが、**新しい created_at を持つ
 偽の kind 3** は通る（署名検証が終わるまでは）。
 
+**そして §10 の割り切りが、この影響の寿命を延ばす。** 遅延検証は 5 秒間隔で走り
+（`DEFAULT_LAZY_VALIDATE_INTERVAL`、`relay-host.ts:38`）、不正イベントを実際にストレージから
+削除する（`lazy-validator.ts:152-155`）ので、**キャッシュの汚染そのものは数秒で自己修復する**。
+ところが §10 で「kind 3 の REQ は取得後に閉じる／authors は張り替えない」と決めているため、
+**偽リストから組まれた `authors` はセッション終了までそのまま残り、リレー側が偽装を検出して
+削除しても画面は訂正されない**。カード 1 枚なら消えて終わりだったものが、ここでは
+「間違った母集団のまま動き続ける」に変わる。
+
 - **今回**: README の制約として明記する
-- **将来**: `fetchValidationStatuses` で kind 3 の検証状態を引き、`pending` の間は
-  「フォローリストを検証中」を出す、あるいは `IMMEDIATELY` 検証を kind 3 だけに
-  かける経路を用意する。要検討
+- **要判断（初回スコープに入れるか）**: kind 3 の検証状態を `fetchValidationStatuses` で
+  ポーリングし、`invalid`（= 削除された）になったらタイムラインを畳んでエラーを出す。
+  既存の再ポーリング機構（`hasPending` を使う `refreshValidationStatuses`、
+  `timeline-controller.ts:476-506`）がそのまま流用できるので、追加コストは小さい。
+  上記のとおり「検出はされるのに表示は直らない」という状態は説明しづらいため、
+  **将来送りにせず初回で入れる方に傾く**
+- **将来**: `IMMEDIATELY` 検証を kind 3 だけにかける経路を用意する
 
 ## 12. プロフィール取得との相互作用
 
@@ -232,7 +354,8 @@ authors が多いフィルタで効く。`doc/TODO.md` 行き。
 
 ```ts
 follows?: {
-  status: 'resolving' | 'ready' | 'missing';
+  /** invalid = 署名検証に落ちて削除された（§11） */
+  status: 'resolving' | 'ready' | 'missing' | 'invalid';
   /** authors に採用した人数（self を含む） */
   count: number;
   /** max-follows で切り捨てた人数 */
@@ -245,6 +368,7 @@ follows?: {
 
 - `resolving`: 「フォローリストを取得しています…」
 - `missing`: 「フォローリストが見つかりませんでした」
+- `invalid`: 「フォローリストの署名検証に失敗しました」（タイムラインは畳む。§11）
 - `ready` かつ `truncated > 0`: `debug` のときだけ「N 人中 500 人を表示」
 
 ## 14. 属性一覧（案）
@@ -255,14 +379,18 @@ follows?: {
 | `relays` | 上流リレー URL（カンマ区切り） | なし |
 | `kinds` | 並べるイベント種別 | `1` |
 | `limit` | 取得件数 | `50` |
-| `max-follows` | authors に載せるフォロー先の上限 | `500`（要検討） |
+| `max-follows` | authors に載せるフォロー先の上限 | `500`（要検討・§7） |
 | `include-self` | 本人の投稿も含める | `true` |
-| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数 | `3600`（要検討） |
+| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数 | 要検討（§8） |
 | `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` | 既存 `<nostr-timeline>` と同じ | 同じ |
 
 `authors` と `filters` は**持たない**。`pubkey` と意味が衝突するため。
 
 `pubkey` の解釈は `filter-json.ts` の `toPubkeyHex` と同じ規則にする（hex / `npub` / `nprofile`）。
+ただし **`toPubkeyHex` は現在エクスポートされていない**（`filter-json.ts:56` に `export` が無く、
+`lib/index.ts:32` も `MAX_FILTERS` と `parseFilterList` しか再エクスポートしていない）ので、
+export を足すか共通モジュールへ切り出す必要がある。
+
 不正なら購読を張らず「pubkey が不正です」を表示する — 既定値で動かしようがない唯一の属性なので、
 他の属性の「警告して既定値で続行」とは扱いを変える。
 
@@ -282,16 +410,24 @@ follows?: {
 各段で build / typecheck / test を緑に保てる順に並べてある。
 
 1. `lib/follow-list.ts`（純粋関数）+ テスト
-2. `lib/one-shot-request.ts` を抽出し、**既存のプロフィール取得を先に載せ替える**（既存テスト緑を維持）
-3. `TimelineController.start()` に `FilterSource` を受けさせる
+2. `lib/one-shot-request.ts` を**新規に追加**（§5 のとおり、既存プロフィール取得の載せ替えは
+   同時にやらない。やるなら独立した変更として先に緑にする）
+3. `TimelineController.start()` に `FilterSource` を受けさせる（§4 の後始末込み）
 4. `TimelineView.svelte` を抽出し、`<nostr-follow-timeline>` を追加
-5. `relay-host.ts` に `followsFreshness`（`upstreamFreshness` の kind 3）
+5. `relay-host.ts` の `upstreamFreshness` 組み立てを kind ごとの条件付きへ直し、
+   `followsFreshness` を足す（§8）
 6. iframe ページの分岐・README・demo-site への追加
 7. e2e
 
 ## 17. 未解決（実装時に決める）
 
-- `max-follows` の既定値と、切り捨てを先頭から採るか末尾から採るか
-- `follows-freshness` の既定値（1 時間 / 24 時間）
+- **`max-follows` の既定値**。REQ サイズではなく「キャッシュ上の kind 1 蓄積量 × フォロー数」で
+  見積もる（§7）。切り捨てを先頭から採るか末尾から採るかも同時に決める
+- **タイムラインフィルタに `since` を入れるか**（§7）。全件 materialize の母数を直接削れるが、
+  入れると `isFreshnessEligible` を通らなくなるので kind 1 側限定
+- **`follows-freshness` の既定値**。`doc/cache-relay/upstream.md:186` の例は 600 秒。
+  決めた側にその例も揃える（§8）
+- **kind 3 の `invalid` 検出を初回スコープに入れるか**（§11）
+- **iframe を 1 ページの分岐にするか 2 ページに分けるか**（§3）
 - 要素名: `<nostr-follow-timeline>` / `<nostr-home-timeline>`
 - `truncated > 0` の表示を `debug` 限定にするか常時出すか
