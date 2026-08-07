@@ -1,4 +1,4 @@
-import { verifier } from 'rx-nostr-crypto';
+import { verifier } from '@rx-nostr/crypto';
 import { describe, expect, it } from 'vitest';
 import { EventSigner } from './event-signer.ts';
 

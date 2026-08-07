@@ -242,7 +242,7 @@ nostr-timeline {
 `dist/nostr-timeline.js` は約 **325 KB（gzip 約 108 KB）** の自己完結した IIFE です。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、
-署名検証用の `rx-nostr-crypto`、そしてリレー接続管理の `rx-nostr`（+ RxJS）で、
+署名検証用の `@rx-nostr/crypto`、そしてリレー接続管理の `rx-nostr`（+ RxJS）で、
 いずれもリレー本体とクライアント接続の機能に必要です。
 
 ## ライブラリとしての利用

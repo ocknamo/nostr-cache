@@ -4,7 +4,7 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
-import { seckeySigner } from 'rx-nostr-crypto';
+import { seckeySigner } from '@rx-nostr/crypto';
 import { type Mock, vi } from 'vitest';
 import { LazyValidator } from '../event/lazy-validator.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';

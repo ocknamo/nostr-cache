@@ -12,7 +12,7 @@
  *
  * This script intentionally uses only the public API of
  * `@nostr-cache/cache-relay` and `@nostr-cache/shared`, plus `ws` and
- * `rx-nostr-crypto`, all of which are already available in the workspace's
+ * `@rx-nostr/crypto`, all of which are already available in the workspace's
  * node_modules.
  */
 
@@ -20,7 +20,7 @@
 import 'fake-indexeddb/auto';
 import { DexieStorage, NostrCacheRelay, WebSocketServer } from '@nostr-cache/cache-relay';
 import { getRandomSecret } from '@nostr-cache/shared';
-import { seckeySigner } from 'rx-nostr-crypto';
+import { seckeySigner } from '@rx-nostr/crypto';
 import WebSocket from 'ws';
 
 const PORT = 4848;

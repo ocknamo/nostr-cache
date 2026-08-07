@@ -5,7 +5,7 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import 'fake-indexeddb/auto';
 import { getRandomSecret } from '@nostr-cache/shared';
-import { seckeySigner } from 'rx-nostr-crypto';
+import { seckeySigner } from '@rx-nostr/crypto';
 import { MessageHandler } from '../../core/message-handler.js';
 import { SubscriptionManager } from '../../core/subscription-manager.js';
 import { DexieStorage } from '../../storage/dexie-storage.js';

@@ -103,7 +103,7 @@ packages/cache-relay/
 │   ├── event/                         # イベント処理
 │   │   ├── event-handler.ts           # イベント処理
 │   │   ├── event-handler.spec.ts      # イベント処理の単体テスト
-│   │   ├── event-validator.ts         # イベント検証（rx-nostr-crypto で実装済み）
+│   │   ├── event-validator.ts         # イベント検証（@rx-nostr/crypto で実装済み）
 │   │   └── event-validator.spec.ts    # イベント検証の単体テスト
 │   ├── storage/                       # ストレージ
 │   │   ├── storage-adapter.ts         # ストレージアダプタインターフェース
@@ -149,7 +149,7 @@ packages/cache-relay/
 
 4. **メッセージハンドリングの実装** (2日)
    - MessageHandlerの実装
-   - EventHandlerの実装（検証は `rx-nostr-crypto` で実装済み）
+   - EventHandlerの実装（検証は `@rx-nostr/crypto` で実装済み）
    - 単体テストの作成と実行
 
 5. **サブスクリプション管理の実装** (2日)
@@ -241,7 +241,7 @@ interface NostrRelayOptions {
    - テスト環境ではfake-indexeddbを使用
 
 2. **イベント検証**
-   - `rx-nostr-crypto` の `verifier` を用いて実装済み（`event-validator.ts`）
+   - `@rx-nostr/crypto` の `verifier` を用いて実装済み（`event-validator.ts`）
    - `validateEventsType` で検証方式を切り替え可能（即時検証は実装済み、遅延検証 `LAZY` は未実装）
 
 3. **テスト戦略**
