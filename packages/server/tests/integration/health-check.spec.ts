@@ -9,7 +9,7 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
-import { findFreePortRange } from '../utils/free-port.js';
+import { findFreePortRange, reservePort } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 describe('NostrRelayServer health check endpoint', () => {
@@ -157,18 +157,22 @@ describe('NostrRelayServer health check disabled', () => {
   it('should not start the health endpoint when disabled', async () => {
     // 「そのポートで待ち受けていない」ことを確かめるには具体的な番号が要るので、
     // ヘルスチェック用のポートだけ空きを確保して明示する（WebSocket は port 0）。
-    const disabledHealthPort = await findFreePortRange(1);
+    // サーバー起動まで掴んだままにするのが要点で、先に解放してしまうと port 0 の
+    // WebSocket 側に OS が同じ番号を割り当てうる（fetch が通ってしまい偽陰性になる）。
+    const reserved = await reservePort();
     const server = new NostrRelayServer({
       port: 0,
-      healthCheck: { enabled: false, port: disabledHealthPort },
+      healthCheck: { enabled: false, port: reserved.port },
     });
     await server.start();
+    await reserved.release();
 
     try {
       expect(server.getHealthPort()).toBeNull();
+      expect(server.getPort()).not.toBe(reserved.port);
 
       // 無効化されているため接続は確立できない
-      await expect(fetch(`http://localhost:${disabledHealthPort}/health`)).rejects.toThrow();
+      await expect(fetch(`http://localhost:${reserved.port}/health`)).rejects.toThrow();
     } finally {
       await server.stop();
     }

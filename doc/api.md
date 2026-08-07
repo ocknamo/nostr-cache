@@ -369,8 +369,23 @@ interface TransportAdapter {
   onConnect(callback: (clientId: string) => void): void;
   onDisconnect(callback: (clientId: string) => void): void;
   getConnectionCount(): number;
+  // 実際にバインドされたポート。未起動時・ポートを持たない実装（エミュレータ）では null
+  // / The actually bound port; null when not listening or not applicable (emulator)
+  getBoundPort?(): number | null;
 }
 ```
+
+`WebSocketServer` はコンストラクタに `0` を渡すと OS が空きポートを割り当てます。
+実際のポートは `start()` 後に `getBoundPort()`（未起動なら `null`）または
+`getPort()`（未起動なら要求値）で読み戻せます。ポート番号を自前で選ぶ代わりに
+これを使うと、`EADDRINUSE` による衝突を原理的に避けられます。なお `getPort()` は
+`stop()` 後には要求値（動的なら `0`）に戻ります（最後にバインドされたポートは保持しません）。
+
+Passing `0` to the `WebSocketServer` constructor lets the OS assign a free port;
+read it back after `start()` via `getBoundPort()` (`null` when not listening) or
+`getPort()` (the requested value when not listening). Note that `getPort()` reverts
+to the requested value (`0` for dynamic) after `stop()` — it does not retain the
+last bound port.
 
 ---
 
@@ -401,6 +416,22 @@ await server.start();
 await server.stop();
 ```
 
+`port: 0` を指定すると OS が空きポートを割り当てます。実際のポートは `start()` 後に
+`getPort()` で読み戻してください。このとき `healthCheck.port` の既定は
+「WebSocket ポート + 1」ではなく `0`（同じく OS 任せ）になり、`getHealthPort()` で
+読み戻せます。テストのようにポート衝突（`EADDRINUSE`）を避けたい場面ではこの形を使います。
+
+With `port: 0` the OS assigns a free port; read it back after `start()` with
+`getPort()`. In that case `healthCheck.port` defaults to `0` (also OS-assigned)
+rather than "WebSocket port + 1", and is read back with `getHealthPort()`. Use this
+shape wherever a port collision (`EADDRINUSE`) would be flaky, such as in tests.
+
+```typescript
+const server = new NostrRelayServer({ port: 0 });
+await server.start();
+const port = server.getPort(); // 実際にバインドされたポート / the actually bound port
+```
+
 `relay.upstreamRelays`（+ `upstreamEoseTimeout` / `upstreamFreshness`）を指定すると、このサーバーは上流実リレー群の手前に挟まる透過
 キャッシュ（リード/ライトスルー）として動作します。
 
@@ -421,7 +452,7 @@ const cache = new NostrRelayServer({
 | `stop(): Promise<void>` | サーバーを停止。既定モードではストレージをクリア、永続モード（`dbPath` 指定時）ではデータを保持したまま DB を閉じる / Stops the server; clears storage in the default mode, keeps data and closes the DB in persistent mode (`dbPath`) |
 | `getConnectionCount(): number` | 現在の WebSocket 接続数 / Current WebSocket connection count |
 | `getEventCount(): Promise<number>` | 保存済みイベント数 / Number of stored events |
-| `getPort(): number` | 待ち受けポート / The configured port |
+| `getPort(): number` | 待ち受けポート。起動後は実際にバインドされたポート、未起動なら設定値を返す（`port: 0` で OS に空きポートを選ばせた場合はこれで読み戻す） / The listening port: the actually bound port once started, the configured value before that (use it to read back the OS-assigned port when constructed with `port: 0`) |
 | `setCachePriority(input?): void` | キャッシュ優先度設定（`storageOptions.cachePriority` と同形式。npub / hex 可）を実行時に差し替える。不正値は例外で現行設定を維持、`undefined` で解除。次回の退避・TTL スイープから反映 / Replaces the cache priority config at runtime (same shape as `storageOptions.cachePriority`; npub or hex). Invalid input throws and keeps the current config; `undefined` clears. Applies from the next eviction / TTL sweep |
 
 設定オプションの詳細は [`packages/server/README.md`](../packages/server/README.md) を参照してください。

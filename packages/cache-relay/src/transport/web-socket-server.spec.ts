@@ -187,20 +187,22 @@ describe('WebSocketServer', () => {
 
       await server.stop();
       expect(server.getBoundPort()).toBeNull();
+      // stop() 後は最後にバインドしたポートを保持せず、要求値（動的なら 0）に戻る
+      expect(server.getPort()).toBe(0);
     });
 
     it('should request a fresh dynamic port on restart instead of pinning the old one', async () => {
       // stop() 後に前回のポートを掴みにいくと、その間に他プロセスが取っていた
       // 場合に EADDRINUSE になる。要求ポート（0）は起動をまたいでも変わらない。
       await server.start();
-      const first = server.getBoundPort();
+      const first = server.getBoundPort() as number;
       expect(first).toBeGreaterThan(0);
       await server.stop();
 
       // 前回のポートを塞いだ状態で再起動しても、別ポートで問題なく上がる
-      const squatter = new WebSocketServer(first as number);
-      await squatter.start();
+      const squatter = new WebSocketServer(first);
       try {
+        await squatter.start();
         await server.start();
         expect(server.getBoundPort()).toBeGreaterThan(0);
         expect(server.getBoundPort()).not.toBe(first);

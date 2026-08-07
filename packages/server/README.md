@@ -130,7 +130,8 @@ interface NostrRelayServerOptions {
   // ヘルスチェック設定
   healthCheck?: {
     enabled?: boolean;  // 有効にするか（デフォルト: true）
-    port?: number;      // HTTP ポート（デフォルト: WebSocket ポート + 1）
+    port?: number;      // HTTP ポート（デフォルト: WebSocket ポート + 1。ただし
+                        // WebSocket ポートが 0 のときは同じく 0）
     path?: string;      // パス（デフォルト: '/health'）
   };
 }
@@ -158,6 +159,11 @@ curl http://localhost:8009/health
 
 `healthCheck.port: 0` を指定すると OS による動的ポート割り当てになり、実際に
 バインドされたポート番号は `getHealthPort()` で取得できます。
+
+WebSocket 側を `port: 0`（OS 任せ）で起動した場合、`healthCheck.port` の既定は
+「WebSocket ポート + 1」ではなく `0` になります。`0 + 1 = 1` は特権ポートで確保できず、
+OS が割り当てた実ポートの隣が空いている保証もないためです。この場合も実ポートは
+`getHealthPort()`（WebSocket 側は `getPort()`）で読み戻せます。
 
 > **注意（host バインドについて）**: `host` オプションはヘルスチェック用 HTTP サーバーには
 > 適用されますが、現状の WebSocket サーバー（`@nostr-cache/cache-relay` の `WebSocketServer`）は

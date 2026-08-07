@@ -138,7 +138,12 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     0（OS 任せ）のときは 0 にする。`0 + 1 = 1` は特権ポートで確保できず、
     OS が割り当てた実ポートの隣が空いている保証もないため
   - 番号そのものを検証する 2 テスト（「既定は +1」「無効時は listen しない」）だけは
-    `tests/utils/free-port.ts` の `findFreePortRange()` で空きポートを実測して使う
+    `tests/utils/free-port.ts` の `findFreePortRange()` / `reservePort()` で空きポートを
+    実測して使う
+  - e2e はサーバーを子プロセスで起動するため `PORT` に具体的な番号が要る。既存の
+    `e2e/src/spawn-server.ts` の `getFreePort()`（bind-to-0）は 1 ポートしか確保して
+    いなかったが、ヘルスチェックが `PORT + 1` を使う（＝1 サーバあたり 2 ポート消費）ため
+    連番の空きを確かめるようにした
 
 ## 優先度: 低（整備）
 

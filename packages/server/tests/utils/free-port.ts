@@ -42,6 +42,32 @@ function portOf(server: Server): number {
   return address.port;
 }
 
+/** {@link reservePort} が返す、掴んだままの空きポート。 */
+export interface ReservedPort {
+  /** 確保中のポート番号。 */
+  port: number;
+  /** ポートを解放する。 */
+  release(): Promise<void>;
+}
+
+/**
+ * 空きポートを 1 つ、`release()` を呼ぶまで**掴んだまま**返す。
+ *
+ * 「このポートでは誰も待ち受けていない」ことを検証するテスト向け。番号を取って
+ * すぐ解放すると、同じテスト内で `port: 0` で起動したサーバーに OS が同じ番号を
+ * 割り当ててしまい、検証が偽陰性で落ちうる。掴んだまま対象サーバーを起動すれば、
+ * 少なくとも自分自身がその番号を取ることはなくなる。
+ *
+ * @returns 確保したポートと、その解放関数
+ */
+export async function reservePort(): Promise<ReservedPort> {
+  const server = await listen(0);
+  return {
+    port: portOf(server),
+    release: () => close(server),
+  };
+}
+
 /**
  * 連続した `count` 個の空きポートの先頭を返す。
  *
@@ -59,6 +85,8 @@ function portOf(server: Server): number {
  * @returns 連番の先頭ポート番号
  */
 export async function findFreePortRange(count = 2, attempts = 20): Promise<number> {
+  let lastError: unknown;
+
   for (let attempt = 0; attempt < attempts; attempt++) {
     const held: Server[] = [];
     try {
@@ -70,8 +98,11 @@ export async function findFreePortRange(count = 2, attempts = 20): Promise<numbe
         held.push(await listen(start + offset));
       }
       return start;
-    } catch {
-      // 連番のどこかが埋まっていた（あるいは 65535 を超えた）。引き直す
+    } catch (error) {
+      // 連番のどこかが埋まっていた（あるいは 65535 を超えた）。引き直す。
+      // 打ち切ったときの調査用に最後の原因だけ残す（EADDRINUSE の引き直しと、
+      // RangeError のようなプログラミングエラーを取り違えないため）
+      lastError = error;
     } finally {
       // return するときも finally が先に走るので、呼び出し側が受け取る時点では
       // 確保していたポートはすべて解放されている
@@ -79,5 +110,9 @@ export async function findFreePortRange(count = 2, attempts = 20): Promise<numbe
     }
   }
 
-  throw new Error(`Could not find ${count} consecutive free ports after ${attempts} attempts`);
+  // ES2020 ターゲットのため Error の cause オプションは使えない。原因はメッセージに畳む
+  throw new Error(
+    `Could not find ${count} consecutive free ports after ${attempts} attempts` +
+      ` (last error: ${lastError instanceof Error ? lastError.message : String(lastError)})`
+  );
 }
