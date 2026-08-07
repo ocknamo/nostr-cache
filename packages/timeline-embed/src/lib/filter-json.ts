@@ -50,10 +50,15 @@ function isHex64(value: string): boolean {
  * of a client; the wire format is hex either way.
  *
  * @param value Raw entry from `authors` or `#p`
+ * Exported because `<nostr-follow-timeline>`'s `pubkey` attribute has to accept
+ * exactly the same spellings as an `authors` entry — an embedder copies one out
+ * of a client the same way they copy the other.
+ *
+ * @param value Raw entry from `authors`, `#p` or the `pubkey` attribute
  * @returns Lowercase hex, or `undefined` when it is neither hex nor a pubkey
  *   entity
  */
-function toPubkeyHex(value: string): string | undefined {
+export function toPubkeyHex(value: string): string | undefined {
   if (isHex64(value)) {
     return value.toLowerCase();
   }

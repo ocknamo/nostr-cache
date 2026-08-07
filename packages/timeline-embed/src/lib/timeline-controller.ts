@@ -43,6 +43,64 @@ const PROFILE_REQUEST_TIMEOUT_MS = 5000;
 /** Lazy validation runs in the background, so re-poll while anything is pending. */
 const VALIDATION_POLL_INTERVAL_MS = 5000;
 
+/**
+ * How many times a validation watch re-checks an event it has never seen
+ * stored before concluding it simply is not there.
+ *
+ * Deliveries are stored before they reach the client, so the first look should
+ * already find the event `pending` — but ingest and this poll are not
+ * synchronized, so a couple of retries keep a race from being reported as a
+ * forged event.
+ */
+const VALIDATION_WATCH_MAX_MISSES = 3;
+
+/** Progress of the two-stage follow-list resolution; see {@link FilterSource}. */
+export interface FollowsState {
+  /**
+   * `resolving` while the kind 3 fetch is in flight, `missing` when there was
+   * no usable follow list (no subscription is opened in that case), `invalid`
+   * when the relay's background verification deleted the list the authors were
+   * built from.
+   */
+  status: 'resolving' | 'ready' | 'missing' | 'invalid';
+  /** Authors on the timeline filter, including the subject when included. */
+  count: number;
+  /** Follow-list entries dropped by `max-follows`. */
+  truncated: number;
+}
+
+/**
+ * Everything a {@link FilterSource} is given to resolve its filters with.
+ *
+ * Deliberately narrow: the controller hands over a connection and a way to
+ * report progress, and stays ignorant of what the source is fetching or how it
+ * interprets it. Teaching the controller about NIP-02 instead would mean every
+ * test of follow-list parsing had to boot a relay first.
+ */
+export interface FilterSourceContext {
+  /** Connected relay link, for whatever the source needs to fetch. */
+  connection: RelayConnection;
+  /** Aborts on `stop()` / `suspend()`; check it after every await. */
+  signal: AbortSignal;
+  /** Publish resolution progress into {@link TimelineState.follows}. */
+  setFollows: (follows: FollowsState) => void;
+  /**
+   * Watch one event's signature verdict, and call back if the relay deletes it
+   * as invalid. Used for an event the timeline's whole author set rests on.
+   */
+  watchValidation: (eventId: string, onInvalid: () => void) => void;
+}
+
+/**
+ * Filters resolved at runtime, from data only a relay can supply.
+ *
+ * Sits between connect and subscribe, which is the only point where a REQ can
+ * be issued to work out what the real REQ should be. Returning an empty array
+ * means "do not subscribe at all" — the caller has decided there is nothing
+ * safe to ask for, and the controller must not invent a fallback filter.
+ */
+export type FilterSource = (context: FilterSourceContext) => Promise<Filter[]>;
+
 export interface TimelineState {
   status: ConnectionStatus;
   events: NostrEvent[];
@@ -52,6 +110,8 @@ export interface TimelineState {
   profiles: Map<string, Profile>;
   eose: boolean;
   error?: string;
+  /** Set only by a {@link FilterSource} that reports one; see {@link FollowsState}. */
+  follows?: FollowsState;
 }
 
 export interface TimelineControllerOptions {
@@ -92,6 +152,24 @@ export class TimelineController {
   private subSeq = 0;
   private validationFetchTimer?: ReturnType<typeof setTimeout>;
   private validationPollTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * Re-check timer for {@link watchValidation}.
+   *
+   * Kept apart from the two above because it is not tied to the current
+   * subscription: the event it watches was fetched before the subscription
+   * existed, and {@link subscribe} clearing it would end the watch. It is
+   * bounded by {@link filterSourceAbort} instead.
+   */
+  private validationWatchTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * Cancels an in-flight {@link FilterSource}.
+   *
+   * A source blocks for up to its own watchdog (5s), and `stop()` can land at
+   * any point in there — a changed attribute tears the widget's controller down
+   * without waiting. The subscriptions a source opens are its own, outside this
+   * class's profile bookkeeping, so nothing else would close them.
+   */
+  private readonly filterSourceAbort = new AbortController();
   private stopped = false;
   /** Whether the connection ever came up, so a later error means it was lost. */
   private connectedOnce = false;
@@ -150,10 +228,12 @@ export class TimelineController {
    * Boot the relay (if this is the first widget) and open the first
    * subscription.
    *
-   * @param filters NIP-01 filters for the timeline; they travel as one REQ, so
-   *   an event matching any of them lands in the same timeline
+   * @param source NIP-01 filters for the timeline — they travel as one REQ, so
+   *   an event matching any of them lands in the same timeline — or a
+   *   {@link FilterSource} that works them out from the relay once it is
+   *   connected. A source that resolves to no filters opens no subscription.
    */
-  async start(filters: Filter[]): Promise<void> {
+  async start(source: Filter[] | FilterSource): Promise<void> {
     try {
       this.relayHost = await acquireRelayHost(this.options.host);
     } catch (error) {
@@ -177,6 +257,35 @@ export class TimelineController {
     if (this.stopped) {
       return;
     }
+
+    if (typeof source !== 'function') {
+      this.subscribe(source);
+      return;
+    }
+
+    let filters: Filter[];
+    try {
+      filters = await source({
+        connection: this.connection,
+        signal: this.filterSourceAbort.signal,
+        setFollows: (follows) => this.applyFollows(follows),
+        watchValidation: (eventId, onInvalid) => this.watchValidation(eventId, onInvalid),
+      });
+    } catch (error) {
+      this.patch({ error: `購読フィルタの解決に失敗しました: ${message(error)}` });
+      return;
+    }
+    // Same rule as after every other await here: the widget may have been torn
+    // down while the source was waiting on a relay.
+    if (this.stopped) {
+      return;
+    }
+    // No filters means the source found nothing safe to ask for. Subscribing
+    // with a widened fallback is the one thing it must never turn into — see
+    // `follow-list.ts`. The source has already said why through `setFollows`.
+    if (filters.length === 0) {
+      return;
+    }
     this.subscribe(filters);
   }
 
@@ -198,6 +307,10 @@ export class TimelineController {
       this.currentSubId = null;
     }
     this.suspended = true;
+    // A filter source that is still resolving holds a subscription of its own,
+    // which would go on reading through to upstream and refilling the cache the
+    // caller is about to measure cold.
+    this.filterSourceAbort.abort();
     this.closeProfiles();
     this.clearTimers();
   }
@@ -209,6 +322,7 @@ export class TimelineController {
   async stop(): Promise<void> {
     this.stopped = true;
     this.signalStopped();
+    this.filterSourceAbort.abort();
     this.clearTimers();
     this.closeProfiles();
     if (this.currentSubId) {
@@ -462,6 +576,104 @@ export class TimelineController {
       this.profileSubs.delete(subId);
       this.connection.unsubscribe(subId);
     }
+  }
+
+  /**
+   * Publish what a {@link FilterSource} reported about its resolution.
+   *
+   * `invalid` is acted on rather than merely displayed: it means the event the
+   * timeline's authors were derived from failed verification and has been
+   * deleted, so the subscription is asking for a population somebody forged.
+   * Leaving it running would keep the wrong timeline on screen — and refilling
+   * with it — for as long as the widget is mounted, since the follow list is
+   * fetched once and never re-read.
+   */
+  private applyFollows(follows: FollowsState): void {
+    if (follows.status !== 'invalid') {
+      this.patch({ follows });
+      return;
+    }
+    if (this.currentSubId) {
+      this.connection.unsubscribe(this.currentSubId);
+      this.currentSubId = null;
+    }
+    this.patch({
+      follows,
+      events: [],
+      origins: new Map(),
+      validationStatuses: new Map(),
+      eose: false,
+    });
+  }
+
+  /**
+   * Poll one event's persisted verdict until it settles, reporting a deletion.
+   *
+   * Reuses the relay's own lazy-validation results (`getValidationStatus`), so
+   * nothing is verified here — the widget does no crypto. Only a transition
+   * *out of* `pending` counts as a deletion: `unknown` also means "never
+   * stored" and "evicted", so claiming forgery on the first sight of it would
+   * accuse the relay of an ingest race.
+   *
+   * Bounded by the same signal as the filter source that asked for it, so
+   * `suspend()` and `stop()` end the loop — including one that is mid-await.
+   *
+   * @param eventId Event whose verdict decides whether the timeline stands
+   * @param onInvalid Called once, if and when the relay deletes it
+   */
+  private watchValidation(eventId: string, onInvalid: () => void): void {
+    const { signal } = this.filterSourceAbort;
+    let sawPending = false;
+    let misses = 0;
+
+    const poll = async (): Promise<void> => {
+      const host = this.relayHost;
+      if (!host || this.stopped || signal.aborted) {
+        return;
+      }
+      let statuses: Map<string, ValidationStatus>;
+      try {
+        statuses = await fetchValidationStatuses(host.relay, [eventId]);
+      } catch {
+        // A failed lookup is not evidence of anything; try again.
+        schedule();
+        return;
+      }
+      if (this.stopped || signal.aborted) {
+        return;
+      }
+      const status = statuses.get(eventId);
+      if (status === 'validated') {
+        // Settled and genuine: nothing can move it from here.
+        return;
+      }
+      if (status === 'pending') {
+        sawPending = true;
+        schedule();
+        return;
+      }
+      if (sawPending) {
+        // It was in storage awaiting verification and now it is gone. The lazy
+        // validator deleting it is the only thing that does that here.
+        onInvalid();
+        return;
+      }
+      misses += 1;
+      if (misses < VALIDATION_WATCH_MAX_MISSES) {
+        schedule();
+      }
+    };
+
+    const schedule = (): void => {
+      clearTimeout(this.validationWatchTimer);
+      this.validationWatchTimer = setTimeout(() => {
+        this.validationWatchTimer = undefined;
+        void poll();
+      }, VALIDATION_POLL_INTERVAL_MS);
+    };
+    signal.addEventListener('abort', () => clearTimeout(this.validationWatchTimer), { once: true });
+
+    void poll();
   }
 
   /** Coalesce the lookups triggered by a burst of incoming events. */

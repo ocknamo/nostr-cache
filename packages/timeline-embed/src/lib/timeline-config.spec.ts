@@ -3,12 +3,19 @@ import {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
   configFromSearchParams,
+  followConfigFromSearchParams,
   parseDebug,
+  parseEnabled,
   parseFilter,
   parseFilters,
   parseFreshness,
+  parseKinds,
+  parseLimit,
+  parseMaxFollows,
+  parsePubkey,
   parseRelays,
   parseShowOriginAlias,
+  parseSinceDays,
 } from './timeline-config.ts';
 
 afterEach(() => {
@@ -280,5 +287,159 @@ describe('configFromSearchParams', () => {
     expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);
     expect(config.filters).toEqual([{ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT }]);
+  });
+});
+
+describe('parsePubkey', () => {
+  const HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
+  const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
+
+  it('accepts the spellings an embedder copies out of a client', () => {
+    expect(parsePubkey(HEX)).toBe(HEX);
+    expect(parsePubkey(NPUB)).toBe(HEX);
+    expect(parsePubkey(` ${NPUB} `)).toBe(HEX);
+  });
+
+  it('lowercases hex so the filter matches what the relay stores', () => {
+    expect(parsePubkey(HEX.toUpperCase())).toBe(HEX);
+  });
+
+  it('rejects anything that is not a pubkey, loudly', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Unlike every other attribute, this one has no default to fall back to:
+    // the caller has to stop rather than subscribe to something else.
+    expect(parsePubkey('nope')).toBeUndefined();
+    expect(
+      parsePubkey('note1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq')
+    ).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('treats an absent value as absent rather than invalid', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parsePubkey(undefined)).toBeUndefined();
+    expect(parsePubkey('  ')).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseKinds and parseLimit', () => {
+  it('fall back to the widget defaults', () => {
+    expect(parseKinds(undefined)).toEqual(DEFAULT_KINDS);
+    expect(parseKinds('')).toEqual(DEFAULT_KINDS);
+    expect(parseLimit(undefined)).toBe(DEFAULT_LIMIT);
+    expect(parseLimit('0')).toBe(DEFAULT_LIMIT);
+    expect(parseLimit('nope')).toBe(DEFAULT_LIMIT);
+  });
+
+  it('read what was given', () => {
+    expect(parseKinds('1, 6')).toEqual([1, 6]);
+    expect(parseLimit('20')).toBe(20);
+  });
+});
+
+describe('parseMaxFollows', () => {
+  it('reads a positive whole number', () => {
+    expect(parseMaxFollows('500')).toBe(500);
+  });
+
+  it('leaves the default in place for anything unusable', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Zero especially: "follow nobody" would leave the timeline with no authors
+    // at all, which is the one filter shape this widget must never send.
+    expect(parseMaxFollows('0')).toBeUndefined();
+    expect(parseMaxFollows('-1')).toBeUndefined();
+    expect(parseMaxFollows('1.5')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('says nothing when the attribute is simply absent', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseMaxFollows(undefined)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseSinceDays', () => {
+  it('converts whole days to seconds', () => {
+    expect(parseSinceDays('30')).toBe(30 * 86_400);
+  });
+
+  it('is off unless asked for', () => {
+    expect(parseSinceDays(undefined)).toBeUndefined();
+    expect(parseSinceDays('')).toBeUndefined();
+  });
+
+  it('warns and stays off for an unusable value', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseSinceDays('0')).toBeUndefined();
+    expect(parseSinceDays('-7')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('parseEnabled', () => {
+  it('is on unless explicitly turned off', () => {
+    expect(parseEnabled(undefined)).toBe(true);
+    expect(parseEnabled('')).toBe(true);
+    expect(parseEnabled('true')).toBe(true);
+    expect(parseEnabled('false')).toBe(false);
+  });
+
+  it('accepts a real boolean from a Svelte parent setting the property', () => {
+    expect(parseEnabled(false)).toBe(false);
+    expect(parseEnabled(true)).toBe(true);
+  });
+});
+
+describe('followConfigFromSearchParams', () => {
+  const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
+  const HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
+
+  it('reads the same options the custom element takes as attributes', () => {
+    const config = followConfigFromSearchParams(
+      new URLSearchParams(
+        `pubkey=${NPUB}&relays=wss://a.example&kinds=1&limit=20&max-follows=100&include-self=false&since-days=7&follows-freshness=900&profile-freshness=600&db-name=demo&debug=true`
+      )
+    );
+
+    expect(config).toEqual({
+      relays: ['wss://a.example'],
+      pubkey: HEX,
+      kinds: [1],
+      limit: 20,
+      maxFollows: 100,
+      includeSelf: false,
+      sinceSeconds: 7 * 86_400,
+      dbName: 'demo',
+      profileFreshness: 600,
+      followsFreshness: 900,
+      debug: true,
+      showAvatars: true,
+      showMedia: true,
+    });
+  });
+
+  it('leaves every optional setting to its default', () => {
+    const config = followConfigFromSearchParams(new URLSearchParams(''));
+
+    expect(config.pubkey).toBeUndefined();
+    expect(config.kinds).toEqual(DEFAULT_KINDS);
+    expect(config.limit).toBe(DEFAULT_LIMIT);
+    expect(config.maxFollows).toBeUndefined();
+    expect(config.includeSelf).toBe(true);
+    expect(config.sinceSeconds).toBeUndefined();
+    expect(config.followsFreshness).toBeUndefined();
+    expect(config.debug).toBe(false);
+  });
+
+  it('does not accept the deprecated show-origin alias', () => {
+    // A new element inherits no legacy spellings; `debug` is the only switch.
+    expect(followConfigFromSearchParams(new URLSearchParams('show-origin=true')).debug).toBe(false);
   });
 });

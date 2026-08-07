@@ -57,6 +57,19 @@
     `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"${freshnessAttr ? `\n  profile-freshness="${freshnessAttr}"` : ''}${debug ? '\n  debug' : ''}\n></nostr-timeline>`
   );
 
+  /**
+   * Subject for the live follow timeline below.
+   *
+   * Empty until someone pastes one: there is no sensible person to default to,
+   * and the element refuses to subscribe without a valid `pubkey` anyway —
+   * which is the point, since the only filter it could fall back to is the
+   * entire global feed.
+   */
+  let followPubkey = $state('');
+  const followSnippet = $derived(
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n></nostr-follow-timeline>`
+  );
+
   /** Bounds on the height the embed page may ask for. */
   const MIN_IFRAME_HEIGHT = 160;
   const MAX_IFRAME_HEIGHT = 800;
@@ -168,6 +181,54 @@
     </div>
   </div>
 
+  <h3 class="follow-heading">フォロータイムライン</h3>
+  <p class="mode-note">
+    <code>&lt;nostr-follow-timeline&gt;</code> は、指定した人が NIP-02（kind 3）でフォローしている
+    人たちの投稿を並べます。フィルタを書くのではなく<strong>人を 1 人指定する</strong>ので、
+    購読は「フォローリストを引く → その authors で購読する」の 2 段階になります。
+    フォローリストも replaceable としてキャッシュに載るため、2 回目以降のロードでは
+    上流に問い合わせずに即座に出ます。
+  </p>
+
+  <label class="follow-input">
+    <span>pubkey（npub / nprofile / hex）</span>
+    <input
+      type="text"
+      bind:value={followPubkey}
+      placeholder="npub1..."
+      spellcheck="false"
+      autocomplete="off"
+    />
+  </label>
+
+  {#if followPubkey.trim()}
+    <div class="live">
+      <nostr-follow-timeline
+        pubkey={followPubkey.trim()}
+        {relays}
+        {limit}
+        db-name={dbName}
+        profile-freshness={profileFreshness}
+        debug={debug ? 'true' : 'false'}
+      ></nostr-follow-timeline>
+    </div>
+  {:else}
+    <p class="footnote">pubkey を入れると、ここに実際のフォロータイムラインが出ます。</p>
+  {/if}
+
+  <div class="snippet">
+    <pre><code>{followSnippet}</code></pre>
+    <button class="secondary" onclick={() => copy(followSnippet)}>コピー</button>
+  </div>
+
+  <p class="footnote">
+    iframe で使う場合は<strong>別のページ</strong>です:
+    <code>{embedOrigin}embed/follow/?pubkey=npub1...&amp;relays=…</code>。
+    入口を分けているのは、この要素に <code>authors</code> も <code>filters</code> も
+    無いからです — 1 ページで両方を受けると、<code>?pubkey=…&amp;filters=…</code>
+    のような URL が「<code>filters</code> が黙って無視される」形で通ってしまいます。
+  </p>
+
   <p class="footnote">
     ページ内に複数の <code>&lt;nostr-timeline&gt;</code> を置いた場合、リレーは 1 つだけ起動して
     共有されます（購読はウィジェットごとに独立）。最初に mount されたウィジェットの設定が採用され、
@@ -235,6 +296,34 @@
     max-height: min(480px, 70vh);
     max-height: min(480px, 70dvh);
     overflow-y: auto;
+  }
+
+  .follow-heading {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+
+  .follow-input {
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  .follow-input span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-bottom: 4px;
+  }
+
+  .follow-input input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.85rem;
   }
 
   .snippet {

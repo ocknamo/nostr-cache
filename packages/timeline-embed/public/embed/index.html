@@ -33,57 +33,27 @@
       `filters` takes a URL-encoded JSON array of NIP-01 filters when the
       comma-separated attributes are not expressive enough, e.g.
         embed/?filters=%5B%7B%22kinds%22%3A%5B1%5D%2C%22limit%22%3A10%7D%5D
+
+      For a follow timeline, use `embed/follow/?pubkey=npub1...` instead — that
+      page mounts `<nostr-follow-timeline>`, which has no `authors` or `filters`.
     -->
     <script src="../nostr-timeline.js"></script>
+    <script src="./embed-host.js"></script>
     <script>
-      (function () {
-        var params = new URLSearchParams(location.search);
-        var timeline = document.createElement('nostr-timeline');
-
-        // Attribute names match the custom element's, so an iframe URL and a
-        // Web Component tag configure the widget the same way.
-        [
-          'relays',
-          'filters',
-          'kinds',
-          'authors',
-          'limit',
-          'db-name',
-          'profile-freshness',
-          'debug',
-          // Deprecated alias of `debug`; still forwarded so older embed URLs work.
-          'show-origin',
-          'show-avatars',
-          'show-media',
-        ].forEach(function (name) {
-          var value = params.get(name);
-          if (value !== null) {
-            timeline.setAttribute(name, value);
-          }
-        });
-
-        document.body.appendChild(timeline);
-
-        // Report our height so the embedding page can size the iframe to the
-        // content instead of guessing (see README for the listener snippet).
-        var lastHeight = 0;
-        function postHeight() {
-          var height = Math.ceil(document.documentElement.scrollHeight);
-          if (height === lastHeight) {
-            return;
-          }
-          lastHeight = height;
-          // targetOrigin '*' because the embedding origin is unknown by design.
-          // The payload is only a height, and the README's receiving snippet
-          // checks event.source before acting on it.
-          parent.postMessage({ type: 'nostr-timeline:height', height: height }, '*');
-        }
-
-        if (typeof ResizeObserver === 'function') {
-          new ResizeObserver(postHeight).observe(document.body);
-        }
-        window.addEventListener('load', postHeight);
-      })();
+      mountNostrEmbed('nostr-timeline', [
+        'relays',
+        'filters',
+        'kinds',
+        'authors',
+        'limit',
+        'db-name',
+        'profile-freshness',
+        'debug',
+        // Deprecated alias of `debug`; still forwarded so older embed URLs work.
+        'show-origin',
+        'show-avatars',
+        'show-media',
+      ]);
     </script>
   </body>
 </html>

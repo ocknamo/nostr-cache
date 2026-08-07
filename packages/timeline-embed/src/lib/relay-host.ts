@@ -55,6 +55,23 @@ export const DEFAULT_LAZY_VALIDATE_INTERVAL = 5;
  * calling {@link acquireRelayHost} directly.
  */
 export const DEFAULT_PROFILE_FRESHNESS = 86_400;
+/**
+ * How long a cached follow list (kind 3) is trusted before the relay re-asks
+ * upstream.
+ *
+ * `<nostr-follow-timeline>` resolves its authors by fetching the subject's
+ * kind 3 on every load, so without a window every visit spends an upstream
+ * round trip before the timeline REQ can even be built. kind 3 is replaceable,
+ * which is what makes it eligible for the same coordinate-based freshness gate
+ * profiles use.
+ *
+ * Ten minutes, matching the worked example in `doc/cache-relay/upstream.md`:
+ * follow lists change more often than display names, and the cost of being one
+ * window behind is a handful of authors missing from the timeline — not a wrong
+ * avatar that stays wrong for a day. Embedders can widen or disable it with
+ * `follows-freshness`.
+ */
+export const DEFAULT_FOLLOWS_FRESHNESS = 600;
 
 export interface RelayHostConfig {
   /** Upstream relay URLs (`wss://…`). Empty means a cache-only relay. */
@@ -76,6 +93,15 @@ export interface RelayHostConfig {
    * one as a typo, so negatives are a JS-caller-only spelling.
    */
   profileFreshness?: number;
+  /**
+   * Seconds a cached follow list (kind 3) is served without re-asking upstream.
+   *
+   * Same convention as {@link RelayHostConfig.profileFreshness}: zero or
+   * negative leaves kind 3 out of the window record entirely rather than being
+   * passed to the relay as a non-positive window, which the relay rejects
+   * outright — taking the whole widget's startup down with it.
+   */
+  followsFreshness?: number;
 }
 
 interface ResolvedConfig extends Required<RelayHostConfig> {}
@@ -119,7 +145,32 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
     interceptUrl: config.interceptUrl ?? DEFAULT_INTERCEPT_URL,
     lazyValidateInterval: config.lazyValidateInterval ?? DEFAULT_LAZY_VALIDATE_INTERVAL,
     profileFreshness: config.profileFreshness ?? DEFAULT_PROFILE_FRESHNESS,
+    followsFreshness: config.followsFreshness ?? DEFAULT_FOLLOWS_FRESHNESS,
   };
+}
+
+/**
+ * Build the relay's `upstreamFreshness` record one kind at a time.
+ *
+ * Deliberately not a single expression over the whole record: each kind's
+ * window is switched off independently, so `profileFreshness: 0` must leave
+ * kind 3's window standing (and vice versa). A non-positive window is *omitted*
+ * rather than passed through as `{ 3: 0 }` — `normalizeFreshnessWindows` throws
+ * on one, which would fail `relay.connect()` and stop the widget from starting
+ * at all. Turning a window off should cost an upstream REQ, not the embed.
+ *
+ * @returns The configured windows, or `undefined` when every kind is switched
+ *   off — which is how the relay spells "no freshness gate"
+ */
+function freshnessWindows(config: ResolvedConfig): Record<number, number> | undefined {
+  const windows: Record<number, number> = {};
+  if (config.profileFreshness > 0) {
+    windows[0] = config.profileFreshness;
+  }
+  if (config.followsFreshness > 0) {
+    windows[3] = config.followsFreshness;
+  }
+  return Object.keys(windows).length > 0 ? windows : undefined;
 }
 
 /**
@@ -186,10 +237,11 @@ async function connectHost(
     lazyValidateInterval: config.lazyValidateInterval,
     maxSubscriptions: 20,
     upstreamPool,
-    // Cache-first window for profiles: see DEFAULT_PROFILE_FRESHNESS. Kept here
-    // rather than in the timeline code so the "when do we re-check upstream"
-    // policy lives with the cache that answers it.
-    upstreamFreshness: config.profileFreshness > 0 ? { 0: config.profileFreshness } : undefined,
+    // Cache-first windows for profiles (kind 0) and follow lists (kind 3): see
+    // DEFAULT_PROFILE_FRESHNESS / DEFAULT_FOLLOWS_FRESHNESS. Kept here rather
+    // than in the timeline code so the "when do we re-check upstream" policy
+    // lives with the cache that answers it.
+    upstreamFreshness: freshnessWindows(config),
   });
 
   await relay.connect();

@@ -4,7 +4,11 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
-import { TimelineController, type TimelineState } from './timeline-controller.ts';
+import {
+  type FollowsState,
+  TimelineController,
+  type TimelineState,
+} from './timeline-controller.ts';
 
 /**
  * The controller is where the timeline subscription, the profile subscription
@@ -481,5 +485,148 @@ describe('TimelineController', () => {
     await controller.stop();
     await expect(controller.stop()).resolves.toBeUndefined();
     expect(getRelayHostRefCount()).toBe(0);
+  });
+
+  /**
+   * A filter source is the controller's only two-stage path: it issues a REQ of
+   * its own to work out what the real REQ should be. What matters here is what
+   * the controller does with the answer — above all, that "no filters" means no
+   * subscription rather than a widened one.
+   */
+  describe('with a filter source', () => {
+    it('subscribes with the filters the source resolved', async () => {
+      const { controller } = createController();
+
+      await controller.start(async () => [{ kinds: [1], limit: 7 }]);
+
+      await waitFor(
+        () => openSubscriptionIds(controller).includes(wireSubId('timeline-1')),
+        'the resolved subscription'
+      );
+      const timeline = openSubscriptions(controller).find(
+        (sub) => sub.id === wireSubId('timeline-1')
+      );
+      expect(timeline?.filters).toEqual([{ kinds: [1], limit: 7 }]);
+    });
+
+    it('opens no subscription at all when the source resolves to nothing', async () => {
+      const { controller } = createController();
+
+      await controller.start(async () => []);
+
+      // The regression this exists for: a source that found no follow list must
+      // not be turned into a filter the controller invented, because the only
+      // filter it could invent is "the entire global feed".
+      expect(openSubscriptionIds(controller)).toEqual([]);
+    });
+
+    it('gives the source a live connection to fetch with', async () => {
+      const { controller } = createController();
+      let connected: boolean | undefined;
+
+      await controller.start(async ({ connection }) => {
+        connected = connection.isConnected;
+        return [];
+      });
+
+      // The source runs between connect and subscribe precisely so it can issue
+      // a REQ of its own; a source handed a dead socket could not.
+      expect(connected).toBe(true);
+    });
+
+    it('publishes what the source reports about its resolution', async () => {
+      const { controller, states } = createController();
+
+      await controller.start(async ({ setFollows }) => {
+        setFollows({ status: 'resolving', count: 0, truncated: 0 });
+        setFollows({ status: 'ready', count: 3, truncated: 1 });
+        return [{ kinds: [1], limit: 10 }];
+      });
+
+      expect(states.at(-1)?.follows).toEqual({ status: 'ready', count: 3, truncated: 1 });
+      expect(states.some((state) => state.follows?.status === 'resolving')).toBe(true);
+    });
+
+    it('tears the timeline down when the source reports an invalid list', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
+      const { controller, states } = createController(dbName);
+      let report: ((follows: FollowsState) => void) | undefined;
+
+      await controller.start(async ({ setFollows }) => {
+        report = setFollows;
+        return [{ kinds: [1], limit: 10 }];
+      });
+      await waitFor(() => (states.at(-1)?.events.length ?? 0) === 1, 'the seeded event');
+
+      report?.({ status: 'invalid', count: 2, truncated: 0 });
+
+      // The event set was chosen by a list that turned out to be forged, so it
+      // is dropped rather than left on screen — and the subscription that would
+      // keep refilling it is closed.
+      expect(states.at(-1)?.events).toEqual([]);
+      expect(states.at(-1)?.follows?.status).toBe('invalid');
+      await waitFor(
+        () => !openSubscriptionIds(controller).includes(wireSubId('timeline-1')),
+        'the subscription to close'
+      );
+    });
+
+    it('reports a source that threw instead of subscribing to something else', async () => {
+      const { controller, states } = createController();
+
+      await controller.start(async () => {
+        throw new Error('boom');
+      });
+
+      expect(states.at(-1)?.error).toContain('boom');
+      expect(openSubscriptionIds(controller)).toEqual([]);
+    });
+
+    it('aborts the source when the controller is stopped mid-resolution', async () => {
+      const { controller } = createController();
+      let aborted: boolean | undefined;
+      let entered = false;
+      let release: (() => void) | undefined;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      // A source blocks for up to its own watchdog, and an attribute change
+      // tears the widget's controller down without waiting for it.
+      const started = controller.start(async ({ signal }) => {
+        entered = true;
+        await blocked;
+        aborted = signal.aborted;
+        return [{ kinds: [1], limit: 10 }];
+      });
+      await waitFor(() => entered, 'the source to start');
+      await controller.stop();
+      release?.();
+      await started;
+
+      expect(aborted).toBe(true);
+      // Nothing is subscribed with a filter resolved after the teardown.
+      expect(controller.host).toBeUndefined();
+    });
+
+    it('watches an event the source names and reports the relay deleting it', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      // Never stored, then reported as `unknown` — but the watch only calls
+      // back after seeing the event `pending`, so this must stay quiet rather
+      // than accusing a relay that simply never had it.
+      const { controller, states } = createController(dbName);
+      let invalidated = false;
+
+      await controller.start(async ({ watchValidation }) => {
+        watchValidation('never-stored', () => {
+          invalidated = true;
+        });
+        return [{ kinds: [1], limit: 10 }];
+      });
+      await waitFor(() => states.at(-1)?.eose === true, 'the subscription to settle');
+
+      expect(invalidated).toBe(false);
+    });
   });
 });

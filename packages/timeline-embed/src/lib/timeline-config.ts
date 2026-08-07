@@ -9,7 +9,7 @@
  */
 
 import type { Filter } from '@nostr-cache/shared';
-import { parseFilterList } from './filter-json.ts';
+import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 
 export const DEFAULT_LIMIT = 50;
 export const DEFAULT_KINDS = [1];
@@ -227,6 +227,119 @@ export function parseFilters(input: FilterInput): Filter[] {
 }
 
 /**
+ * Parse the `pubkey` attribute of `<nostr-follow-timeline>`.
+ *
+ * hex, `npub` and `nprofile` are all accepted, matching how `authors` entries
+ * are read. Unlike every other attribute here, an unusable value is *not*
+ * survivable: `pubkey` is the one input the widget cannot supply a default for,
+ * since there is no sensible follow list to fall back to. The caller reports it
+ * to the reader rather than subscribing to something else.
+ *
+ * @param value Raw attribute or query-parameter value
+ * @returns Lowercase hex, or `undefined` when the value is not a pubkey
+ */
+export function parsePubkey(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const hex = toPubkeyHex(value.trim());
+  if (!hex) {
+    console.warn(`[nostr-timeline] Invalid pubkey (expected hex, npub or nprofile): ${value}`);
+  }
+  return hex;
+}
+
+/**
+ * Parse a comma-separated `kinds` list, falling back to the widget's default.
+ *
+ * @param value Raw attribute or query-parameter value, e.g. `"1,6"`
+ * @returns The kinds to request; never empty
+ */
+export function parseKinds(value: string | null | undefined): number[] {
+  const kinds = parseNumberList(value);
+  return kinds.length > 0 ? kinds : DEFAULT_KINDS;
+}
+
+/**
+ * Parse a `limit`, falling back to the widget's default.
+ *
+ * @param value Raw attribute or query-parameter value
+ * @returns A positive event count
+ */
+export function parseLimit(value: string | null | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_LIMIT;
+}
+
+/**
+ * Parse `max-follows`, the cap on how many follow-list entries reach the
+ * timeline filter's `authors`.
+ *
+ * @param value Raw attribute or query-parameter value
+ * @returns A positive count, or `undefined` when nothing usable was given —
+ *   leaving the caller's default (`DEFAULT_MAX_FOLLOWS`) in place
+ */
+export function parseMaxFollows(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  // Zero is rejected rather than read as "follow nobody": that would leave the
+  // timeline with no authors at all, which is the one shape this widget must
+  // never subscribe with.
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[nostr-timeline] Ignoring invalid max-follows (expected a positive whole number): ${value}`
+    );
+    return undefined;
+  }
+  return parsed;
+}
+
+/**
+ * Parse `since-days`, the optional recency bound on a follow timeline.
+ *
+ * Off by default. It narrows the local query to a `created_at` range instead of
+ * materializing every cached row by the followed authors, but a quiet follow
+ * list then renders as an empty timeline with nothing to say why — so the
+ * embedder has to ask for it deliberately.
+ *
+ * @param value Raw attribute or query-parameter value, in whole days
+ * @returns Seconds to look back, or `undefined` for no bound
+ */
+export function parseSinceDays(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[nostr-timeline] Ignoring invalid since-days (expected a positive whole number of days): ${value}`
+    );
+    return undefined;
+  }
+  return parsed * 86_400;
+}
+
+/**
+ * Read a switch that is on unless explicitly turned off, the way
+ * `show-avatars` / `show-media` read.
+ *
+ * Booleans are accepted alongside strings for the same reason
+ * {@link parseDebug} accepts them: a Svelte parent setting the property rather
+ * than the attribute delivers a real boolean.
+ *
+ * @param value Raw attribute, property or query-parameter value
+ * @returns Whether the switch is on
+ */
+export function parseEnabled(value: string | boolean | null | undefined): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return value !== 'false';
+}
+
+/**
  * Read the widget config out of an iframe URL's query string, so
  * `embed/?relays=wss://nos.lol&kinds=1&limit=20` configures the same things the
  * custom element's attributes do.
@@ -256,6 +369,55 @@ export function configFromSearchParams(params: URLSearchParams): {
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
+    showAvatars: params.get('show-avatars') !== 'false',
+    showMedia: params.get('show-media') !== 'false',
+  };
+}
+
+export interface FollowTimelineConfig {
+  relays: string[];
+  /** Hex pubkey whose follows are shown, or `undefined` when unusable. */
+  pubkey: string | undefined;
+  kinds: number[];
+  limit: number;
+  /** Cap on follow-list entries; `undefined` keeps `DEFAULT_MAX_FOLLOWS`. */
+  maxFollows: number | undefined;
+  includeSelf: boolean;
+  /** Recency bound in seconds; `undefined` for none. */
+  sinceSeconds: number | undefined;
+  dbName: string | undefined;
+  /** Seconds a cached profile is served for; `undefined` keeps the default. */
+  profileFreshness: number | undefined;
+  /** Seconds a cached follow list is served for; `undefined` keeps the default. */
+  followsFreshness: number | undefined;
+  debug: boolean;
+  showAvatars: boolean;
+  showMedia: boolean;
+}
+
+/**
+ * Read `<nostr-follow-timeline>`'s config out of an iframe URL's query string.
+ *
+ * Its own function rather than a branch inside {@link configFromSearchParams},
+ * for the same reason the two elements are separate: a query string carries no
+ * element type, so a single entry point would have to guess which widget the
+ * caller meant from which parameters they wrote — and quietly drop the ones the
+ * guessed element does not have. Two entry points make the choice explicit,
+ * which is what the `embed/` and `embed/follow/` split is for.
+ */
+export function followConfigFromSearchParams(params: URLSearchParams): FollowTimelineConfig {
+  return {
+    relays: parseRelays(params.get('relays')),
+    pubkey: parsePubkey(params.get('pubkey')),
+    kinds: parseKinds(params.get('kinds')),
+    limit: parseLimit(params.get('limit')),
+    maxFollows: parseMaxFollows(params.get('max-follows')),
+    includeSelf: parseEnabled(params.get('include-self')),
+    sinceSeconds: parseSinceDays(params.get('since-days')),
+    dbName: params.get('db-name') ?? undefined,
+    profileFreshness: parseFreshness(params.get('profile-freshness')),
+    followsFreshness: parseFreshness(params.get('follows-freshness')),
+    debug: parseDebug(params.get('debug')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
   };

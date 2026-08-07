@@ -29,9 +29,26 @@ export type {
 } from './content-parts.ts';
 export { parseRefs } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';
-export { MAX_FILTERS, parseFilterList } from './filter-json.ts';
+export { MAX_FILTERS, parseFilterList, toPubkeyHex } from './filter-json.ts';
+export {
+  DEFAULT_MAX_FOLLOWS,
+  followFilterSource,
+  parseFollowList,
+  selectAuthors,
+} from './follow-list.ts';
+export type {
+  FollowFilterSourceOptions,
+  SelectAuthorsOptions,
+  SelectedAuthors,
+} from './follow-list.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
+export {
+  DEFAULT_ONE_SHOT_GRACE_MS,
+  DEFAULT_ONE_SHOT_TIMEOUT_MS,
+  fetchLatestReplaceable,
+} from './one-shot-request.ts';
+export type { OneShotRequestOptions } from './one-shot-request.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
 export type { Profile } from './profile.ts';
 export { RelayConnection } from './relay-connection.ts';
@@ -42,6 +59,7 @@ export type {
 } from './relay-connection.ts';
 export {
   DEFAULT_DB_NAME,
+  DEFAULT_FOLLOWS_FRESHNESS,
   DEFAULT_INTERCEPT_URL,
   DEFAULT_LAZY_VALIDATE_INTERVAL,
   DEFAULT_PROFILE_FRESHNESS,
@@ -55,16 +73,29 @@ export {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
   configFromSearchParams,
+  followConfigFromSearchParams,
   parseDebug,
+  parseEnabled,
   parseFilter,
   parseFilters,
   parseFreshness,
+  parseKinds,
+  parseLimit,
+  parseMaxFollows,
+  parsePubkey,
   parseRelays,
   parseShowOriginAlias,
+  parseSinceDays,
 } from './timeline-config.ts';
-export type { FilterInput } from './timeline-config.ts';
+export type { FilterInput, FollowTimelineConfig } from './timeline-config.ts';
 export { TimelineController } from './timeline-controller.ts';
-export type { TimelineControllerOptions, TimelineState } from './timeline-controller.ts';
+export type {
+  FilterSource,
+  FilterSourceContext,
+  FollowsState,
+  TimelineControllerOptions,
+  TimelineState,
+} from './timeline-controller.ts';
 export { DEFAULT_TIMELINE_CAP, insertEvent } from './timeline-utils.ts';
 export { fetchValidationStatuses, hasPending } from './validation-status.ts';
 export type { ValidationStatus } from './validation-status.ts';
