@@ -147,11 +147,22 @@ describe('Embeddable timeline E2E', () => {
 
   it('subscribes with the filters JSON in place of kinds/limit', async () => {
     page = await browser.newPage();
-    // `embedUrl` always sets `kinds=1`, which would render the two notes. Asking
-    // for kind 0 through `filters` and getting the profile event instead is what
-    // shows the JSON drove the REQ and took precedence.
+    // `embedUrl` always sets `kinds=1`, which would render the two notes and
+    // never the profile. So wait for the profile's content rather than for a
+    // card count: `waitForEventCount` returns the instant the count matches, and
+    // one card is also a passing moment on the way to the two notes — a
+    // `filters` attribute that was ignored entirely would still satisfy it.
     await page.goto(embedUrl({ relays: upstream.url, filters: '[{"kinds":[0],"limit":10}]' }));
-    await waitForEventCount(page, 1);
+    await page.waitForSelector('nostr-timeline .content:has-text("e2e_author")', {
+      timeout: TIMEOUT,
+    });
+
+    // The notes can no longer arrive once the kind 0 filter is the one in
+    // force, so their absence is a stable fact rather than a snapshot.
+    const contents = await page.$$eval('nostr-timeline .content', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+    expect(contents.some((content) => content.includes('from upstream'))).toBe(false);
   });
 
   it('subscribes with every filter in the JSON array', async () => {
