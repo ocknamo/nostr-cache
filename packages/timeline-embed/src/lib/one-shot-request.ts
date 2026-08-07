@@ -6,10 +6,13 @@
  * corrections to be right (`doc/plan/follow-timeline.md` §5). Written out a
  * second time, at least one of them would have been missed:
  *
- * 1. **EOSE does not mean "delivered".** On a read-through the relay emits EOSE
- *    as soon as the upstream pool reports end-of-stored, without waiting for the
- *    events it is still ingesting. Closing on EOSE therefore throws away the
- *    very event that was just fetched — hence the grace period.
+ * 1. **EOSE did not mean "delivered".** The relay used to emit EOSE as soon as
+ *    the upstream pool reported end-of-stored, without waiting for the events it
+ *    was still ingesting, so closing on EOSE threw away the very event that had
+ *    just been fetched. That was a defect in `UpstreamCoordinator`, since fixed
+ *    — `flushEose` now waits for its ingest chain — which is why
+ *    {@link DEFAULT_ONE_SHOT_GRACE_MS} is zero. The knob remains for relays
+ *    that are not ours.
  * 2. **The first event is not necessarily the newest.** Two upstream relays can
  *    each answer with their own copy of a replaceable event, in either order, so
  *    the winner is decided by `created_at` rather than by arrival.
@@ -27,10 +30,19 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { RelayConnection } from './relay-connection.ts';
 
 /**
- * How long the subscription stays open after EOSE, waiting for an upstream
- * fetch that is still being ingested. Mirrors the profile lookup's grace.
+ * How long the subscription stays open after EOSE.
+ *
+ * Zero, because the relay now orders EOSE after the events it has accepted:
+ * `UpstreamCoordinator.flushEose` waits for its ingest chain, so "end of
+ * stored" means every stored event really has been delivered. The window this
+ * used to hold open was covering a defect in the relay, not something NIP-01
+ * requires a client to tolerate — and it delayed every follow timeline's first
+ * paint by half a second.
+ *
+ * Kept as a knob rather than deleted: `RelayConnection` can be pointed at any
+ * relay, and a third-party one may still release EOSE early.
  */
-export const DEFAULT_ONE_SHOT_GRACE_MS = 500;
+export const DEFAULT_ONE_SHOT_GRACE_MS = 0;
 /**
  * Hard deadline on one lookup.
  *

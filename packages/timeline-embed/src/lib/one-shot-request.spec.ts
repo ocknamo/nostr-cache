@@ -67,15 +67,29 @@ describe('fetchLatestReplaceable', () => {
     expect(await settled).toBe(event);
   });
 
-  it('keeps listening after EOSE, because EOSE is not "delivered"', async () => {
+  it('closes on EOSE by default, because our relay orders it after delivery', async () => {
     const fake = fakeConnection();
 
     const settled = fetchLatestReplaceable(fake.connection, FILTER);
-    // A read-through relay emits EOSE the moment the upstream pool reports
-    // end-of-stored, without waiting for the events it is still ingesting.
-    // Closing here would throw away the very event that was just fetched.
+    fake.handlers()?.onEvent(makeEvent({ id: 'e1', kind: 3 }));
     fake.handlers()?.onEose?.();
-    await vi.advanceTimersByTimeAsync(DEFAULT_ONE_SHOT_GRACE_MS - 1);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // `UpstreamCoordinator.flushEose` waits for its ingest chain, so "end of
+    // stored" really does mean everything stored has been delivered. Holding
+    // the subscription open past it would just delay the first paint.
+    expect((await settled)?.id).toBe('e1');
+    expect(fake.closed).toEqual([fake.subId()]);
+  });
+
+  it('keeps listening past EOSE when a grace is asked for', async () => {
+    const fake = fakeConnection();
+
+    // The escape hatch for a third-party relay that releases EOSE before the
+    // events it has accepted — which is what ours used to do.
+    const settled = fetchLatestReplaceable(fake.connection, FILTER, { graceMs: 500 });
+    fake.handlers()?.onEose?.();
+    await vi.advanceTimersByTimeAsync(499);
     fake.handlers()?.onEvent(makeEvent({ id: 'late', kind: 3 }));
     await vi.advanceTimersByTimeAsync(1);
 

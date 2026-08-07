@@ -28,10 +28,15 @@ const VALIDATION_FETCH_DEBOUNCE_MS = 200;
  */
 const MAX_CONCURRENT_PROFILE_REQUESTS = 4;
 /**
- * How long a profile lookup stays open after EOSE, waiting for an upstream
- * fetch that is still being ingested. See {@link TimelineController.finishAfterEose}.
+ * How long a profile lookup stays open after EOSE.
+ *
+ * Zero: the relay orders EOSE after the events it has accepted
+ * (`UpstreamCoordinator.flushEose` waits for its ingest chain), so there is
+ * nothing left in flight to wait for. This was 500ms while that was untrue, and
+ * every visible author's card paid it on a cold cache.
+ * See {@link TimelineController.finishAfterEose}.
  */
-const PROFILE_EOSE_GRACE_MS = 500;
+const PROFILE_EOSE_GRACE_MS = 0;
 /**
  * Hard deadline on a single profile lookup.
  *
@@ -116,6 +121,14 @@ export interface TimelineControllerOptions {
   host?: RelayHostConfig;
   /** Cap on events held in the timeline. */
   maxEvents?: number;
+  /**
+   * How long a profile lookup stays open after EOSE, in milliseconds.
+   *
+   * Zero by default — see {@link PROFILE_EOSE_GRACE_MS}. Raise it when talking
+   * to a relay that releases EOSE before the events it has accepted; specs also
+   * use it to give themselves a subscription they can observe.
+   */
+  profileEoseGraceMs?: number;
   /**
    * Seconds between validation re-checks, as milliseconds.
    *
@@ -512,14 +525,14 @@ export class TimelineController {
   }
 
   /**
-   * Give an upstream fetch a moment to land, then close the lookup.
+   * Close the lookup once EOSE says there is nothing more.
    *
-   * EOSE does not mean "everything has been delivered": on a read-through the
-   * relay sends it as soon as the upstream pool reports end-of-stored, without
-   * waiting for the events it is still ingesting (`UpstreamCoordinator` runs
-   * ingest on a promise chain and drops deliveries once the subscription is
-   * closed). Closing the instant EOSE arrives therefore threw away the very
-   * profile that had just been fetched.
+   * Deferred by a task rather than closed inline, so a delivery already queued
+   * on the transport still lands. The 500ms this used to wait was covering a
+   * relay that released EOSE before the events it had accepted
+   * (`UpstreamCoordinator` ingests on a promise chain and drops deliveries once
+   * the subscription is closed); `flushEose` now waits for that chain, so EOSE
+   * genuinely means "delivered".
    *
    * @param subId Subscription that reached EOSE
    */
@@ -528,7 +541,10 @@ export class TimelineController {
     if (!entry || entry.timer) {
       return;
     }
-    entry.timer = setTimeout(() => this.finishProfileRequest(subId), PROFILE_EOSE_GRACE_MS);
+    entry.timer = setTimeout(
+      () => this.finishProfileRequest(subId),
+      this.options.profileEoseGraceMs ?? PROFILE_EOSE_GRACE_MS
+    );
   }
 
   /**

@@ -25,9 +25,19 @@ describe('TimelineController', () => {
   const seeded: RelayHost[] = [];
   const originalWebSocket = globalThis.WebSocket;
 
+  /**
+   * Milliseconds a profile lookup is held open after EOSE, for the specs that
+   * need to catch one in flight.
+   *
+   * Production closes on EOSE (the relay orders it after the events it has
+   * accepted), which leaves no window to observe. A spec asserting "this path
+   * closes the subscription" has to be given one to close.
+   */
+  const OBSERVABLE_GRACE_MS = 500;
+
   function createController(
     dbName = `controller-${crypto.randomUUID()}`,
-    validationPollIntervalMs?: number
+    options: { validationPollIntervalMs?: number; profileEoseGraceMs?: number } = {}
   ): {
     controller: TimelineController;
     states: TimelineState[];
@@ -35,7 +45,7 @@ describe('TimelineController', () => {
     const states: TimelineState[] = [];
     const controller = new TimelineController({
       host: { dbName },
-      validationPollIntervalMs,
+      ...options,
       onChange: (state) => states.push(state),
     });
     controllers.push(controller);
@@ -171,7 +181,7 @@ describe('TimelineController', () => {
   it('closes both subscriptions on suspend', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
-    const { controller } = createController(dbName);
+    const { controller } = createController(dbName, { profileEoseGraceMs: OBSERVABLE_GRACE_MS });
     await controller.start([{ kinds: [1], limit: 10 }]);
     // Wait for the profile subscription to exist, or the assertion below would
     // hold just as well against a suspend() that closes nothing.
@@ -242,7 +252,7 @@ describe('TimelineController', () => {
   it('asks for one author per subscription', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
-    const { controller } = createController(dbName);
+    const { controller } = createController(dbName, { profileEoseGraceMs: OBSERVABLE_GRACE_MS });
     await controller.start([{ kinds: [1], limit: 10 }]);
 
     controller.requestProfile('alice');
@@ -260,7 +270,7 @@ describe('TimelineController', () => {
   });
 
   it('opens no lookup while suspended, and resumes with the next filter', async () => {
-    const { controller } = createController();
+    const { controller } = createController(undefined, { profileEoseGraceMs: OBSERVABLE_GRACE_MS });
     await controller.start([{ kinds: [1], limit: 10 }]);
 
     controller.suspend();
@@ -277,7 +287,7 @@ describe('TimelineController', () => {
   });
 
   it('gives a slot back when the relay answers a lookup with nothing at all', async () => {
-    const { controller } = createController();
+    const { controller } = createController(undefined, { profileEoseGraceMs: OBSERVABLE_GRACE_MS });
     await controller.start([{ kinds: [1], limit: 10 }]);
     // A REQ the relay refuses gets a NOTICE and no EOSE or CLOSED — that is
     // what a storage read failure or the subscription cap looks like from here.
@@ -305,7 +315,7 @@ describe('TimelineController', () => {
   }, 10000);
 
   it('ignores a repeat request for an author already asked about', async () => {
-    const { controller } = createController();
+    const { controller } = createController(undefined, { profileEoseGraceMs: OBSERVABLE_GRACE_MS });
     await controller.start([{ kinds: [1], limit: 10 }]);
 
     // Synchronous, so neither lookup can have finished in between: the same
@@ -457,7 +467,7 @@ describe('TimelineController', () => {
   it('closes the profile subscription on stop', async () => {
     const dbName = `controller-${crypto.randomUUID()}`;
     await seedCache(dbName, [makeEvent({ id: 'e1', pubkey: 'alice' })]);
-    const { controller } = createController(dbName);
+    const { controller } = createController(dbName, { profileEoseGraceMs: OBSERVABLE_GRACE_MS });
     await controller.start([{ kinds: [1], limit: 10 }]);
     controller.requestProfile('alice');
     await waitFor(() => profileSubscription(controller) !== undefined, 'the profile subscription');
@@ -634,7 +644,7 @@ describe('TimelineController', () => {
         dbName: string,
         eventId: string
       ): Promise<{ controller: TimelineController; dropped: () => boolean }> {
-        const { controller } = createController(dbName, POLL_MS);
+        const { controller } = createController(dbName, { validationPollIntervalMs: POLL_MS });
         let dropped = false;
         await controller.start(async ({ watchValidation }) => {
           watchValidation(eventId, () => {

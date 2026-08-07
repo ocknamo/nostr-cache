@@ -282,7 +282,25 @@ export class UpstreamCoordinator {
     this.flushEose(upstreamSubId);
   }
 
-  /** Send the client EOSE exactly once (from aggregated EOSE or timeout). */
+  /**
+   * Send the client EOSE exactly once (from aggregated EOSE or timeout).
+   *
+   * Waits for the ingest chain first. Upstream events are delivered only after
+   * their storage write resolves ({@link handleUpstreamEvent}), while EOSE has
+   * no such wait — so releasing it immediately lets it overtake events the
+   * relay has already accepted and is about to deliver. NIP-01 puts those
+   * before EOSE, and a one-shot client that closes on EOSE (rx-nostr's oneshot
+   * strategy, nostr-tools' `get`) never receives them at all: the chain drops
+   * every queued delivery once `closed` is set.
+   *
+   * That is the case this class exists for — see the "so one-shot clients see
+   * upstream results before end of stored" note at the top of the file.
+   *
+   * The chain is captured as it stands rather than re-read: anything arriving
+   * after upstream's EOSE is a real-time event, which belongs *after* EOSE.
+   * `eoseSent` is still set synchronously so the aggregated EOSE and the
+   * timeout cannot both fire one.
+   */
   private flushEose(upstreamSubId: string): void {
     const state = this.subs.get(upstreamSubId);
     if (!state || state.eoseSent) {
@@ -290,7 +308,15 @@ export class UpstreamCoordinator {
     }
     state.eoseSent = true;
     this.clearEoseTimer(state);
-    this.deps.sendEose(state.clientId, state.subscriptionId);
+    // The chain never rejects — every step catches its own ingest and delivery
+    // failures — so this settles even when a backfill fails.
+    const delivered = state.ingestChain;
+    void delivered.then(() => {
+      if (state.closed) {
+        return;
+      }
+      this.deps.sendEose(state.clientId, state.subscriptionId);
+    });
   }
 
   /** Add an id to the dedup set, evicting the oldest when the cap is exceeded. */
