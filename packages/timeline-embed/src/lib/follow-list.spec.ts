@@ -348,7 +348,7 @@ describe('followFilterSource', () => {
     expect(watched).toEqual([{ eventId: 'follow-list', onInvalid: expect.any(Function) }]);
 
     watched[0].onInvalid();
-    expect(reported.at(-1)).toEqual({ status: 'invalid', count: 1, truncated: 0 });
+    expect(reported.at(-1)).toEqual({ status: 'dropped', count: 1, truncated: 0 });
   });
 
   it('subscribes to nothing when it is aborted before it starts', async () => {

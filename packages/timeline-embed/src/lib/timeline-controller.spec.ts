@@ -25,13 +25,17 @@ describe('TimelineController', () => {
   const seeded: RelayHost[] = [];
   const originalWebSocket = globalThis.WebSocket;
 
-  function createController(dbName = `controller-${crypto.randomUUID()}`): {
+  function createController(
+    dbName = `controller-${crypto.randomUUID()}`,
+    validationPollIntervalMs?: number
+  ): {
     controller: TimelineController;
     states: TimelineState[];
   } {
     const states: TimelineState[] = [];
     const controller = new TimelineController({
       host: { dbName },
+      validationPollIntervalMs,
       onChange: (state) => states.push(state),
     });
     controllers.push(controller);
@@ -559,13 +563,13 @@ describe('TimelineController', () => {
       });
       await waitFor(() => (states.at(-1)?.events.length ?? 0) === 1, 'the seeded event');
 
-      report?.({ status: 'invalid', count: 2, truncated: 0 });
+      report?.({ status: 'dropped', count: 2, truncated: 0 });
 
       // The event set was chosen by a list that turned out to be forged, so it
       // is dropped rather than left on screen — and the subscription that would
       // keep refilling it is closed.
       expect(states.at(-1)?.events).toEqual([]);
-      expect(states.at(-1)?.follows?.status).toBe('invalid');
+      expect(states.at(-1)?.follows?.status).toBe('dropped');
       await waitFor(
         () => !openSubscriptionIds(controller).includes(wireSubId('timeline-1')),
         'the subscription to close'
@@ -610,23 +614,137 @@ describe('TimelineController', () => {
       expect(controller.host).toBeUndefined();
     });
 
-    it('watches an event the source names and reports the relay deleting it', async () => {
-      const dbName = `controller-${crypto.randomUUID()}`;
-      // Never stored, then reported as `unknown` — but the watch only calls
-      // back after seeing the event `pending`, so this must stay quiet rather
-      // than accusing a relay that simply never had it.
-      const { controller, states } = createController(dbName);
-      let invalidated = false;
+    /**
+     * The watch behind `follows.status === 'dropped'` (design §11), driven
+     * through the real relay rather than by calling its callback directly.
+     *
+     * Every other spec around this stubs `watchValidation` or invokes
+     * `setFollows` itself, which leaves the loop — the `pending` sighting, the
+     * re-poll, the storage read — able to break without a single test noticing.
+     * These drive `storage` and let the poller reach its own conclusion.
+     */
+    describe('validation watch', () => {
+      /** Wait past enough poll intervals for the watch to reach a verdict. */
+      const WATCH_TIMEOUT_MS = 5000;
 
-      await controller.start(async ({ watchValidation }) => {
-        watchValidation('never-stored', () => {
-          invalidated = true;
+      /** Fast enough that the misses are spent in well under a second. */
+      const POLL_MS = 20;
+
+      async function startWatch(
+        dbName: string,
+        eventId: string
+      ): Promise<{ controller: TimelineController; dropped: () => boolean }> {
+        const { controller } = createController(dbName, POLL_MS);
+        let dropped = false;
+        await controller.start(async ({ watchValidation }) => {
+          watchValidation(eventId, () => {
+            dropped = true;
+          });
+          return [{ kinds: [1], limit: 10 }];
         });
-        return [{ kinds: [1], limit: 10 }];
-      });
-      await waitFor(() => states.at(-1)?.eose === true, 'the subscription to settle');
+        return { controller, dropped: () => dropped };
+      }
 
-      expect(invalidated).toBe(false);
+      it('reports an event the relay deleted after holding it', async () => {
+        const dbName = `controller-${crypto.randomUUID()}`;
+        // Stored and unvalidated — exactly the state a freshly ingested kind 3
+        // is in while lazy validation has yet to reach it.
+        await seedCache(dbName, [makeEvent({ id: 'follows-1', kind: 3, pubkey: 'alice' })]);
+        const { dropped } = await startWatch(dbName, 'follows-1');
+
+        // The watch has to see it `pending` first, so let a poll land before
+        // taking it away; otherwise this would pass on the never-stored path.
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS * 2));
+        expect(dropped()).toBe(false);
+
+        const host = await acquireRelayHost({ dbName });
+        seeded.push(host);
+        await host.storage.deleteEvent('follows-1');
+
+        await waitFor(dropped, 'the deletion to be reported', WATCH_TIMEOUT_MS);
+      });
+
+      it('reports an event that never reaches storage at all', async () => {
+        const dbName = `controller-${crypto.randomUUID()}`;
+        const { dropped } = await startWatch(dbName, 'never-stored');
+
+        // Waiting for a `pending` sighting before concluding anything would
+        // look safer, but lazy validation runs every 5s and can delete a forged
+        // event before the first poll — leaving `unknown` from the outset and a
+        // timeline built on it running for the rest of the session.
+        await waitFor(dropped, 'the absence to be reported', WATCH_TIMEOUT_MS);
+      });
+
+      it('stays quiet for an event the relay has validated', async () => {
+        const dbName = `controller-${crypto.randomUUID()}`;
+        await seedCache(dbName, [makeEvent({ id: 'follows-2', kind: 3, pubkey: 'alice' })]);
+        const host = await acquireRelayHost({ dbName });
+        seeded.push(host);
+        await host.storage.markValidated(['follows-2']);
+
+        const { dropped } = await startWatch(dbName, 'follows-2');
+
+        // `validated` is terminal and is the question §11 actually asks: the
+        // relay checked the signature and it held.
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS * 10));
+        expect(dropped()).toBe(false);
+      });
+
+      it('ends the watch when the controller is stopped', async () => {
+        const dbName = `controller-${crypto.randomUUID()}`;
+        const { controller, dropped } = await startWatch(dbName, 'never-stored');
+
+        await controller.stop();
+        // Long enough that the misses would have been exhausted had the watch
+        // survived its controller.
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS * 10));
+
+        expect(dropped()).toBe(false);
+      });
+    });
+
+    it('re-arms the filter source after a suspend so the controller can resume', async () => {
+      const { controller } = createController();
+
+      await controller.start(async () => [{ kinds: [1], limit: 10 }]);
+      controller.suspend();
+      controller.applyFilter([{ kinds: [1], limit: 10 }]);
+
+      // `suspend()` aborts the source's signal; reusing that same controller
+      // afterwards would hand every later source a signal that is already spent,
+      // so a resolution could never complete and its watch would be born dead.
+      const abort = (controller as unknown as { filterSourceAbort: AbortController })
+        .filterSourceAbort;
+
+      expect(abort.signal.aborted).toBe(false);
+    });
+
+    it('drops the resolution state on suspend rather than stranding it', async () => {
+      const { controller, states } = createController();
+
+      await controller.start(async ({ setFollows }) => {
+        setFollows({ status: 'resolving', count: 0, truncated: 0 });
+        return [];
+      });
+      expect(states.at(-1)?.follows?.status).toBe('resolving');
+
+      controller.suspend();
+
+      // The source that was going to replace `resolving` is gone, so leaving it
+      // there would strand the widget on "フォローリストを取得しています…".
+      expect(states.at(-1)?.follows).toBeUndefined();
+    });
+
+    it('clears the resolution state when the source throws', async () => {
+      const { controller, states } = createController();
+
+      await controller.start(async ({ setFollows }) => {
+        setFollows({ status: 'resolving', count: 0, truncated: 0 });
+        throw new Error('boom');
+      });
+
+      expect(states.at(-1)?.error).toContain('boom');
+      expect(states.at(-1)?.follows?.status).toBe('missing');
     });
   });
 });

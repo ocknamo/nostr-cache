@@ -66,6 +66,16 @@
    * entire global feed.
    */
   let followPubkey = $state('');
+  /**
+   * Whether the box holds something long enough to be a pubkey at all.
+   *
+   * A shape check, not validation — the element does the real parse. It is here
+   * so a half-typed npub is not handed over on every keystroke, which would put
+   * one "Invalid pubkey" warning per character into the console.
+   */
+  const followPubkeyReady = $derived(
+    /^[0-9a-fA-F]{64}$/.test(followPubkey.trim()) || /^n(pub|profile)1\w{20,}$/.test(followPubkey.trim())
+  );
   const followSnippet = $derived(
     `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n></nostr-follow-timeline>`
   );
@@ -201,7 +211,7 @@
     />
   </label>
 
-  {#if followPubkey.trim()}
+  {#if followPubkeyReady}
     <div class="live">
       <nostr-follow-timeline
         pubkey={followPubkey.trim()}
@@ -213,7 +223,9 @@
       ></nostr-follow-timeline>
     </div>
   {:else}
-    <p class="footnote">pubkey を入れると、ここに実際のフォロータイムラインが出ます。</p>
+    <p class="footnote">
+      pubkey を入れると、ここに実際のフォロータイムラインが出ます（hex / npub / nprofile）。
+    </p>
   {/if}
 
   <div class="snippet">

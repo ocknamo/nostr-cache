@@ -136,7 +136,7 @@
         // than this widget pinning one — which also keeps two widgets that both
         // omit the attribute from looking like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
-        followsFreshness: parseFreshness(followsFreshness),
+        followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
       },
       onChange: (next) => {
         state = next;

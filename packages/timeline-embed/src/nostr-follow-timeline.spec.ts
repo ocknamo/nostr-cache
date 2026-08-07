@@ -220,6 +220,30 @@ describe('<nostr-follow-timeline> custom element', () => {
     expect(quiet.shadowRoot?.textContent).not.toContain('人を表示しています');
   });
 
+  it('leaves no follow-list subscription behind when removed mid-resolution', async () => {
+    const dbName = `follow-${crypto.randomUUID()}`;
+    await seedCache(dbName, [followList([FRIEND])]);
+    const element = mount({ pubkey: SUBJECT, 'db-name': dbName });
+
+    // The kind 3 REQ is opened by the filter source, outside the controller's
+    // profile bookkeeping — design §4 names it as the one subscription none of
+    // the existing teardown paths would reach.
+    const host = await acquireRelayHost({ dbName });
+    seeded.push(host);
+    const relay = host.relay as unknown as {
+      subscriptionManager: { getAllSubscriptions(): { id: string }[] };
+    };
+    const oneShots = () =>
+      relay.subscriptionManager
+        .getAllSubscriptions()
+        .filter((subscription) => subscription.id.startsWith('oneshot-'));
+
+    await waitFor(() => oneShots().length > 0, 'the follow-list subscription to open');
+    element.remove();
+
+    await waitFor(() => oneShots().length === 0, 'the follow-list subscription to close');
+  });
+
   it('acquires the shared relay while mounted and releases it on removal', async () => {
     const element = mount({ pubkey: SUBJECT, 'db-name': `follow-${crypto.randomUUID()}` });
     await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');

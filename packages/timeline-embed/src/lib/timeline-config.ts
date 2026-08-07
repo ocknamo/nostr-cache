@@ -87,9 +87,14 @@ function parseNumberList(value: string | null | undefined): number[] {
  * cost the reader nothing more than the default behaviour.
  *
  * @param value Raw attribute or query-parameter value, e.g. `"3600"`
+ * @param label Attribute this came from, so the warning names the one the
+ *   embedder actually wrote — `follows-freshness` reaches here too
  * @returns Seconds, or `undefined` when nothing usable was given
  */
-export function parseFreshness(value: string | null | undefined): number | undefined {
+export function parseFreshness(
+  value: string | null | undefined,
+  label = 'profile-freshness'
+): number | undefined {
   if (value === null || value === undefined || value.trim() === '') {
     return undefined;
   }
@@ -98,7 +103,7 @@ export function parseFreshness(value: string | null | undefined): number | undef
   // so a negative one is a mistake, and 0 already spells the disable case.
   if (!Number.isInteger(parsed) || parsed < 0) {
     console.warn(
-      `[nostr-timeline] Ignoring invalid profile-freshness (expected whole seconds, 0 to disable): ${value}`
+      `[nostr-timeline] Ignoring invalid ${label} (expected whole seconds, 0 to disable): ${value}`
     );
     return undefined;
   }
@@ -333,6 +338,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   dbName: string | undefined;
   /** Seconds a cached profile is served for; `undefined` keeps the default. */
   profileFreshness: number | undefined;
+  /** Configures the shared relay, not this widget; see `<nostr-timeline>`. */
+  followsFreshness: number | undefined;
   /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
   /** Whether to render author avatars. */
@@ -350,6 +357,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     }),
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
+    followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
@@ -396,7 +404,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     sinceSeconds: parseSinceDays(params.get('since-days')),
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
-    followsFreshness: parseFreshness(params.get('follows-freshness')),
+    followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
     debug: parseDebug(params.get('debug')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',

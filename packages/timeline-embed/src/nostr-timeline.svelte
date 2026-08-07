@@ -9,6 +9,7 @@
       limit: { attribute: 'limit' },
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
+      followsFreshness: { attribute: 'follows-freshness' },
       debug: { attribute: 'debug' },
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
@@ -55,6 +56,17 @@
      */
     profileFreshness?: string;
     /**
+     * Seconds a cached follow list (kind 3) is used before the relay re-asks
+     * upstream.
+     *
+     * This element never fetches one — it exists so a page that also carries a
+     * `<nostr-follow-timeline>` can be given matching settings. Both widgets
+     * share one relay and the first to mount configures it, so without this
+     * attribute the conflict warning would name a setting the other element has
+     * no way to spell.
+     */
+    followsFreshness?: string;
+    /**
      * Set (`debug` / `debug="true"`) to render the diagnostic cache/upstream
      * badges. Off by default — they are for checking that the cache works, not
      * for the readers of the embedding page.
@@ -90,6 +102,7 @@
     limit,
     dbName,
     profileFreshness,
+    followsFreshness,
     debug,
     showOrigin,
     showAvatars,
@@ -125,6 +138,7 @@
         // than this widget pinning one — which also keeps two widgets that both
         // omit the attribute from looking like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
+        followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
       },
       onChange: (next) => {
         state = next;

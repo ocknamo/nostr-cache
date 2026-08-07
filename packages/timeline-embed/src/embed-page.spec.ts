@@ -77,6 +77,35 @@ describe('iframe host pages', () => {
     );
   });
 
+  /**
+   * The query-string readers in `timeline-config.ts` are a third copy of each
+   * attribute list, and the comparisons above do not reach them — so an
+   * attribute could be added to the element and the page and still be dropped
+   * by the JS entry point that `packages/web-client` and the demo use.
+   */
+  it('reads every attribute in the query-string config readers too', () => {
+    const config = read('./lib/timeline-config.ts');
+    const readers = {
+      configFromSearchParams: declaredAttributes('./nostr-timeline.svelte'),
+      followConfigFromSearchParams: declaredAttributes('./nostr-follow-timeline.svelte'),
+    };
+
+    for (const [reader, attributes] of Object.entries(readers)) {
+      const start = config.indexOf(`export function ${reader}`);
+      expect(start).toBeGreaterThan(-1);
+      // To the next top-level declaration, not the first `\n}`: both readers
+      // declare an inline return type that closes before the body opens.
+      const rest = config.slice(start);
+      const end = rest.indexOf('\nexport ', 1);
+      const body = end === -1 ? rest : rest.slice(0, end);
+      for (const attribute of attributes) {
+        // `show-origin` is deprecated and deliberately absent from the follow
+        // reader; it is still read by the timeline one.
+        expect(body, `${reader} should read "${attribute}"`).toContain(`'${attribute}'`);
+      }
+    }
+  });
+
   it('shares one height-reporting implementation between the pages', () => {
     // Splitting the entry points was only acceptable because the postMessage
     // protocol stayed in one place; a page growing its own copy is how the two

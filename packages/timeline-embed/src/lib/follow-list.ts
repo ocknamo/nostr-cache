@@ -169,7 +169,7 @@ export function followFilterSource(options: FollowFilterSourceOptions): FilterSo
     // fetched once and never re-read (§10) — so without this, the relay
     // detecting the forgery would not correct the screen.
     watchValidation(event.id, () =>
-      setFollows({ status: 'invalid', count: authors.length, truncated })
+      setFollows({ status: 'dropped', count: authors.length, truncated })
     );
     setFollows({ status: 'ready', count: authors.length, truncated });
 

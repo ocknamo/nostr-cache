@@ -50,11 +50,11 @@
 
   /**
    * `missing` means no subscription was ever opened, so `Timeline` would sit on
-   * "読み込み中…" waiting for an EOSE that cannot come. `invalid` means what the
-   * subscription did produce is the wrong population. Either way the notice
-   * replaces the timeline rather than sitting above it.
+   * "読み込み中…" waiting for an EOSE that cannot come. `dropped` means what the
+   * subscription did produce can no longer be vouched for. Either way the
+   * notice replaces the timeline rather than sitting above it.
    */
-  const collapsed = $derived(follows?.status === 'missing' || follows?.status === 'invalid');
+  const collapsed = $derived(follows?.status === 'missing' || follows?.status === 'dropped');
 
   const followNotice = $derived.by(() => {
     switch (follows?.status) {
@@ -62,8 +62,11 @@
         return 'フォローリストを取得しています…';
       case 'missing':
         return 'フォローリストが見つかりませんでした';
-      case 'invalid':
-        return 'フォローリストの署名検証に失敗しました';
+      // Deliberately not "署名検証に失敗しました": the relay reports a missing
+      // event the same way whether it deleted it as forged, it was removed by
+      // NIP-09, or storage failed to answer. See `watchValidation`.
+      case 'dropped':
+        return 'フォローリストがキャッシュから失われたため、表示を中止しました';
       default:
         return undefined;
     }

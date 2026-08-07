@@ -42,6 +42,13 @@ describe('Follow timeline E2E', () => {
   /** Someone the subject follows. */
   let friend: string;
   let cannedEvents: NostrEvent[] = [];
+  /**
+   * A newer follow list naming two people, for the truncation case.
+   *
+   * kind 3 is replaceable and the fetch keeps the highest `created_at`, so
+   * adding this to the canned set is enough to supersede the one-follow list.
+   */
+  let twoFollowList: NostrEvent;
 
   beforeAll(async () => {
     const subjectKey = getRandomSecret();
@@ -64,11 +71,22 @@ describe('Follow timeline E2E', () => {
     });
     subject = subjectNote.pubkey;
     friend = friendNote.pubkey;
+    const stranger = strangerNote.pubkey;
 
     const followList = await createTestEvent(subjectKey, {
       kind: 3,
       created_at: 1_700_000_050,
       tags: [['p', friend]],
+      content: '',
+    });
+
+    twoFollowList = await createTestEvent(subjectKey, {
+      kind: 3,
+      created_at: 1_700_000_060,
+      tags: [
+        ['p', friend],
+        ['p', stranger],
+      ],
       content: '',
     });
 
@@ -108,17 +126,29 @@ describe('Follow timeline E2E', () => {
     );
   }
 
+  /**
+   * Wait until the widget has settled on exactly `count` cards.
+   *
+   * The settling matters as much as the count. Returning the instant the number
+   * matches would let a timeline that is on its way past `count` — which is
+   * what a filter that lost its `authors` looks like as the global feed streams
+   * in — pass an assertion about what is *not* on screen.
+   */
   async function waitForEventCount(target: Page, count: number): Promise<void> {
     const deadline = Date.now() + TIMEOUT;
     let actual = -1;
     while (Date.now() < deadline) {
       actual = (await target.$$('nostr-follow-timeline article')).length;
       if (actual === count) {
-        return;
+        await target.waitForTimeout(300);
+        actual = (await target.$$('nostr-follow-timeline article')).length;
+        if (actual === count) {
+          return;
+        }
       }
       await target.waitForTimeout(50);
     }
-    throw new Error(`Timed out waiting for ${count} event cards (last saw ${actual})`);
+    throw new Error(`Timed out waiting for ${count} settled event cards (last saw ${actual})`);
   }
 
   it('resolves the follow list and shows only those authors', async () => {
@@ -246,20 +276,33 @@ describe('Follow timeline E2E', () => {
   });
 
   it('caps the authors it asks for and says so under debug', async () => {
-    page = await browser.newPage();
-    await page.goto(
-      followUrl({
-        relays: upstream.url,
-        'max-follows': '1',
-        'include-self': 'false',
-        debug: 'true',
-      })
-    );
+    // Its own upstream whose kind 3 names two people, so `max-follows=1` really
+    // truncates. Against the shared one — a single follow, cap of one — nothing
+    // is dropped, and the test would assert the absence of the very notice its
+    // name claims to check.
+    const disposable = await startMockUpstreamRelay([...cannedEvents, twoFollowList]);
+    try {
+      page = await browser.newPage();
+      await page.goto(
+        followUrl({
+          relays: disposable.url,
+          'max-follows': '1',
+          'include-self': 'false',
+          debug: 'true',
+        })
+      );
 
-    await waitForEventCount(page, 1);
-    // One follow, cap of one: nothing is dropped, so no notice is due.
-    expect(await page.$$('nostr-follow-timeline .follows')).toHaveLength(0);
-    expect(await contents(page)).toEqual(['a post by a follow']);
+      const notice = await page.waitForSelector(
+        'nostr-follow-timeline .follows:text-is("2 人中 1 人を表示しています")',
+        { timeout: TIMEOUT }
+      );
+      expect(notice).toBeTruthy();
+      // Truncation takes the first entry, so only that author's note arrives.
+      await waitForEventCount(page, 1);
+      expect(await contents(page)).toEqual(['a post by a follow']);
+    } finally {
+      await disposable.close();
+    }
   });
 
   it('reports its height to the embedding page from the shared host script', async () => {

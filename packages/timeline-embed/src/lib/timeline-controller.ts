@@ -44,20 +44,23 @@ const PROFILE_REQUEST_TIMEOUT_MS = 5000;
 const VALIDATION_POLL_INTERVAL_MS = 5000;
 
 /**
- * How many times a validation watch re-checks an event it has never seen
- * stored before concluding it simply is not there.
+ * How many polls a watch waits for the event to appear in storage before
+ * concluding the cache does not hold it.
  *
- * Deliveries are stored before they reach the client, so the first look should
- * already find the event `pending` — but ingest and this poll are not
- * synchronized, so a couple of retries keep a race from being reported as a
- * forged event.
+ * Deliveries are stored before they reach the client, so the first look
+ * normally finds the event already. The retries cover an ingest that is still
+ * in flight — and, because the poll interval is 5s, they also give a storage
+ * read error time to clear before it is read as an absence.
  */
-const VALIDATION_WATCH_MAX_MISSES = 3;
+const VALIDATION_WATCH_MAX_MISSES = 4;
 
 /** Progress of the two-stage follow-list resolution; see {@link FilterSource}. */
 export interface FollowsState {
-  /** `missing` means no subscription was opened at all. */
-  status: 'resolving' | 'ready' | 'missing' | 'invalid';
+  /**
+   * `missing` means no subscription was opened at all; `dropped` means the
+   * event the authors were built from is no longer in the cache.
+   */
+  status: 'resolving' | 'ready' | 'missing' | 'dropped';
   /** Authors on the timeline filter, including the subject when included. */
   count: number;
   /** Follow-list entries dropped by `max-follows`. */
@@ -78,10 +81,11 @@ export interface FilterSourceContext {
   signal: AbortSignal;
   setFollows: (follows: FollowsState) => void;
   /**
-   * Watch one event's signature verdict, and call back if the relay deletes it
-   * as invalid. For an event the timeline's whole author set rests on.
+   * Watch an event the timeline's whole author set rests on, and call back if
+   * the cache stops holding it. See {@link TimelineController.watchValidation}
+   * for what that does and does not prove.
    */
-  watchValidation: (eventId: string, onInvalid: () => void) => void;
+  watchValidation: (eventId: string, onDropped: () => void) => void;
 }
 
 /**
@@ -112,6 +116,14 @@ export interface TimelineControllerOptions {
   host?: RelayHostConfig;
   /** Cap on events held in the timeline. */
   maxEvents?: number;
+  /**
+   * Seconds between validation re-checks, as milliseconds.
+   *
+   * Paired with the relay's own `lazyValidateInterval`: a caller that speeds
+   * verification up wants the widget to notice at the same rate. Specs use it to
+   * avoid spending {@link VALIDATION_WATCH_MAX_MISSES} real poll intervals.
+   */
+  validationPollIntervalMs?: number;
   /** Called with a fresh snapshot whenever anything changes. */
   onChange: (state: TimelineState) => void;
 }
@@ -158,8 +170,11 @@ export class TimelineController {
    * A source blocks for up to its own watchdog (5s) and `stop()` can land at
    * any point in there. The subscriptions a source opens are its own, outside
    * this class's profile bookkeeping, so nothing else would close them.
+   *
+   * Replaced rather than reused after a `suspend()`, so a controller that is
+   * resumed with {@link applyFilter} is not left permanently aborted.
    */
-  private readonly filterSourceAbort = new AbortController();
+  private filterSourceAbort = new AbortController();
   private stopped = false;
   /** Whether the connection ever came up, so a later error means it was lost. */
   private connectedOnce = false;
@@ -262,7 +277,13 @@ export class TimelineController {
         watchValidation: (eventId, onInvalid) => this.watchValidation(eventId, onInvalid),
       });
     } catch (error) {
-      this.patch({ error: `購読フィルタの解決に失敗しました: ${message(error)}` });
+      // `follows` goes with it: a source that threw is not going to report
+      // again, so leaving it on `resolving` would stack "取得しています…" and
+      // "読み込み中…" underneath an error banner that has already said it failed.
+      this.patch({
+        error: `購読フィルタの解決に失敗しました: ${message(error)}`,
+        follows: this.state.follows && { status: 'missing', count: 0, truncated: 0 },
+      });
       return;
     }
     if (this.stopped) {
@@ -297,8 +318,12 @@ export class TimelineController {
     this.suspended = true;
     // A filter source that is still resolving holds a subscription of its own,
     // which would go on reading through to upstream and refilling the cache the
-    // caller is about to measure cold.
+    // caller is about to measure cold. Aborting also ends its validation watch,
+    // and drops the resolution state with it — leaving `resolving` on screen
+    // would strand the widget on "フォローリストを取得しています…" for good,
+    // because the source it was waiting for is never going to report again.
     this.filterSourceAbort.abort();
+    this.patch({ follows: undefined });
     this.closeProfiles();
     this.clearTimers();
   }
@@ -333,6 +358,11 @@ export class TimelineController {
     // them are about to be re-rendered. Profiles already parsed stay in state,
     // so nobody flickers back to a pubkey while the lookups re-run.
     this.suspended = false;
+    if (this.filterSourceAbort.signal.aborted && !this.stopped) {
+      // Re-arm after a suspend, so a resumed controller can run a filter source
+      // (and the validation watch that comes with it) again.
+      this.filterSourceAbort = new AbortController();
+    }
     this.closeProfiles();
     this.requestedProfiles = new Set();
     // Timings are per subscription id and never revisited once replaced.
@@ -569,13 +599,13 @@ export class TimelineController {
   /**
    * Publish what a {@link FilterSource} reported about its resolution.
    *
-   * `invalid` is acted on rather than merely displayed: the subscription is
-   * asking for a population somebody forged, and since the follow list is
-   * fetched once and never re-read, leaving it running would keep the wrong
-   * timeline on screen — and refilling with it — until the widget unmounts.
+   * `dropped` is acted on rather than merely displayed: the subscription is
+   * asking for a population the cache can no longer vouch for, and since the
+   * follow list is fetched once and never re-read, leaving it running would
+   * keep that timeline on screen — and refilling with it — until unmount.
    */
   private applyFollows(follows: FollowsState): void {
-    if (follows.status !== 'invalid') {
+    if (follows.status !== 'dropped') {
       this.patch({ follows });
       return;
     }
@@ -593,19 +623,34 @@ export class TimelineController {
   }
 
   /**
-   * Poll one event's persisted verdict until it settles, reporting a deletion.
+   * Poll until the cache either vouches for an event or stops holding it.
    *
    * Reuses the relay's own lazy-validation results, so nothing is verified here
-   * — the widget does no crypto. Only a transition *out of* `pending` counts as
-   * a deletion: `unknown` also means "never stored" and "evicted", so claiming
-   * forgery on first sight of it would accuse the relay of an ingest race.
+   * — the widget does no crypto.
    *
-   * @param eventId Event whose verdict decides whether the timeline stands
-   * @param onInvalid Called once, if and when the relay deletes it
+   * **`unknown` does not prove forgery.** The relay reports it for any id that
+   * has no row: deleted as invalid, deleted by NIP-09, evicted, never ingested,
+   * and — because the storage layer answers a read failure by calling
+   * everything `unknown` — a broken IndexedDB too. Signature failure is only
+   * the most likely of those for an event that was in the cache a moment ago,
+   * so what this reports is "the cache no longer holds it", and the caller says
+   * exactly that rather than naming a cause it cannot know.
+   *
+   * `validated` ends the watch: the relay has checked the signature, which is
+   * the question §11 was actually asking.
+   *
+   * An event that never appears at all is reported too, after
+   * {@link VALIDATION_WATCH_MAX_MISSES} tries. Waiting for a `pending` sighting
+   * first would look safer but silently loses the case that matters most: lazy
+   * validation runs every 5s and can delete a forged event *before* the first
+   * poll, leaving a status that is `unknown` from the outset and a timeline
+   * built on it running untouched for the rest of the session.
+   *
+   * @param eventId Event whose presence decides whether the timeline stands
+   * @param onDropped Called once, if and when the cache stops holding it
    */
-  private watchValidation(eventId: string, onInvalid: () => void): void {
+  private watchValidation(eventId: string, onDropped: () => void): void {
     const { signal } = this.filterSourceAbort;
-    let sawPending = false;
     let misses = 0;
 
     const poll = async (): Promise<void> => {
@@ -626,24 +671,20 @@ export class TimelineController {
       }
       const status = statuses.get(eventId);
       if (status === 'validated') {
-        // Settled and genuine: nothing can move it from here.
         return;
       }
       if (status === 'pending') {
-        sawPending = true;
+        // Still queued for verification, so the verdict is still to come.
+        misses = 0;
         schedule();
-        return;
-      }
-      if (sawPending) {
-        // It was in storage awaiting verification and now it is gone. The lazy
-        // validator deleting it is the only thing that does that here.
-        onInvalid();
         return;
       }
       misses += 1;
-      if (misses < VALIDATION_WATCH_MAX_MISSES) {
-        schedule();
+      if (misses >= VALIDATION_WATCH_MAX_MISSES) {
+        onDropped();
+        return;
       }
+      schedule();
     };
 
     const schedule = (): void => {
@@ -651,7 +692,7 @@ export class TimelineController {
       this.validationWatchTimer = setTimeout(() => {
         this.validationWatchTimer = undefined;
         void poll();
-      }, VALIDATION_POLL_INTERVAL_MS);
+      }, this.options.validationPollIntervalMs ?? VALIDATION_POLL_INTERVAL_MS);
     };
     signal.addEventListener('abort', () => clearTimeout(this.validationWatchTimer), { once: true });
 
