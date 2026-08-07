@@ -59,17 +59,14 @@ export const DEFAULT_PROFILE_FRESHNESS = 86_400;
  * How long a cached follow list (kind 3) is trusted before the relay re-asks
  * upstream.
  *
- * `<nostr-follow-timeline>` resolves its authors by fetching the subject's
- * kind 3 on every load, so without a window every visit spends an upstream
- * round trip before the timeline REQ can even be built. kind 3 is replaceable,
- * which is what makes it eligible for the same coordinate-based freshness gate
- * profiles use.
+ * `<nostr-follow-timeline>` fetches the subject's kind 3 on every load, so
+ * without a window every visit spends an upstream round trip before the
+ * timeline REQ can even be built.
  *
  * Ten minutes, matching the worked example in `doc/cache-relay/upstream.md`:
  * follow lists change more often than display names, and the cost of being one
- * window behind is a handful of authors missing from the timeline — not a wrong
- * avatar that stays wrong for a day. Embedders can widen or disable it with
- * `follows-freshness`.
+ * window behind is a few authors missing from the timeline — not a wrong avatar
+ * that stays wrong for a day.
  */
 export const DEFAULT_FOLLOWS_FRESHNESS = 600;
 
@@ -156,8 +153,8 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
  * window is switched off independently, so `profileFreshness: 0` must leave
  * kind 3's window standing (and vice versa). A non-positive window is *omitted*
  * rather than passed through as `{ 3: 0 }` — `normalizeFreshnessWindows` throws
- * on one, which would fail `relay.connect()` and stop the widget from starting
- * at all. Turning a window off should cost an upstream REQ, not the embed.
+ * on one, which would fail `relay.connect()`. Turning a window off should cost
+ * an upstream REQ, not the whole embed.
  *
  * @returns The configured windows, or `undefined` when every kind is switched
  *   off — which is how the relay spells "no freshness gate"

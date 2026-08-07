@@ -115,8 +115,7 @@ describe('<nostr-follow-timeline> custom element', () => {
 
   it('accepts an npub for pubkey, the way an embedder copies one', async () => {
     const dbName = `follow-${crypto.randomUUID()}`;
-    // Same key as SUBJECT would be ideal, but any npub proves the decode: what
-    // matters is that a bech32 spelling reaches the kind 3 fetch as hex.
+    // What matters is that a bech32 spelling reaches the kind 3 fetch as hex.
     const npub = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
     const subject = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
     await seedCache(dbName, [followList([FRIEND], { pubkey: subject })]);
@@ -148,8 +147,7 @@ describe('<nostr-follow-timeline> custom element', () => {
         element.shadowRoot?.textContent?.includes('フォローリストが見つかりませんでした') === true,
       'the missing-list notice'
     );
-    // The timeline is collapsed rather than left on 読み込み中…, and above all
-    // no filter was invented to replace the one that could not be built.
+    // Above all: no filter was invented to replace the one that could not be built.
     expect(element.shadowRoot?.textContent).not.toContain('読み込み中');
     expect(await timelineFilters(dbName)).toBeUndefined();
   });
@@ -219,8 +217,6 @@ describe('<nostr-follow-timeline> custom element', () => {
       () => loud.shadowRoot?.textContent?.includes('3 人中 1 人を表示しています') === true,
       'the truncation notice'
     );
-    // An embedder wants to know their cap bit; a reader of the embedding page
-    // has no use for the number and no way to act on it.
     expect(quiet.shadowRoot?.textContent).not.toContain('人を表示しています');
   });
 

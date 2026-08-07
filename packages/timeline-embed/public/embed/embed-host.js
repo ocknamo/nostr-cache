@@ -7,21 +7,16 @@
  * parameters the guessed element does not have — the exact failure that
  * splitting the elements was meant to remove.
  *
- * What the pages genuinely do share is this: copy the query string onto the
- * element, and report the content height to the embedding page. Keeping it here
- * means the height protocol has one implementation, so the split above costs a
- * per-page attribute list and nothing else.
+ * Keeping the shared half here means the height protocol has one
+ * implementation, so that split costs a per-page attribute list and nothing else.
  */
 
 (function () {
   /**
-   * Create the widget, configure it from the query string, and start reporting
-   * height.
-   *
    * @param {string} tag Custom element to create
-   * @param {string[]} names Attribute names to copy across from the query
-   *   string. Attribute names match the element's, so an iframe URL and a Web
-   *   Component tag configure the widget the same way.
+   * @param {string[]} names Attributes to copy from the query string. The names
+   *   match the element's own, so an iframe URL and a Web Component tag
+   *   configure the widget the same way.
    */
   window.mountNostrEmbed = function mountNostrEmbed(tag, names) {
     var params = new URLSearchParams(location.search);

@@ -29,10 +29,6 @@
    * need a precedence rule between all three — with the failure mode that
    * someone writes `filters` and has it silently ignored. Splitting them makes
    * `pubkey` required by construction and leaves nothing to disambiguate.
-   *
-   * Everything below the filter is shared: `TimelineView` renders the same
-   * chrome and the same `Timeline` as `<nostr-timeline>`, and both elements run
-   * the same `TimelineController` against the same page-wide relay.
    */
 
   import TimelineView from './components/TimelineView.svelte';
@@ -54,59 +50,38 @@
     /**
      * Whose follow list to walk. hex, `npub` or `nprofile`.
      *
-     * The one attribute with no usable default: without it there is no follow
-     * list, and there is no wider query to fall back to that would not mean
-     * asking the upstream relays for the global feed.
+     * The one attribute with no usable default: there is no wider query to fall
+     * back to that would not mean asking upstream for the global feed.
      */
     pubkey?: string;
     /** Comma-separated upstream relay URLs. Empty = cache-only. */
     relays?: string;
     /**
-     * Comma-separated event kinds for the timeline. Defaults to `1`.
+     * Comma-separated event kinds. Defaults to `1`.
      *
      * Adding `6` (reposts) renders badly: `EventCard` does not interpret them,
      * so a repost arrives as an empty card or raw JSON. See the README.
      */
     kinds?: string;
-    /** Max events to request. Defaults to 50. */
+    /** Defaults to 50. */
     limit?: string;
-    /**
-     * Cap on how many follow-list entries reach the timeline filter.
-     *
-     * A safety valve for pathological lists, not a tuning knob — the default is
-     * set above any realistic follow list. See `follow-list.ts`.
-     */
+    /** Safety valve for pathological lists, not a tuning knob — see `follow-list.ts`. */
     maxFollows?: string;
-    /** Set to "false" to leave the subject's own posts out. */
     includeSelf?: string | boolean;
     /**
-     * Only show posts from the last N days.
-     *
-     * Off by default. It bounds the local query, but a quiet follow list then
-     * renders as an empty timeline with no way for the reader to tell that from
-     * "nobody posted".
+     * Only show posts from the last N days. Off by default: it bounds the local
+     * query, but a quiet follow list then renders as an empty timeline with no
+     * way for the reader to tell that from "nobody posted".
      */
     sinceDays?: string;
-    /**
-     * Seconds a cached follow list (kind 3) is used before the relay re-asks
-     * upstream. Defaults to ten minutes; `0` re-asks on every load.
-     */
+    /** Defaults to ten minutes; `0` re-asks upstream on every load. */
     followsFreshness?: string;
-    /** IndexedDB database name for the shared cache. */
     dbName?: string;
-    /**
-     * Seconds a cached profile (kind 0) is shown before the relay re-asks
-     * upstream. Defaults to a day; `0` re-asks on every lookup.
-     */
+    /** Defaults to a day; `0` re-asks upstream on every lookup. */
     profileFreshness?: string;
-    /**
-     * Set (`debug` / `debug="true"`) to render the diagnostic cache/upstream
-     * badges and the follow-truncation notice.
-     */
+    /** Renders the cache/upstream badges and the follow-truncation notice. */
     debug?: string | boolean;
-    /** Set to "false" to hide author avatars. */
     showAvatars?: string;
-    /** Set to "false" to stop rendering media found in a note's body. */
     showMedia?: string;
   }
 
@@ -139,12 +114,8 @@
   // whichever controller is current when a card appears.
   let controller: TimelineController | undefined;
 
-  /**
-   * The subject, or `undefined` when the attribute is unusable.
-   *
-   * Derived rather than reported through `state` inside the effect below: an
-   * effect that writes the same state it reads re-runs itself forever.
-   */
+  // Derived rather than reported through `state` inside the effect below: an
+  // effect that writes the same state it reads re-runs itself forever.
   const subject = $derived(parsePubkey(pubkey));
 
   // Attributes are reactive: changing one tears this widget's controller down

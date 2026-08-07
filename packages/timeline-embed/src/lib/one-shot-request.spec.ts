@@ -86,8 +86,6 @@ describe('fetchLatestReplaceable', () => {
     const fake = fakeConnection();
 
     const settled = fetchLatestReplaceable(fake.connection, FILTER);
-    // Two upstream relays can each answer with their own copy of a replaceable
-    // event, in either order.
     fake.handlers()?.onEvent(makeEvent({ id: 'newer', kind: 3, created_at: 200 }));
     fake.handlers()?.onEvent(makeEvent({ id: 'older', kind: 3, created_at: 100 }));
     fake.handlers()?.onEose?.();
@@ -144,8 +142,6 @@ describe('fetchLatestReplaceable', () => {
     await vi.advanceTimersByTimeAsync(DEFAULT_ONE_SHOT_GRACE_MS);
     await settled;
 
-    // A caller counting deliveries has to see the same population the upstream
-    // pool counted, or its cache/upstream counters describe different sets.
     expect(seen).toEqual(['newer', 'older']);
   });
 
@@ -159,8 +155,8 @@ describe('fetchLatestReplaceable', () => {
     fake.handlers()?.onEvent(makeEvent({ id: 'e1', kind: 3 }));
     controller.abort();
 
-    // Nothing is reported back: the caller is being torn down, and a
-    // half-answer would have it act on a filter it may no longer subscribe with.
+    // Nothing is reported back, not even the event that did arrive: the caller
+    // is being torn down.
     expect(await settled).toBeUndefined();
     expect(fake.closed).toEqual([fake.subId()]);
   });

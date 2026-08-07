@@ -47,8 +47,7 @@ describe('parseFollowList', () => {
   });
 
   it('collapses a pubkey listed twice', () => {
-    // Once as written and once uppercased: the same author either way, and a
-    // REQ naming them twice is legal but pointless.
+    // The same author either way, so the REQ must not name them twice.
     const event = followEvent([hex(1), hex(1).toUpperCase(), hex(2)]);
 
     expect(parseFollowList(event)).toEqual([hex(1), hex(2)]);
@@ -98,8 +97,6 @@ describe('selectAuthors', () => {
   });
 
   it('adds the subject when asked, without spending the cap on them', () => {
-    // `max-follows` reads as "how many people I follow", so include-self
-    // evicting one of them would be a surprising interaction.
     const result = selectAuthors([hex(1), hex(2)], { ...base, maxFollows: 2, includeSelf: true });
 
     expect(result).toEqual({ authors: [hex(1), hex(2), SUBJECT], truncated: 0 });
@@ -146,7 +143,7 @@ describe('followFilterSource', () => {
    *
    * Deliberately not a real relay: what is under test is the interpretation of
    * a kind 3 and the decision of what to subscribe with, both of which are pure
-   * consequences of the events that arrive.
+   * consequences of which events arrive.
    */
   function harness(events: NostrEvent[], signal?: AbortSignal): Harness {
     const reported: FollowsState[] = [];
@@ -183,10 +180,9 @@ describe('followFilterSource', () => {
   /**
    * Run a source to completion.
    *
-   * The one-shot fetch keeps listening for a moment after EOSE (a read-through
-   * relay emits EOSE before it has finished ingesting), so the source only
-   * settles once that grace has elapsed. Fake timers keep the wait from being
-   * paid in wall-clock time once per spec.
+   * The one-shot fetch keeps listening after EOSE, so the source only settles
+   * once that grace elapses. Fake timers keep the wait from being paid in
+   * wall-clock time once per spec.
    */
   function resolve(source: FilterSource, context: FilterSourceContext): Promise<Filter[]> {
     const settled = source(context);
@@ -206,8 +202,6 @@ describe('followFilterSource', () => {
 
     await resolve(followFilterSource(options), context);
 
-    // kind 3 is replaceable, so there is exactly one event to ask for — and the
-    // plainest possible filter is what the relay's freshness gate can act on.
     expect(requested[0]).toEqual([{ kinds: [3], authors: [SUBJECT] }]);
   });
 
@@ -264,10 +258,8 @@ describe('followFilterSource', () => {
   it('opens no subscription when the cap threw every follow away', async () => {
     const { context, reported } = harness([followEvent([hex(1), hex(2)])]);
 
-    // Only a JS caller can get here — `parseMaxFollows` rejects a zero
-    // attribute — but the outcome would otherwise be the forbidden
-    // `{"kinds":[1],"authors":[]}`, which the "empty list" guard does not catch:
-    // the list had entries, the cap discarded all of them.
+    // The "empty list" guard does not catch this: the list had entries and the
+    // cap discarded all of them, which would leave the forbidden empty `authors`.
     const filters = await resolve(
       followFilterSource({ ...options, maxFollows: 0, includeSelf: false }),
       context
@@ -355,10 +347,6 @@ describe('followFilterSource', () => {
     await resolve(followFilterSource(options), context);
     expect(watched).toEqual([{ eventId: 'follow-list', onInvalid: expect.any(Function) }]);
 
-    // The relay verifies in the background, so the list that chose these
-    // authors was still unverified when the timeline was built — and it is
-    // fetched once and never re-read. Without this, a forged population would
-    // stay on screen after the relay had already deleted the list behind it.
     watched[0].onInvalid();
     expect(reported.at(-1)).toEqual({ status: 'invalid', count: 1, truncated: 0 });
   });
@@ -373,9 +361,6 @@ describe('followFilterSource', () => {
   });
 
   it('defaults the cap well above any real follow list', () => {
-    // Two real relays answered a 982-author filter without complaint and only
-    // ~10ms slower than a 500-author one, so a cap low enough to bite would
-    // drop a large share of someone's follows for no measured gain.
     expect(DEFAULT_MAX_FOLLOWS).toBeGreaterThanOrEqual(2000);
   });
 });

@@ -250,9 +250,8 @@ export function parsePubkey(value: string | null | undefined): string | undefine
 }
 
 /**
- * Parse a comma-separated `kinds` list, falling back to the widget's default.
+ * Parse a comma-separated `kinds` list.
  *
- * @param value Raw attribute or query-parameter value, e.g. `"1,6"`
  * @returns The kinds to request; never empty
  */
 export function parseKinds(value: string | null | undefined): number[] {
@@ -260,22 +259,14 @@ export function parseKinds(value: string | null | undefined): number[] {
   return kinds.length > 0 ? kinds : DEFAULT_KINDS;
 }
 
-/**
- * Parse a `limit`, falling back to the widget's default.
- *
- * @param value Raw attribute or query-parameter value
- * @returns A positive event count
- */
 export function parseLimit(value: string | null | undefined): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_LIMIT;
 }
 
 /**
- * Parse `max-follows`, the cap on how many follow-list entries reach the
- * timeline filter's `authors`.
+ * Parse `max-follows`, the cap on how many follow-list entries reach `authors`.
  *
- * @param value Raw attribute or query-parameter value
  * @returns A positive count, or `undefined` when nothing usable was given —
  *   leaving the caller's default (`DEFAULT_MAX_FOLLOWS`) in place
  */
@@ -299,12 +290,7 @@ export function parseMaxFollows(value: string | null | undefined): number | unde
 /**
  * Parse `since-days`, the optional recency bound on a follow timeline.
  *
- * Off by default. It narrows the local query to a `created_at` range instead of
- * materializing every cached row by the followed authors, but a quiet follow
- * list then renders as an empty timeline with nothing to say why — so the
- * embedder has to ask for it deliberately.
- *
- * @param value Raw attribute or query-parameter value, in whole days
+ * @param value Whole days
  * @returns Seconds to look back, or `undefined` for no bound
  */
 export function parseSinceDays(value: string | null | undefined): number | undefined {
@@ -325,12 +311,8 @@ export function parseSinceDays(value: string | null | undefined): number | undef
  * Read a switch that is on unless explicitly turned off, the way
  * `show-avatars` / `show-media` read.
  *
- * Booleans are accepted alongside strings for the same reason
- * {@link parseDebug} accepts them: a Svelte parent setting the property rather
- * than the attribute delivers a real boolean.
- *
- * @param value Raw attribute, property or query-parameter value
- * @returns Whether the switch is on
+ * Booleans are accepted for the same reason {@link parseDebug} accepts them: a
+ * Svelte parent setting the property rather than the attribute delivers one.
  */
 export function parseEnabled(value: string | boolean | null | undefined): boolean {
   if (typeof value === 'boolean') {
@@ -401,9 +383,7 @@ export interface FollowTimelineConfig {
  * Its own function rather than a branch inside {@link configFromSearchParams},
  * for the same reason the two elements are separate: a query string carries no
  * element type, so a single entry point would have to guess which widget the
- * caller meant from which parameters they wrote — and quietly drop the ones the
- * guessed element does not have. Two entry points make the choice explicit,
- * which is what the `embed/` and `embed/follow/` split is for.
+ * caller meant — and quietly drop the parameters the guessed element lacks.
  */
 export function followConfigFromSearchParams(params: URLSearchParams): FollowTimelineConfig {
   return {

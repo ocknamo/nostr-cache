@@ -1,10 +1,10 @@
 /**
  * Fetch a single replaceable event and close the subscription again.
  *
- * Extracted because the follow-list fetch is exactly the same shape as the
- * profile fetch `TimelineController` already does, and that one needed three
- * separate corrections to be right (`doc/plan/follow-timeline.md` §5). Written
- * out a second time, at least one of them would have been missed:
+ * Extracted because the follow-list fetch is the same shape as the profile
+ * fetch `TimelineController` already does, and that one needed three separate
+ * corrections to be right (`doc/plan/follow-timeline.md` §5). Written out a
+ * second time, at least one of them would have been missed:
  *
  * 1. **EOSE does not mean "delivered".** On a read-through the relay emits EOSE
  *    as soon as the upstream pool reports end-of-stored, without waiting for the
@@ -43,27 +43,23 @@ export const DEFAULT_ONE_SHOT_TIMEOUT_MS = 5000;
 let sequence = 0;
 
 export interface OneShotRequestOptions {
-  /** Milliseconds to keep listening after EOSE. */
   graceMs?: number;
-  /** Milliseconds before the lookup gives up entirely. */
   timeoutMs?: number;
   /**
-   * Abort the lookup (stop / suspend / attribute change).
+   * Resolves with `undefined` and closes the subscription.
    *
-   * Resolves with `undefined` and closes the subscription. Without it a caller
-   * that is torn down mid-fetch leaves a REQ open on the relay: this
-   * subscription is opened outside the controller's profile bookkeeping, so
-   * none of its bulk-close paths would reach it.
+   * Without it a caller torn down mid-fetch leaves a REQ open on the relay:
+   * this subscription is opened outside the controller's profile bookkeeping,
+   * so none of its bulk-close paths would reach it.
    */
   signal?: AbortSignal;
   /**
    * Called for every delivered event, including copies that lost the
    * `created_at` comparison.
    *
-   * Kept separate from the return value because the caller may need to account
-   * for deliveries it does not use — `CacheMetrics.classifyDelivered` has to see
-   * the same population the upstream pool counted, or the cache/upstream
-   * counters describe different sets.
+   * A caller may need to account for deliveries it does not use —
+   * `CacheMetrics.classifyDelivered` has to see the same population the
+   * upstream pool counted, or the two counters describe different sets.
    */
   onEvent?: (event: NostrEvent) => void;
 }

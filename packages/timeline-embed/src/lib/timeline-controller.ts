@@ -56,12 +56,7 @@ const VALIDATION_WATCH_MAX_MISSES = 3;
 
 /** Progress of the two-stage follow-list resolution; see {@link FilterSource}. */
 export interface FollowsState {
-  /**
-   * `resolving` while the kind 3 fetch is in flight, `missing` when there was
-   * no usable follow list (no subscription is opened in that case), `invalid`
-   * when the relay's background verification deleted the list the authors were
-   * built from.
-   */
+  /** `missing` means no subscription was opened at all. */
   status: 'resolving' | 'ready' | 'missing' | 'invalid';
   /** Authors on the timeline filter, including the subject when included. */
   count: number;
@@ -78,15 +73,13 @@ export interface FollowsState {
  * test of follow-list parsing had to boot a relay first.
  */
 export interface FilterSourceContext {
-  /** Connected relay link, for whatever the source needs to fetch. */
   connection: RelayConnection;
   /** Aborts on `stop()` / `suspend()`; check it after every await. */
   signal: AbortSignal;
-  /** Publish resolution progress into {@link TimelineState.follows}. */
   setFollows: (follows: FollowsState) => void;
   /**
    * Watch one event's signature verdict, and call back if the relay deletes it
-   * as invalid. Used for an event the timeline's whole author set rests on.
+   * as invalid. For an event the timeline's whole author set rests on.
    */
   watchValidation: (eventId: string, onInvalid: () => void) => void;
 }
@@ -153,21 +146,18 @@ export class TimelineController {
   private validationFetchTimer?: ReturnType<typeof setTimeout>;
   private validationPollTimer?: ReturnType<typeof setTimeout>;
   /**
-   * Re-check timer for {@link watchValidation}.
-   *
-   * Kept apart from the two above because it is not tied to the current
-   * subscription: the event it watches was fetched before the subscription
-   * existed, and {@link subscribe} clearing it would end the watch. It is
+   * Kept apart from the two timers above because it is not tied to the current
+   * subscription: the event it watches was fetched before that subscription
+   * existed, so {@link subscribe} clearing it would end the watch early. It is
    * bounded by {@link filterSourceAbort} instead.
    */
   private validationWatchTimer?: ReturnType<typeof setTimeout>;
   /**
    * Cancels an in-flight {@link FilterSource}.
    *
-   * A source blocks for up to its own watchdog (5s), and `stop()` can land at
-   * any point in there — a changed attribute tears the widget's controller down
-   * without waiting. The subscriptions a source opens are its own, outside this
-   * class's profile bookkeeping, so nothing else would close them.
+   * A source blocks for up to its own watchdog (5s) and `stop()` can land at
+   * any point in there. The subscriptions a source opens are its own, outside
+   * this class's profile bookkeeping, so nothing else would close them.
    */
   private readonly filterSourceAbort = new AbortController();
   private stopped = false;
@@ -275,14 +265,12 @@ export class TimelineController {
       this.patch({ error: `購読フィルタの解決に失敗しました: ${message(error)}` });
       return;
     }
-    // Same rule as after every other await here: the widget may have been torn
-    // down while the source was waiting on a relay.
     if (this.stopped) {
       return;
     }
-    // No filters means the source found nothing safe to ask for. Subscribing
-    // with a widened fallback is the one thing it must never turn into — see
-    // `follow-list.ts`. The source has already said why through `setFollows`.
+    // The source found nothing safe to ask for, and has already said why
+    // through `setFollows`. Substituting a widened fallback here is the one
+    // thing this must never do — see `follow-list.ts`.
     if (filters.length === 0) {
       return;
     }
@@ -581,12 +569,10 @@ export class TimelineController {
   /**
    * Publish what a {@link FilterSource} reported about its resolution.
    *
-   * `invalid` is acted on rather than merely displayed: it means the event the
-   * timeline's authors were derived from failed verification and has been
-   * deleted, so the subscription is asking for a population somebody forged.
-   * Leaving it running would keep the wrong timeline on screen — and refilling
-   * with it — for as long as the widget is mounted, since the follow list is
-   * fetched once and never re-read.
+   * `invalid` is acted on rather than merely displayed: the subscription is
+   * asking for a population somebody forged, and since the follow list is
+   * fetched once and never re-read, leaving it running would keep the wrong
+   * timeline on screen — and refilling with it — until the widget unmounts.
    */
   private applyFollows(follows: FollowsState): void {
     if (follows.status !== 'invalid') {
@@ -609,14 +595,10 @@ export class TimelineController {
   /**
    * Poll one event's persisted verdict until it settles, reporting a deletion.
    *
-   * Reuses the relay's own lazy-validation results (`getValidationStatus`), so
-   * nothing is verified here — the widget does no crypto. Only a transition
-   * *out of* `pending` counts as a deletion: `unknown` also means "never
-   * stored" and "evicted", so claiming forgery on the first sight of it would
-   * accuse the relay of an ingest race.
-   *
-   * Bounded by the same signal as the filter source that asked for it, so
-   * `suspend()` and `stop()` end the loop — including one that is mid-await.
+   * Reuses the relay's own lazy-validation results, so nothing is verified here
+   * — the widget does no crypto. Only a transition *out of* `pending` counts as
+   * a deletion: `unknown` also means "never stored" and "evicted", so claiming
+   * forgery on first sight of it would accuse the relay of an ingest race.
    *
    * @param eventId Event whose verdict decides whether the timeline stands
    * @param onInvalid Called once, if and when the relay deletes it
