@@ -2,12 +2,12 @@
  * Signed test event helpers for E2E tests.
  *
  * Events reaching the relay are verified with a real signature check
- * (rx-nostr-crypto's verifier), so E2E events must be properly signed.
+ * (@rx-nostr/crypto's verifier), so E2E events must be properly signed.
  * Mirrors packages/server/tests/utils/test-events.ts.
  */
 
 import { type NostrEvent, getRandomSecret } from '@nostr-cache/shared';
-import { seckeySigner } from 'rx-nostr-crypto';
+import { seckeySigner } from '@rx-nostr/crypto';
 
 /**
  * Create a signed Nostr event.

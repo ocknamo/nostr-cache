@@ -52,7 +52,7 @@ node examples/node-relay-demo.mjs
 
 - `NostrCacheRelay`, `DexieStorage`, `WebSocketServer`（`@nostr-cache/cache-relay`）
 - `getRandomSecret`（`@nostr-cache/shared`）— 秘密鍵生成 / secret key generation
-- `seckeySigner`（`rx-nostr-crypto`）— イベント署名 / event signing
+- `seckeySigner`（`@rx-nostr/crypto`）— イベント署名 / event signing
 - `ws` — WebSocket クライアント / WebSocket client
 
 API の詳細は [`doc/api.md`](../doc/api.md) を参照してください。

@@ -1,6 +1,6 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
-import { seckeySigner } from 'rx-nostr-crypto';
+import { seckeySigner } from '@rx-nostr/crypto';
 
 /**
  * Signs Nostr events with an in-memory secret key.

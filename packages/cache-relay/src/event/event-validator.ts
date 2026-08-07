@@ -1,5 +1,5 @@
 import type { NostrEvent } from '@nostr-cache/shared';
-import { verifier } from 'rx-nostr-crypto';
+import { verifier } from '@rx-nostr/crypto';
 
 /**
  * Event validator for Nostr Cache Relay
