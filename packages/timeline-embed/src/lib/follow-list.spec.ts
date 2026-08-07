@@ -261,6 +261,34 @@ describe('followFilterSource', () => {
     expect(reported.at(-1)?.status).toBe('missing');
   });
 
+  it('opens no subscription when the cap threw every follow away', async () => {
+    const { context, reported } = harness([followEvent([hex(1), hex(2)])]);
+
+    // Only a JS caller can get here — `parseMaxFollows` rejects a zero
+    // attribute — but the outcome would otherwise be the forbidden
+    // `{"kinds":[1],"authors":[]}`, which the "empty list" guard does not catch:
+    // the list had entries, the cap discarded all of them.
+    const filters = await resolve(
+      followFilterSource({ ...options, maxFollows: 0, includeSelf: false }),
+      context
+    );
+
+    expect(filters).toEqual([]);
+    expect(reported.at(-1)).toEqual({ status: 'missing', count: 0, truncated: 2 });
+  });
+
+  it('still subscribes when the cap drops every follow but self is included', async () => {
+    const { context } = harness([followEvent([hex(1), hex(2)])]);
+
+    const filters = await resolve(
+      followFilterSource({ ...options, maxFollows: 0, includeSelf: true }),
+      context
+    );
+
+    // The subject alone is a real (if narrow) author set, not an empty one.
+    expect(filters).toEqual([{ kinds: [1], authors: [SUBJECT], limit: 50 }]);
+  });
+
   it('keeps the newest copy when two relays answer with different versions', async () => {
     // Storage holds one copy, but two upstream relays can each deliver theirs,
     // and the first to land is not necessarily the newest.

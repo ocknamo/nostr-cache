@@ -184,6 +184,15 @@ export function followFilterSource(options: FollowFilterSourceOptions): FilterSo
     }
 
     const { authors, truncated } = selectAuthors(follows, options);
+    if (authors.length === 0) {
+      // Reachable only from a JS caller passing `maxFollows: 0` with
+      // `includeSelf: false` — `parseMaxFollows` rejects a zero attribute. It is
+      // checked anyway because the alternative is emitting
+      // `{"kinds":[1],"authors":[]}`, and the guard above ("the list was empty")
+      // does not cover it: the list had entries, the cap threw them all away.
+      setFollows({ status: 'missing', count: 0, truncated });
+      return [];
+    }
     // The relay verifies signatures in the background (LAZY), so the list that
     // decided this author set is still unverified here. A forged kind 3 with a
     // newer created_at picks the entire population the reader sees — and since
