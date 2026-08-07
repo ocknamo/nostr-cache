@@ -18,6 +18,11 @@ import { SubscriptionManager } from './core/subscription-manager.js';
 // Event handling
 import { EventHandler } from './event/event-handler.js';
 import { EventValidator } from './event/event-validator.js';
+// Replaceable / addressable version comparison (NIP-01). Exported so browser
+// consumers that fetch a replaceable event themselves — the embed widget picks
+// one kind 3 out of what several upstream relays answered — order versions the
+// same way the relay does, rather than inventing a second rule.
+import { supersedes } from './event/replaceable.js';
 
 import { DexieStorage } from './storage/dexie-storage.js';
 // キャッシュ優先度の判定（Dexie 非依存の純関数）
@@ -57,6 +62,7 @@ export {
   // Event
   EventHandler,
   EventValidator,
+  supersedes,
   // Storage
   StorageAdapter,
   CacheStrategy,

@@ -94,6 +94,41 @@ describe('fetchLatestReplaceable', () => {
     expect((await settled)?.id).toBe('newer');
   });
 
+  it('breaks a created_at tie by the lowest id, whichever arrived first', async () => {
+    // NIP-01: "in case of replaceable events with the same timestamp, the event
+    // with the lowest id (first in lexical order) should be retained". Comparing
+    // timestamps alone leaves this to arrival order — decided by whichever
+    // upstream relay answered first — so two readers could resolve the same
+    // follow list to different author sets.
+    for (const order of [
+      ['bbbb', 'aaaa'],
+      ['aaaa', 'bbbb'],
+    ]) {
+      const fake = fakeConnection();
+      const settled = fetchLatestReplaceable(fake.connection, FILTER);
+      for (const id of order) {
+        fake.handlers()?.onEvent(makeEvent({ id, kind: 3, created_at: 100 }));
+      }
+      fake.handlers()?.onEose?.();
+      await vi.advanceTimersByTimeAsync(DEFAULT_ONE_SHOT_GRACE_MS);
+
+      expect((await settled)?.id).toBe('aaaa');
+    }
+  });
+
+  it('still prefers a newer created_at over a lower id', async () => {
+    const fake = fakeConnection();
+
+    const settled = fetchLatestReplaceable(fake.connection, FILTER);
+    fake.handlers()?.onEvent(makeEvent({ id: 'aaaa', kind: 3, created_at: 100 }));
+    fake.handlers()?.onEvent(makeEvent({ id: 'zzzz', kind: 3, created_at: 200 }));
+    fake.handlers()?.onEose?.();
+    await vi.advanceTimersByTimeAsync(DEFAULT_ONE_SHOT_GRACE_MS);
+
+    // The id only decides ties; it must not outrank the timestamp.
+    expect((await settled)?.id).toBe('zzzz');
+  });
+
   it('gives up when the relay answers with nothing at all', async () => {
     const fake = fakeConnection();
 
