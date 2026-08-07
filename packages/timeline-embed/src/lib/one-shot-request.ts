@@ -12,7 +12,8 @@
  *    very event that was just fetched — hence the grace period.
  * 2. **The first event is not necessarily the newest.** Two upstream relays can
  *    each answer with their own copy of a replaceable event, in either order, so
- *    the winner is decided by `created_at` rather than by arrival.
+ *    the winner is decided by NIP-01's version ordering (`supersedes`) rather
+ *    than by arrival.
  * 3. **A refused REQ answers with nothing at all.** A subscription cap or a
  *    storage read failure gets a NOTICE and no EOSE or CLOSED, so without a
  *    watchdog the caller waits forever.
@@ -23,6 +24,7 @@
  * change. `onEvent` and `signal` exist so that migration stays possible.
  */
 
+import { supersedes } from '@nostr-cache/cache-relay/browser';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { RelayConnection } from './relay-connection.ts';
 
@@ -121,7 +123,13 @@ export function fetchLatestReplaceable(
     connection.subscribe(subId, [filter], {
       onEvent: (event) => {
         onEvent?.(event);
-        if (!newest || event.created_at > newest.created_at) {
+        // `supersedes` rather than a `created_at` comparison: NIP-01 breaks a
+        // tie by keeping the lowest id, and comparing timestamps alone would
+        // silently fall back to arrival order — which is decided by whichever
+        // upstream relay answered first, so two readers could resolve the same
+        // follow list to different author sets. The relay orders its own stored
+        // versions with this exact predicate.
+        if (!newest || supersedes(event, newest)) {
           newest = event;
         }
       },
