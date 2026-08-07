@@ -1,5 +1,5 @@
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import {
   DEFAULT_MAX_FOLLOWS,
@@ -8,7 +8,6 @@ import {
   parseFollowList,
   selectAuthors,
 } from './follow-list.ts';
-import { DEFAULT_ONE_SHOT_GRACE_MS } from './one-shot-request.ts';
 import type { RelayConnection } from './relay-connection.ts';
 import type { FilterSource, FilterSourceContext, FollowsState } from './timeline-controller.ts';
 
@@ -150,18 +149,10 @@ describe('followFilterSource', () => {
     const requested: Filter[][] = [];
     const watched: { eventId: string; onInvalid: () => void }[] = [];
     const connection = {
-      subscribe: (
-        _subId: string,
-        filters: Filter[],
-        handlers: { onEvent: (event: NostrEvent) => void; onEose?: () => void }
-      ) => {
+      fetchOnce: async (filters: Filter[], options: { signal?: AbortSignal } = {}) => {
         requested.push(filters);
-        for (const event of events) {
-          handlers.onEvent(event);
-        }
-        handlers.onEose?.();
+        return options.signal?.aborted ? [] : events;
       },
-      unsubscribe: () => {},
     } as unknown as RelayConnection;
 
     return {
@@ -177,25 +168,10 @@ describe('followFilterSource', () => {
     };
   }
 
-  /**
-   * Run a source to completion.
-   *
-   * The one-shot fetch keeps listening after EOSE, so the source only settles
-   * once that grace elapses. Fake timers keep the wait from being paid in
-   * wall-clock time once per spec.
-   */
+  /** The fetch settles on its own now, so nothing has to be driven here. */
   function resolve(source: FilterSource, context: FilterSourceContext): Promise<Filter[]> {
-    const settled = source(context);
-    return vi.advanceTimersByTimeAsync(DEFAULT_ONE_SHOT_GRACE_MS).then(() => settled);
+    return source(context);
   }
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
 
   it('asks for the follow list with no limit', async () => {
     const { context, requested } = harness([followEvent([hex(1)])]);
