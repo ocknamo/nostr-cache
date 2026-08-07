@@ -85,7 +85,7 @@
         timeline = next;
       },
     });
-    await controller.start(filter);
+    await controller.start([filter]);
 
     const host = controller.host;
     unsubscribeMetrics = host?.metrics.subscribe(() => {
@@ -198,7 +198,7 @@
       metrics = { cacheHits: 0, upstreamEvents: 0, delivered: 0 };
       // Resume the live timeline. Its previous events were wiped by the cold
       // pass, so re-subscribing is what makes the view match the cache again.
-      controller?.applyFilter(filter);
+      controller?.applyFilter([filter]);
     }
   }
 

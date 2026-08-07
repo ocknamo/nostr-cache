@@ -150,9 +150,10 @@ export class TimelineController {
    * Boot the relay (if this is the first widget) and open the first
    * subscription.
    *
-   * @param filter NIP-01 filter for the timeline
+   * @param filters NIP-01 filters for the timeline; they travel as one REQ, so
+   *   an event matching any of them lands in the same timeline
    */
-  async start(filter: Filter): Promise<void> {
+  async start(filters: Filter[]): Promise<void> {
     try {
       this.relayHost = await acquireRelayHost(this.options.host);
     } catch (error) {
@@ -176,12 +177,12 @@ export class TimelineController {
     if (this.stopped) {
       return;
     }
-    this.subscribe(filter);
+    this.subscribe(filters);
   }
 
   /** Replace the subscription, clearing the timeline and restarting timing. */
-  applyFilter(filter: Filter): void {
-    this.subscribe(filter);
+  applyFilter(filters: Filter[]): void {
+    this.subscribe(filters);
   }
 
   /**
@@ -220,13 +221,13 @@ export class TimelineController {
     await host?.release();
   }
 
-  private subscribe(filter: Filter): void {
+  private subscribe(filters: Filter[]): void {
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
     }
     this.clearTimers();
-    // The new filter brings its own authors, and the cards that will ask for
+    // The new filters bring their own authors, and the cards that will ask for
     // them are about to be re-rendered. Profiles already parsed stay in state,
     // so nobody flickers back to a pubkey while the lookups re-run.
     this.suspended = false;
@@ -253,7 +254,7 @@ export class TimelineController {
     this.currentSubId = subId;
     this.timer.start(subId);
 
-    this.connection.subscribe(subId, [filter], {
+    this.connection.subscribe(subId, filters, {
       onEvent: (event) => {
         this.timer.markEvent(subId);
         // Without a host there is nothing that can tell cache from upstream;

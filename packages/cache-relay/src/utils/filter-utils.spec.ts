@@ -409,10 +409,21 @@ describe('filterUtils', () => {
       expect(isValidFilterShape('nope' as unknown as Filter)).toBe(false);
     });
 
+    it('accepts any single-letter tag filter, not only #e and #p', () => {
+      // ストレージ側も eventMatchesFilter も汎用タグを扱えるので、REQ 検証だけが
+      // NIP-01 より狭いということが無いようにする（#t のハッシュタグ購読など）
+      expect(isValidFilterShape({ '#t': ['nostr'] })).toBe(true);
+      expect(isValidFilterShape({ '#d': ['identifier'] })).toBe(true);
+      expect(isValidFilterShape({ '#a': ['30023:pk:slug'] })).toBe(true);
+    });
+
     it('rejects conditions of the wrong type', () => {
       expect(isValidFilterShape({ ids: 'abc' } as unknown as Filter)).toBe(false);
       expect(isValidFilterShape({ since: '100' } as unknown as Filter)).toBe(false);
       expect(isValidFilterShape({ limit: '10' } as unknown as Filter)).toBe(false);
+      expect(isValidFilterShape({ '#t': 'nostr' } as unknown as Filter)).toBe(false);
+      // 1 文字でないタグキーは NIP-01 の定義外
+      expect(isValidFilterShape({ '#tag': ['nostr'] } as unknown as Filter)).toBe(false);
     });
   });
 });

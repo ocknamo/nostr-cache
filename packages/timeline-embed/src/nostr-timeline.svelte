@@ -3,6 +3,7 @@
     tag: 'nostr-timeline',
     props: {
       relays: { attribute: 'relays' },
+      filters: { attribute: 'filters' },
       kinds: { attribute: 'kinds' },
       authors: { attribute: 'authors' },
       limit: { attribute: 'limit' },
@@ -21,7 +22,7 @@
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
   import {
     parseDebug,
-    parseFilter,
+    parseFilters,
     parseFreshness,
     parseRelays,
     parseShowOriginAlias,
@@ -30,11 +31,21 @@
   interface Props {
     /** Comma-separated upstream relay URLs. Empty = cache-only. */
     relays?: string;
-    /** Comma-separated event kinds. Defaults to `1`. */
+    /**
+     * JSON array of NIP-01 filters, e.g.
+     * `'[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]'`.
+     *
+     * They travel as a single REQ, so events matching any of them share one
+     * timeline. Reaches the fields `kinds` / `authors` / `limit` cannot
+     * (`since`, `until`, `ids`, tag filters), and takes precedence over all
+     * three when it parses to at least one usable filter.
+     */
+    filters?: string;
+    /** Comma-separated event kinds. Ignored when `filters` is set. Defaults to `1`. */
     kinds?: string;
-    /** Comma-separated author pubkeys (hex). */
+    /** Comma-separated author pubkeys (hex). Ignored when `filters` is set. */
     authors?: string;
-    /** Max events to request. Defaults to 50. */
+    /** Max events to request. Ignored when `filters` is set. Defaults to 50. */
     limit?: string;
     /** IndexedDB database name for the shared cache. */
     dbName?: string;
@@ -73,6 +84,7 @@
 
   const {
     relays,
+    filters,
     kinds,
     authors,
     limit,
@@ -120,7 +132,7 @@
     });
 
     controller = active;
-    void active.start(parseFilter({ kinds, authors, limit }));
+    void active.start(parseFilters({ filters, kinds, authors, limit }));
 
     return () => {
       controller = undefined;

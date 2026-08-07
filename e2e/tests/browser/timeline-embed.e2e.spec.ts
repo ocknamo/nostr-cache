@@ -145,6 +145,40 @@ describe('Embeddable timeline E2E', () => {
     expect(await originBadges(page)).toEqual(['upstream', 'upstream']);
   });
 
+  it('subscribes with the filters JSON in place of kinds/limit', async () => {
+    page = await browser.newPage();
+    // `embedUrl` always sets `kinds=1`, which would render the two notes and
+    // never the profile. So wait for the profile's content rather than for a
+    // card count: `waitForEventCount` returns the instant the count matches, and
+    // one card is also a passing moment on the way to the two notes — a
+    // `filters` attribute that was ignored entirely would still satisfy it.
+    await page.goto(embedUrl({ relays: upstream.url, filters: '[{"kinds":[0],"limit":10}]' }));
+    await page.waitForSelector('nostr-timeline .content:has-text("e2e_author")', {
+      timeout: TIMEOUT,
+    });
+
+    // The notes can no longer arrive once the kind 0 filter is the one in
+    // force, so their absence is a stable fact rather than a snapshot.
+    const contents = await page.$$eval('nostr-timeline .content', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+    expect(contents.some((content) => content.includes('from upstream'))).toBe(false);
+  });
+
+  it('subscribes with every filter in the JSON array', async () => {
+    page = await browser.newPage();
+    await page.goto(
+      embedUrl({
+        relays: upstream.url,
+        filters: '[{"kinds":[1],"limit":10},{"kinds":[0],"limit":10}]',
+      })
+    );
+
+    // Both notes and the profile event: the two filters travel as one REQ, so
+    // everything matching either lands in the same timeline.
+    await waitForEventCount(page, 3);
+  });
+
   it('serves the same events from the local cache after a reload', async () => {
     const url = embedUrl({ relays: upstream.url, debug: 'true' });
     page = await browser.newPage();

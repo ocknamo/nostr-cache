@@ -29,6 +29,7 @@ export type {
 } from './content-parts.ts';
 export { parseRefs } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';
+export { MAX_FILTERS, parseFilterList } from './filter-json.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
@@ -56,6 +57,7 @@ export {
   configFromSearchParams,
   parseDebug,
   parseFilter,
+  parseFilters,
   parseFreshness,
   parseRelays,
   parseShowOriginAlias,

@@ -5,6 +5,7 @@ import {
   configFromSearchParams,
   parseDebug,
   parseFilter,
+  parseFilters,
   parseFreshness,
   parseRelays,
   parseShowOriginAlias,
@@ -180,6 +181,53 @@ describe('parseShowOriginAlias', () => {
   });
 });
 
+describe('parseFilters', () => {
+  it('wraps the comma-separated attributes when no filters JSON is given', () => {
+    expect(parseFilters({ kinds: '1,6', limit: '20' })).toEqual([{ kinds: [1, 6], limit: 20 }]);
+    expect(parseFilters({})).toEqual([{ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT }]);
+  });
+
+  it('uses the filters JSON as given', () => {
+    expect(parseFilters({ filters: '[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]' })).toEqual(
+      [
+        { kinds: [1], limit: 10 },
+        { kinds: [6], limit: 5 },
+      ]
+    );
+  });
+
+  it('ignores kinds, authors and limit when filters is usable', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(
+      parseFilters({
+        filters: '[{"kinds":[7],"limit":3}]',
+        kinds: '1',
+        authors: 'abc',
+        limit: '99',
+      })
+    ).toEqual([{ kinds: [7], limit: 3 }]);
+  });
+
+  it('supplies the default limit to a filter that names none', () => {
+    expect(parseFilters({ filters: '[{"kinds":[1]},{"kinds":[6],"limit":5}]' })).toEqual([
+      { kinds: [1], limit: DEFAULT_LIMIT },
+      { kinds: [6], limit: 5 },
+    ]);
+  });
+
+  it('falls back to the attributes when every filter is unusable', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseFilters({ filters: '{not json', kinds: '6', limit: '20' })).toEqual([
+      { kinds: [6], limit: 20 },
+    ]);
+    expect(parseFilters({ filters: '[{"search":"hi"}]' })).toEqual([
+      { kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT },
+    ]);
+  });
+});
+
 describe('configFromSearchParams', () => {
   it('accepts the deprecated show-origin as a way to ask for the badges', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -197,13 +245,24 @@ describe('configFromSearchParams', () => {
 
     expect(config).toEqual({
       relays: ['wss://a.example'],
-      filter: { kinds: [1, 7], authors: ['abc'], limit: 20 },
+      filters: [{ kinds: [1, 7], authors: ['abc'], limit: 20 }],
       dbName: 'demo',
       profileFreshness: 600,
       debug: true,
       showAvatars: true,
       showMedia: true,
     });
+  });
+
+  it('reads the filters JSON out of the query string', () => {
+    const config = configFromSearchParams(
+      new URLSearchParams({ filters: '[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]' })
+    );
+
+    expect(config.filters).toEqual([
+      { kinds: [1], limit: 10 },
+      { kinds: [6], limit: 5 },
+    ]);
   });
 
   it('turns media off only when asked', () => {
@@ -220,6 +279,6 @@ describe('configFromSearchParams', () => {
     expect(config.dbName).toBeUndefined();
     expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);
-    expect(config.filter).toEqual({ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT });
+    expect(config.filters).toEqual([{ kinds: DEFAULT_KINDS, limit: DEFAULT_LIMIT }]);
   });
 });

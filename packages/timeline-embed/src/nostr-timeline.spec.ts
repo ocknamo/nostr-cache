@@ -117,6 +117,39 @@ describe('<nostr-timeline> custom element', () => {
       'EOSE from the local relay'
     );
   });
+
+  it('subscribes with the filters attribute when one is given', async () => {
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('filters', '[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]');
+    document.body.appendChild(element);
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('.timeline')),
+      'the timeline to render'
+    );
+    // Both filters travel on one REQ, so the local relay answers the whole
+    // subscription with a single EOSE.
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('イベントがありません') === true,
+      'EOSE from the local relay'
+    );
+
+    const host = await acquireRelayHost();
+    try {
+      const relay = host.relay as unknown as {
+        subscriptionManager: { getAllSubscriptions(): { id: string; filters: unknown[] }[] };
+      };
+      const timeline = relay.subscriptionManager
+        .getAllSubscriptions()
+        .find((subscription) => subscription.id.startsWith('timeline-'));
+      expect(timeline?.filters).toEqual([
+        { kinds: [1], limit: 10 },
+        { kinds: [6], limit: 5 },
+      ]);
+    } finally {
+      await host.release();
+    }
+  });
 });
 
 function waitFor(predicate: () => boolean, label: string, timeoutMs = 5000): Promise<void> {
