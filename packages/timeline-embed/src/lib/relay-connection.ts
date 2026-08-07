@@ -1,6 +1,14 @@
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { ConnectionState, EventSigner, LazyFilter, MessagePacket, RxNostr } from 'rx-nostr';
-import { createRxForwardReq, createRxNostr } from 'rx-nostr';
+import { createRxForwardReq, createRxNostr, createRxOneshotReq } from 'rx-nostr';
+
+/**
+ * Deadline on a {@link RelayConnection.fetchOnce}, in milliseconds.
+ *
+ * Covers the relay's upstream EOSE timeout (3s) with room to spare. Its real
+ * job is the case where no reply of any kind arrives.
+ */
+export const ONE_SHOT_TIMEOUT_MS = 5000;
 
 export type ConnectionStatus =
   | 'disconnected'
@@ -147,6 +155,14 @@ export class RelayConnection {
       // after ten seconds, which for an in-page relay buys nothing and costs a
       // reconnect on the next profile lookup.
       connectionStrategy: 'aggressive',
+      // Bounds a one-shot fetch: rx-nostr's backward strategy pipes its event
+      // stream through `completeOnTimeout(eoseTimeout)`, so this is the deadline
+      // for {@link fetchOnce} when a REQ draws no reply at all — the relay
+      // answers a refusal (subscription cap, storage read failure) with a NOTICE
+      // and neither EOSE nor CLOSED. The default is 30s, far too long to leave a
+      // widget waiting; 5s covers the relay's own upstream EOSE timeout (3s)
+      // with room to spare.
+      eoseTimeout: ONE_SHOT_TIMEOUT_MS,
       signer: PASSTHROUGH_SIGNER,
       // Left undefined, rx-nostr reads globalThis.WebSocket when it opens the
       // socket — which is after the emulator has patched it, as it must be.
@@ -250,6 +266,61 @@ export class RelayConnection {
     });
     this.subscriptions.set(wireSubId(subId), { handlers, events });
     req.emit(filters as LazyFilter[]);
+  }
+
+  /**
+   * Issue one REQ, collect what it returns, and close it again.
+   *
+   * rx-nostr's oneshot strategy does the work: its backward event observable
+   * completes when every target relay has finished the subscription (EOSE or
+   * CLOSED), pipes itself through `completeOnTimeout(eoseTimeout)` so a REQ that
+   * draws no reply cannot hang, and `finalize`s into a CLOSE on every path. All
+   * three used to be hand-rolled here.
+   *
+   * Closing on EOSE is only correct because our relay orders EOSE *after* the
+   * events it has accepted (`UpstreamCoordinator.flushEose` waits for its ingest
+   * chain). Against a relay that releases EOSE early this would drop events that
+   * were already on their way.
+   *
+   * @param filters Filters for the REQ; they travel as one subscription
+   * @param options `signal` abandons the fetch — the subscription is closed and
+   *   the promise resolves with nothing rather than a partial answer, because a
+   *   caller being torn down should not act on half a result
+   * @returns Every event that arrived, in arrival order
+   */
+  fetchOnce(filters: Filter[], options: { signal?: AbortSignal } = {}): Promise<NostrEvent[]> {
+    const rxNostr = this.rxNostr;
+    if (!rxNostr || options.signal?.aborted) {
+      return Promise.resolve([]);
+    }
+
+    return new Promise((resolve) => {
+      const events: NostrEvent[] = [];
+      const req = createRxOneshotReq({ filters: filters as LazyFilter[] });
+      const subscription = rxNostr.use(req).subscribe({
+        next: ({ event }) => {
+          events.push(event as NostrEvent);
+        },
+        complete: () => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve(events);
+        },
+        // A stream-level failure is not distinguishable from an empty answer by
+        // anyone upstream of here, and the callers all treat "nothing" as "could
+        // not fetch it" — so report that rather than rejecting.
+        error: () => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve([]);
+        },
+      });
+
+      function onAbort(): void {
+        // Unsubscribing runs rx-nostr's `finalize`, which sends the CLOSE.
+        subscription.unsubscribe();
+        resolve([]);
+      }
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   /**

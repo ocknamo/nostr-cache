@@ -43,15 +43,10 @@ export type {
 } from './follow-list.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
-export {
-  DEFAULT_ONE_SHOT_GRACE_MS,
-  DEFAULT_ONE_SHOT_TIMEOUT_MS,
-  fetchLatestReplaceable,
-} from './one-shot-request.ts';
-export type { OneShotRequestOptions } from './one-shot-request.ts';
+export { fetchLatestReplaceable, latestReplaceable } from './one-shot-request.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
 export type { Profile } from './profile.ts';
-export { RelayConnection } from './relay-connection.ts';
+export { ONE_SHOT_TIMEOUT_MS, RelayConnection } from './relay-connection.ts';
 export type {
   ConnectionStatus,
   RelayConnectionOptions,

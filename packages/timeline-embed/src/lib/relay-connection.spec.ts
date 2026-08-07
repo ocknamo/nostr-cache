@@ -1,7 +1,7 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionStatus } from './relay-connection.ts';
-import { RelayConnection } from './relay-connection.ts';
+import { ONE_SHOT_TIMEOUT_MS, RelayConnection } from './relay-connection.ts';
 
 const RELAY_URL = 'ws://nostr-cache.invalid';
 
@@ -333,5 +333,115 @@ describe('RelayConnection', () => {
         connection.unsubscribe('sub-1');
       }).not.toThrow();
     });
+  });
+});
+
+/**
+ * `fetchOnce` is rx-nostr's oneshot strategy, so what these pin down is the
+ * wire behaviour we now rely on it for rather than our own bookkeeping: a REQ
+ * goes out, EOSE ends it, a CLOSE follows, and nothing hangs when the relay
+ * says nothing at all.
+ */
+describe('RelayConnection.fetchOnce', () => {
+  /** The REQ this fetch put on the wire, and the subscription id it used. */
+  function lastReq(socket: FakeWebSocket): { subId: string; filters: unknown[] } | undefined {
+    const req = socket.messages.filter(
+      (message): message is [string, string, ...unknown[]] =>
+        Array.isArray(message) && message[0] === 'REQ'
+    );
+    const latest = req.at(-1);
+    return latest ? { subId: latest[1], filters: latest.slice(2) } : undefined;
+  }
+
+  it('sends the REQ, collects until EOSE and then closes', async () => {
+    const { connection, socket } = await createOpenConnection();
+
+    const settled = connection.fetchOnce([{ kinds: [1], authors: ['pub'] }]);
+    await flush();
+    const req = lastReq(socket);
+    expect(req?.filters).toEqual([{ kinds: [1], authors: ['pub'] }]);
+
+    socket.simulateMessage(['EVENT', req?.subId, sampleEvent('a', 100)]);
+    socket.simulateMessage(['EVENT', req?.subId, sampleEvent('b', 200)]);
+    await flush();
+    socket.simulateMessage(['EOSE', req?.subId]);
+
+    expect((await settled).map((event) => event.id)).toEqual(['a', 'b']);
+    // The CLOSE is rx-nostr's `finalize`; nothing is left open on the relay.
+    expect(socket.messages).toContainEqual(['CLOSE', req?.subId]);
+  });
+
+  it('resolves empty when the relay answers with EOSE and nothing else', async () => {
+    const { connection, socket } = await createOpenConnection();
+
+    const settled = connection.fetchOnce([{ kinds: [1] }]);
+    await flush();
+    socket.simulateMessage(['EOSE', lastReq(socket)?.subId]);
+
+    expect(await settled).toEqual([]);
+  });
+
+  it('ends on CLOSED, keeping what had already arrived', async () => {
+    const { connection, socket } = await createOpenConnection();
+
+    const settled = connection.fetchOnce([{ kinds: [1] }]);
+    await flush();
+    const subId = lastReq(socket)?.subId;
+    socket.simulateMessage(['EVENT', subId, sampleEvent('a')]);
+    await flush();
+    socket.simulateMessage(['CLOSED', subId, 'too many subscriptions']);
+
+    expect((await settled).map((event) => event.id)).toEqual(['a']);
+  });
+
+  it('gives up when the relay answers with nothing at all', async () => {
+    vi.useFakeTimers();
+    try {
+      const { connection, socket } = await createOpenConnection();
+
+      const settled = connection.fetchOnce([{ kinds: [1] }]);
+      await flush();
+      expect(lastReq(socket)).toBeDefined();
+      // A refused REQ gets a NOTICE and neither EOSE nor CLOSED. rx-nostr's
+      // backward observable pipes itself through `completeOnTimeout(eoseTimeout)`,
+      // which is what ends this — the connection configures that timeout.
+      await vi.advanceTimersByTimeAsync(ONE_SHOT_TIMEOUT_MS);
+
+      expect(await settled).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('abandons the fetch and closes when the signal aborts', async () => {
+    const { connection, socket } = await createOpenConnection();
+    const controller = new AbortController();
+
+    const settled = connection.fetchOnce([{ kinds: [1] }], { signal: controller.signal });
+    await flush();
+    const subId = lastReq(socket)?.subId;
+    socket.simulateMessage(['EVENT', subId, sampleEvent('a')]);
+    controller.abort();
+
+    // Nothing is reported back, not even the event that did arrive: the caller
+    // is being torn down and must not act on half an answer.
+    expect(await settled).toEqual([]);
+    expect(socket.messages).toContainEqual(['CLOSE', subId]);
+  });
+
+  it('opens no subscription at all when it is already aborted', async () => {
+    const { connection, socket } = await createOpenConnection();
+    const controller = new AbortController();
+    controller.abort();
+
+    expect(await connection.fetchOnce([{ kinds: [1] }], { signal: controller.signal })).toEqual([]);
+    await flush();
+    expect(lastReq(socket)).toBeUndefined();
+  });
+
+  it('resolves empty when there is no connection', async () => {
+    const connection = createConnection();
+
+    expect(await connection.fetchOnce([{ kinds: [1] }])).toEqual([]);
   });
 });
