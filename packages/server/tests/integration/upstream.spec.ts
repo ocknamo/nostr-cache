@@ -48,18 +48,18 @@ describe('NostrRelayServer upstream option', () => {
   let cachePort: number;
 
   beforeEach(async () => {
-    upstreamPort = Math.floor(Math.random() * 10000) + 20000;
-    cachePort = upstreamPort + 1;
-
+    // 両サーバーともポート 0（OS 任せ）で起動し、実ポートを読み戻す。
+    // 上流の URL を組み立てるのは上流が起動して実ポートが確定してから。
     upstream = new NostrRelayServer({
-      port: upstreamPort,
+      port: 0,
       storageOptions: { dbName: 'UpstreamRelayDb' },
       healthCheck: { enabled: false },
     });
     await upstream.start();
+    upstreamPort = upstream.getPort();
 
     cache = new NostrRelayServer({
-      port: cachePort,
+      port: 0,
       storageOptions: { dbName: 'CacheRelayDb' },
       healthCheck: { enabled: false },
       relay: {
@@ -68,6 +68,7 @@ describe('NostrRelayServer upstream option', () => {
       },
     });
     await cache.start();
+    cachePort = cache.getPort();
     // Give the cache relay a moment to establish its upstream connection.
     await delay(300);
   });

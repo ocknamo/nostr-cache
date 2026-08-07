@@ -56,21 +56,21 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  const randomPort = () => Math.floor(Math.random() * 10000) + 9000;
+  // どのサーバーもポート 0（OS 任せ）で起動し、実ポートは getPort() で読み戻す
 
   it('keeps events across stop/restart when dbPath is set', async () => {
     const dbPath = join(dataDir, 'relay.db');
     const event = await createTestEvent();
 
     // 1st server: publish, then stop (must NOT clear the persistent storage)
-    const first = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
+    const first = new NostrRelayServer({ port: 0, storageOptions: { dbPath } });
     await first.start();
     await publish(first.getPort(), event);
     expect(await first.getEventCount()).toBe(1);
     await first.stop();
 
     // 2nd server on the same database file: the event must still be there
-    const second = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
+    const second = new NostrRelayServer({ port: 0, storageOptions: { dbPath } });
     await second.start();
     try {
       expect(await second.getEventCount()).toBe(1);
@@ -95,11 +95,12 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
 
     // 同一インスタンスの stop() → start() でも、閉じた DB が再オープンされ
     // データが保持されていること（既定モードとの lifecycle 対称性）
-    const server = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
+    const server = new NostrRelayServer({ port: 0, storageOptions: { dbPath } });
     await server.start();
     await publish(server.getPort(), event);
     await server.stop();
 
+    // 再起動時も port 0 が要求され直すため、前回のポートを掴みにいくことはない
     await server.start();
     try {
       expect(await server.getEventCount()).toBe(1);
@@ -111,7 +112,7 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
   it('clears events on stop in the default in-memory mode', async () => {
     const event = await createTestEvent();
 
-    const server = new NostrRelayServer({ port: randomPort() });
+    const server = new NostrRelayServer({ port: 0 });
     await server.start();
     await publish(server.getPort(), event);
     expect(await server.getEventCount()).toBe(1);

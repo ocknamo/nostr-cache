@@ -13,14 +13,20 @@ export class WebSocketServer implements TransportAdapter {
   private messageCallback?: (clientId: string, message: NostrWireMessage) => void;
   private connectCallback?: (clientId: string) => void;
   private disconnectCallback?: (clientId: string) => void;
-  private port = 0;
+  /**
+   * The port asked for at construction time. Never overwritten by the port the
+   * OS actually handed out, so a `stop()` → `start()` cycle on a dynamic-port
+   * server re-requests 0 instead of pinning the port from the previous run
+   * (which another process may have taken in the meantime).
+   */
+  private readonly requestedPort: number;
 
   /**
    * Create a new WebSocket server
    * @param port Optional port number (default: dynamically assigned)
    */
   constructor(port?: number) {
-    this.port = port || 0; // 0 = dynamically assigned port
+    this.requestedPort = port || 0; // 0 = dynamically assigned port
   }
 
   /**
@@ -28,7 +34,7 @@ export class WebSocketServer implements TransportAdapter {
    * @returns Promise resolving when transport is started
    */
   async start(): Promise<void> {
-    this.server = new WS({ port: this.port });
+    this.server = new WS({ port: this.requestedPort });
 
     this.server.on('connection', (socket) => {
       const clientId = randomUUID();
@@ -71,20 +77,34 @@ export class WebSocketServer implements TransportAdapter {
       });
 
       this.server.once('listening', () => {
-        // Get the actual port number (in case we used 0 for dynamic assignment)
-        const address = this.server?.address();
-        this.port = typeof address === 'object' && address ? address.port : this.port;
-        logger.info(`WebSocket server started on port ${this.port}`);
+        // Report the actual port number (in case we used 0 for dynamic assignment)
+        logger.info(`WebSocket server started on port ${this.getBoundPort()}`);
         resolve();
       });
     });
   }
 
   /**
-   * Get the port the server is listening on
+   * Get the port the server is actually listening on.
+   *
+   * Reads the address off the live server rather than a cached field, so
+   * `port: 0` (let the OS pick) resolves to the real port once `start()` has
+   * resolved. Callers that need a collision-free port should construct with 0
+   * and read it back here instead of picking a number themselves.
+   *
+   * @returns The bound port, or null when the server is not listening
+   */
+  getBoundPort(): number | null {
+    const address = this.server?.address();
+    return typeof address === 'object' && address !== null ? address.port : null;
+  }
+
+  /**
+   * Get the port the server is listening on, falling back to the port that was
+   * requested at construction time while the server is not listening.
    */
   getPort(): number {
-    return this.port;
+    return this.getBoundPort() ?? this.requestedPort;
   }
 
   /**

@@ -174,6 +174,42 @@ describe('WebSocketServer', () => {
     });
   });
 
+  describe('getBoundPort()', () => {
+    it('should be null before start and after stop, and the real port while listening', async () => {
+      expect(server.getBoundPort()).toBeNull();
+      // 未起動のあいだ getPort() はコンストラクタで要求した値（既定 0）を返す
+      expect(server.getPort()).toBe(0);
+
+      await server.start();
+      const bound = server.getBoundPort();
+      expect(bound).toBeGreaterThan(0);
+      expect(server.getPort()).toBe(bound);
+
+      await server.stop();
+      expect(server.getBoundPort()).toBeNull();
+    });
+
+    it('should request a fresh dynamic port on restart instead of pinning the old one', async () => {
+      // stop() 後に前回のポートを掴みにいくと、その間に他プロセスが取っていた
+      // 場合に EADDRINUSE になる。要求ポート（0）は起動をまたいでも変わらない。
+      await server.start();
+      const first = server.getBoundPort();
+      expect(first).toBeGreaterThan(0);
+      await server.stop();
+
+      // 前回のポートを塞いだ状態で再起動しても、別ポートで問題なく上がる
+      const squatter = new WebSocketServer(first as number);
+      await squatter.start();
+      try {
+        await server.start();
+        expect(server.getBoundPort()).toBeGreaterThan(0);
+        expect(server.getBoundPort()).not.toBe(first);
+      } finally {
+        await squatter.stop();
+      }
+    });
+  });
+
   describe('getConnectionCount()', () => {
     it('should start at zero', () => {
       expect(server.getConnectionCount()).toBe(0);

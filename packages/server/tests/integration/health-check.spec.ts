@@ -9,24 +9,18 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { findFreePortRange } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
-
-/**
- * ランダムな WebSocket ポートを返す。
- */
-function randomPort(): number {
-  return Math.floor(Math.random() * 10000) + 30000;
-}
 
 describe('NostrRelayServer health check endpoint', () => {
   let server: NostrRelayServer;
   let healthPort: number;
 
   beforeEach(async () => {
-    // ヘルスチェックは動的ポート（0）で起動し、実際のバインドポートを取得することで
-    // ポート衝突によるフレークを避ける。
+    // WebSocket / ヘルスチェックとも動的ポート（0）で起動し、実際のバインドポートを
+    // 読み戻すことでポート衝突によるフレークを避ける。
     server = new NostrRelayServer({
-      port: randomPort(),
+      port: 0,
       healthCheck: { port: 0 },
     });
     await server.start();
@@ -49,13 +43,35 @@ describe('NostrRelayServer health check endpoint', () => {
 
   it('should default the health port to the WebSocket port + 1', async () => {
     // 既定（port 未指定）では WebSocket ポート + 1 にバインドされることを確認する。
-    const wsPort = randomPort();
+    // 番号そのものを検証する唯一のテストなので、ここだけは連番の空きポートを
+    // 実際に確保して使う（port 0 では「+1」を確かめようがない）。
+    const wsPort = await findFreePortRange(2);
     const defaultServer = new NostrRelayServer({ port: wsPort });
     await defaultServer.start();
     try {
+      expect(defaultServer.getPort()).toBe(wsPort);
       expect(defaultServer.getHealthPort()).toBe(wsPort + 1);
     } finally {
       await defaultServer.stop();
+    }
+  });
+
+  it('should assign the health port dynamically when the WebSocket port is dynamic', async () => {
+    // WebSocket が port 0 のときの既定は「+1」ではなく 0（OS 任せ）。
+    // 0 + 1 = 1 は特権ポートで確保できず、ヘルスチェックが黙って死ぬため。
+    const dynamicServer = new NostrRelayServer({ port: 0 });
+    await dynamicServer.start();
+    try {
+      const boundHealthPort = dynamicServer.getHealthPort();
+      expect(boundHealthPort).not.toBeNull();
+      expect(boundHealthPort).toBeGreaterThan(1);
+      expect(boundHealthPort).not.toBe(dynamicServer.getPort());
+
+      const response = await fetch(`http://localhost:${boundHealthPort}/health`);
+      expect(response.status).toBe(200);
+      await response.text();
+    } finally {
+      await dynamicServer.stop();
     }
   });
 
@@ -139,10 +155,12 @@ describe('NostrRelayServer health check endpoint', () => {
 
 describe('NostrRelayServer health check disabled', () => {
   it('should not start the health endpoint when disabled', async () => {
-    const wsPort = randomPort();
+    // 「そのポートで待ち受けていない」ことを確かめるには具体的な番号が要るので、
+    // ヘルスチェック用のポートだけ空きを確保して明示する（WebSocket は port 0）。
+    const disabledHealthPort = await findFreePortRange(1);
     const server = new NostrRelayServer({
-      port: wsPort,
-      healthCheck: { enabled: false, port: wsPort + 1 },
+      port: 0,
+      healthCheck: { enabled: false, port: disabledHealthPort },
     });
     await server.start();
 
@@ -150,7 +168,7 @@ describe('NostrRelayServer health check disabled', () => {
       expect(server.getHealthPort()).toBeNull();
 
       // 無効化されているため接続は確立できない
-      await expect(fetch(`http://localhost:${wsPort + 1}/health`)).rejects.toThrow();
+      await expect(fetch(`http://localhost:${disabledHealthPort}/health`)).rejects.toThrow();
     } finally {
       await server.stop();
     }

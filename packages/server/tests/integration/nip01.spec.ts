@@ -106,9 +106,10 @@ describe('NostrRelayServer NIP-01 compliance', () => {
   let port: number;
 
   beforeEach(async () => {
-    port = Math.floor(Math.random() * 10000) + 9000;
-    server = new NostrRelayServer({ port });
+    // ポート 0（OS 任せ）で起動し、実際にバインドされたポートを読み戻す
+    server = new NostrRelayServer({ port: 0 });
     await server.start();
+    port = server.getPort();
   });
 
   afterEach(async () => {
@@ -383,12 +384,12 @@ describe('NostrRelayServer NIP-01 compliance', () => {
 
   describe('subscription limit (rate limiting)', () => {
     it('should reject subscriptions beyond the configured maximum', async () => {
-      const limitedPort = Math.floor(Math.random() * 10000) + 20000;
       const limitedServer = new NostrRelayServer({
-        port: limitedPort,
+        port: 0,
         relay: { maxSubscriptions: 2 },
       });
       await limitedServer.start();
+      const limitedPort = limitedServer.getPort();
 
       try {
         const client = await connect(limitedPort);

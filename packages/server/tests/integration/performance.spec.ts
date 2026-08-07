@@ -143,9 +143,10 @@ describe('NostrRelayServer performance', () => {
   let port: number;
 
   beforeEach(async () => {
-    port = Math.floor(Math.random() * 10000) + 40000;
-    server = new NostrRelayServer({ port });
+    // ポート 0（OS 任せ）で起動し、実際にバインドされたポートを読み戻す
+    server = new NostrRelayServer({ port: 0 });
     await server.start();
+    port = server.getPort();
   });
 
   afterEach(async () => {
