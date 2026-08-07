@@ -625,6 +625,9 @@ describe('NostrCacheRelay', () => {
       expect(eoseHandler).not.toHaveBeenCalled();
 
       pool.fireEose();
+      // One microtask later: the coordinator waits for the ingest chain so EOSE
+      // cannot overtake events it has accepted but not yet delivered.
+      await Promise.resolve();
       expect(eoseHandler).toHaveBeenCalledWith('sub1');
     });
 

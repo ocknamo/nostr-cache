@@ -220,7 +220,7 @@ describe('<nostr-follow-timeline> custom element', () => {
     expect(quiet.shadowRoot?.textContent).not.toContain('人を表示しています');
   });
 
-  it('leaves no follow-list subscription behind when removed mid-resolution', async () => {
+  it('leaves no follow-list subscription behind', async () => {
     const dbName = `follow-${crypto.randomUUID()}`;
     await seedCache(dbName, [followList([FRIEND])]);
     const element = mount({ pubkey: SUBJECT, 'db-name': dbName });
@@ -233,15 +233,21 @@ describe('<nostr-follow-timeline> custom element', () => {
     const relay = host.relay as unknown as {
       subscriptionManager: { getAllSubscriptions(): { id: string }[] };
     };
-    const oneShots = () =>
-      relay.subscriptionManager
-        .getAllSubscriptions()
-        .filter((subscription) => subscription.id.startsWith('oneshot-'));
+    const subscriptionIds = () =>
+      relay.subscriptionManager.getAllSubscriptions().map((subscription) => subscription.id);
 
-    await waitFor(() => oneShots().length > 0, 'the follow-list subscription to open');
+    // The timeline subscription only exists once the follow list resolved, so
+    // waiting for it proves the one-shot ran. Catching that one *while open* is
+    // no longer possible: it closes on EOSE now that the relay orders EOSE
+    // after delivery, which is a window too short to poll for.
+    await waitFor(
+      () => subscriptionIds().some((id) => id.startsWith('timeline-')),
+      'the resolved timeline subscription'
+    );
+    expect(subscriptionIds().filter((id) => id.startsWith('oneshot-'))).toEqual([]);
+
     element.remove();
-
-    await waitFor(() => oneShots().length === 0, 'the follow-list subscription to close');
+    await waitFor(() => subscriptionIds().length === 0, 'every subscription to close');
   });
 
   it('acquires the shared relay while mounted and releases it on removal', async () => {

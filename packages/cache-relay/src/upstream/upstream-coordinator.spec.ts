@@ -188,27 +188,105 @@ describe('UpstreamCoordinator', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
-    it('sends client EOSE when the aggregated upstream EOSE arrives', () => {
+    it('sends client EOSE when the aggregated upstream EOSE arrives', async () => {
       const { pool, coordinator, sendEose } = makeHarness();
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
       pool.emitEose(pool.lastSubId());
+      await flush();
       expect(sendEose).toHaveBeenCalledWith('client', 'sub');
     });
 
-    it('sends client EOSE after the timeout if upstream is silent', () => {
+    it('sends client EOSE after the timeout if upstream is silent', async () => {
       const { coordinator, sendEose } = makeHarness(undefined, { eoseTimeout: 500 });
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
       expect(sendEose).not.toHaveBeenCalled();
       vi.advanceTimersByTime(500);
+      await flush();
       expect(sendEose).toHaveBeenCalledWith('client', 'sub');
     });
 
-    it('sends client EOSE only once (aggregate then timeout)', () => {
+    it('sends client EOSE only once (aggregate then timeout)', async () => {
       const { pool, coordinator, sendEose } = makeHarness(undefined, { eoseTimeout: 500 });
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
       pool.emitEose(pool.lastSubId());
       vi.advanceTimersByTime(500);
+      await flush();
       expect(sendEose).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The ordering this class exists for: "hold back the client's EOSE ... so
+     * one-shot clients see upstream results before end of stored".
+     *
+     * Upstream events are delivered only once their storage write resolves,
+     * while EOSE had no such wait — so it overtook events the relay had already
+     * accepted. A client that closes on EOSE (rx-nostr's oneshot strategy,
+     * nostr-tools' `get`) then never saw them: the ingest chain drops every
+     * queued delivery as soon as `closed` is set.
+     */
+    it('waits for queued ingests before sending EOSE', async () => {
+      let releaseIngest: (() => void) | undefined;
+      const ingestGate = new Promise<void>((resolve) => {
+        releaseIngest = resolve;
+      });
+      const { pool, coordinator, deliver, sendEose } = makeHarness(async (event) => {
+        await ingestGate;
+        return { success: true, stored: true, event };
+      });
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+
+      pool.emitEvent(pool.lastSubId(), makeEvent('slow-write'));
+      pool.emitEose(pool.lastSubId());
+      await flush();
+
+      // Upstream said "end of stored", but the event it sent just before that
+      // is still being written. EOSE now would be a lie.
+      expect(deliver).not.toHaveBeenCalled();
+      expect(sendEose).not.toHaveBeenCalled();
+
+      releaseIngest?.();
+      await flush();
+
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(sendEose).toHaveBeenCalledTimes(1);
+      expect(deliver.mock.invocationCallOrder[0]).toBeLessThan(
+        sendEose.mock.invocationCallOrder[0]
+      );
+    });
+
+    it('does not send EOSE when the client closed while an ingest was pending', async () => {
+      let releaseIngest: (() => void) | undefined;
+      const ingestGate = new Promise<void>((resolve) => {
+        releaseIngest = resolve;
+      });
+      const { pool, coordinator, sendEose } = makeHarness(async (event) => {
+        await ingestGate;
+        return { success: true, stored: true, event };
+      });
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+
+      pool.emitEvent(pool.lastSubId(), makeEvent('abandoned'));
+      pool.emitEose(pool.lastSubId());
+      coordinator.closeForSubscription('client', 'sub');
+      releaseIngest?.();
+      await flush();
+
+      expect(sendEose).not.toHaveBeenCalled();
+    });
+
+    it('still sends EOSE when the backfill failed', async () => {
+      // A failed write is not a reason to withhold "end of stored" for good;
+      // the chain catches its own errors so it always settles.
+      const { pool, coordinator, sendEose } = makeHarness(async () => {
+        throw new Error('storage full');
+      });
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+
+      pool.emitEvent(pool.lastSubId(), makeEvent('doomed'));
+      pool.emitEose(pool.lastSubId());
+      await flush();
+
+      expect(sendEose).toHaveBeenCalledWith('client', 'sub');
     });
   });
 
