@@ -602,12 +602,19 @@ describe('Embeddable timeline E2E', () => {
     );
     expect(faded).toEqual(['0.6', '0.6']);
 
-    // ...and come back to full strength once it has vouched for them.
+    // ...and come back to full strength once it has vouched for them. Waited
+    // for rather than sampled: the fade is a 200ms transition, so reading the
+    // moment the ✓ appears catches a card partway there (CI saw 0.995).
     await page.waitForSelector('nostr-timeline .verified', { timeout: TIMEOUT });
-    const solid = await page.$$eval('nostr-timeline .event-card', (cards) =>
-      cards.map((card) => getComputedStyle(card).opacity)
+    await page.waitForFunction(
+      () => {
+        const root = document.querySelector('nostr-timeline')?.shadowRoot;
+        const cards = [...(root?.querySelectorAll('.event-card') ?? [])];
+        return cards.length === 2 && cards.every((card) => getComputedStyle(card).opacity === '1');
+      },
+      undefined,
+      { timeout: TIMEOUT }
     );
-    expect(solid).toEqual(['1', '1']);
   });
 
   it('keeps the first card tooltip above the card below it', async () => {
