@@ -78,9 +78,22 @@ describe('Demo site action bar E2E', () => {
     expect(Array.isArray(fromElement) && fromElement.length > 0).toBe(true);
 
     const iframeSrc = await page.getAttribute('iframe', 'src');
-    const iframeActions = new URL(iframeSrc ?? '', site.baseUrl).searchParams.get('actions');
+    const iframeParams = new URL(iframeSrc ?? '', site.baseUrl).searchParams;
+    const iframeActions = iframeParams.get('actions');
     expect(iframeActions).not.toBeNull();
     expect(JSON.parse(iframeActions ?? '')).toEqual(fromElement);
+
+    // The icons are Material Symbols ligature names, so the two examples only
+    // look alike while both sides ask for the same variant: without it the
+    // iframe would render the names as the words they are.
+    const variant = await page.evaluate(() => {
+      const element = document.querySelector('nostr-timeline') as
+        | (Element & { materialIcons?: string })
+        | null;
+      return element?.materialIcons ?? element?.getAttribute('material-icons');
+    });
+    expect(variant).toBeTruthy();
+    expect(iframeParams.get('material-icons')).toBe(variant);
 
     // The follow timeline renders only once the box holds a usable pubkey.
     await page.fill('.follow-input input', FOLLOW_PUBKEY);
