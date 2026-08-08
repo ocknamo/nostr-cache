@@ -167,7 +167,9 @@
       // A sub-pixel line box rounds the two apart on a note that fits, so a
       // whole pixel is the smallest difference worth calling an overflow.
       noteOverflowing = node.scrollHeight - node.clientHeight > 1;
-      noteAtEnd = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+      // Only ever true of a note that scrolls: a box that fits is at its end by
+      // arithmetic, and saying so would put the class on every short card.
+      noteAtEnd = noteOverflowing && node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
     };
 
     measure();
@@ -178,12 +180,16 @@
         destroy: () => node.removeEventListener('scroll', measure),
       };
     }
-    // The box itself for a resized embed, the content for a note that grew
-    // inside it — neither alone catches both.
+    // Two boxes: this one for a resized embed, and the wrapper inside it for a
+    // note that grew — once the cap bites, the scroll box stops changing size
+    // and the content is the only thing left that moves. The wrapper is always
+    // there, so this survives the body gaining a part it did not render at
+    // first paint (an attachment list appearing when `show-media` is switched
+    // back on); observing the children directly would miss it.
     const observer = new ResizeObserver(measure);
     observer.observe(node);
-    for (const child of node.children) {
-      observer.observe(child);
+    if (node.firstElementChild) {
+      observer.observe(node.firstElementChild);
     }
     return {
       destroy: () => {
@@ -387,18 +393,28 @@
       region to be operable without a mouse, but an unconditional tab stop
       would put one on every card in the list. The rule below flags exactly
       that pattern, which is the one WCAG asks for here.
+
+      `group` rather than `region`: a labelled `region` is a landmark, and a
+      timeline of long posts would fill a screen reader's landmark list with
+      identically named entries. What the reader needs here is the label and
+      the tab stop, not a place to jump to.
     -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="note"
+      part="note"
       class:overflowing={noteOverflowing}
       class:at-end={noteAtEnd}
-      role={noteOverflowing ? 'region' : undefined}
+      role={noteOverflowing ? 'group' : undefined}
       tabindex={noteOverflowing ? 0 : undefined}
       aria-label={noteOverflowing ? '投稿本文（スクロールできます）' : undefined}
       use:watchOverflow
     >
-      <NoteContent content={event.content} {showMedia} {profiles} />
+      <!-- One wrapper, always present, so the observer above has a single box
+           to watch whatever the body turns out to contain. -->
+      <div class="note-body">
+        <NoteContent content={event.content} {showMedia} {profiles} />
+      </div>
     </div>
   </div>
   <!--
@@ -535,13 +551,29 @@
     /* Horizontal overflow is already impossible (everything inside wraps or
        breaks); saying so keeps a stray wide child from adding a second bar. */
     overflow-x: hidden;
-    /* Reaching the end of a note should carry on scrolling the timeline, the
-       way a nested scroll area in a Nostr client does — `contain` here would
-       stop the wheel dead on every long post. */
+    /* The default, spelled out because the alternative is tempting and wrong:
+       `contain` would stop a wheel here for good. It is worth knowing that
+       `auto` does not buy as much as it sounds like either — a browser latches
+       a scroll gesture to the box it started over, so a flick that ends inside
+       a long note does not carry on into the timeline; the reader has to lift
+       off and start again outside the note. That is the cost of scrolling a
+       post in place, and the reason the cap is generous enough that most posts
+       never become a scroll box at all. */
     overscroll-behavior-y: auto;
     /* Tabbing to a link near the bottom scrolls it into view; without this the
        browser would stop with it half under the fade. */
     scroll-padding-bottom: var(--note-fade);
+    /* Where scrollbars take space (Windows, most Linux desktops) a fat one
+       would make an overflowing note narrower than the card next to it, in a
+       colour the embed never chose. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--nt-scrollbar, var(--nt-muted, #657786)) transparent;
+  }
+
+  /* Nothing of its own: it exists so the overflow observer has one box to watch
+     no matter what the body renders. */
+  .note-body {
+    min-width: 0;
   }
 
   /*

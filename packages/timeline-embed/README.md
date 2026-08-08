@@ -288,6 +288,7 @@ nostr-timeline {
   --nt-separator: #30363d;      /* カード間の区切り線。既定は --nt-border */
   --nt-card-padding: 10px 12px;
   --nt-card-max-height: 420px;  /* 1 投稿の高さの上限。none で content 任せ */
+  --nt-scrollbar: #8b949e;      /* 上限を超えた投稿のスクロールバー。既定は --nt-muted */
   --nt-avatar-size: 40px;
   --nt-avatar-radius: 8px;
   --nt-avatar-gap: 10px;        /* アバターと本文の間隔 */
@@ -317,7 +318,7 @@ nostr-timeline {
   --nt-link-fg: #58a6ff;        /* 本文中のリンク */
   --nt-mention-fg: #58a6ff;     /* nostr: メンション */
   --nt-mention-bg: transparent;
-  --nt-media-max-height: 400px; /* 添付画像・動画の高さの上限 */
+  --nt-media-max-height: 300px; /* 添付画像・動画の高さの上限。カード上限に収まる値 */
   --nt-media-radius: 10px;
   --nt-media-bg: #161b22;       /* 読み込み中の添付の背景 */
 }
@@ -344,10 +345,20 @@ nostr-timeline {
 - 上限はパディングを含めた**カード全体の高さ**です（`box-sizing: border-box`）。
   `--nt-card-max-height: none` で上限なし（従来どおり本文の長さだけカードが伸びる）に戻せます。
 - 溢れている投稿だけがスクロール領域になります。その場合のみ
-  キーボードで到達できるよう `tabindex="0"` と `role="region"` が付き（WCAG 2.1.1）、
+  キーボードで到達できるよう `tabindex="0"` と `role="group"` が付き（WCAG 2.1.1）、
   下端に「まだ続きがある」ことを示すフェードが出ます（最下部まで送ると消えます）。
   収まっている投稿には何も付きません（タブ移動の邪魔になるため）。
-- 画像や動画の高さは別に `--nt-media-max-height`（既定 400px）でも制限されます。
+  `role="region"` ではなく `group` なのは、名前付きの region がランドマークになり、
+  長文が並ぶタイムラインでスクリーンリーダーのランドマーク一覧が同名項目で
+  埋まってしまうためです。
+- スクロール領域は `part="note"` で公開しています。スクロールバーは
+  `scrollbar-width: thin` と `--nt-scrollbar`（色）で調整できます。
+- 添付画像・動画の高さの上限 `--nt-media-max-height` の既定値（300px）は、
+  **カードの上限（420px）の中にヘッダーとアクション行ごと収まる**ように選んでいます。
+  写真 1 枚の投稿は縮小して全体を表示します（画像はスクロールさせるより
+  縮めて全体を見せるほうがよいため）。上限付きのカードでこれを大きくしても
+  スクロールバーが増えるだけなので、大きな画像を出したい場合は
+  `--nt-card-max-height` も一緒に引き上げる（または `none` にする）でください。
 
 ## 本文の描画
 

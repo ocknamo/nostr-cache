@@ -513,8 +513,11 @@ describe('EventCard', () => {
       // One tab stop per card, on a 50-card timeline, for boxes that do not
       // scroll: the affordance only appears where there is something to reach.
       expect(note(container)).not.toHaveAttribute('tabindex');
-      expect(screen.queryByRole('region')).not.toBeInTheDocument();
+      expect(screen.queryByRole('group')).not.toBeInTheDocument();
       expect(note(container)).not.toHaveClass('overflowing');
+      // Nor the end-of-note marker: a box that fits is at its end by
+      // arithmetic, and the class would be on every short card in the list.
+      expect(note(container)).not.toHaveClass('at-end');
     });
 
     it('announces an overflowing note as a scroll area a keyboard can reach', async () => {
@@ -529,7 +532,10 @@ describe('EventCard', () => {
         FakeResizeObserver.instances[0].resize();
         await tick();
 
-        const scroller = screen.getByRole('region', { name: '投稿本文（スクロールできます）' });
+        // `group`, not `region`: a labelled region is a landmark, and a
+        // timeline of long posts would fill a screen reader's landmark list
+        // with identical entries.
+        const scroller = screen.getByRole('group', { name: '投稿本文（スクロールできます）' });
         expect(scroller).toBe(note(container));
         // WCAG 2.1.1: a scrollable region has to be operable without a mouse.
         expect(scroller).toHaveAttribute('tabindex', '0');
@@ -540,17 +546,41 @@ describe('EventCard', () => {
       });
     });
 
-    it('watches the note itself and what is inside it', async () => {
+    it('watches the note and the wrapper that holds whatever it renders', async () => {
       await withObserver(() => {
         const { container } = render(EventCard, {
           props: { event: makeEvent({ content: 'https://cdn.example.com/a.jpg' }) },
         });
 
         const observer = FakeResizeObserver.instances[0];
-        // The box for a resized embed, the content for a note that grew inside
-        // it (here the attachment list); neither alone catches both.
+        // The box for a resized embed, the wrapper for a note that grew inside
+        // it; neither alone catches both. The wrapper rather than the body's
+        // own children, which come and go — an attachment list appears only
+        // once `show-media` is on, and would never be observed.
         expect(observer.observed).toContain(note(container));
-        expect(observer.observed).toContain(container.querySelector('.media'));
+        expect(observer.observed).toContain(container.querySelector('.note-body'));
+        expect(container.querySelector('.note-body')).toContainElement(
+          container.querySelector('.media')
+        );
+      });
+    });
+
+    it('stops watching once the card is gone', async () => {
+      await withObserver(async () => {
+        const { container, unmount } = render(EventCard, { props: { event: makeEvent() } });
+        const scroller = note(container);
+        const observer = FakeResizeObserver.instances[0];
+        // Spied rather than inferred from the DOM: a destroyed component stops
+        // rendering either way, so the class would look right even with the
+        // listener still attached.
+        const removeListener = vi.spyOn(scroller, 'removeEventListener');
+
+        unmount();
+
+        // A timeline replaces its cards as events stream in, so an observer or
+        // a scroll listener left behind is a leak per card.
+        expect(observer.disconnected).toBe(true);
+        expect(removeListener).toHaveBeenCalledWith('scroll', expect.any(Function));
       });
     });
 

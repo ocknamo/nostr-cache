@@ -640,16 +640,90 @@ describe('Embeddable timeline E2E', () => {
       expect(cards[1].tabindex).toBeNull();
       expect(cards[1].faded).toBe(false);
 
-      // The long post scrolls inside its own box rather than moving the page.
-      const scrolled = await page.$eval('nostr-timeline .note', (note) => {
-        note.scrollTop = note.scrollHeight;
+      // A real wheel gesture over the long post, rather than assigning
+      // `scrollTop`: what is worth knowing is that the note is the box the
+      // browser hands the scroll to.
+      const note = await page.$('nostr-timeline .note');
+      const box = (await note?.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 200);
+      await page.waitForTimeout(200);
+
+      const afterWheel = await page.$eval('nostr-timeline .note', (scroller) => ({
+        scrollTop: Math.round(scroller.scrollTop),
+        atEnd: scroller.classList.contains('at-end'),
+      }));
+      expect(afterWheel.scrollTop).toBeGreaterThan(0);
+      expect(afterWheel.atEnd).toBe(false);
+
+      // Sent to the end, the fade lifts: fading the last line of a note that
+      // has finished reads as a rendering bug rather than a hint.
+      const atEnd = await page.$eval('nostr-timeline .note', async (scroller) => {
+        scroller.scrollTop = scroller.scrollHeight;
+        await new Promise((settle) => requestAnimationFrame(settle));
+        return scroller.classList.contains('at-end');
+      });
+      expect(atEnd).toBe(true);
+    } finally {
+      await disposable.close();
+    }
+  });
+
+  it('shows a photo post whole rather than turning it into a scroll box', async () => {
+    // The two defaults have to agree: an attachment is capped
+    // (--nt-media-max-height) inside a card that is itself capped
+    // (--nt-card-max-height), and if the first does not fit inside the second
+    // then *every* photo post becomes a scroll area with a tab stop.
+    const events = await Promise.all([
+      createTestEvent(getRandomSecret(), {
+        content: site.photoUrl,
+        created_at: 1_700_000_300,
+      }),
+    ]);
+    const disposable = await startMockUpstreamRelay(events);
+    try {
+      page = await browser.newPage({ viewport: { width: 360, height: 900 } });
+      await page.goto(
+        embedUrl({
+          relays: disposable.url,
+          actions: JSON.stringify([{ id: 'reply', label: '返信', icon: '💬' }]),
+        })
+      );
+      await waitForEventCount(page, 1);
+      // The picture is 1000px tall at source, so it only settles into its
+      // capped height once the bytes have arrived.
+      await page.waitForFunction(
+        () =>
+          (
+            document
+              .querySelector('nostr-timeline')
+              ?.shadowRoot?.querySelector('img.attachment') as HTMLImageElement | null
+          )?.complete === true,
+        undefined,
+        { timeout: TIMEOUT }
+      );
+
+      const card = await page.$eval('nostr-timeline .event-card', (node) => {
+        const note = node.querySelector('.note') as HTMLElement;
+        const photo = node.querySelector('img.attachment') as HTMLImageElement;
         return {
-          scrollTop: note.scrollTop,
-          pageScrolled: window.scrollY,
+          height: Math.round(node.getBoundingClientRect().height),
+          photoHeight: Math.round(photo.getBoundingClientRect().height),
+          naturalHeight: photo.naturalHeight,
+          scrolls: note.scrollHeight - note.clientHeight > 1,
+          tabindex: note.getAttribute('tabindex'),
         };
       });
-      expect(scrolled.scrollTop).toBeGreaterThan(0);
-      expect(scrolled.pageScrolled).toBe(0);
+
+      // The premise: a picture that really is taller than the card.
+      expect(card.naturalHeight).toBe(1000);
+      // The behaviour first, so a regression here reads as what it is: an
+      // ordinary photo post turning into a scroll box with a tab stop.
+      expect(card.scrolls).toBe(false);
+      expect(card.tabindex).toBeNull();
+      // Shrunk to fit, inside the card's own cap.
+      expect(card.photoHeight).toBe(300);
+      expect(card.height).toBeLessThanOrEqual(420);
     } finally {
       await disposable.close();
     }
