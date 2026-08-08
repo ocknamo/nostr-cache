@@ -14,12 +14,21 @@
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
+      actions: { attribute: 'actions' },
+      materialIcons: { attribute: 'material-icons' },
+      materialIconsFont: { attribute: 'material-icons-font' },
     },
   }}
 />
 
 <script lang="ts">
   import TimelineView from './components/TimelineView.svelte';
+  import {
+    type EventAction,
+    dispatchActionEvent,
+    normalizeActions,
+  } from './lib/event-actions.ts';
+  import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
   import {
     parseDebug,
@@ -92,6 +101,34 @@
      * this only stops the widget from fetching from whatever host a note names.
      */
     showMedia?: string;
+    /**
+     * Buttons to render under every card, as a JSON array of
+     * `{"id","label","icon"}` — or, when set as a property from JS, the array
+     * itself, whose entries may also carry an `onSelect` function.
+     *
+     * The widget defines no actions of its own; a press is reported as a
+     * `nostr-timeline:action` DOM event on this element. See
+     * `lib/event-actions.ts`.
+     */
+    actions?: string | EventAction[];
+    /**
+     * Render the action icons as Material Symbols
+     * (<https://fonts.google.com/icons>): each `icon` is then a ligature name
+     * such as `favorite`, not literal text. Values: `outlined` (the default for
+     * a bare attribute), `rounded`, `sharp`.
+     *
+     * Setting this also loads the font from Google Fonts into the page, because
+     * a shadow root cannot register one itself — set
+     * `material-icons-font="none"` when the page provides the font already.
+     */
+    materialIcons?: string | boolean;
+    /**
+     * Where the Material Symbols font comes from: `google` (default) injects
+     * Google's stylesheet into `document.head`, which is a third-party request
+     * exposing the reader's IP to Google. `none` loads nothing and leaves the
+     * font to the embedding page.
+     */
+    materialIconsFont?: string;
   }
 
   const {
@@ -107,7 +144,31 @@
     showOrigin,
     showAvatars,
     showMedia,
+    actions,
+    materialIcons,
+    materialIconsFont,
   }: Props = $props();
+
+  // The element itself, so a press can be announced to the embedding page —
+  // which, having written HTML rather than JS, has no callback to receive.
+  const hostElement = $host();
+
+  /**
+   * The Material Symbols variant to render icons with, and the font to back it.
+   *
+   * The load is an effect rather than part of the derivation because it touches
+   * `document.head`: deriving it would inject a stylesheet as a side effect of
+   * reading a value, and once per re-render at that. `ensureMaterialSymbols` is
+   * idempotent per variant regardless.
+   */
+  const iconVariant = $derived(parseMaterialVariant(materialIcons));
+
+  $effect(() => {
+    if (iconVariant && materialIconsFont !== 'none') {
+      ensureMaterialSymbols(iconVariant);
+    }
+  });
+
 
   let state = $state<TimelineState>({
     status: 'disconnected',
@@ -161,5 +222,8 @@
   debug={parseDebug(debug)}
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
+  actions={normalizeActions(actions)}
+  materialIcons={iconVariant}
+  onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
 />

@@ -27,6 +27,13 @@ export type {
   MediaPart,
   TextPart,
 } from './content-parts.ts';
+export {
+  ACTION_EVENT,
+  MAX_ACTIONS,
+  dispatchActionEvent,
+  normalizeActions,
+} from './event-actions.ts';
+export type { EventAction, EventActionContext, EventActionDetail } from './event-actions.ts';
 export { parseRefs } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';
 export { MAX_FILTERS, parseFilterList, toPubkeyHex } from './filter-json.ts';
@@ -42,6 +49,13 @@ export type {
   SelectedAuthors,
 } from './follow-list.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
+export {
+  ensureMaterialSymbols,
+  materialFontFamily,
+  materialFontHref,
+  parseMaterialVariant,
+} from './material-symbols.ts';
+export type { MaterialVariant } from './material-symbols.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
 export { fetchLatestReplaceable, latestReplaceable } from './one-shot-request.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';

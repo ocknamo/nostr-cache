@@ -258,7 +258,18 @@ describe('configFromSearchParams', () => {
       debug: true,
       showAvatars: true,
       showMedia: true,
+      actions: [],
     });
+  });
+
+  it('reads the action bar out of the query string', () => {
+    const config = configFromSearchParams(
+      new URLSearchParams({ actions: '[{"id":"reply","label":"返信","icon":"💬"}]' })
+    );
+
+    // A URL cannot carry a handler, so the buttons arrive declarative and the
+    // press comes back as an event — see `event-actions.ts`.
+    expect(config.actions).toEqual([{ id: 'reply', label: '返信', icon: '💬' }]);
   });
 
   it('reads the filters JSON out of the query string', () => {
@@ -422,6 +433,7 @@ describe('followConfigFromSearchParams', () => {
       debug: true,
       showAvatars: true,
       showMedia: true,
+      actions: [],
     });
   });
 

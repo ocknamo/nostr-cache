@@ -228,6 +228,218 @@ describe('EventCard', () => {
     expect(screen.queryByLabelText('署名検証済み')).not.toBeInTheDocument();
   });
 
+  describe('unverified events', () => {
+    const card = (container: HTMLElement) => container.querySelector('.event-card');
+
+    it('fades anything the relay has not vouched for', () => {
+      // `pending` and "no status yet" are the same thing to a reader: the relay
+      // validates lazily, so a card arrives unverified and may stay that way.
+      for (const status of ['pending', 'unknown', undefined] as const) {
+        const { container, unmount } = render(EventCard, {
+          props: { event: makeEvent(), status },
+        });
+
+        expect(card(container)).toHaveClass('unverified');
+        unmount();
+      }
+    });
+
+    it('shows a validated event at full strength', () => {
+      const { container } = render(EventCard, {
+        props: { event: makeEvent(), status: 'validated' },
+      });
+
+      expect(card(container)).not.toHaveClass('unverified');
+    });
+  });
+
+  it('opens the first card of a list downward, where there is room', async () => {
+    const { container } = render(EventCard, {
+      props: { event: makeEvent(), datePlacement: 'below' },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: '日付を表示' }));
+
+    // The list keeps only a small gap above the first card now, so its tooltip
+    // has to flip rather than clip against the embed's top edge.
+    expect(container.querySelector('.date-tip')).toHaveClass('below');
+  });
+
+  it('lifts the card while its tooltip is open', async () => {
+    const { container } = render(EventCard, { props: { event: makeEvent() } });
+    const card = container.querySelector('.event-card');
+
+    expect(card).not.toHaveClass('tip-open');
+    await fireEvent.click(screen.getByRole('button', { name: '日付を表示' }));
+
+    // A faded card is its own stacking context, which traps the tooltip's
+    // z-index inside it — the next card would otherwise paint over the tooltip.
+    expect(card).toHaveClass('tip-open');
+  });
+
+  describe('action bar', () => {
+    it('renders nothing of its own when the embedder asked for no buttons', () => {
+      const { container } = render(EventCard, { props: { event: makeEvent() } });
+
+      expect(container.querySelector('.actions')).toBeNull();
+    });
+
+    it('names an icon-only button for a screen reader', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'like', label: 'いいね', icon: '♡' }] },
+      });
+
+      const button = screen.getByRole('button', { name: 'いいね' });
+      expect(button).toHaveTextContent('♡');
+      // The id is what a listener switches on, so keep it reachable from the DOM.
+      expect(button).toHaveAttribute('data-action', 'like');
+    });
+
+    it('falls back to the label as the button text when no icon is given', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'reply', label: '返信' }] },
+      });
+
+      expect(screen.getByRole('button', { name: '返信' })).toHaveTextContent('返信');
+    });
+
+    it('reports a press to the action and to the timeline, with its own event', async () => {
+      const event = makeEvent({ id: 'note-1' });
+      const onSelect = vi.fn();
+      const onAction = vi.fn();
+      const action = { id: 'zap', label: 'Zap', icon: '⚡', onSelect };
+      render(EventCard, { props: { event, status: 'pending', actions: [action], onAction } });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Zap' }));
+
+      // The verdict comes along: the card shows unverified events, so a handler
+      // that acts on the reader's behalf has to be able to see that.
+      expect(onSelect).toHaveBeenCalledWith({ event, status: 'pending' });
+      expect(onAction).toHaveBeenCalledWith(action, { event, status: 'pending' });
+    });
+
+    it('gives an icon button a native tooltip, and a label button none', () => {
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          actions: [
+            { id: 'zap', label: 'Zap', icon: '⚡' },
+            { id: 'reply', label: '返信' },
+          ],
+        },
+      });
+
+      expect(screen.getByRole('button', { name: 'Zap' })).toHaveAttribute('title', 'Zap');
+      // The text is right there; a title would only repeat it.
+      expect(screen.getByRole('button', { name: '返信' })).not.toHaveAttribute('title');
+    });
+
+    it('still reports the press when the embedder handler throws', async () => {
+      const onAction = vi.fn();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          actions: [
+            {
+              id: 'boom',
+              label: 'Boom',
+              onSelect: () => {
+                throw new Error('nope');
+              },
+            },
+          ],
+          onAction,
+        },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Boom' }));
+
+      // One embedder's broken handler must not silence every other listener.
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it('renders an icon as a Material Symbols ligature when asked', () => {
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          materialIcons: 'rounded',
+          actions: [{ id: 'like', label: 'いいね', icon: 'favorite' }],
+        },
+      });
+
+      const icon = screen.getByRole('button', { name: 'いいね' }).querySelector('.action-icon');
+      expect(icon).toHaveClass('material');
+      expect(icon).toHaveTextContent('favorite');
+      expect(icon?.getAttribute('style')).toContain('Material Symbols Rounded');
+      // A ligature name is markup, not prose: a page translator turning
+      // `favorite` into a word would turn the icon into gibberish.
+      expect(icon).toHaveAttribute('translate', 'no');
+    });
+
+    it('lets one button opt out of Material icons, and another opt in', () => {
+      const { container } = render(EventCard, {
+        props: {
+          event: makeEvent(),
+          materialIcons: 'outlined',
+          actions: [
+            { id: 'like', label: 'いいね', icon: 'favorite' },
+            { id: 'zap', label: 'Zap', icon: '⚡', iconType: 'text' as const },
+          ],
+        },
+      });
+
+      const icons = container.querySelectorAll('.action-icon');
+      expect(icons[0]).toHaveClass('material');
+      expect(icons[1]).not.toHaveClass('material');
+    });
+
+    it('leaves icons as literal text unless Material icons are turned on', () => {
+      const { container } = render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'like', label: 'いいね', icon: '♡' }] },
+      });
+
+      expect(container.querySelector('.action-icon')).not.toHaveClass('material');
+    });
+
+    it('shows the label beside the icon when the action asks for it', () => {
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          actions: [{ id: 'reply', label: '返信', icon: '💬', showLabel: true }],
+        },
+      });
+
+      const button = screen.getByRole('button', { name: '返信' });
+      expect(button.querySelector('.action-icon')).toHaveTextContent('💬');
+      expect(button.querySelector('.action-label')).toHaveTextContent('返信');
+    });
+
+    it('gives each button a part named after its id, for styling from outside', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'zap', label: 'Zap', icon: '⚡' }] },
+      });
+
+      // `::part(action)` styles the row, `::part(action-zap)` just this one.
+      expect(screen.getByRole('button', { name: 'Zap' })).toHaveAttribute(
+        'part',
+        'action action-zap'
+      );
+    });
+
+    it('renders a disabled action as unpressable', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'zap', label: 'Zap', disabled: true }] },
+      });
+
+      // The button attribute, not a guard in the handler: the browser is what
+      // withholds the click, and `fireEvent` dispatches straight past it.
+      expect(screen.getByRole('button', { name: 'Zap' })).toBeDisabled();
+    });
+  });
+
   describe('visibility reporting', () => {
     /** Records observers so a test can decide when the card "appears". */
     class FakeIntersectionObserver {
