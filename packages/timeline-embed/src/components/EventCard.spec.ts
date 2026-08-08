@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import EventCard from './EventCard.svelte';
@@ -437,6 +438,169 @@ describe('EventCard', () => {
       // The button attribute, not a guard in the handler: the browser is what
       // withholds the click, and `fireEvent` dispatches straight past it.
       expect(screen.getByRole('button', { name: 'Zap' })).toBeDisabled();
+    });
+  });
+
+  describe('height cap', () => {
+    /** Records observers so a test can decide when the note has been remeasured. */
+    class FakeResizeObserver {
+      static instances: FakeResizeObserver[] = [];
+      readonly observed: Element[] = [];
+      disconnected = false;
+
+      constructor(private readonly callback: () => void) {
+        FakeResizeObserver.instances.push(this);
+      }
+
+      observe(node: Element): void {
+        this.observed.push(node);
+      }
+
+      disconnect(): void {
+        this.disconnected = true;
+      }
+
+      resize(): void {
+        this.callback();
+      }
+    }
+
+    async function withObserver(run: () => void | Promise<void>): Promise<void> {
+      FakeResizeObserver.instances = [];
+      const original = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+      try {
+        await run();
+      } finally {
+        globalThis.ResizeObserver = original;
+      }
+    }
+
+    /**
+     * Make the note report more content than fits.
+     *
+     * jsdom lays nothing out, so every box is 0×0 and the card would never
+     * consider itself overflowing on its own.
+     */
+    function overflow(note: Element, scrollHeight = 900): void {
+      Object.defineProperty(note, 'scrollHeight', { value: scrollHeight, configurable: true });
+      Object.defineProperty(note, 'clientHeight', { value: 300, configurable: true });
+    }
+
+    function note(container: HTMLElement): HTMLElement {
+      const found = container.querySelector<HTMLElement>('.note');
+      if (!found) {
+        throw new Error('no .note in the card');
+      }
+      return found;
+    }
+
+    it('puts the body in its own box, so the cap has something to scroll', () => {
+      const { container } = render(EventCard, {
+        props: { event: makeEvent({ content: 'hello there' }) },
+      });
+
+      // The note is the only scrolling part of the card: the header, the
+      // reference chips and the action row stay put above and below it.
+      expect(note(container)).toContainElement(container.querySelector('.content'));
+      expect(note(container)).not.toContainElement(container.querySelector('header'));
+      expect(note(container)).not.toContainElement(container.querySelector('.actions'));
+    });
+
+    it('leaves a note that fits out of the tab order', () => {
+      const { container } = render(EventCard, { props: { event: makeEvent() } });
+
+      // One tab stop per card, on a 50-card timeline, for boxes that do not
+      // scroll: the affordance only appears where there is something to reach.
+      expect(note(container)).not.toHaveAttribute('tabindex');
+      expect(screen.queryByRole('group')).not.toBeInTheDocument();
+      expect(note(container)).not.toHaveClass('overflowing');
+      // Nor the end-of-note marker: a box that fits is at its end by
+      // arithmetic, and the class would be on every short card in the list.
+      expect(note(container)).not.toHaveClass('at-end');
+    });
+
+    it('announces an overflowing note as a scroll area a keyboard can reach', async () => {
+      await withObserver(async () => {
+        const { container } = render(EventCard, {
+          props: { event: makeEvent({ content: 'とても長い本文' }) },
+        });
+        overflow(note(container));
+
+        // A note grows after first paint — an attached image loads, a profile
+        // turns an npub into a name — so the box is remeasured, not judged once.
+        FakeResizeObserver.instances[0].resize();
+        await tick();
+
+        // `group`, not `region`: a labelled region is a landmark, and a
+        // timeline of long posts would fill a screen reader's landmark list
+        // with identical entries.
+        const scroller = screen.getByRole('group', { name: '投稿本文（スクロールできます）' });
+        expect(scroller).toBe(note(container));
+        // WCAG 2.1.1: a scrollable region has to be operable without a mouse.
+        expect(scroller).toHaveAttribute('tabindex', '0');
+        // Overlay scrollbars are invisible until a scroll starts, so the fade
+        // is the only sign that the post was cut.
+        expect(scroller).toHaveClass('overflowing');
+        expect(scroller).not.toHaveClass('at-end');
+      });
+    });
+
+    it('watches the note and the wrapper that holds whatever it renders', async () => {
+      await withObserver(() => {
+        const { container } = render(EventCard, {
+          props: { event: makeEvent({ content: 'https://cdn.example.com/a.jpg' }) },
+        });
+
+        const observer = FakeResizeObserver.instances[0];
+        // The box for a resized embed, the wrapper for a note that grew inside
+        // it; neither alone catches both. The wrapper rather than the body's
+        // own children, which come and go — an attachment list appears only
+        // once `show-media` is on, and would never be observed.
+        expect(observer.observed).toContain(note(container));
+        expect(observer.observed).toContain(container.querySelector('.note-body'));
+        expect(container.querySelector('.note-body')).toContainElement(
+          container.querySelector('.media')
+        );
+      });
+    });
+
+    it('stops watching once the card is gone', async () => {
+      await withObserver(async () => {
+        const { container, unmount } = render(EventCard, { props: { event: makeEvent() } });
+        const scroller = note(container);
+        const observer = FakeResizeObserver.instances[0];
+        // Spied rather than inferred from the DOM: a destroyed component stops
+        // rendering either way, so the class would look right even with the
+        // listener still attached.
+        const removeListener = vi.spyOn(scroller, 'removeEventListener');
+
+        unmount();
+
+        // A timeline replaces its cards as events stream in, so an observer or
+        // a scroll listener left behind is a leak per card.
+        expect(observer.disconnected).toBe(true);
+        expect(removeListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+      });
+    });
+
+    it('drops the fade once the note is scrolled to the end', async () => {
+      const { container } = render(EventCard, { props: { event: makeEvent() } });
+      const scroller = note(container);
+      overflow(scroller);
+
+      // No ResizeObserver here (jsdom has none): a scroll remeasures too, which
+      // is what keeps the fade in step with the reader.
+      await fireEvent.scroll(scroller);
+      expect(scroller).toHaveClass('overflowing');
+      expect(scroller).not.toHaveClass('at-end');
+
+      scroller.scrollTop = 600;
+      await fireEvent.scroll(scroller);
+
+      // Fading the last line of a note that has ended reads as a bug, not a
+      // hint.
+      expect(scroller).toHaveClass('at-end');
     });
   });
 

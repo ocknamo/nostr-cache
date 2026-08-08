@@ -583,6 +583,152 @@ describe('Embeddable timeline E2E', () => {
     expect(await tooltips()).toEqual([]);
   });
 
+  it('caps a long post and scrolls it inside its own card', async () => {
+    // Long enough to fill several screens on its own, which is the thing the
+    // cap exists for: one post like this used to push everything else out of
+    // the timeline.
+    const long = Array.from({ length: 80 }, (_, line) => `${line + 1} 行目のとても長い本文`).join(
+      '\n'
+    );
+    const events = await Promise.all([
+      createTestEvent(getRandomSecret(), { content: long, created_at: 1_700_000_300 }),
+      createTestEvent(undefined, { content: 'みじかい投稿', created_at: 1_700_000_200 }),
+    ]);
+    const disposable = await startMockUpstreamRelay(events);
+    try {
+      page = await browser.newPage({ viewport: { width: 360, height: 900 } });
+      await page.goto(
+        embedUrl({
+          relays: disposable.url,
+          actions: JSON.stringify([{ id: 'reply', label: '返信', icon: '💬' }]),
+        })
+      );
+      await waitForEventCount(page, 2);
+
+      const cards = await page.$$eval('nostr-timeline .event-card', (nodes) =>
+        nodes.map((card) => {
+          const note = card.querySelector('.note') as HTMLElement;
+          const header = card.querySelector('header') as HTMLElement;
+          const bar = card.querySelector('.actions') as HTMLElement;
+          const box = card.getBoundingClientRect();
+          return {
+            height: Math.round(box.height),
+            scrolls: note.scrollHeight - note.clientHeight > 1,
+            tabindex: note.getAttribute('tabindex'),
+            faded: note.classList.contains('overflowing'),
+            headerInside: header.getBoundingClientRect().top >= box.top - 1,
+            actionsInside: bar.getBoundingClientRect().bottom <= box.bottom + 1,
+          };
+        })
+      );
+
+      // The whole post, padding included: --nt-card-max-height is a border-box
+      // height, so the number an embedder writes is the height they get.
+      expect(cards[0].height).toBe(420);
+      expect(cards[0].scrolls).toBe(true);
+      // The parts that must not scroll away with the body.
+      expect(cards[0].headerInside).toBe(true);
+      expect(cards[0].actionsInside).toBe(true);
+      // WCAG 2.1.1: the scroll area is reachable without a pointer, and the
+      // bottom fade says there is more below.
+      expect(cards[0].tabindex).toBe('0');
+      expect(cards[0].faded).toBe(true);
+
+      // A post that fits is untouched — no cap artefacts, no stray tab stop.
+      expect(cards[1].height).toBeLessThan(420);
+      expect(cards[1].scrolls).toBe(false);
+      expect(cards[1].tabindex).toBeNull();
+      expect(cards[1].faded).toBe(false);
+
+      // A real wheel gesture over the long post, rather than assigning
+      // `scrollTop`: what is worth knowing is that the note is the box the
+      // browser hands the scroll to.
+      const note = await page.$('nostr-timeline .note');
+      const box = (await note?.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 200);
+      await page.waitForTimeout(200);
+
+      const afterWheel = await page.$eval('nostr-timeline .note', (scroller) => ({
+        scrollTop: Math.round(scroller.scrollTop),
+        atEnd: scroller.classList.contains('at-end'),
+      }));
+      expect(afterWheel.scrollTop).toBeGreaterThan(0);
+      expect(afterWheel.atEnd).toBe(false);
+
+      // Sent to the end, the fade lifts: fading the last line of a note that
+      // has finished reads as a rendering bug rather than a hint.
+      const atEnd = await page.$eval('nostr-timeline .note', async (scroller) => {
+        scroller.scrollTop = scroller.scrollHeight;
+        await new Promise((settle) => requestAnimationFrame(settle));
+        return scroller.classList.contains('at-end');
+      });
+      expect(atEnd).toBe(true);
+    } finally {
+      await disposable.close();
+    }
+  });
+
+  it('shows a photo post whole rather than turning it into a scroll box', async () => {
+    // The two defaults have to agree: an attachment is capped
+    // (--nt-media-max-height) inside a card that is itself capped
+    // (--nt-card-max-height), and if the first does not fit inside the second
+    // then *every* photo post becomes a scroll area with a tab stop.
+    const events = await Promise.all([
+      createTestEvent(getRandomSecret(), {
+        content: site.photoUrl,
+        created_at: 1_700_000_300,
+      }),
+    ]);
+    const disposable = await startMockUpstreamRelay(events);
+    try {
+      page = await browser.newPage({ viewport: { width: 360, height: 900 } });
+      await page.goto(
+        embedUrl({
+          relays: disposable.url,
+          actions: JSON.stringify([{ id: 'reply', label: '返信', icon: '💬' }]),
+        })
+      );
+      await waitForEventCount(page, 1);
+      // The picture is 1000px tall at source, so it only settles into its
+      // capped height once the bytes have arrived.
+      await page.waitForFunction(
+        () =>
+          (
+            document
+              .querySelector('nostr-timeline')
+              ?.shadowRoot?.querySelector('img.attachment') as HTMLImageElement | null
+          )?.complete === true,
+        undefined,
+        { timeout: TIMEOUT }
+      );
+
+      const card = await page.$eval('nostr-timeline .event-card', (node) => {
+        const note = node.querySelector('.note') as HTMLElement;
+        const photo = node.querySelector('img.attachment') as HTMLImageElement;
+        return {
+          height: Math.round(node.getBoundingClientRect().height),
+          photoHeight: Math.round(photo.getBoundingClientRect().height),
+          naturalHeight: photo.naturalHeight,
+          scrolls: note.scrollHeight - note.clientHeight > 1,
+          tabindex: note.getAttribute('tabindex'),
+        };
+      });
+
+      // The premise: a picture that really is taller than the card.
+      expect(card.naturalHeight).toBe(1000);
+      // The behaviour first, so a regression here reads as what it is: an
+      // ordinary photo post turning into a scroll box with a tab stop.
+      expect(card.scrolls).toBe(false);
+      expect(card.tabindex).toBeNull();
+      // Shrunk to fit, inside the card's own cap.
+      expect(card.photoHeight).toBe(300);
+      expect(card.height).toBeLessThanOrEqual(420);
+    } finally {
+      await disposable.close();
+    }
+  });
+
   it('keeps a small top gap and fades what the relay has not validated yet', async () => {
     page = await browser.newPage();
     await page.goto(embedUrl({ relays: upstream.url }));

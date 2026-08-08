@@ -339,6 +339,15 @@
   </p>
 
   <p class="footnote">
+    1 投稿の高さは <strong>420px まで</strong>です（<code>--nt-card-max-height</code>）。
+    極端に長い投稿でタイムラインが埋まらないよう、超えた分はその投稿の中だけでスクロールします
+    （スクロールするのは本文だけで、名前・時刻・アクションの行はカード内に残ります）。
+    上限を外す場合は <code>--nt-card-max-height: none</code> を指定してください。
+    写真は上限の中に収まる高さ（<code>--nt-media-max-height</code>、既定 300px）まで縮小して
+    全体を表示するので、写真 1 枚の投稿がスクロールになることはありません。
+  </p>
+
+  <p class="footnote">
     本文中の URL はリンクになり、画像・動画・音声は投稿者が指定したホストから直接埋め込まれます
     （アバターと同じく閲覧者の IP がそのホストに渡ります）。避けたい場合は
     <code>show-media="false"</code>（iframe なら <code>&amp;show-media=false</code>）を
