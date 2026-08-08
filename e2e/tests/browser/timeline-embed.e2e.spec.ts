@@ -615,7 +615,6 @@ describe('Embeddable timeline E2E', () => {
             height: Math.round(box.height),
             scrolls: note.scrollHeight - note.clientHeight > 1,
             tabindex: note.getAttribute('tabindex'),
-            faded: note.classList.contains('overflowing'),
             headerInside: header.getBoundingClientRect().top >= box.top - 1,
             actionsInside: bar.getBoundingClientRect().bottom <= box.bottom + 1,
           };
@@ -629,16 +628,15 @@ describe('Embeddable timeline E2E', () => {
       // The parts that must not scroll away with the body.
       expect(cards[0].headerInside).toBe(true);
       expect(cards[0].actionsInside).toBe(true);
-      // WCAG 2.1.1: the scroll area is reachable without a pointer, and the
-      // bottom fade says there is more below.
-      expect(cards[0].tabindex).toBe('0');
-      expect(cards[0].faded).toBe(true);
 
-      // A post that fits is untouched — no cap artefacts, no stray tab stop.
+      // A post that fits is untouched.
       expect(cards[1].height).toBeLessThan(420);
       expect(cards[1].scrolls).toBe(false);
+
+      // The widget writes no `tabindex` at all — the keyboard affordance below
+      // is the browser's own, and this is what makes that claim checkable.
+      expect(cards[0].tabindex).toBeNull();
       expect(cards[1].tabindex).toBeNull();
-      expect(cards[1].faded).toBe(false);
 
       // A real wheel gesture over the long post, rather than assigning
       // `scrollTop`: what is worth knowing is that the note is the box the
@@ -649,21 +647,39 @@ describe('Embeddable timeline E2E', () => {
       await page.mouse.wheel(0, 200);
       await page.waitForTimeout(200);
 
-      const afterWheel = await page.$eval('nostr-timeline .note', (scroller) => ({
-        scrollTop: Math.round(scroller.scrollTop),
-        atEnd: scroller.classList.contains('at-end'),
-      }));
-      expect(afterWheel.scrollTop).toBeGreaterThan(0);
-      expect(afterWheel.atEnd).toBe(false);
+      expect(
+        await page.$eval('nostr-timeline .note', (scroller) => scroller.scrollTop)
+      ).toBeGreaterThan(0);
 
-      // Sent to the end, the fade lifts: fading the last line of a note that
-      // has finished reads as a rendering bug rather than a hint.
-      const atEnd = await page.$eval('nostr-timeline .note', async (scroller) => {
-        scroller.scrollTop = scroller.scrollHeight;
-        await new Promise((settle) => requestAnimationFrame(settle));
-        return scroller.classList.contains('at-end');
+      // WCAG 2.1.1, met without a line of JS: a browser makes a scroll
+      // container with no focusable children keyboard-operable by itself, and
+      // only while it scrolls. The widget leans on that instead of measuring
+      // the overflow, so this pins the behaviour it depends on.
+      const keyboard = await page.evaluate(async () => {
+        const root = document.querySelector('nostr-timeline')?.shadowRoot as ShadowRoot;
+        const [long, short] = [...root.querySelectorAll('.note')] as HTMLElement[];
+        long.focus();
+        const reachable = root.activeElement === long;
+        const before = long.scrollTop;
+        long.scrollTop = 0;
+        short.focus();
+        return { reachable, before, shortReachable: root.activeElement === short };
       });
-      expect(atEnd).toBe(true);
+      expect(keyboard.reachable).toBe(true);
+      // ...and the post that fits stays out of the tab order, which is the
+      // whole reason for leaving this to the browser.
+      expect(keyboard.shortReachable).toBe(false);
+
+      // Arrow keys scroll the focused note, so the clipped text is readable
+      // without a pointer.
+      await page.evaluate(() => {
+        const root = document.querySelector('nostr-timeline')?.shadowRoot as ShadowRoot;
+        (root.querySelector('.note') as HTMLElement).focus();
+      });
+      await page.keyboard.press('PageDown');
+      await page.waitForTimeout(200);
+      const byKeyboard = await page.$eval('nostr-timeline .note', (scroller) => scroller.scrollTop);
+      expect(byKeyboard).toBeGreaterThan(0);
     } finally {
       await disposable.close();
     }
