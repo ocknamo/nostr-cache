@@ -29,12 +29,43 @@
   const baseUrl = import.meta.env.BASE_URL;
   const origin = typeof location === 'undefined' ? '' : location.origin;
 
+  /**
+   * The action bar the examples below render under every card.
+   *
+   * Display only, on purpose. The widget ships no actions of its own — it holds
+   * no key and never writes to a relay — so these exist to show what the row
+   * looks like once an embedder declares one. This page declares them and
+   * listens for nothing: a press raises `nostr-timeline:action` (and a
+   * `postMessage` from the iframe) and stops there.
+   *
+   * Text icons rather than `material-icons`, which would have the widget inject
+   * Google's stylesheet into this page — a third-party request the demo does not
+   * otherwise make.
+   */
+  const DEMO_ACTIONS = [
+    { id: 'reply', label: '返信', icon: '💬' },
+    { id: 'repost', label: 'リポスト', icon: '🔁' },
+    { id: 'like', label: 'いいね', icon: '♡' },
+    { id: 'zap', label: 'Zap', icon: '⚡' },
+  ];
+  /**
+   * What actually reaches the widgets: a JSON string, not the array.
+   *
+   * Svelte hands a custom element's props over as properties when it can and as
+   * attributes otherwise, and an array stringified into an attribute arrives as
+   * `[object Object]`. The string is read the same way down both paths.
+   */
+  const actionsJson = JSON.stringify(DEMO_ACTIONS);
+  /** The same list, laid out to be read inside the copyable HTML snippets. */
+  const actionsSnippet = `[\n${DEMO_ACTIONS.map((action) => `    ${JSON.stringify(action)}`).join(',\n')}\n  ]`;
+
   const query = $derived(
     new URLSearchParams({
       relays,
       kinds,
       limit,
       'profile-freshness': profileFreshness,
+      actions: actionsJson,
       // The badges are a diagnostic and the widget hides them by default; this
       // page turns them on because showing them is its whole point.
       ...(debug ? { debug: 'true' } : {}),
@@ -50,11 +81,11 @@
   );
 
   const iframeSnippet = $derived(
-    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}${freshnessAttr ? `&profile-freshness=${freshnessAttr}` : ''}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
+    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}${freshnessAttr ? `&profile-freshness=${freshnessAttr}` : ''}&actions=${encodeURIComponent(actionsJson)}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
   );
 
   const webComponentSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"${freshnessAttr ? `\n  profile-freshness="${freshnessAttr}"` : ''}${debug ? '\n  debug' : ''}\n></nostr-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"${freshnessAttr ? `\n  profile-freshness="${freshnessAttr}"` : ''}\n  actions='${actionsSnippet}'${debug ? '\n  debug' : ''}\n></nostr-timeline>`
   );
 
   /**
@@ -77,7 +108,7 @@
     /^[0-9a-fA-F]{64}$/.test(followPubkey.trim()) || /^n(pub|profile)1\w{20,}$/.test(followPubkey.trim())
   );
   const followSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n></nostr-follow-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n  actions='${actionsSnippet}'\n></nostr-follow-timeline>`
   );
 
   /** Bounds on the height the embed page may ask for. */
@@ -142,6 +173,15 @@
     同じウィジェットを 2 通りの方法で埋め込めます。下の 2 つはどちらも実際に動いている実物です
     （このページ自身がウィジェットの利用者になっています）。
   </p>
+  <p class="panel-note">
+    各投稿の下に並ぶ 💬 🔁 ♡ ⚡ は、このページが <code>actions</code> で宣言したボタンです。
+    ウィジェット自身はアクションを 1 つも持ちません（鍵を持たない読み取り専用の表示器なので、
+    返信・リポスト・いいね・Zap はいずれも埋め込む側の仕事です）。<strong
+      >このデモでは押しても何も起きません</strong
+    >
+    — 押下は <code>nostr-timeline:action</code> イベント（iframe なら
+    <code>postMessage</code>）で通知されるだけで、このページは受け取っていません。
+  </p>
 
   <div class="modes">
     <div class="mode">
@@ -181,6 +221,7 @@
           {limit}
           db-name={dbName}
           profile-freshness={profileFreshness}
+          actions={actionsJson}
           debug={debug ? 'true' : 'false'}
         ></nostr-timeline>
       </div>
@@ -219,6 +260,7 @@
         {limit}
         db-name={dbName}
         profile-freshness={profileFreshness}
+        actions={actionsJson}
         debug={debug ? 'true' : 'false'}
       ></nostr-follow-timeline>
     </div>

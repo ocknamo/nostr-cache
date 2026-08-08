@@ -24,6 +24,8 @@ declare namespace svelteHTML {
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
+      /** JSON array of buttons to render under each card. */
+      actions?: string;
     };
     'nostr-timeline': {
       relays?: string;
@@ -37,6 +39,8 @@ declare namespace svelteHTML {
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
+      /** JSON array of buttons to render under each card. */
+      actions?: string;
     };
   }
 }
