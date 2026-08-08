@@ -91,6 +91,8 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
+| `material-icons` | ボタンのアイコンを [Material Symbols](https://fonts.google.com/icons) で描画する。`outlined` / `rounded` / `sharp`（値なしは `outlined`） | なし（`icon` は文字そのまま） |
+| `material-icons-font` | `none` で Google Fonts の読み込みを止める（埋め込み先ページが自前で読み込む場合） | `google`（Google Fonts から読み込む） |
 
 `profile-freshness` は iframe（`&profile-freshness=3600`）と Web Component
 （`profile-freshness="3600"`）のどちらでも同じように指定できます。プロフィールの更新を
@@ -137,6 +139,8 @@ iframe は**別のページ**（`embed/follow/`）です:
 ```
 
 高さの `postMessage` は `embed/` とまったく同じ仕組みです（同じスクリプトを共有しています）。
+なお先頭カードの日付ツールチップは下向きに開くため、**カードが少ない埋め込みでは
+それを開いている間だけ報告する高さが数十 px 伸びます**（閉じれば戻ります）。
 
 入口を分けているのは、要素を分けたのと同じ理由です。この要素には `authors` も `filters` も
 **ありません**（`pubkey` と意味が衝突するため）。1 つのページで両方を受けると、
@@ -166,7 +170,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
-| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `actions` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `actions` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -293,15 +297,21 @@ nostr-timeline {
   --nt-tip-bg: #0f1419;         /* 日付ツールチップの背景 */
   --nt-tip-fg: #ffffff;         /* 日付ツールチップの文字色 */
   --nt-list-padding-top: 16px;  /* リスト先頭の余白 */
+  /* --nt-tip-clearance: 48px;     旧称。指定があればそのまま余白として効きます */
   --nt-unverified-opacity: 0.6; /* 署名未検証カードの不透明度。1 で区別しない */
 
   /* アクションボタン（--nt-action-* は actions を指定したときだけ効く） */
-  --nt-actions-justify: space-between; /* 行の並べ方。flex-start なども可 */
+  --nt-actions-justify: flex-end; /* 既定は右寄せ。space-between で横いっぱい */
   --nt-action-gap: 8px;
-  --nt-action-size: 1rem;       /* アイコンの大きさ */
+  --nt-action-padding: 6px 10px;
+  --nt-action-size: 1rem;       /* 文字アイコン・ラベルの大きさ */
+  --nt-action-icon-size: 20px;  /* Material Symbols の大きさ */
   --nt-action-fg: #8b949e;      /* 既定は --nt-muted */
   --nt-action-hover-fg: #58a6ff;
   --nt-action-hover-bg: rgb(88 166 255 / 12%);
+  --nt-material-fill: 0;        /* 1 で塗りつぶしアイコン */
+  --nt-material-weight: 400;    /* 100〜700 */
+  --nt-material-font: 'Material Symbols Outlined'; /* 自前フォントを使う場合 */
 
   /* 本文（リンク・メンション・添付） */
   --nt-link-fg: #58a6ff;        /* 本文中のリンク */
@@ -418,18 +428,56 @@ window.addEventListener('message', (event) => {
 | キー | 内容 |
 |---|---|
 | `id` | **必須**。押下を見分ける識別子。DOM イベントと `postMessage` にはこれが載ります |
-| `label` | **必須**。アクセシブル名（`aria-label` と `title`）。アイコンだけのボタンでも省略できません |
-| `icon` | 表示する文字（絵文字など）。無い場合は `label` をそのまま文字として出します |
+| `label` | **必須**。アクセシブル名（`aria-label`、アイコンボタンでは `title` も）。アイコンだけのボタンでも省略できません |
+| `icon` | 表示する文字（絵文字など）。Material Symbols を有効にした場合は**アイコン名**（`favorite` など）。無い場合は `label` をそのまま文字として出します |
+| `iconType` | `text` / `material`。`material-icons` の設定をこのボタンだけ上書きする（絵文字とアイコン名の混在用） |
+| `showLabel` | `true` でアイコンの横に `label` も表示する |
 | `disabled` | `true` で押せないボタンにする |
 | `onSelect` | 押下時に呼ぶ関数（プロパティで渡す場合のみ） |
 
 - `id` と `label` が揃わないエントリは**そのボタンだけ**警告を出して捨てます。
 - `id` が重複した場合は先勝ちです（受け取り側が区別できないため）。
-- ボタンは**1 投稿あたり 8 個まで**。行は折り返さない前提の 1 行です。
+- ボタンは**1 投稿あたり 8 個まで**。行は折り返さない前提の 1 行です（9 個目以降は 1 回警告を出して切り捨て）。
 - JSON が壊れている、配列でない場合は警告を出してボタン無しになります。
 
-見た目は `--nt-action-*` の CSS 変数で調整できます（[下記](#見た目のカスタマイズ)）。
-Shadow DOM の `::part(actions)` / `::part(action)` からも触れます。
+### Material Symbols アイコン
+
+`material-icons` を付けると、`icon` は文字ではなく
+[Material Symbols](https://fonts.google.com/icons) の**アイコン名（リガチャ）**として扱われます。
+
+```html
+<nostr-timeline
+  relays="wss://nos.lol"
+  material-icons="rounded"
+  actions='[
+    {"id":"reply","label":"返信","icon":"chat_bubble"},
+    {"id":"repost","label":"リポスト","icon":"repeat"},
+    {"id":"like","label":"いいね","icon":"favorite"},
+    {"id":"zap","label":"Zap","icon":"bolt"},
+    {"id":"share","label":"共有","icon":"share"}
+  ]'
+></nostr-timeline>
+```
+
+- 変種は `outlined`（既定）/ `rounded` / `sharp`。値なしの `material-icons` でも有効です。
+- **フォントは既定で Google Fonts から読み込みます**（`<link>` を `document.head` に 1 回だけ挿入）。
+  Shadow DOM 内の `@font-face` はどのブラウザでも無視されるため、
+  ウィジェット内部だけで完結させることができないからです。
+  **この読み込みは Google への第三者リクエストで、閲覧者の IP アドレスが Google に渡ります。**
+  埋め込み先ページが自前でフォントを読み込む場合（セルフホストを含む）は
+  `material-icons-font="none"` を指定してください。
+- フォントが読み込まれるまでの間、アイコンは `favorite` のような**アイコン名の文字列として表示されます**。
+- 絵文字と混ぜたい場合は、そのボタンだけ `"iconType":"text"` を指定します
+  （逆に、全体が文字アイコンのときに 1 つだけ `"iconType":"material"` にもできます）。
+- `--nt-material-fill`（0/1）・`--nt-material-weight`（100〜700）で塗りと太さを変えられます。
+
+### 見た目の調整
+
+- CSS 変数: `--nt-actions-justify`（既定 `flex-end` = 右寄せ。`space-between` で横いっぱいに広げる）、
+  `--nt-action-gap` / `--nt-action-padding` / `--nt-action-size` / `--nt-action-icon-size` /
+  `--nt-action-fg` / `--nt-action-hover-fg` / `--nt-action-hover-bg`（[上記](#見た目のカスタマイズ)）
+- Shadow parts: 行全体が `::part(actions)`、ボタンが `::part(action)`、
+  **個別のボタンが `::part(action-<id>)`**（例: `nostr-timeline::part(action-like) { color: crimson }`）
 
 ## 制約
 
@@ -443,7 +491,10 @@ Shadow DOM の `::part(actions)` / `::part(action)` からも触れます。
   表示内容の真正性が重要な用途では、✓ が付いた（＝半透明でない）イベントだけを
   信頼してください
   （この方式は、クライアント側で暗号処理をせずに済ませるための意図的なトレードオフです）。
-  半透明表示をやめる場合は `--nt-unverified-opacity: 1` を指定してください（✓ は残ります）
+  半透明表示をやめる場合は `--nt-unverified-opacity: 1` を指定してください（✓ は残ります）。
+  **半透明の間は文字のコントラストが下がります**（`--nt-muted` の二次テキストは
+  WCAG AA の 4.5:1 を下回ります）。コントラストを優先する場合も
+  `--nt-unverified-opacity: 1` にしてください
 - **アバター画像は上流リレー由来の任意の URL から読み込まれます。** `picture` は上流が返した
   プロフィールの中身そのままで（`http:` / `https:` 以外のスキームは破棄しますが、ホストは
   制限しません）、画像を読みに行く時点で**閲覧者の IP アドレスとブラウザ情報がその画像ホストに
@@ -542,7 +593,8 @@ import {
 | `Timeline` / `EventCard` / `NoteContent` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 | `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |
-| `normalizeActions` / `dispatchActionEvent` / `ACTION_EVENT` | 投稿下ボタンの定義解釈と押下通知（`EventAction` 型付き） |
+| `normalizeActions` / `dispatchActionEvent` / `ACTION_EVENT` / `MAX_ACTIONS` | 投稿下ボタンの定義解釈と押下通知（`EventAction` 型付き） |
+| `parseMaterialVariant` / `ensureMaterialSymbols` / `materialFontFamily` / `materialFontHref` | Material Symbols の変種解釈と、document へのフォント登録 |
 | `parseFollowList` / `selectAuthors` | kind 3 の `p` タグ解釈と `authors` の組み立て（純粋関数。DOM もリレーも要らない） |
 | `followFilterSource` | フォローリストを引いてタイムラインフィルタを返す `FilterSource` |
 | `fetchLatestReplaceable` | replaceable イベントを 1 件だけ引く one-shot REQ（EOSE グレース・`created_at` 最大採用・ウォッチドッグ込み） |

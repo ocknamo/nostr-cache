@@ -40,6 +40,9 @@
           type: 'nostr-timeline:action',
           actionId: pressed.detail.actionId,
           event: pressed.detail.event,
+          // The relay's signature verdict, so a page acting on the press can
+          // tell a vouched-for event from one still waiting to be checked.
+          status: pressed.detail.status,
         },
         '*'
       );

@@ -3,6 +3,7 @@
   import type { EventOrigin } from '../lib/cache-metrics.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
+  import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import Avatar from './Avatar.svelte';
@@ -44,6 +45,12 @@
      */
     onAction?: (action: EventAction, context: EventActionContext) => void;
     /**
+     * Render action icons as Material Symbols ligatures of this variant.
+     * Undefined leaves every `icon` as the literal text it is. An action's own
+     * `iconType` overrides this either way.
+     */
+    materialIcons?: MaterialVariant;
+    /**
      * Called once, when the card first enters the viewport. The timeline uses
      * this to look up the author's profile only for cards a reader can see.
      */
@@ -61,8 +68,25 @@
     datePlacement = 'above',
     actions = [],
     onAction,
+    materialIcons,
     onVisible,
   }: Props = $props();
+
+  /** Whether this button's `icon` is a ligature name rather than literal text. */
+  function isMaterial(action: EventAction): boolean {
+    return action.iconType === 'material' || (materialIcons !== undefined && action.iconType !== 'text');
+  }
+
+  /**
+   * The family, inline.
+   *
+   * It is the one part of the icon's styling that depends on a runtime value —
+   * the variant — and a scoped stylesheet cannot interpolate one. Everything
+   * else (size, weight, fill, ligature setup) stays in the `.material` rule.
+   */
+  const materialStyle = $derived(
+    materialIcons ? `font-family: '${materialFontFamily(materialIcons)}'` : undefined
+  );
 
   /**
    * Report the card's first appearance on screen, then stop watching.
@@ -194,7 +218,12 @@
     // to the embedder — who could mutate the card from under it, and cannot
     // `postMessage` it at all (a proxy is not structured-cloneable, which is
     // exactly how the iframe path breaks).
-    const context: EventActionContext = { event: $state.snapshot(event) };
+    // The verdict travels with it: the widget shows unverified events (faded),
+    // so an embedder wiring a button that signs, reposts or pays must be able
+    // to tell what the relay has actually vouched for. Nothing else on this
+    // path carries it — the DOM event and the iframe's `postMessage` are all
+    // the embedder gets.
+    const context: EventActionContext = { event: $state.snapshot(event), status };
     // The embedder's own handler runs first, but must not be able to swallow
     // the press: without this, one throwing `onSelect` would also stop the DOM
     // event every other listener on the page is waiting for.
@@ -211,6 +240,7 @@
   class="event-card"
   class:with-avatar={showAvatar}
   class:unverified
+  class:tip-open={dateVisible}
   use:whenVisible={onVisible}
 >
   {#if showAvatar}
@@ -297,6 +327,9 @@
   <!--
     The embedder's buttons. Nothing is rendered unless they asked for some, so a
     plain embed keeps the card it had.
+
+    The `title` is set only on an icon button, where the glyph stands in for the
+    name; on a label-only button it would repeat the text beneath it.
   -->
   {#if actions.length > 0}
     <footer class="actions" part="actions">
@@ -304,17 +337,28 @@
         <button
           type="button"
           class="action"
-          part="action"
+          class:with-label={action.icon && action.showLabel}
+          part="action action-{action.id}"
           data-action={action.id}
-          title={action.label}
+          title={action.icon ? action.label : undefined}
           aria-label={action.label}
           disabled={action.disabled}
           onclick={() => select(action)}
         >
           {#if action.icon}
-            <!-- The glyph is decorative; `aria-label` above carries the name. -->
-            <span class="action-icon" aria-hidden="true">{action.icon}</span>
-          {:else}
+            <!-- The glyph is decorative; `aria-label` above carries the name.
+                 `translate="no"` because a Material ligature name is markup,
+                 not prose: a page translator would otherwise turn `favorite`
+                 into a word and the icon into gibberish. -->
+            <span
+              class="action-icon"
+              class:material={isMaterial(action)}
+              style={isMaterial(action) ? materialStyle : undefined}
+              translate="no"
+              aria-hidden="true">{action.icon}</span
+            >
+          {/if}
+          {#if !action.icon || action.showLabel}
             <span class="action-label">{action.label}</span>
           {/if}
         </button>
@@ -345,6 +389,16 @@
      still marks the validated ones. */
   .unverified {
     opacity: var(--nt-unverified-opacity, 0.6);
+  }
+
+  /* A faded card is its own stacking context, which traps the date tooltip's
+     z-index inside it: the next card, painting later as a sibling, would come
+     out on top of the tooltip and leave it unreadable. Lifting the whole card
+     while its tooltip is open puts it back above what follows — and only then,
+     so nothing else about the list's layering changes. */
+  .tip-open {
+    position: relative;
+    z-index: 2;
   }
 
   /* Validation lands in batches, so without this a whole screen of cards snaps
@@ -568,15 +622,19 @@
     grid-column: 1 / -1;
     display: flex;
     align-items: center;
-    /* Spread across the card by default, like the clients this mirrors. Set
-       --nt-actions-justify (e.g. `flex-start`) for a bar of one or two. */
-    justify-content: var(--nt-actions-justify, space-between);
+    /* Right-aligned by default. --nt-actions-justify takes any `justify-content`
+       value, so `space-between` spreads them across the card, `flex-start` puts
+       them under the note, `center` centres them. */
+    justify-content: var(--nt-actions-justify, flex-end);
     gap: var(--nt-action-gap, 8px);
     margin-top: 6px;
-    /* One row, always: the cap in `event-actions.ts` is what keeps it from
-       needing to wrap, and a squeezed embed shrinks the gaps instead. */
+    /* One row, always. The buttons shrink and their labels ellipsize, and what
+       still will not fit is clipped here — the header above does the same, for
+       the same reason: a row that grew past the card would hand the embedding
+       page a horizontal scrollbar. */
     flex-wrap: nowrap;
     min-width: 0;
+    overflow: hidden;
   }
 
   .action {
@@ -586,13 +644,16 @@
     border-radius: 999px;
     /* Roughly the 44px-square target the pointer guidelines ask for once the
        glyph's own line box is added. */
-    padding: 6px 10px;
+    padding: var(--nt-action-padding, 6px 10px);
     font: inherit;
     font-size: var(--nt-action-size, 1rem);
     line-height: 1;
     color: var(--nt-action-fg, var(--nt-muted, #657786));
     cursor: pointer;
+    /* A flex item refuses to shrink below its content's width without this, so
+       a long label would push the row wide rather than ellipsize. */
     min-width: 0;
+    flex: 0 1 auto;
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -607,10 +668,61 @@
     opacity: 0.5;
   }
 
+  /* `block`, not the span's default `inline`: `overflow` and `text-overflow`
+     do nothing on a non-replaced inline box, so an inline label would never
+     ellipsize however narrow the embed got. */
   .action-label {
+    display: block;
     font-size: 0.85em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .action-icon {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  /* A button showing both needs them side by side, and the label is the part
+     that gives up width. */
+  .with-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /*
+   * Material Symbols: the `icon` is a ligature name (`favorite`), and this rule
+   * is what turns it into the icon. The family is set inline, from the chosen
+   * variant; the fallback here covers an action that asked for `material` on
+   * its own, without the widget-level switch.
+   *
+   * The font itself must be registered on the document — a shadow root's
+   * `@font-face` is ignored — which `material-icons` does by injecting Google's
+   * stylesheet. Until it loads, the ligature name shows as the word it is.
+   */
+  .material {
+    font-family: var(--nt-material-font, 'Material Symbols Outlined');
+    font-weight: normal;
+    font-style: normal;
+    font-size: var(--nt-action-icon-size, 20px);
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    word-wrap: normal;
+    direction: ltr;
+    /* The ligature is the whole mechanism, so make sure nothing has turned
+       ligatures off further up. */
+    font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    /* Filled/weight are the two axes worth exposing; the rest stay at Google's
+       defaults for the 20px optical size this renders at. */
+    font-variation-settings:
+      'FILL' var(--nt-material-fill, 0),
+      'wght' var(--nt-material-weight, 400),
+      'GRAD' 0,
+      'opsz' 20;
   }
 </style>

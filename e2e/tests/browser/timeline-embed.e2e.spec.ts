@@ -583,6 +583,71 @@ describe('Embeddable timeline E2E', () => {
     expect(await tooltips()).toEqual([]);
   });
 
+  it('keeps a small top gap and fades what the relay has not validated yet', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url }));
+    await waitForEventCount(page, 2);
+
+    const listPadding = await page.$eval(
+      'nostr-timeline .timeline ul',
+      (list) => getComputedStyle(list).paddingTop
+    );
+    // A third of the 48px the first card's tooltip used to need above it; the
+    // tooltip flips downward there now instead.
+    expect(listPadding).toBe('16px');
+
+    // The relay validates lazily, so the cards arrive unverified and faded.
+    const faded = await page.$$eval('nostr-timeline .event-card', (cards) =>
+      cards.map((card) => getComputedStyle(card).opacity)
+    );
+    expect(faded).toEqual(['0.6', '0.6']);
+
+    // ...and come back to full strength once it has vouched for them.
+    await page.waitForSelector('nostr-timeline .verified', { timeout: TIMEOUT });
+    const solid = await page.$$eval('nostr-timeline .event-card', (cards) =>
+      cards.map((card) => getComputedStyle(card).opacity)
+    );
+    expect(solid).toEqual(['1', '1']);
+  });
+
+  it('keeps the first card tooltip above the card below it', async () => {
+    // A short first card, so its downward tooltip really does reach into the
+    // next one — the case where the fade's stacking context bites. A note with
+    // a body is tall enough to contain its own tooltip, which is why the ones
+    // above cannot catch this.
+    const short = await Promise.all([
+      createTestEvent(getRandomSecret(), { content: '', created_at: 1_700_000_300 }),
+      createTestEvent(undefined, { content: 'below the tooltip', created_at: 1_700_000_200 }),
+    ]);
+    const disposable = await startMockUpstreamRelay(short);
+    try {
+      page = await browser.newPage({ viewport: { width: 240, height: 600 } });
+      await page.goto(embedUrl({ relays: disposable.url, 'show-avatars': 'false' }));
+      await waitForEventCount(page, 2);
+
+      await (await page.$$('nostr-timeline .timestamp'))[0].click();
+
+      const layered = await page.$eval('nostr-timeline .date-tip', (tip) => {
+        const root = tip.getRootNode() as ShadowRoot;
+        const next = root.querySelectorAll('.event-card')[1].getBoundingClientRect();
+        const box = tip.getBoundingClientRect();
+        // Hit testing follows paint order, so it answers what the geometry
+        // cannot: every card is its own stacking context while it is faded, and
+        // the next one paints last — over this tooltip, unless the card holding
+        // it is lifted.
+        (tip as HTMLElement).style.pointerEvents = 'auto';
+        const at = root.elementFromPoint((box.left + box.right) / 2, box.bottom - 2);
+        return { reachesNextCard: box.bottom > next.top, topmost: at === tip || tip.contains(at) };
+      });
+
+      // The premise first: without the overlap the assertion below is vacuous.
+      expect(layered.reachesNextCard).toBe(true);
+      expect(layered.topmost).toBe(true);
+    } finally {
+      await disposable.close();
+    }
+  });
+
   it('renders the embedder actions and reports a press to the embedding page', async () => {
     page = await browser.newPage();
     await page.goto(
@@ -613,8 +678,32 @@ describe('Embeddable timeline E2E', () => {
     expect(buttons).toHaveLength(4);
     expect(await buttons[0].getAttribute('aria-label')).toBe('返信');
 
+    // Right-aligned, and inside the card: the row must never be what hands the
+    // embedding page a horizontal scrollbar.
+    const layout = await page.$eval('nostr-timeline .event-card', (card) => {
+      const bar = card.querySelector('.actions') as HTMLElement;
+      const last = bar.lastElementChild as HTMLElement;
+      return {
+        justify: getComputedStyle(bar).justifyContent,
+        gapToRight: bar.getBoundingClientRect().right - last.getBoundingClientRect().right,
+        overflows: bar.scrollWidth > bar.clientWidth + 1,
+        pageScrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    });
+    expect(layout.justify).toBe('flex-end');
+    expect(layout.gapToRight).toBeLessThan(2);
+    expect(layout.overflows).toBe(false);
+    expect(layout.pageScrolls).toBe(false);
+
     await buttons[1].click();
 
+    // `postMessage` delivers on a later task, so wait for it rather than
+    // assuming the click round trip outran it.
+    await page.waitForFunction(
+      () => (window as unknown as { pressed: unknown[] }).pressed.length > 0,
+      undefined,
+      { timeout: TIMEOUT }
+    );
     const pressed = await page.evaluate(
       () => (window as unknown as { pressed: { actionId: string; event: NostrEvent }[] }).pressed
     );

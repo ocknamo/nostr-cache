@@ -11,6 +11,7 @@
 import type { Filter } from '@nostr-cache/shared';
 import { type EventAction, normalizeActions } from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
+import { type MaterialVariant, parseMaterialVariant } from './material-symbols.ts';
 
 export const DEFAULT_LIMIT = 50;
 export const DEFAULT_KINDS = [1];
@@ -352,6 +353,10 @@ export function configFromSearchParams(params: URLSearchParams): {
    * functions, so these are declarative only — a press is reported by event.
    */
   actions: EventAction[];
+  /** Material Symbols variant for the action icons, if asked for. */
+  materialIcons: MaterialVariant | undefined;
+  /** `none` when the embedding page loads the icon font itself. */
+  materialIconsFont: string | undefined;
 } {
   return {
     relays: parseRelays(params.get('relays')),
@@ -368,6 +373,8 @@ export function configFromSearchParams(params: URLSearchParams): {
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
     actions: normalizeActions(params.get('actions')),
+    materialIcons: parseMaterialVariant(params.get('material-icons')),
+    materialIconsFont: params.get('material-icons-font') ?? undefined,
   };
 }
 
@@ -392,6 +399,10 @@ export interface FollowTimelineConfig {
   showMedia: boolean;
   /** Declarative action buttons; see {@link configFromSearchParams}. */
   actions: EventAction[];
+  /** Material Symbols variant for the action icons, if asked for. */
+  materialIcons: MaterialVariant | undefined;
+  /** `none` when the embedding page loads the icon font itself. */
+  materialIconsFont: string | undefined;
 }
 
 /**
@@ -418,5 +429,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
     actions: normalizeActions(params.get('actions')),
+    materialIcons: parseMaterialVariant(params.get('material-icons')),
+    materialIconsFont: params.get('material-icons-font') ?? undefined,
   };
 }

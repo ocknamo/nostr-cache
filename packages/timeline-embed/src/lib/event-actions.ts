@@ -19,11 +19,22 @@
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
+import type { ValidationStatus } from './validation-status.ts';
 
 /** What a press hands back to whoever is listening. */
 export interface EventActionContext {
   /** The event whose card the pressed button sits under. */
   event: NostrEvent;
+  /**
+   * The relay's signature verdict for that event, as of the press.
+   *
+   * The widget renders unverified events (faded, and without the ✓), so a
+   * button that signs, reposts or pays on the reader's behalf must be able to
+   * see that `validated` is not what it got. Anything other than `validated` —
+   * including `undefined`, meaning the verdict has not arrived — is an event
+   * the relay has not vouched for.
+   */
+  status?: ValidationStatus;
 }
 
 /** One button in a card's action bar. */
@@ -40,8 +51,26 @@ export interface EventAction {
    * reader.
    */
   label: string;
-  /** Glyph to render instead of the label — one character or two, e.g. `♡`. */
+  /**
+   * What to render instead of the label.
+   *
+   * Plain text by default — an emoji or an arrow, one character or two. With
+   * Material Symbols turned on it is a ligature name from
+   * <https://fonts.google.com/icons> (`favorite`, `repeat`, `bolt`) instead;
+   * see {@link EventAction.iconType} for mixing the two.
+   */
   icon?: string;
+  /**
+   * How to read `icon`, overriding the widget's `material-icons` setting for
+   * this one button — `text` keeps an emoji literal in an otherwise Material
+   * bar, `material` asks for a ligature in a bar that is otherwise text.
+   */
+  iconType?: 'text' | 'material';
+  /**
+   * Show the label next to the icon rather than only to a screen reader.
+   * Without an `icon` the label is the button, so this changes nothing there.
+   */
+  showLabel?: boolean;
   /** Renders the button greyed out and unpressable. */
   disabled?: boolean;
   /**
@@ -72,6 +101,8 @@ export interface EventActionDetail {
   actionId: string;
   /** The event whose card it sits under. */
   event: NostrEvent;
+  /** The relay's verdict for it — see {@link EventActionContext.status}. */
+  status?: ValidationStatus;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -113,7 +144,7 @@ function toAction(entry: unknown): EventAction | undefined {
   if (!isRecord(entry)) {
     return undefined;
   }
-  const { id, label, icon, disabled, onSelect } = entry;
+  const { id, label, icon, iconType, showLabel, disabled, onSelect } = entry;
   // Both are load-bearing: `id` is the only thing a listener can identify the
   // press by, and `label` is the button's accessible name.
   if (typeof id !== 'string' || id.trim() === '') {
@@ -125,6 +156,12 @@ function toAction(entry: unknown): EventAction | undefined {
   const action: EventAction = { id: id.trim(), label: label.trim() };
   if (typeof icon === 'string' && icon.trim() !== '') {
     action.icon = icon.trim();
+  }
+  if (iconType === 'text' || iconType === 'material') {
+    action.iconType = iconType;
+  }
+  if (showLabel === true) {
+    action.showLabel = true;
   }
   if (disabled === true) {
     action.disabled = true;
@@ -161,8 +198,12 @@ export function normalizeActions(value: unknown): EventAction[] {
       continue;
     }
     if (actions.length >= MAX_ACTIONS) {
-      console.warn(`[nostr-timeline] Ignoring action "${action.id}": at most ${MAX_ACTIONS} fit.`);
-      continue;
+      // Stop rather than skip: everything after this is dropped too, and one
+      // line says that better than a warning per remaining entry.
+      console.warn(
+        `[nostr-timeline] Ignoring actions after "${action.id}": at most ${MAX_ACTIONS} fit in a row.`
+      );
+      break;
     }
     seen.add(action.id);
     actions.push(action);
@@ -187,7 +228,11 @@ export function dispatchActionEvent(
   action: EventAction,
   context: EventActionContext
 ): void {
-  const detail: EventActionDetail = { actionId: action.id, event: context.event };
+  const detail: EventActionDetail = {
+    actionId: action.id,
+    event: context.event,
+    status: context.status,
+  };
   host.dispatchEvent(
     new CustomEvent<EventActionDetail>(ACTION_EVENT, {
       detail,

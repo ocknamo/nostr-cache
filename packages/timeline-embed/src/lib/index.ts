@@ -49,6 +49,13 @@ export type {
   SelectedAuthors,
 } from './follow-list.ts';
 export { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
+export {
+  ensureMaterialSymbols,
+  materialFontFamily,
+  materialFontHref,
+  parseMaterialVariant,
+} from './material-symbols.ts';
+export type { MaterialVariant } from './material-symbols.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
 export { fetchLatestReplaceable, latestReplaceable } from './one-shot-request.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';

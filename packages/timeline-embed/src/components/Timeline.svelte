@@ -2,6 +2,7 @@
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import EventCard from './EventCard.svelte';
@@ -35,6 +36,8 @@
     actions?: EventAction[];
     /** Called on a press, after the action's own `onSelect`. */
     onAction?: (action: EventAction, context: EventActionContext) => void;
+    /** Render action icons as Material Symbols ligatures of this variant. */
+    materialIcons?: MaterialVariant;
     /**
      * Called with an author's pubkey the first time one of their cards scrolls
      * into view, so profiles are fetched for what the reader actually sees.
@@ -53,6 +56,7 @@
     showMedia = true,
     actions = [],
     onAction,
+    materialIcons,
     onAuthorVisible,
   }: Props = $props();
 </script>
@@ -74,6 +78,7 @@
             {showMedia}
             {actions}
             {onAction}
+            {materialIcons}
             datePlacement={index === 0 ? 'below' : 'above'}
             onVisible={onAuthorVisible && (() => onAuthorVisible(event.pubkey))}
           />

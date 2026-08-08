@@ -71,14 +71,19 @@ describe('normalizeActions', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate action id'));
   });
 
-  it('caps the bar so it never has to wrap', () => {
-    quiet();
+  it('caps the bar so it never has to wrap, warning once', () => {
+    const warn = quiet();
     const many = Array.from({ length: MAX_ACTIONS + 3 }, (_, index) => ({
       id: `a${index}`,
       label: `action ${index}`,
     }));
 
-    expect(normalizeActions(many)).toHaveLength(MAX_ACTIONS);
+    const kept = normalizeActions(many);
+
+    expect(kept).toHaveLength(MAX_ACTIONS);
+    expect(kept.at(-1)?.id).toBe(`a${MAX_ACTIONS - 1}`);
+    // One line for the whole tail, not one per dropped entry.
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it('survives broken JSON and JSON that is not an array', () => {
@@ -88,6 +93,22 @@ describe('normalizeActions', () => {
     expect(normalizeActions('{"id":"reply","label":"返信"}')).toEqual([]);
     expect(normalizeActions(42)).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the per-button icon and label switches', () => {
+    expect(
+      normalizeActions(
+        '[{"id":"like","label":"いいね","icon":"favorite","iconType":"material","showLabel":true}]'
+      )
+    ).toEqual([
+      { id: 'like', label: 'いいね', icon: 'favorite', iconType: 'material', showLabel: true },
+    ]);
+  });
+
+  it('ignores an iconType it does not know', () => {
+    expect(
+      normalizeActions('[{"id":"like","label":"いいね","icon":"♡","iconType":"svg"}]')
+    ).toEqual([{ id: 'like', label: 'いいね', icon: '♡' }]);
   });
 
   it('carries only the fields a card renders from', () => {
@@ -114,11 +135,17 @@ describe('dispatchActionEvent', () => {
       heard.push((received as CustomEvent<EventActionDetail>).detail);
     });
 
-    dispatchActionEvent(host, action, { event });
+    dispatchActionEvent(host, action, { event, status: 'pending' });
 
-    expect(heard).toEqual([{ actionId: 'like', event }]);
+    // The verdict travels with the event: a button that signs or pays on the
+    // reader's behalf has no other way to learn the card was never validated.
+    expect(heard).toEqual([{ actionId: 'like', event, status: 'pending' }]);
     // The iframe host page posts this detail to the embedding window verbatim,
     // so it has to survive being serialized.
-    expect(JSON.parse(JSON.stringify(heard[0]))).toEqual({ actionId: 'like', event });
+    expect(JSON.parse(JSON.stringify(heard[0]))).toEqual({
+      actionId: 'like',
+      event,
+      status: 'pending',
+    });
   });
 });

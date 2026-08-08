@@ -14,6 +14,7 @@
    */
 
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { TimelineState } from '../lib/timeline-controller.ts';
   import Timeline from './Timeline.svelte';
 
@@ -26,6 +27,8 @@
     actions?: EventAction[];
     /** Called on a press, after the action's own `onSelect`. */
     onAction?: (action: EventAction, context: EventActionContext) => void;
+    /** Render action icons as Material Symbols ligatures of this variant. */
+    materialIcons?: MaterialVariant;
     /**
      * Separate from `showOrigin` because the deprecated `show-origin` alias
      * turns the badges on without asking for the rest of the diagnostics.
@@ -48,6 +51,7 @@
     showMedia = true,
     actions = [],
     onAction,
+    materialIcons,
     debug = false,
     fatal,
     onAuthorVisible,
@@ -119,6 +123,7 @@
         {showMedia}
         {actions}
         {onAction}
+        {materialIcons}
         {onAuthorVisible}
       />
     {/if}
