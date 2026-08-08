@@ -86,9 +86,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Unlike the filter queries this `between()` intentionally keeps Dexie's
    * default exclusive upper bound: the bound is `Dexie.maxKey`, which sorts
    * above every real key, so nothing can be excluded by it.
-   *
-   * @param limit Maximum number of events to return
-   * @returns Promise resolving to the unvalidated events, oldest first
    */
   async getUnvalidatedEvents(limit: number): Promise<NostrEvent[]> {
     if (!(limit > 0)) {
@@ -111,12 +108,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  /**
-   * Mark the given events as validated. IDs no longer stored (deleted or
-   * evicted meanwhile) are silently ignored.
-   *
-   * @param ids IDs of the events to mark as validated
-   */
   async markValidated(ids: string[]): Promise<void> {
     if (ids.length === 0) {
       return;
@@ -143,9 +134,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Primary-key `bulkGet` — the fastest lookup path; no extra index is
    * needed for id → status queries. Does NOT track access, since clients
    * may poll this frequently (e.g. verification badges in a UI).
-   *
-   * @param ids Event IDs to look up
-   * @returns Promise resolving to a map with one entry per requested id
    */
   async getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>> {
     const statuses = new Map<string, ValidationStatus>();
@@ -188,9 +176,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Deliberately has no try/catch — see {@link StorageAdapter.getCurrentVersion}:
    * a swallowed error would read as "no version stored" and let an older event
    * overwrite a newer one.
-   *
-   * @param address Coordinate to look up (kind / pubkey / d value)
-   * @returns Promise resolving to the stored version, or undefined if none
    */
   async getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined> {
     const rows = await this.events
@@ -208,9 +193,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Primary-key `bulkGet`, like {@link getValidationStatus}, and likewise does
    * NOT track access: a freshness check must not disturb LRU/LFU ordering.
    * Ids that are not stored are omitted from the map.
-   *
-   * @param ids Event IDs to look up
-   * @returns Promise resolving to a map of id → `cached_at` in milliseconds
    */
   async getCachedAt(ids: string[]): Promise<Map<string, number>> {
     const cachedAt = new Map<string, number>();
@@ -244,9 +226,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Only touches `cached_at`, so validation state and the LRU/LFU access
    * metadata are left alone. Restarts the TTL for those events, as a re-save of
    * the same id would.
-   *
-   * @param ids Event IDs to re-stamp
-   * @returns Promise resolving to the number of events updated (0 on error)
    */
   async touchCachedAt(ids: string[]): Promise<number> {
     if (ids.length === 0) {
@@ -270,20 +249,12 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  /**
-   * Get events matching the given filters
-   *
-   * @param filters Array of filters to match events against
-   * @returns Promise resolving to array of matching events
-   */
   async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
     try {
-      // Process each filter independently and combine results
       const eventSets = await Promise.all(
         filters.map(async (filter) => {
           let collection = buildOptimizedQuery(this.events, filter);
 
-          // Apply final filter validation
           collection = collection.filter((event) => eventRowMatchesFilter(event, filter));
 
           const events = (await collection.toArray()).map(rowToEvent);
@@ -300,7 +271,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         })
       );
 
-      // Deduplicate results across filters
       const results = Array.from(
         new Map(eventSets.flat().map((event) => [event.id, event])).values()
       );
@@ -326,8 +296,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    *
    * Tracking failures are logged and swallowed so they never affect the read
    * path that triggered them.
-   *
-   * @param ids IDs of the events that were read
    */
   private async trackAccess(ids: string[]): Promise<void> {
     if (ids.length === 0) {
@@ -350,12 +318,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  /**
-   * Delete an event from storage
-   *
-   * @param id ID of the event to delete
-   * @returns Promise resolving to true if successful
-   */
   async deleteEvent(id: string): Promise<boolean> {
     try {
       const count = await this.events.where('id').equals(id).delete();
@@ -368,9 +330,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  /**
-   * Clear all events from storage
-   */
   async clear(): Promise<void> {
     try {
       await this.events.clear();
@@ -394,8 +353,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
-   * @param priority Cache priority config; matching events are never deleted
-   * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteExpired(olderThan: number, priority?: CachePriority): Promise<number> {
     try {
@@ -415,11 +372,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  /**
-   * Count the number of stored events
-   *
-   * @returns Promise resolving to the number of stored events (0 on error)
-   */
   async count(): Promise<number> {
     try {
       return await this.events.count();
@@ -435,11 +387,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * Evict events so that no more than `maxSize` remain, per the given
    * strategy. Delegates to the eviction module; see
    * {@link enforceLimit} for the ordering and soft-limit semantics.
-   *
-   * @param maxSize Maximum number of events to keep (no-op when <= 0)
-   * @param strategy Eviction strategy (default `FIFO`)
-   * @param priority Cache priority config; matching events are evicted last
-   * @returns Promise resolving to the number of events evicted
    */
   async enforceLimit(
     maxSize: number,
@@ -449,17 +396,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     return enforceLimit(this, this.events, maxSize, strategy, priority);
   }
 
-  /**
-   * Delete events with the same pubkey and kind
-   * Used for handling replaceable events
-   *
-   * @param pubkey Public key of the event author
-   * @param kind Event kind
-   * @returns Promise resolving to true if successful, false otherwise
-   */
   async deleteEventsByPubkeyAndKind(pubkey: string, kind: number): Promise<boolean> {
     try {
-      // 複合インデックスを使用してイベントを削除
       const count = await this.events.where('[pubkey+kind]').equals([pubkey, kind]).delete();
       return count > 0;
     } catch (error) {
@@ -472,25 +410,14 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  /**
-   * Delete events with the same pubkey, kind, and d tag value
-   * Used for handling addressable events
-   *
-   * @param pubkey Public key of the event author
-   * @param kind Event kind
-   * @param dTagValue Value of the d tag
-   * @returns Promise resolving to true if successful, false otherwise
-   */
   async deleteEventsByPubkeyKindAndDTag(
     pubkey: string,
     kind: number,
     dTagValue: string
   ): Promise<boolean> {
     try {
-      // pubkeyとkindで一致するイベントをフィルタリング
       const events = await this.events.where('[pubkey+kind]').equals([pubkey, kind]).toArray();
 
-      // dタグが一致するイベントのIDを収集
       const idsToDelete = events
         .filter((event) => {
           const dTag = event.tags.find((tag) => tag[0] === 'd');
@@ -502,7 +429,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
         return false;
       }
 
-      // 収集したIDでイベントを削除
       await this.events.bulkDelete(idsToDelete);
       return true;
     } catch (error) {
@@ -523,10 +449,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * caller, because both restrictions can only be checked against the stored
    * row: another author's event must never be deleted, and a deletion request
    * (kind 5) is never deletable — a kind 5 targeting a kind 5 has no effect.
-   *
-   * @param ids Ids of the events to delete
-   * @param pubkey Author of the deletion request
-   * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number> {
     if (ids.length === 0) {
@@ -553,10 +475,6 @@ export class DexieStorage extends Dexie implements StorageAdapter {
    * The `[pubkey+kind+created_at]` index gives the range directly; the `d`
    * identifier and the coordinate guard come from cache-relay's shared
    * predicates so Dexie and SQLite read coordinates the same way.
-   *
-   * @param address Coordinate of the event to delete
-   * @param until Unix timestamp (seconds); versions at or before it are deleted
-   * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
     if (!isDeletableAddress(address, until)) {

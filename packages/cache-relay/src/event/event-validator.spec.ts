@@ -1,12 +1,9 @@
-/**
- * Tests for EventValidator
- */
+/** Tests for EventValidator */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { EventValidator } from './event-validator.js';
 
 describe('EventValidator', () => {
-  // Sample event
   const sampleEvent: NostrEvent = {
     content: 'sample',
     created_at: 1742660714,

@@ -36,9 +36,6 @@ const FAMILIES: Record<MaterialVariant, string> = {
  * A bare attribute (or `true`) means the outlined variant, the one Google's own
  * examples use. Anything unrecognised is a typo, and rendering ligature names
  * as words would be a worse answer than leaving the icons as plain text.
- *
- * @param value Raw attribute, property or query-parameter value
- * @returns The variant to render with, or `undefined` for "plain text icons"
  */
 export function parseMaterialVariant(
   value: string | boolean | null | undefined
@@ -93,9 +90,6 @@ const LINK_ATTRIBUTE = 'data-nostr-timeline-material';
  * link is left behind when the widget goes away: fonts are document-scoped and
  * cheap to keep, and a second widget (or a re-mount) would only have to fetch
  * it again.
- *
- * @param variant Which variant to load
- * @returns The stylesheet href, or `undefined` where there is no document
  */
 export function ensureMaterialSymbols(variant: MaterialVariant): string | undefined {
   if (typeof document === 'undefined') {

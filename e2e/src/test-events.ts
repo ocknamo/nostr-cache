@@ -9,13 +9,7 @@
 import { type NostrEvent, getRandomSecret } from '@nostr-cache/shared';
 import { seckeySigner } from '@rx-nostr/crypto';
 
-/**
- * Create a signed Nostr event.
- *
- * @param seckey Optional hex secret key; a random one is generated when omitted
- * @param overrides Event fields to override (id/pubkey/sig are always derived)
- * @returns A signed NostrEvent
- */
+/** Create a signed Nostr event. */
 export async function createTestEvent(
   seckey?: string,
   overrides: Omit<Partial<NostrEvent>, 'id' | 'pubkey' | 'sig'> = {}

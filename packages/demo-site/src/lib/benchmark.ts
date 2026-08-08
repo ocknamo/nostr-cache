@@ -50,11 +50,7 @@ export interface BenchmarkOptions {
   timeoutMs?: number;
 }
 
-/**
- * Run a cold pass followed by a warm one against the same filter.
- *
- * @returns Both passes' timings
- */
+/** Run a cold pass followed by a warm one against the same filter. */
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkResult> {
   await options.clearCache();
   const cold = await measurePass('bench-cold', options);

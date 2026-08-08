@@ -1,7 +1,7 @@
 # TODO リスト
 
-残作業の一覧。**このファイルは未着手の課題だけを追う**。完了した作業の詳細な経緯は
-git の履歴と各設計書（[doc/](.) 以下）にあるので、ここでは末尾に見出しだけを残す。
+残作業の一覧。**このファイルは未着手の課題だけを追う**。完了した作業の経緯は
+git の履歴と各設計書（[doc/](.) 以下）を参照。
 
 ## 現状（2026-07）
 
@@ -117,8 +117,8 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     NIP-01 準拠のまま N 件で打ち切れる。それ以外の分岐（`kind` / `pubkey` / タグ index）は
     走査順が `created_at` と無関係なため全件走査が必要で、この最適化は使えない
   - 着手時は「どの分岐で早期打ち切りしたか」がテストから見えるようにすること
-  - **フォロータイムライン（[doc/plan/follow-timeline.md](./plan/follow-timeline.md)）は
-    ここに正面から当たる**。`{kinds:[1],authors:[…500],limit:50}` は時間範囲を持たないので
+  - **フォロータイムライン（`<nostr-follow-timeline>`）はここに正面から当たる**。
+    `{kinds:[1],authors:[…500],limit:50}` は時間範囲を持たないので
     `[pubkey+kind]` 分岐に入り、早期打ち切りが使えない側になる。フィルタに `since` を
     足せば時間範囲分岐へ移せるが、その場合 `isFreshnessEligible` を通らなくなる
 - [ ] `eventMatchesFilter` の `authors` / `kinds` / `ids` 照合を Set 化する
@@ -126,40 +126,6 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     authors が数百件あるフィルタでは候補行 × authors 件数の比較になる
   - ただし上記の「全件 materialize」のほうが主項なので、**効くのはそちらを直したあと**。
     先に測ること
-- [x] 統合テストのポート採番を衝突しない方式にする
-  - **対応済み**: 乱数採番（`Math.floor(Math.random() * 10000) + <帯>`）を全廃した。
-    帯の幅 10000 に対して N 回起動したときの衝突確率は誕生日のパラドックスで
-    N²/20000（1 帯で 100 回起動すればおよそ 5 割）で、「たまに落ちる」ではなく
-    「かなりの確率で落ちる」ものだった
-  - **本番コードは変更していない**。当初この項目は「`WebSocketServer` にポート 0 で
-    起動して実ポートを返す口を用意する」としていたが、テスト都合で公開 API を
-    変えない方針を採り、`tests/utils/free-port.ts` に閉じた解決に切り替えた
-  - 各 spec は `startRelayServer()` 経由でリレーを起動する。二段構えになっている
-    - **ワーカーごとに重ならない固定帯**（20000-32000 を `VITEST_WORKER_ID` で 500 ずつ
-      分割）を、単調増加のカーソルで払い出す。帯を ephemeral 範囲（Linux 既定
-      32768-60999）の外に置くのが要点で、これにより「カーネルが `listen(0)` で
-      配った番号との衝突」「他ワーカーとの衝突」「同一ワーカー内の再利用」が
-      すべて構造的に起きなくなる
-    - それでも塞げない分（**同じマシンで同じスイートを同時に実行**した場合や、
-      無関係なプロセスが帯を使っている場合）は、起動が `EADDRINUSE` で失敗したら
-      別の枠で自動リトライする
-  - `NostrRelayServer` はヘルスチェックに `PORT + 1` を使う（1 台あたり 2 ポート消費）
-    ため、既定で連番 2 つの空きを確かめる。`healthCheck` を無効化・明示する spec は
-    `portsPerRelay: 1` を渡す
-  - **素朴な「`listen(0)` で選ばせて即解放」では不十分**だった。vitest は spec を
-    並列ワーカーで走らせるので、A が解放した直後の番号を B の `listen(0)` が
-    引き当てる。実測でスイート 30 回中 2 回発生（ヘルスチェック側に当たったため
-    テストは落ちなかったが、WebSocket 側なら落ちる）。3 スイート同時実行では
-    帯分割だけでも 18 回中 5 回落ち、リトライを足して 0 回になった
-  - ヘルスチェック用ポートの確保失敗は本番実装が握り潰す仕様のためリトライで
-    検出できない。ヘルスチェックを検証する spec は `healthCheck.port` を明示すること
-  - 「そのポートで誰も待ち受けていない」ことを検証するテストは `reservePort()` で
-    対象サーバーの起動まで掴んだままにする（先に解放すると、そのサーバー自身に
-    同じ番号が割り当たって偽陰性になりうる）
-  - e2e はサーバーを子プロセスで起動するため `PORT` に具体的な番号が要る。既存の
-    `e2e/src/spawn-server.ts` の `getFreePort()`（bind-to-0）は 1 ポートしか確保して
-    いなかったが、ヘルスチェックが `PORT + 1` を使う（＝1 サーバあたり 2 ポート消費）ため
-    連番の空きを確かめるようにした
 
 ## 優先度: 低（整備）
 
@@ -172,74 +138,3 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     `LAZY` 検証をメインスレッドから外せる可能性がある
   - これは移行で新しく生えた API ではなく旧 `rx-nostr-crypto@3.1.3` にもあったもの。
     着手するなら実際にメインスレッドの占有が問題になっているかの計測が先
-- [x] フォローリスト由来のタイムライン表示（NIP-02）をクライアントに出すか決める
-  - **実装済み**: `<nostr-follow-timeline>`（`packages/timeline-embed`）。設計は
-    [doc/plan/follow-timeline.md](./plan/follow-timeline.md)、使い方は
-    [packages/timeline-embed/README.md](../packages/timeline-embed/README.md)
-  - §17 の未解決事項は次のとおり決着した
-    - `max-follows` の既定は **2000**。実測（§7.2）で上流は 982 authors を問題なく捌いており、
-      残る根拠はクライアント側（Dexie の全件 materialize と ingest の直列化）だが**未計測**。
-      測るまでは「病的なリストへの安全弁」に徹する大きめの値にしてある。切り捨ては先頭から N 件
-    - `follows-freshness` の既定は **600 秒**（`doc/cache-relay/upstream.md` の例と同じ）
-    - kind 3 の `invalid` 検出は**初回スコープに入れた**（`TimelineController.watchValidation`）
-    - `since` は `since-days` 属性として入れたが**既定オフ**。静かなフォローリストが空の
-      タイムラインになる副作用があるため、埋め込む側が明示したときだけ効く
-  - 残っている計測（`max-follows` の既定を締めるために必要）は下の
-    「`DexieStorage` の `limit` クエリ…」および「`eventMatchesFilter` の Set 化」と同じ土俵
-
-## 完了済み
-
-詳細は git 履歴と各設計書を参照。
-
-**目的の本丸**
-- Web クライアントとローカルリレーのエンドツーエンド配線（Svelte 製 web-client +
-  `WebSocketServerEmulator` + IndexedDB）。エミュレータの実ネットワーク接続・
-  単一接続保持・URL 固定の設計上の問題もあわせて解消
-- 上流リレーへの透過キャッシュ化（リードスルー / ライトスルー）。
-  `cache-relay/src/upstream/` — 設計は [cache-relay/upstream.md](./cache-relay/upstream.md)
-- 鮮度ウィンドウ `upstreamFreshness`（HTTP の `max-age` 相当。replaceable のみ）
-- GitHub Pages の公開デモサイト（`packages/demo-site`）と埋め込みウィジェット
-  （`packages/timeline-embed`。iframe / Web Component の 2 形態）
-- cache-relay を無改変での上流トラフィック計測（`InstrumentedUpstreamPool`）
-- 上流接続層を rx-nostr へ寄せて重複実装を解消（`upstream-connection.ts` を削除。
-  接続・再接続・購読再確立はライブラリ側へ。EOSE 集約だけが自前で残る）。
-  移行後の設計は [cache-relay/upstream.md](./cache-relay/upstream.md) 第2.1節
-- https ページからの `ws://` インターセプトの検証（自動テスト化）
-
-**cache-relay コア**
-- `subscribe()` / `unsubscribe()` の本実装と `emit('event'|'eose')` の実データ化
-- 未実装オプションをすべて実装: `maxEventsPerRequest` / `ttl`（`cached_at` 基準の
-  定期スイープ）/ 遅延バリデーション（`LAZY`）と検証状態の DB 永続化 /
-  `storageMaxSize` + `cacheStrategy`（FIFO / LRU / LFU）/ `cachePriority`
-- フィルタマッチロジックの重複（`subscription-manager` と `utils/filter-utils`）を共通化
-- Dexie ストレージの NIP-01 準拠フィルタ修正（`limit` が「最新 N 件」でなかった /
-  返却順が新しい順でなかった / `since`・`until` の `0` が無視されていた /
-  小数 `limit` / 境界が一部分岐で排他だった）
-- NIP-09（イベント削除・kind 5）の対応。kind 5 は全モードで同期検証し、
-  TTL スイープ対象外・退避は最後
-- replaceable / addressable の版比較（NIP-01「最新の1件だけを保持する」）。
-  保存前に既存版と `created_at` を比較し、古い版は保存も配信も上流転送もしない
-  （同値は id の辞書順）。座標の現行版は `StorageAdapter.getCurrentVersion` で引く
-
-**server**
-- ビルド型エラーの修正と CI 復旧、`tsc --noEmit` による typecheck の CI 組み込み
-- `getConnectionCount()` / `getEventCount()` の実装、`/health` エンドポイント
-- NIP-01 準拠の統合テスト拡充、同時接続・負荷下の正当性テスト
-- 実永続化（オプトイン）: `node:sqlite` + Drizzle ORM の `SqliteStorage`。
-  口は `storageOptions.dbPath` / 環境変数 `NOSTR_DB_PATH`
-
-**テスト / 基盤**
-- E2E テスト（Node.js / ブラウザ）と CI ワークフロー `.github/workflows/e2e.yml`
-- `DexieStorage` と `SqliteStorage` の等価性を担保する契約テスト
-  （`cache-relay/src/test/storage-conformance.ts`。両アダプタが同一の適合性テストを実行する）
-- web-client / timeline-embed の重複した lib モジュールの共通化
-  （`@nostr-cache/timeline-embed/lib`）
-- shared パッケージのテスト追加、CI の `lint:check` を全パッケージ対象に拡大
-- tsconfig の deprecation 対応と TypeScript 6 系への引き上げ
-- 署名・検証を deprecated な `rx-nostr-crypto@3.1.3` から後継の
-  `@rx-nostr/crypto@3.1.6` へ移行（公開 API は同一。`@noble/curves` などが
-  メジャーアップするが、バンドルは微減で署名の相互検証も一致）
-- API ドキュメント（[api.md](./api.md)）と実行可能なサンプル（[examples/](../examples/README.md)）
-
-**廃棄**
-- Angular 製 web-client（POC）の廃棄。以降は Svelte 製で作り直し

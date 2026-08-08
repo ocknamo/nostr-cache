@@ -19,9 +19,7 @@ export const DEFAULT_LAZY_VALIDATE_INTERVAL = 60;
 /** Default number of events validated per pass. */
 export const DEFAULT_LAZY_VALIDATE_BATCH_SIZE = 100;
 
-/**
- * Options controlling the lazy validation cadence.
- */
+/** Options controlling the lazy validation cadence. */
 export interface LazyValidatorOptions {
   /** Interval between validation passes, in seconds. */
   intervalSeconds?: number;
@@ -29,9 +27,7 @@ export interface LazyValidatorOptions {
   batchSize?: number;
 }
 
-/**
- * Result of a single validation pass.
- */
+/** Result of a single validation pass. */
 export interface LazyValidationPassResult {
   /** Number of events verified and marked validated in this pass. */
   validated: number;
@@ -54,8 +50,6 @@ export class LazyValidator {
   /**
    * @param storage Storage adapter holding the pending events and receiving
    *   the validation results
-   * @param options Validation cadence options
-   * @param validator Event validator (injectable for testing)
    */
   constructor(
     private readonly storage: StorageAdapter,
@@ -94,11 +88,7 @@ export class LazyValidator {
     this.runGuardedPass();
   }
 
-  /**
-   * Run one validation pass unless another is still in flight.
-   *
-   * @private
-   */
+  /** Run one validation pass unless another is still in flight. */
   private runGuardedPass(): void {
     if (this.processing) {
       return;
@@ -128,8 +118,6 @@ export class LazyValidator {
   /**
    * Validate up to `batchSize` pending events from storage, marking the valid
    * ones and deleting the invalid ones.
-   *
-   * @returns Counts of events validated and removed in this pass
    */
   async processBatch(): Promise<LazyValidationPassResult> {
     const batch = await this.storage.getUnvalidatedEvents(this.batchSize);

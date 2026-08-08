@@ -26,9 +26,7 @@ import { events, eventTags } from './schema.js';
  */
 const MAX_IN_PARAMS = 500;
 
-/**
- * Built narrowing condition for a single filter.
- */
+/** Built narrowing condition for a single filter. */
 export interface BuiltFilterQuery {
   /** WHERE 条件（絞り込み条件が無い場合は undefined = 全件走査） */
   where: SQL | undefined;
@@ -46,9 +44,6 @@ export interface BuiltFilterQuery {
  * Dexie 実装の `eventRowMatchesFilter` の追加検証と同じ条件:
  * `#x` のタグ名が単一英字でない、値が配列でない、または空・非文字列の値を
  * 含むフィルタは何にもマッチしない（結果は空）。
- *
- * @param filter Filter to inspect
- * @returns true if the filter can never match (malformed tag condition)
  */
 export function hasInvalidTagFilter(filter: Filter): boolean {
   for (const [key, values] of Object.entries(filter)) {
@@ -72,10 +67,6 @@ export function hasInvalidTagFilter(filter: Filter): boolean {
  * 条件のみ: `id IN` / `pubkey IN` / `kind IN` / `created_at >= since` /
  * `created_at <= until`（since / until は truthy のときのみ —
  * `eventMatchesFilter` の `filter.since &&` と同じ挙動）。
- *
- * @param db Drizzle database handle (タグ主導分岐のサブクエリ構築に使用)
- * @param filter Filter conditions (must have passed {@link hasInvalidTagFilter})
- * @returns Narrowing condition and whether it is complete
  */
 export function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltFilterQuery {
   const { ids, authors, kinds, since, until, ...rest } = filter;

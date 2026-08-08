@@ -1,6 +1,4 @@
-/**
- * Tests for the typed relay event emitter.
- */
+/** Tests for the typed relay event emitter. */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';

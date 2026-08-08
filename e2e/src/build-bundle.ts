@@ -10,9 +10,6 @@ import { build } from 'esbuild';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
-/**
- * Build the browser bundle and return the output file path.
- */
 export async function buildBrowserBundle(): Promise<string> {
   const outfile = resolve(currentDir, '../dist/browser-bundle.js');
 

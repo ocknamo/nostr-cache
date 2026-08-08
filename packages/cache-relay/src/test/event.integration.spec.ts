@@ -13,23 +13,19 @@ import { IntegrationTestBase, createTestEvent } from './utils/base.integration.j
 describe('Event Handler Integration', () => {
   let testBase: IntegrationTestBase;
 
-  // Setup before each test
   beforeEach(async () => {
     testBase = new IntegrationTestBase();
     await testBase.setup();
   });
 
-  // Cleanup after each test
   afterEach(async () => {
     await testBase.teardown();
   });
 
   describe('Event processing', () => {
     it('should store and validate regular events', async () => {
-      // Create test event
       const event = await createTestEvent();
 
-      // Process event through MessageHandler
       const result = await testBase.messageHandler.handleMessage('test-client', ['EVENT', event]);
 
       // Verify event was stored
@@ -47,7 +43,6 @@ describe('Event Handler Integration', () => {
         content: 'First version',
       });
 
-      // Process first event
       await testBase.messageHandler.handleMessage('test-client', ['EVENT', event1]);
 
       // Create a newer replaceable event with same kind and pubkey
@@ -57,7 +52,6 @@ describe('Event Handler Integration', () => {
         content: 'Second version',
       });
 
-      // Process second event
       await testBase.messageHandler.handleMessage('test-client', ['EVENT', event2]);
 
       // Verify only the newer event is returned
@@ -187,7 +181,6 @@ describe('Event Handler Integration', () => {
         content: 'Ephemeral content',
       });
 
-      // Process ephemeral event
       await testBase.messageHandler.handleMessage('test-client', ['EVENT', event]);
 
       // Verify ephemeral event is not stored
@@ -207,7 +200,6 @@ describe('Event Handler Integration', () => {
         sig: 'invalid-sig',
       } as NostrEvent;
 
-      // Set up response collector
       let responseMessage: NostrWireMessage | null = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'test-client' && msg[0] === 'OK') {
@@ -215,7 +207,6 @@ describe('Event Handler Integration', () => {
         }
       });
 
-      // Process invalid event
       await testBase.messageHandler.handleMessage('test-client', ['EVENT', invalidEvent]);
 
       // Verify event was rejected
@@ -230,10 +221,8 @@ describe('Event Handler Integration', () => {
 
   describe('Event matching', () => {
     it('should match events to subscriptions by kind', async () => {
-      // Create subscription
       await testBase.messageHandler.handleMessage('sub-client', ['REQ', 'sub1', { kinds: [1] }]);
 
-      // Create client for receiving messages
       let receivedEvent: unknown = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
@@ -242,11 +231,9 @@ describe('Event Handler Integration', () => {
         }
       });
 
-      // Create and publish event
       const event = await createTestEvent(getRandomSecret(), { kind: 1 });
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', event]);
 
-      // Verify client received the event
       expect(receivedEvent).not.toBeNull();
       expect((receivedEvent as NostrEvent).id).toBe(event.id);
     });
@@ -258,14 +245,12 @@ describe('Event Handler Integration', () => {
 
       const hexSecKey2 = getRandomSecret();
 
-      // Create subscription for specific author
       await testBase.messageHandler.handleMessage('sub-client', [
         'REQ',
         'sub1',
         { authors: [author] },
       ]);
 
-      // Set up response collector
       let receivedEvent: unknown = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
@@ -274,34 +259,27 @@ describe('Event Handler Integration', () => {
         }
       });
 
-      // Create and publish matching event
       const matchingEvent = await createTestEvent(hexSecKey1);
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', matchingEvent]);
 
-      // Verify client received the event
       expect(receivedEvent).not.toBeNull();
       expect((receivedEvent as NostrEvent).id).toBe(matchingEvent.id);
 
-      // Reset collector
       receivedEvent = null;
 
-      // Create and publish non-matching event
       const nonMatchingEvent = await createTestEvent(hexSecKey2);
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', nonMatchingEvent]);
 
-      // Verify client did not receive the event
       expect(receivedEvent).toBeNull();
     });
 
     it('should match events to subscriptions by tag', async () => {
-      // Create subscription for specific e-tag
       await testBase.messageHandler.handleMessage('sub-client', [
         'REQ',
         'sub1',
         { '#e': ['specific-event-id'] },
       ]);
 
-      // Set up response collector
       let receivedEvent: unknown = null;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'sub-client' && msg[0] === 'EVENT' && msg[1] === 'sub1') {
@@ -310,7 +288,6 @@ describe('Event Handler Integration', () => {
         }
       });
 
-      // Create and publish matching event
       const matchingEvent = await createTestEvent(getRandomSecret(), {
         tags: [
           ['e', 'specific-event-id'],
@@ -319,14 +296,11 @@ describe('Event Handler Integration', () => {
       });
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', matchingEvent]);
 
-      // Verify client received the event
       expect(receivedEvent).not.toBeNull();
       expect((receivedEvent as NostrEvent).id).toBe(matchingEvent.id);
 
-      // Reset collector
       receivedEvent = null;
 
-      // Create and publish non-matching event
       const nonMatchingEvent = await createTestEvent(getRandomSecret(), {
         tags: [
           ['e', 'other-event-id'],
@@ -335,7 +309,6 @@ describe('Event Handler Integration', () => {
       });
       await testBase.messageHandler.handleMessage('pub-client', ['EVENT', nonMatchingEvent]);
 
-      // Verify client did not receive the event
       expect(receivedEvent).toBeNull();
     });
   });
@@ -355,7 +328,6 @@ describe('Event Handler Integration', () => {
         created_at: 3000,
       });
 
-      // Store all events
       await testBase.storage.saveEvent(event1);
       await testBase.storage.saveEvent(event2);
       await testBase.storage.saveEvent(event3);

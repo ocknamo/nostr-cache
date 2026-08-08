@@ -1,6 +1,4 @@
-/**
- * Tests for relay option defaulting.
- */
+/** Tests for relay option defaulting. */
 
 import {
   DEFAULT_MAX_EVENTS,

@@ -60,12 +60,7 @@ export interface DeletionRequest {
   until: number;
 }
 
-/**
- * Whether an event is a NIP-09 deletion request.
- *
- * @param event Event to check
- * @returns True for kind 5
- */
+/** Whether an event is a NIP-09 deletion request (kind 5). */
 export function isDeletionEvent(event: Pick<NostrEvent, 'kind'>): boolean {
   return isDeletionKind(event.kind);
 }
@@ -75,9 +70,6 @@ export function isDeletionEvent(event: Pick<NostrEvent, 'kind'>): boolean {
  *
  * The identifier may itself contain `:`, so only the first two separators are
  * significant.
- *
- * @param value Raw `a` tag value
- * @returns The coordinate, or undefined if malformed
  */
 export function parseAddress(value: string): EventAddress | undefined {
   const firstColon = value.indexOf(':');
@@ -118,9 +110,6 @@ export function parseAddress(value: string): EventAddress | undefined {
  *
  * Tolerates a malformed `tags` array (a non-array, or entries that are not
  * arrays), which `NONE` validation mode makes reachable.
- *
- * @param event Deletion request event (kind 5)
- * @returns The targets to delete, deduplicated
  */
 export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
   const ids = new Set<string>();
@@ -194,10 +183,6 @@ export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
  * `until` must be a finite number: IndexedDB orders strings above every number,
  * so a non-numeric upper bound would silently turn the range into "all
  * versions".
- *
- * @param address Coordinate being deleted
- * @param until Upper bound on `created_at`
- * @returns True if the deletion may proceed
  */
 export function isDeletableAddress(address: EventAddress, until: number): boolean {
   return isCoordinateAddressableKind(address.kind) && Number.isFinite(until);
@@ -210,10 +195,6 @@ export function isDeletableAddress(address: EventAddress, until: number): boolea
  * coordinates identically. Only addressable kinds carry a `d` tag; for
  * replaceable kinds the identifier is not part of the address. A missing `d`
  * tag counts as the empty identifier, matching NIP-01.
- *
- * @param tags Tags of the stored event
- * @param address Coordinate being deleted
- * @returns True if the event is a version of the addressed event
  */
 export function matchesAddressIdentifier(tags: string[][], address: EventAddress): boolean {
   if (!isAddressableKind(address.kind)) {
@@ -232,10 +213,6 @@ export function matchesAddressIdentifier(tags: string[][], address: EventAddress
  * are logged and swallowed — the request itself is already persisted and gets
  * re-applied the next time it arrives, and callers rely on this never throwing
  * (`NostrCacheRelay.publishEvent` has already committed the save by then).
- *
- * @param storage Storage adapter to delete from
- * @param event Deletion request event (kind 5)
- * @returns Promise resolving to the number of events deleted
  */
 export async function applyDeletionRequest(
   storage: StorageAdapter,

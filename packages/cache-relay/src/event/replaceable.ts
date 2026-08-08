@@ -21,12 +21,7 @@ import { isAddressableKind } from './event-kind.js';
 /** Fields the version comparison needs; keeps the helpers usable on rows. */
 type VersionKey = Pick<NostrEvent, 'id' | 'created_at'>;
 
-/**
- * Get the `d` tag value of an event (the first one, as NIP-01 specifies).
- *
- * @param tags Tags of the event
- * @returns The `d` tag value, or undefined when the event carries no `d` tag
- */
+/** Get the `d` tag value of an event (the first one, as NIP-01 specifies). */
 export function getDTagValue(tags: string[][]): string | undefined {
   const dTag = tags.find((tag) => tag[0] === 'd');
   return dTag ? dTag[1] : undefined;
@@ -39,9 +34,6 @@ export function getDTagValue(tags: string[][]): string | undefined {
  * A missing `d` tag counts as the empty identifier, matching NIP-01 and
  * `matchesAddressIdentifier` (the predicate the storage adapters resolve
  * coordinates with).
- *
- * @param event Event to address (kind must be replaceable or addressable)
- * @returns The coordinate of the event
  */
 export function addressOf(event: NostrEvent): EventAddress {
   return {
@@ -63,10 +55,6 @@ export function addressOf(event: NostrEvent): EventAddress {
  * stays a normal save, which keeps the existing TTL / freshness-window
  * semantics — `cached_at` is re-stamped exactly as before — and keeps the event
  * deliverable to the client that asked for it.
- *
- * @param stored Version currently held by the cache
- * @param incoming Version being ingested
- * @returns True if the stored version must be kept and the incoming one dropped
  */
 export function supersedes(stored: VersionKey, incoming: VersionKey): boolean {
   if (stored.id === incoming.id) {
@@ -85,9 +73,6 @@ export function supersedes(stored: VersionKey, incoming: VersionKey): boolean {
  * Normally there is at most one (the relay replaces on write), so this only
  * matters for rows written before the comparison existed, or by another writer
  * on the same database.
- *
- * @param versions Stored versions of a single (pubkey, kind[, d]) coordinate
- * @returns The version to retain, or undefined when there is none
  */
 export function selectCurrentVersion<T extends VersionKey>(versions: T[]): T | undefined {
   let current: T | undefined;

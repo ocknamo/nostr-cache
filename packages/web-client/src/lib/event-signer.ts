@@ -20,9 +20,6 @@ export class EventSigner {
     return this.signer.getPublicKey();
   }
 
-  /**
-   * Build and sign a kind-1 text note with the given content.
-   */
   async signTextNote(content: string): Promise<NostrEvent> {
     const event = await this.signer.signEvent({
       kind: 1,

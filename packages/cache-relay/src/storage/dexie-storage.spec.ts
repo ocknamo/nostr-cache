@@ -20,7 +20,6 @@ const createStorage = () => new DexieStorage('TestNostrCacheRelay');
 const disposeStorage = async (storage: DexieStorage) => {
   await storage.clear();
   await storage.delete();
-  // Reset indexedDB for next test
   // @ts-ignore - fake-indexeddb types
   // biome-ignore lint/suspicious/noGlobalAssign: for indexedDB mock
   indexedDB = new IDBFactory();

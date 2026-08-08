@@ -1,10 +1,5 @@
-/**
- * Relay-related constants
- */
+/** Relay-related constants */
 
-/**
- * Default Nostr relay URLs
- */
 export const DEFAULT_RELAY_URLS = [
   'wss://relay.damus.io',
   'wss://relay.nostr.info',
@@ -13,17 +8,11 @@ export const DEFAULT_RELAY_URLS = [
   'wss://nos.lol',
 ];
 
-/**
- * Default subscription timeout in milliseconds
- */
+/** ミリ秒 */
 export const DEFAULT_SUBSCRIPTION_TIMEOUT = 3000;
 
-/**
- * Default request timeout in milliseconds
- */
+/** ミリ秒 */
 export const DEFAULT_REQUEST_TIMEOUT = 10000;
 
-/**
- * Default maximum number of relays to connect to simultaneously
- */
+/** Default maximum number of relays to connect to simultaneously */
 export const DEFAULT_MAX_CONCURRENT_RELAYS = 5;

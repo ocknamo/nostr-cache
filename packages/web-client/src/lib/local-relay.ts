@@ -17,9 +17,7 @@ export interface LocalRelayHandle {
   stop: () => Promise<void>;
 }
 
-/**
- * Options for {@link startLocalRelay}.
- */
+/** Options for {@link startLocalRelay}. */
 export interface StartLocalRelayOptions {
   /**
    * Upstream relay URLs (`wss://…`). When provided, the local relay becomes a

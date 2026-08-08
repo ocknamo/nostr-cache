@@ -1,6 +1,4 @@
-/**
- * Tests for the Dexie tag-indexing helpers.
- */
+/** Tests for the Dexie tag-indexing helpers. */
 
 import {
   formatTagForIndex,

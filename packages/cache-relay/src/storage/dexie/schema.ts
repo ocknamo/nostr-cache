@@ -51,9 +51,6 @@ export const EVENTS_SCHEMA_V1 = `
  * Project a stored row onto the public {@link NostrEvent} shape, dropping the
  * cache bookkeeping columns (indexed_tags / last_accessed_at / access_count /
  * cached_at / validated).
- *
- * @param row Stored table row
- * @returns The event as exposed to callers
  */
 export function rowToEvent(row: NostrEventTable): NostrEvent {
   return {

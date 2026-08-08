@@ -62,9 +62,7 @@ export interface UpstreamPool {
   getConnectedCount(): number;
 }
 
-/**
- * Options for {@link UpstreamRelayPool}.
- */
+/** Options for {@link UpstreamRelayPool}. */
 export interface UpstreamPoolOptions {
   /**
    * Maximum number of relays to connect to. URLs beyond this are ignored with a

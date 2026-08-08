@@ -94,9 +94,7 @@ function retentionCondition(priority?: CachePriority): SQL {
   return or(...conditions) as SQL;
 }
 
-/**
- * Split an array into chunks of at most `size` elements.
- */
+/** Split an array into chunks of at most `size` elements. */
 function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -233,9 +231,6 @@ export class SqliteStorage implements StorageAdapter {
    * Get stored events that have not been validated yet, oldest first
    * (`cached_at` ascending — the persistent lazy-validation FIFO queue).
    * Does NOT track access (background work must not perturb LRU/LFU eviction).
-   *
-   * @param limit Maximum number of events to return
-   * @returns Promise resolving to the unvalidated events, oldest first
    */
   async getUnvalidatedEvents(limit: number): Promise<NostrEvent[]> {
     if (!(limit > 0)) {
@@ -263,8 +258,6 @@ export class SqliteStorage implements StorageAdapter {
   /**
    * Mark the given events as validated. IDs no longer stored (deleted or
    * evicted meanwhile) are silently ignored.
-   *
-   * @param ids IDs of the events to mark as validated
    */
   async markValidated(ids: string[]): Promise<void> {
     if (ids.length === 0) {
@@ -289,9 +282,6 @@ export class SqliteStorage implements StorageAdapter {
   /**
    * Get the persisted validation status for the given event ids.
    * Does NOT track access, since clients may poll this frequently.
-   *
-   * @param ids Event IDs to look up
-   * @returns Promise resolving to a map with one entry per requested id
    */
   async getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>> {
     const statuses = new Map<string, ValidationStatus>();
@@ -338,9 +328,6 @@ export class SqliteStorage implements StorageAdapter {
    * Deliberately has no try/catch, mirroring `DexieStorage`: a swallowed error
    * would read as "no version stored" and let an older event overwrite a newer
    * one.
-   *
-   * @param address Coordinate to look up (kind / pubkey / d value)
-   * @returns Promise resolving to the stored version, or undefined if none
    */
   async getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined> {
     const rows = this.db
@@ -359,9 +346,6 @@ export class SqliteStorage implements StorageAdapter {
    * Get the cache insertion time (ms) of the given event ids.
    * Does NOT track access, mirroring `DexieStorage`: a freshness check must not
    * disturb LRU/LFU ordering. Unstored ids are omitted from the map.
-   *
-   * @param ids Event IDs to look up
-   * @returns Promise resolving to a map of id → cached_at in milliseconds
    */
   async getCachedAt(ids: string[]): Promise<Map<string, number>> {
     const cachedAt = new Map<string, number>();
@@ -395,9 +379,6 @@ export class SqliteStorage implements StorageAdapter {
    * Re-stamp the cache insertion time of the given ids to now.
    * `cached_at` のみを更新し、検証状態とアクセスメタデータには触らない。
    * 再保存と同じく、対象イベントの TTL は数え直しになる。
-   *
-   * @param ids Event IDs to re-stamp
-   * @returns Promise resolving to the number of events updated (0 on error)
    */
   async touchCachedAt(ids: string[]): Promise<number> {
     if (ids.length === 0) {
@@ -432,9 +413,6 @@ export class SqliteStorage implements StorageAdapter {
    *
    * 各フィルタを独立に評価して id でデデュープ（Dexie 実装と同一）。
    * SQL は候補を絞るだけで、最終判定は共通の `eventMatchesFilter`。
-   *
-   * @param filters Array of filters to match events against
-   * @returns Promise resolving to array of matching events
    */
   async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
     try {
@@ -456,9 +434,7 @@ export class SqliteStorage implements StorageAdapter {
     }
   }
 
-  /**
-   * Evaluate a single filter: SQL narrowing + final JS validation + limit.
-   */
+  /** Evaluate a single filter: SQL narrowing + final JS validation + limit. */
   private queryFilter(filter: Filter): NostrEvent[] {
     // Stage A: 不正なタグ条件を持つフィルタは何にもマッチしない
     if (hasInvalidTagFilter(filter)) {
@@ -518,12 +494,6 @@ export class SqliteStorage implements StorageAdapter {
     }
   }
 
-  /**
-   * Delete an event from storage
-   *
-   * @param id ID of the event to delete
-   * @returns Promise resolving to true if the event existed and was deleted
-   */
   async deleteEvent(id: string): Promise<boolean> {
     try {
       const { changes } = this.db.delete(events).where(eq(events.id, id)).run();
@@ -536,9 +506,6 @@ export class SqliteStorage implements StorageAdapter {
     }
   }
 
-  /**
-   * Clear all events from storage
-   */
   async clear(): Promise<void> {
     try {
       // event_tags は ON DELETE CASCADE で追随する
@@ -560,8 +527,6 @@ export class SqliteStorage implements StorageAdapter {
    *
    * @param olderThan Unix timestamp (seconds); events cached strictly before
    *   this moment are deleted
-   * @param priority Cache priority config; matching events are never deleted
-   * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteExpired(olderThan: number, priority?: CachePriority): Promise<number> {
     try {
@@ -582,11 +547,6 @@ export class SqliteStorage implements StorageAdapter {
     }
   }
 
-  /**
-   * Count the number of stored events
-   *
-   * @returns Promise resolving to the number of stored events (0 on error)
-   */
   async count(): Promise<number> {
     try {
       const row = this.db.select({ value: count() }).from(events).get();
@@ -610,11 +570,6 @@ export class SqliteStorage implements StorageAdapter {
    * still over `maxSize` are priority events evicted (also in strategy
    * order), so `maxSize` is always honored — same as the Dexie
    * implementation.
-   *
-   * @param maxSize Maximum number of events to keep (no-op when <= 0)
-   * @param strategy Eviction strategy (default `FIFO`)
-   * @param priority Cache priority config; matching events are evicted last
-   * @returns Promise resolving to the number of events evicted
    */
   async enforceLimit(
     maxSize: number,
@@ -680,10 +635,6 @@ export class SqliteStorage implements StorageAdapter {
   /**
    * Delete events with the same pubkey and kind
    * Used for handling replaceable events
-   *
-   * @param pubkey Public key of the event author
-   * @param kind Event kind
-   * @returns Promise resolving to true if any event was deleted
    */
   async deleteEventsByPubkeyAndKind(pubkey: string, kind: number): Promise<boolean> {
     try {
@@ -709,11 +660,6 @@ export class SqliteStorage implements StorageAdapter {
    * d タグの照合は（event_tags ではなく）完全な tags JSON に対して行う。
    * インデックスの 100 件キャップの影響を受けないための Dexie 実装との
    * セマンティクス互換
-   *
-   * @param pubkey Public key of the event author
-   * @param kind Event kind
-   * @param dTagValue Value of the d tag
-   * @returns Promise resolving to true if any event was deleted
    */
   async deleteEventsByPubkeyKindAndDTag(
     pubkey: string,
@@ -764,10 +710,6 @@ export class SqliteStorage implements StorageAdapter {
    * caller cannot see it: another author's event must never be deleted, and a
    * deletion request (kind 5) is never deletable. Mirrors the Dexie
    * implementation.
-   *
-   * @param ids Ids of the events to delete
-   * @param pubkey Author of the deletion request
-   * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteEventsByIdsForPubkey(ids: string[], pubkey: string): Promise<number> {
     if (ids.length === 0) {
@@ -813,10 +755,6 @@ export class SqliteStorage implements StorageAdapter {
    * Unlike Dexie's single filtered cursor delete, the select and the delete run
    * in separate statements (the delete batched in one transaction). Nothing
    * awaits between them, so no concurrent statement can interleave.
-   *
-   * @param address Coordinate of the event to delete
-   * @param until Unix timestamp (seconds); versions at or before it are deleted
-   * @returns Promise resolving to the number of events deleted (0 on error)
    */
   async deleteEventsByAddress(address: EventAddress, until: number): Promise<number> {
     if (!isDeletableAddress(address, until)) {

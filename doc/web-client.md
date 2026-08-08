@@ -54,4 +54,3 @@ App.svelte
 
 - [NIP-01](./nips/nip-01.md): 購読・イベントのプロトコル
 - [api.md](./api.md): `startLocalRelay` が組み立てる各コンポーネントの API
-- [cache-relay/transport.md](./cache-relay/transport.md): `WebSocketServerEmulator` の設計

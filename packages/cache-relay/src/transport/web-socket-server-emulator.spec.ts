@@ -1,9 +1,6 @@
 import type { NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { WebSocketServerEmulator } from './web-socket-server-emulator.js';
 
-/**
- * Open an emulated WebSocket and resolve once its open event fires.
- */
 function openSocket(url: string): Promise<WebSocket> {
   return new Promise((resolve) => {
     const ws = new WebSocket(url);

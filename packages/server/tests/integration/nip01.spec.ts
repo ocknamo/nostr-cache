@@ -13,9 +13,7 @@ import { NostrRelayServer } from '../../src/nostr-relay-server.js';
 import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
-/**
- * サーバーへ接続し、open するまで待機した WebSocket を返す。
- */
+/** サーバーへ接続し、open するまで待機した WebSocket を返す。 */
 async function connect(port: number): Promise<WebSocket> {
   const client = new WebSocket(`ws://localhost:${port}`);
   await new Promise<void>((resolve, reject) => {
@@ -25,13 +23,7 @@ async function connect(port: number): Promise<WebSocket> {
   return client;
 }
 
-/**
- * 指定した述語に最初に一致したメッセージを待機する。
- *
- * @param client WebSocket クライアント
- * @param predicate メッセージ（パース済み配列）に対する一致条件
- * @param timeoutMs タイムアウト（ミリ秒）
- */
+/** 指定した述語に最初に一致したメッセージを待機する。 */
 function waitForMessage(
   client: WebSocket,
   predicate: (message: unknown[]) => boolean,
@@ -91,9 +83,7 @@ async function collectReqEvents(
   return events;
 }
 
-/**
- * イベントを保存し、OK 応答を待機する。
- */
+/** イベントを保存し、OK 応答を待機する。 */
 async function publishEvent(port: number, event: NostrEvent): Promise<void> {
   const client = await connect(port);
   const ok = waitForMessage(client, (message) => message[0] === 'OK' && message[1] === event.id);

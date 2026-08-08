@@ -1,6 +1,4 @@
-/**
- * Tests for LazyValidator
- */
+/** Tests for LazyValidator */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';

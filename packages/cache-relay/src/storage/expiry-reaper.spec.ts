@@ -1,6 +1,4 @@
-/**
- * Tests for ExpiryReaper
- */
+/** Tests for ExpiryReaper */
 
 import { logger } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';

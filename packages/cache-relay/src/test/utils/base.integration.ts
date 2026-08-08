@@ -1,6 +1,4 @@
-/**
- * Base setup for integration tests
- */
+/** Base setup for integration tests */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import 'fake-indexeddb/auto';
@@ -11,12 +9,6 @@ import { SubscriptionManager } from '../../core/subscription-manager.js';
 import { DexieStorage } from '../../storage/dexie-storage.js';
 import { WebSocketServer } from '../../transport/web-socket-server.js';
 
-/**
- * Create a test event
- * @param seckey 秘密鍵（オプション）
- * @param overrides イベントのプロパティをオーバーライド
- * @returns NostrEvent object
- */
 export async function createTestEvent(
   seckey?: string,
   overrides: Omit<Partial<NostrEvent>, 'id' | 'pubkey' | 'sig'> = {}
@@ -48,10 +40,7 @@ export class IntegrationTestBase {
   server: WebSocketServer;
   port = 0;
 
-  /**
-   * Create a new instance
-   * @param port Optional port number (0 = dynamically assigned)
-   */
+  /** Create a new instance */
   constructor(port = 0) {
     this.storage = new DexieStorage('TestNostrCacheRelay');
     this.subscriptionManager = new SubscriptionManager();
@@ -59,10 +48,6 @@ export class IntegrationTestBase {
     this.server = new WebSocketServer(port);
   }
 
-  /**
-   * Setup test environment
-   * @returns The port the WebSocket server is listening on
-   */
   async setup(): Promise<number> {
     await this.server.start();
     this.port = this.server.getPort();
@@ -77,17 +62,10 @@ export class IntegrationTestBase {
     return this.port;
   }
 
-  /**
-   * Get WebSocket server URL
-   * @returns The WebSocket server URL (ws://localhost:port)
-   */
   getServerUrl(): string {
     return `ws://localhost:${this.port}`;
   }
 
-  /**
-   * Teardown test environment
-   */
   async teardown(): Promise<void> {
     await this.server.stop();
     await this.storage.clear();

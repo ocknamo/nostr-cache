@@ -42,7 +42,6 @@ class MockPool implements UpstreamPool {
   getConnectedCount(): number {
     return this.connectedCount;
   }
-  // Test helpers
   emitEvent(subId: string, event: NostrEvent): void {
     this.eventCb?.(subId, event, 'wss://relay');
   }

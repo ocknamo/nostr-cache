@@ -1,9 +1,3 @@
-/**
- * Nostr Relay Server
- *
- * NIP-01準拠のNostrリレーサーバー実装
- */
-
 import {
   type CacheStrategy,
   NostrCacheRelay,
@@ -15,15 +9,10 @@ import { logger } from '@nostr-cache/shared';
 import { type HealthCheckOptions, HealthServer } from './health-server.js';
 import { createStorage } from './storage.js';
 
-/**
- * Nostrリレーサーバーの設定オプション
- */
 interface NostrRelayServerOptions {
-  // サーバー設定
   port: number;
   host?: string;
 
-  // ストレージ設定
   storageOptions?: {
     dbName?: string;
     // SQLite データベースのファイルパス。指定すると node:sqlite による永続
@@ -40,7 +29,6 @@ interface NostrRelayServerOptions {
     cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
 
-  // リレー設定（NostrCacheRelayに渡すオプション）
   relay?: {
     maxSubscriptions?: number;
     maxEventsPerRequest?: number;
@@ -61,14 +49,9 @@ interface NostrRelayServerOptions {
     upstreamFreshness?: Record<number, number>;
   };
 
-  // ヘルスチェック設定
   healthCheck?: HealthCheckOptions;
 }
 
-/**
- * Nostrリレーサーバークラス
- * NIP-01準拠のNostrリレーサーバーを実装
- */
 export class NostrRelayServer {
   // Depend on the transport/storage abstractions; getConnectionCount() and
   // getEventCount() are part of those contracts, so the concrete WebSocketServer
@@ -79,33 +62,25 @@ export class NostrRelayServer {
   private options: NostrRelayServerOptions;
   // 永続ストレージ（dbPath 指定）かどうか。stop() の挙動を分ける
   private persistent: boolean;
-  // ヘルスチェック用 HTTP サーバー（補助エンドポイント）
   private healthServer: HealthServer;
 
-  /**
-   * NostrRelayServerのインスタンスを作成
-   *
-   * @param options 設定オプション
-   */
   constructor(options: Partial<NostrRelayServerOptions> = {}) {
-    // デフォルト設定とマージ
     this.options = {
       port: 8008,
       ...options,
     };
 
-    // ストレージアダプタの初期化。既定は fake-indexeddb（インメモリ）、
-    // dbPath 指定時は node:sqlite による永続ストレージ（詳細は storage.ts）
+    // 既定は fake-indexeddb（インメモリ）、dbPath 指定時は node:sqlite による
+    // 永続ストレージ（詳細は storage.ts）
     this.persistent = !!this.options.storageOptions?.dbPath;
     this.storage = createStorage({
       dbName: this.options.storageOptions?.dbName || 'NostrRelay',
       dbPath: this.options.storageOptions?.dbPath,
     });
 
-    // WebSocketサーバーの作成
     this.server = new WebSocketServer(this.options.port);
 
-    // リレーの初期化。ストレージ上限・退避戦略は relay 経由で適用する
+    // ストレージ上限・退避戦略は relay 経由で適用する
     // （relay が保存後に storage.enforceLimit を呼ぶ）
     this.relay = new NostrCacheRelay(this.storage, this.server, {
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
@@ -116,19 +91,16 @@ export class NostrRelayServer {
       ttl: this.options.relay?.ttl,
       ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',
-      // 上流リレー（リード/ライトスルー）。未指定なら独立リレーのまま
       upstreamRelays: this.options.relay?.upstreamRelays,
       upstreamEoseTimeout: this.options.relay?.upstreamEoseTimeout,
       upstreamFreshness: this.options.relay?.upstreamFreshness,
     });
 
-    // ヘルスチェック用 HTTP サーバー。稼働状況のスナップショットは本サーバーから注入する
     this.healthServer = new HealthServer(
       this.options.healthCheck,
       this.options.port,
       this.options.host,
       async () => {
-        // 元実装と同じく、まずイベント数を取得してから uptime / connections を読む
         const events = await this.getEventCount();
         return {
           status: 'ok',
@@ -140,11 +112,6 @@ export class NostrRelayServer {
     );
   }
 
-  /**
-   * サーバーを起動
-   *
-   * @returns Promise resolving when the server is started
-   */
   async start(): Promise<void> {
     if (this.persistent) {
       // stop() で閉じた永続 DB を再オープンする（初回起動時は no-op）。これにより
@@ -157,11 +124,6 @@ export class NostrRelayServer {
     logger.info(`Nostr relay server started on port ${this.options.port}`);
   }
 
-  /**
-   * サーバーを停止
-   *
-   * @returns Promise resolving when the server is stopped
-   */
   async stop(): Promise<void> {
     await this.healthServer.stop();
     await this.relay.disconnect();
@@ -178,38 +140,18 @@ export class NostrRelayServer {
     logger.info('Nostr relay server stopped');
   }
 
-  /**
-   * 稼働中のヘルスチェックエンドポイントのポート番号を取得する。
-   *
-   * @returns リッスン中のポート番号。無効化されている、または起動に失敗した場合は null
-   */
   getHealthPort(): number | null {
     return this.healthServer.getBoundPort();
   }
 
-  /**
-   * 接続数を取得
-   *
-   * @returns 現在の接続数
-   */
   getConnectionCount(): number {
     return this.server.getConnectionCount();
   }
 
-  /**
-   * イベント数を取得
-   *
-   * @returns Promise resolving to the number of events
-   */
   async getEventCount(): Promise<number> {
     return this.storage.count();
   }
 
-  /**
-   * サーバーが使用しているポート番号を取得
-   *
-   * @returns ポート番号
-   */
   getPort(): number {
     return this.options.port;
   }
@@ -219,8 +161,6 @@ export class NostrRelayServer {
    * pubkey は npub / hex どちらでも指定でき、不正な値は例外を投げて現行設定を
    * 維持する。undefined（または空設定）で全ルールを解除。新しいルールは
    * 次回の退避・TTL スイープから反映される（退避済みイベントは戻らない）。
-   *
-   * @param input 新しい優先度設定。undefined で解除
    */
   setCachePriority(input?: { pubkeys?: string[]; kinds?: number[] }): void {
     // relay 側の検証が通ってから自身の options も同期する（将来 relay を

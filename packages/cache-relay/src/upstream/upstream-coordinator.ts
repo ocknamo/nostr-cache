@@ -196,10 +196,6 @@ export class UpstreamCoordinator {
    * of the same event — inevitable once write-through forwards it upstream — is
    * dropped instead of re-delivered. No-op if the subscription has no upstream
    * counterpart.
-   *
-   * @param clientId Owning client
-   * @param subscriptionId Owning subscription
-   * @param eventId Id of the event already sent to that subscription
    */
   markDelivered(clientId: string, subscriptionId: string, eventId: string): void {
     const upstreamSubId = this.byClientSub.get(clientSubKey(clientId, subscriptionId));

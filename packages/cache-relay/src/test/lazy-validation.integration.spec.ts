@@ -37,7 +37,6 @@ describe('Lazy validation persistence integration', () => {
   afterEach(async () => {
     const cleanup = new DexieStorage(dbName);
     await cleanup.delete();
-    // Reset indexedDB for next test
     // @ts-ignore - fake-indexeddb types
     // biome-ignore lint/suspicious/noGlobalAssign: for indexedDB mock
     indexedDB = new IDBFactory();

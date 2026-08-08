@@ -53,10 +53,6 @@ function isHex64(value: string): boolean {
  * Exported because `<nostr-follow-timeline>`'s `pubkey` attribute has to accept
  * exactly the same spellings as an `authors` entry — an embedder copies one out
  * of a client the same way they copy the other.
- *
- * @param value Raw entry from `authors`, `#p` or the `pubkey` attribute
- * @returns Lowercase hex, or `undefined` when it is neither hex nor a pubkey
- *   entity
  */
 export function toPubkeyHex(value: string): string | undefined {
   if (isHex64(value)) {
@@ -72,10 +68,6 @@ export function toPubkeyHex(value: string): string | undefined {
  * Normalize a value that NIP-01 wants as a 64-character hex event id.
  *
  * `note` / `nevent` are accepted for the same reason `npub` is above.
- *
- * @param value Raw entry from `ids` or `#e`
- * @returns Lowercase hex, or `undefined` when it is neither hex nor an event
- *   entity
  */
 function toEventIdHex(value: string): string | undefined {
   if (isHex64(value)) {
@@ -119,13 +111,7 @@ function hasCondition(filter: Filter): boolean {
   return Object.keys(filter).some((key) => key !== 'limit');
 }
 
-/**
- * Sanitize one entry of the `filters` array.
- *
- * @param input Parsed JSON value at that position
- * @param index Position in the array, for the warning messages
- * @returns The filter to send, or `undefined` when it cannot be salvaged
- */
+/** Sanitize one entry of the `filters` array. */
 function sanitizeFilter(input: unknown, index: number): Filter | undefined {
   const label = `filters[${index}]`;
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
@@ -217,7 +203,6 @@ function sanitizeFilter(input: unknown, index: number): Filter | undefined {
  * A filter that names no `limit` is returned without one; supplying the
  * widget's default is `parseFilters`' job, alongside the other defaults.
  *
- * @param raw JSON text, e.g. `'[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]'`
  * @returns The filters to subscribe with, or `undefined` when nothing usable
  *   was given — the caller then falls back to the `kinds` / `authors` / `limit`
  *   attributes

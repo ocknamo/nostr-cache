@@ -1,13 +1,10 @@
-/**
- * Tests for SubscriptionManager
- */
+/** Tests for SubscriptionManager */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';
 import { SubscriptionManager } from './subscription-manager.js';
 
 describe('SubscriptionManager', () => {
-  // Sample event
   const sampleEvent: NostrEvent = {
     id: '123',
     pubkey: 'abc',
@@ -21,7 +18,6 @@ describe('SubscriptionManager', () => {
     sig: 'xyz',
   };
 
-  // Sample filters
   const sampleFilter1: Filter = {
     kinds: [1],
     authors: ['abc'],

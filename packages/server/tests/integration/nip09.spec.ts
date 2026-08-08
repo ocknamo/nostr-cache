@@ -14,9 +14,7 @@ import { NostrRelayServer } from '../../src/nostr-relay-server.js';
 import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
-/**
- * サーバーへ接続し、open するまで待機した WebSocket を返す。
- */
+/** サーバーへ接続し、open するまで待機した WebSocket を返す。 */
 async function connect(port: number): Promise<WebSocket> {
   const client = new WebSocket(`ws://localhost:${port}`);
   await new Promise<void>((resolve, reject) => {
@@ -26,9 +24,7 @@ async function connect(port: number): Promise<WebSocket> {
   return client;
 }
 
-/**
- * 指定した述語に最初に一致したメッセージを待機する。
- */
+/** 指定した述語に最初に一致したメッセージを待機する。 */
 function waitForMessage(
   client: WebSocket,
   predicate: (message: unknown[]) => boolean,
@@ -53,9 +49,7 @@ function waitForMessage(
   });
 }
 
-/**
- * REQ を送信し、EOSE までに受け取った EVENT を返す。
- */
+/** REQ を送信し、EOSE までに受け取った EVENT を返す。 */
 async function collectReqEvents(
   client: WebSocket,
   subscriptionId: string,
@@ -87,9 +81,7 @@ async function collectReqEvents(
   return events;
 }
 
-/**
- * イベントを保存し、OK 応答を待機する。
- */
+/** イベントを保存し、OK 応答を待機する。 */
 async function publishEvent(port: number, event: NostrEvent): Promise<unknown[]> {
   const client = await connect(port);
   const ok = waitForMessage(client, (message) => message[0] === 'OK' && message[1] === event.id);
@@ -99,9 +91,7 @@ async function publishEvent(port: number, event: NostrEvent): Promise<unknown[]>
   return response;
 }
 
-/**
- * 保存済みイベントの id 一覧を取得する（フィルタ指定）。
- */
+/** 保存済みイベントの id 一覧を取得する（フィルタ指定）。 */
 async function storedIds(port: number, filters: unknown[]): Promise<string[]> {
   const client = await connect(port);
   const events = await collectReqEvents(client, `sub-${Math.random()}`, filters);

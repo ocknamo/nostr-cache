@@ -109,9 +109,6 @@ export const SQLITE_SCHEMA = `
 /**
  * Project a stored row onto the public {@link NostrEvent} shape, dropping the
  * cache bookkeeping columns and parsing the tags JSON back into arrays.
- *
- * @param row Stored table row
- * @returns The event as exposed to callers
  */
 export function rowToEvent(row: EventRow): NostrEvent {
   return {

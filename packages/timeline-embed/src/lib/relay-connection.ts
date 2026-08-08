@@ -205,9 +205,7 @@ export class RelayConnection {
     });
   }
 
-  /**
-   * Close the connection (if any) and drop all subscriptions.
-   */
+  /** Close the connection (if any) and drop all subscriptions. */
   disconnect(): void {
     this.teardownClient('disconnected');
     this.settleConnect(new Error('Connection closed before opening'));
@@ -282,11 +280,9 @@ export class RelayConnection {
    * chain). Against a relay that releases EOSE early this would drop events that
    * were already on their way.
    *
-   * @param filters Filters for the REQ; they travel as one subscription
    * @param options `signal` abandons the fetch — the subscription is closed and
    *   the promise resolves with nothing rather than a partial answer, because a
    *   caller being torn down should not act on half a result
-   * @returns Every event that arrived, in arrival order
    */
   fetchOnce(filters: Filter[], options: { signal?: AbortSignal } = {}): Promise<NostrEvent[]> {
     const rxNostr = this.rxNostr;
@@ -323,9 +319,7 @@ export class RelayConnection {
     });
   }
 
-  /**
-   * Close a subscription: sends CLOSE and stops routing its messages.
-   */
+  /** Close a subscription: sends CLOSE and stops routing its messages. */
   unsubscribe(subId: string): void {
     const entry = this.subscriptions.get(wireSubId(subId));
     if (!entry) {
@@ -335,9 +329,6 @@ export class RelayConnection {
     entry.events.unsubscribe();
   }
 
-  /**
-   * Publish an event. The result arrives via the onOk callback.
-   */
   publish(event: NostrEvent): void {
     // OK is routed from the shared message stream with every other
     // relay-to-client message, so this subscription only drives the send and is

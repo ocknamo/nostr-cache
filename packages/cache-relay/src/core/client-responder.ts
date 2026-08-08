@@ -19,19 +19,10 @@ import {
   messageToWire,
 } from '@nostr-cache/shared';
 
-/**
- * Dispatches responses to registered client transport callbacks.
- */
+/** Dispatches responses to registered client transport callbacks. */
 export class ClientResponder {
   private responseCallbacks: ((clientId: string, message: NostrWireMessage) => void)[] = [];
 
-  /**
-   * Send an EVENT message to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param subscriptionId Subscription ID
-   * @param event Event to send
-   */
   sendEvent(clientId: string, subscriptionId: string, event: NostrEvent): void {
     const message: EventMessage = {
       type: NostrMessageType.EVENT,
@@ -41,14 +32,6 @@ export class ClientResponder {
     this.sendResponse(clientId, message);
   }
 
-  /**
-   * Send an OK message to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param eventId ID of the event
-   * @param success Whether the event was accepted
-   * @param message Message to include
-   */
   sendOK(clientId: string, eventId: string, success: boolean, message = ''): void {
     const response: OkResponse = {
       type: NostrMessageType.OK,
@@ -59,12 +42,6 @@ export class ClientResponder {
     this.sendResponse(clientId, response);
   }
 
-  /**
-   * Send an EOSE message to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param subscriptionId Subscription ID
-   */
   sendEOSE(clientId: string, subscriptionId: string): void {
     const response: EoseResponse = {
       type: NostrMessageType.EOSE,
@@ -73,13 +50,6 @@ export class ClientResponder {
     this.sendResponse(clientId, response);
   }
 
-  /**
-   * Send a CLOSED message to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param subscriptionId Subscription ID
-   * @param message Message to include
-   */
   sendClosed(clientId: string, subscriptionId: string, message: string): void {
     const response: ClosedResponse = {
       type: NostrMessageType.CLOSED,
@@ -89,12 +59,6 @@ export class ClientResponder {
     this.sendResponse(clientId, response);
   }
 
-  /**
-   * Send a NOTICE message to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param message Message to include
-   */
   sendNotice(clientId: string, message: string): void {
     const response: NoticeResponse = {
       type: NostrMessageType.NOTICE,
@@ -103,22 +67,11 @@ export class ClientResponder {
     this.sendResponse(clientId, response);
   }
 
-  /**
-   * Register a callback for responses
-   *
-   * @param callback Function to call when a response is sent
-   */
+  /** Register a callback for responses */
   onResponse(callback: (clientId: string, message: NostrWireMessage) => void): void {
     this.responseCallbacks.push(callback);
   }
 
-  /**
-   * Send a response to a client
-   *
-   * @param clientId ID of the client to send to
-   * @param message Message to send
-   * @private
-   */
   private sendResponse(
     clientId: string,
     message: EventMessage | OkResponse | EoseResponse | ClosedResponse | NoticeResponse

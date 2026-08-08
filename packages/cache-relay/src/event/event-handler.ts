@@ -1,9 +1,3 @@
-/**
- * Event handler for Nostr Cache Relay
- *
- * Handles event processing and storage
- */
-
 import { logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { SubscriptionManager } from '../core/subscription-manager.js';
@@ -64,21 +58,12 @@ export interface HandleEventResult {
   matches?: Map<string, Subscription[]>;
 }
 
-/**
- * Event handler class
- * Handles event processing and storage
- */
 export class EventHandler {
   private validator: EventValidator;
 
   /**
-   * Create a new EventHandler instance
-   *
-   * @param storage Storage adapter
-   * @param subscriptionManager Subscription manager
-   * @param validateEventsType How events are validated. Only `IMMEDIATELY`
-   *   validates synchronously here; `NONE` / `LAZY` skip (LAZY validation is
-   *   performed later by the background validator).
+   * Only `IMMEDIATELY` validates synchronously here; `NONE` / `LAZY` skip
+   * (LAZY validation is performed later by the background validator).
    */
   constructor(
     private storage: StorageAdapter,
@@ -88,12 +73,6 @@ export class EventHandler {
     this.validator = new EventValidator();
   }
 
-  /**
-   * Handle an event
-   *
-   * @param event Event to handle
-   * @returns Promise resolving to object containing success status and matching subscriptions
-   */
   async handleEvent(event: NostrEvent): Promise<HandleEventResult> {
     const mustValidateNow = this.mustValidateNow(event);
     if (mustValidateNow) {
@@ -112,7 +91,6 @@ export class EventHandler {
       }
     }
 
-    // イベントの種類に応じた処理
     if (this.isEphemeralEvent(event)) {
       try {
         // 永続化せずにサブスクリプションマッチングのみ
@@ -128,8 +106,6 @@ export class EventHandler {
       }
     } else if (this.isReplaceableEvent(event)) {
       try {
-        // Replaceableイベントの処理
-        // 同じpubkeyとkindの組み合わせに対して最新のものだけ保存
         const { stored, superseded } = await this.handleReplaceableEvent(event, mustValidateNow);
         if (superseded) {
           return this.supersededResult();
@@ -146,8 +122,6 @@ export class EventHandler {
       }
     } else if (this.isAddressableEvent(event)) {
       try {
-        // Addressableイベントの処理
-        // 同じpubkey、kind、dタグ値の組み合わせに対して最新のものだけ保存
         const { stored, superseded } = await this.handleAddressableEvent(event, mustValidateNow);
         if (superseded) {
           return this.supersededResult();
@@ -182,7 +156,6 @@ export class EventHandler {
       }
     }
 
-    // Store the event
     try {
       const saved = await this.storage.saveEvent(event, this.saveOptions(mustValidateNow));
       if (!saved) {
@@ -198,7 +171,6 @@ export class EventHandler {
       };
     }
 
-    // Find matching subscriptions
     try {
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
       return { success: true, stored: true, message: 'success', matches };
@@ -227,10 +199,6 @@ export class EventHandler {
    *   what I send without checking", not "let anyone delete other people's
    *   data"; one signature check per deletion request is a negligible price
    *   for keeping that distinction.
-   *
-   * @param event Event about to be handled
-   * @returns True if the signature must be verified synchronously
-   * @private
    */
   private mustValidateNow(event: NostrEvent): boolean {
     if (isDeletionKind(event.kind)) {
@@ -250,54 +218,23 @@ export class EventHandler {
    * follows the actual check rather than the configured mode, so a kind 5
    * verified under LAZY / NONE is not re-queued for verification it already
    * passed.
-   *
-   * @param verified Whether the signature was verified before this save
-   * @private
    */
   private saveOptions(verified: boolean): { validated: boolean } {
     return { validated: verified };
   }
 
-  /**
-   * Check if an event is replaceable
-   *
-   * @param event Event to check
-   * @returns True if the event is replaceable
-   * @private
-   */
   private isReplaceableEvent(event: NostrEvent): boolean {
     return isReplaceableKind(event.kind);
   }
 
-  /**
-   * Check if an event is ephemeral
-   *
-   * @param event Event to check
-   * @returns True if the event is ephemeral
-   * @private
-   */
   private isEphemeralEvent(event: NostrEvent): boolean {
     return isEphemeralKind(event.kind);
   }
 
-  /**
-   * Check if an event is addressable
-   *
-   * @param event Event to check
-   * @returns True if the event is addressable
-   * @private
-   */
   private isAddressableEvent(event: NostrEvent): boolean {
     return isAddressableKind(event.kind);
   }
 
-  /**
-   * Get the d tag value from an event
-   *
-   * @param event Event to get the d tag from
-   * @returns The d tag value, or undefined if not found
-   * @private
-   */
   private getDTagValue(event: NostrEvent): string | undefined {
     return getDTagValue(event.tags);
   }
@@ -306,9 +243,6 @@ export class EventHandler {
    * Result for an event the relay accepts but drops because it already holds a
    * newer version of the same coordinate. No `matches`: the event must not be
    * broadcast, since the relay itself refuses to keep it.
-   *
-   * @returns The `superseded` handling result
-   * @private
    */
   private supersededResult(): HandleEventResult {
     return { success: true, stored: false, superseded: true, message: SUPERSEDED_MESSAGE };
@@ -327,11 +261,6 @@ export class EventHandler {
    * leave the older one stored. That race is inherent in the delete-then-save
    * shape this predates; the fix here removes the case that needs no
    * concurrency at all.
-   *
-   * @param event Event being ingested
-   * @param address Coordinate of the event
-   * @returns Promise resolving to true if the incoming event must be dropped
-   * @private
    */
   private async isSuperseded(event: NostrEvent, address: EventAddress): Promise<boolean> {
     const current = await this.storage.getCurrentVersion(address);
@@ -344,15 +273,7 @@ export class EventHandler {
     return true;
   }
 
-  /**
-   * Handle a replaceable event
-   * Keeps only the newest event with the same pubkey and kind
-   *
-   * @param event Event to handle
-   * @param verified Whether the signature was verified before this save
-   * @returns Promise resolving to whether the event was stored / superseded
-   * @private
-   */
+  /** Keeps only the newest event with the same pubkey and kind. */
   private async handleReplaceableEvent(
     event: NostrEvent,
     verified: boolean
@@ -363,10 +284,7 @@ export class EventHandler {
         return { stored: false, superseded: true };
       }
 
-      // 同じpubkeyとkindの古いイベントを削除
       await this.storage.deleteEventsByPubkeyAndKind(event.pubkey, event.kind);
-
-      // 新しいイベントを保存
       const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
       return { stored, superseded: false };
     } catch (error) {
@@ -375,15 +293,7 @@ export class EventHandler {
     }
   }
 
-  /**
-   * Handle an addressable event
-   * Keeps only the newest event with the same pubkey, kind, and d tag value
-   *
-   * @param event Event to handle
-   * @param verified Whether the signature was verified before this save
-   * @returns Promise resolving to whether the event was stored / superseded
-   * @private
-   */
+  /** Keeps only the newest event with the same pubkey, kind and d tag value. */
   private async handleAddressableEvent(
     event: NostrEvent,
     verified: boolean
@@ -403,10 +313,7 @@ export class EventHandler {
         return { stored: false, superseded: true };
       }
 
-      // 同じpubkey、kind、dタグ値の古いイベントを削除
       await this.storage.deleteEventsByPubkeyKindAndDTag(event.pubkey, event.kind, dTagValue);
-
-      // 新しいイベントを保存
       const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
       return { stored, superseded: false };
     } catch (error) {
@@ -429,11 +336,6 @@ export class EventHandler {
    *
    * A failure while applying the deletion does not fail the event: the request
    * is already persisted, so the next arrival retries it.
-   *
-   * @param event Deletion request to handle
-   * @param verified Whether the signature was verified before this save
-   * @returns Promise resolving to whether the request itself was stored
-   * @private
    */
   private async handleDeletionEvent(event: NostrEvent, verified: boolean): Promise<boolean> {
     const stored = await this.storage.saveEvent(event, this.saveOptions(verified));

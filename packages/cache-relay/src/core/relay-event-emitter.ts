@@ -27,18 +27,11 @@ export type RelayEventListener =
   | RelayEventHandler
   | RelayEoseHandler;
 
-/**
- * Registers listeners and dispatches typed relay events to them.
- */
+/** Registers listeners and dispatches typed relay events to them. */
 export class RelayEventEmitter {
   private listeners: Map<string, RelayEventListener[]> = new Map();
 
-  /**
-   * Register an event listener.
-   *
-   * @param event Event type to listen for
-   * @param callback Function to call when the event occurs
-   */
+  /** Register an event listener. */
   on(event: RelayEventName, callback: RelayEventListener): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, []);
@@ -47,12 +40,7 @@ export class RelayEventEmitter {
     this.listeners.get(event)?.push(callback);
   }
 
-  /**
-   * Remove an event listener.
-   *
-   * @param event Event type to remove listener for
-   * @param callback Function to remove
-   */
+  /** Remove an event listener. */
   off(event: RelayEventName, callback: RelayEventListener): void {
     const listeners = this.listeners.get(event);
 
@@ -68,7 +56,6 @@ export class RelayEventEmitter {
   /**
    * Emit an event to the registered listeners.
    *
-   * @param event Event type to emit
    * @param payload Data to pass to the listeners (an Error for `error`, a
    *   NostrEvent for `event`, the subscription ID for `eose`)
    */

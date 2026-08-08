@@ -40,13 +40,6 @@ const evictionIndex: Record<CacheStrategy, string> = {
  *   "Priority" covers both the configured `priority` rules and the kinds that
  *   are always retained (NIP-09 deletion requests), so this filtered path runs
  *   even when no `priority` config is given.
- *
- * @param db The Dexie database (used to open the eviction transaction)
- * @param table The Dexie events table
- * @param maxSize Maximum number of events to keep (no-op when <= 0)
- * @param strategy Eviction strategy (default `FIFO`)
- * @param priority Cache priority config; matching events are evicted last
- * @returns Promise resolving to the number of events evicted
  */
 export async function enforceLimit(
   db: Dexie,

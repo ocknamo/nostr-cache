@@ -33,10 +33,6 @@ export type FreshnessWindows = ReadonlyMap<number, number>;
  * Replaceable kinds keep exactly one event per (pubkey, kind), so this pair
  * fully identifies "the newest version" — no `d` tag is involved (that is what
  * makes addressable kinds, 30000–39999, out of scope here).
- *
- * @param kind Event kind
- * @param pubkey Author pubkey, compared verbatim (as `eventMatchesFilter` does)
- * @returns The coordinate key
  */
 function coordinateKey(kind: number, pubkey: string): string {
   return `${kind}:${pubkey}`;
@@ -57,11 +53,6 @@ function coordinateKey(kind: number, pubkey: string): string {
  * A `cached` timestamp in the future is also treated as stale: `Date.now()` is
  * not monotonic, and a SQLite-backed cache compares timestamps across process
  * restarts, so clock skew must not hand out an unbounded window.
- *
- * @param cached Cache insertion time in ms, or undefined when not stored
- * @param windowSeconds Configured window for the event's kind, or undefined
- * @param nowMs Current time in milliseconds
- * @returns True only when all inputs are sane and the copy is inside the window
  */
 function isWithinWindow(
   cached: number | undefined,
@@ -102,10 +93,6 @@ function isWithinWindow(
  *
  * `limit` is allowed: a truncated response simply leaves coordinates uncovered,
  * which makes {@link narrowFiltersByFreshness} forward the filter anyway.
- *
- * @param filter Filter from a REQ
- * @param windows Configured freshness windows
- * @returns True if the filter can be evaluated against the freshness window
  */
 export function isFreshnessEligible(filter: Filter, windows: FreshnessWindows): boolean {
   if (filter.ids !== undefined) return false;
@@ -132,14 +119,9 @@ export function isFreshnessEligible(filter: Filter, windows: FreshnessWindows): 
  * copy, one missing author, one unknown `cached_at` — forwards the filter
  * unchanged (all-or-nothing; no narrowed residual filter is synthesized).
  *
- * @param filters Filters as received from the client
  * @param sentEvents Events this REQ actually delivered to the client. Must be
  *   the post-`limit`, post-`maxEventsPerRequest` list: an event that was
  *   truncated away was never delivered, so it must not count as coverage.
- * @param cachedAt Cache insertion time (ms) per event id; a missing entry
- *   counts as stale
- * @param windows Configured freshness windows
- * @param nowMs Current time in milliseconds
  * @returns The filters to forward upstream; empty means upstream can be skipped
  *   entirely for this subscription
  */
@@ -192,8 +174,6 @@ export class FreshnessGate {
   /**
    * @param storage Storage adapter (must implement `getCachedAt` for the
    *   window to have any effect)
-   * @param windows Configured freshness windows (normalized, non-empty)
-   * @param now Clock injection for testing (returns current time in ms)
    */
   constructor(
     private readonly storage: StorageAdapter,
@@ -201,14 +181,6 @@ export class FreshnessGate {
     private readonly now: () => number = () => Date.now()
   ) {}
 
-  /**
-   * Which of the REQ's filters still need to go upstream.
-   *
-   * @param filters Filters as received from the client
-   * @param sentEvents Events this REQ delivered to the client (post-limit)
-   * @returns The filters to forward upstream; empty means upstream can be
-   *   skipped entirely
-   */
   async filtersForUpstream(filters: Filter[], sentEvents: NostrEvent[]): Promise<Filter[]> {
     if (!filters.some((filter) => isFreshnessEligible(filter, this.windows))) {
       return filters;
@@ -257,8 +229,6 @@ export class FreshnessGate {
    * Fire-and-forget: this is cache bookkeeping on the read path, so a failure
    * must never affect the REQ. Only kinds that actually have a window are
    * touched, so a high-volume regular kind never reaches storage here.
-   *
-   * @param event The upstream event that duplicated an already-delivered id
    */
   markRevalidated(event: NostrEvent): void {
     if (!this.windows.has(event.kind) || typeof this.storage.touchCachedAt !== 'function') {

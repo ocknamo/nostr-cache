@@ -1,6 +1,4 @@
-/**
- * Shared types and utilities for Nostr cache project
- */
+/** Shared types and utilities for Nostr cache project */
 
 // Export constants
 export * from './constants/relays.js';

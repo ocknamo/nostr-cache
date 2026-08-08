@@ -51,8 +51,6 @@ export class WebSocketServerEmulator implements TransportAdapter {
   /**
    * Start the WebSocket emulator
    * Overrides the global WebSocket for the configured relay URL(s)
-   *
-   * @param url Optional URL to intercept; replaces the URLs given to the constructor
    */
   async start(url?: string): Promise<void> {
     if (url) {
@@ -102,39 +100,22 @@ export class WebSocketServerEmulator implements TransportAdapter {
     }
   }
 
-  /**
-   * Send a message to a client
-   */
   send(clientId: string, message: NostrWireMessage): void {
     this.sockets.get(clientId)?.receiveFromRelay(message);
   }
 
-  /**
-   * Register message handler
-   */
   onMessage(callback: (clientId: string, message: NostrWireMessage) => void): void {
     this.messageCallback = callback;
   }
 
-  /**
-   * Register connect handler
-   */
   onConnect(callback: (clientId: string) => void): void {
     this.connectCallback = callback;
   }
 
-  /**
-   * Register disconnect handler
-   */
   onDisconnect(callback: (clientId: string) => void): void {
     this.disconnectCallback = callback;
   }
 
-  /**
-   * Get the number of currently connected clients
-   *
-   * @returns The number of active emulated connections
-   */
   getConnectionCount(): number {
     return this.sockets.size;
   }
@@ -148,23 +129,16 @@ export class WebSocketServerEmulator implements TransportAdapter {
    *
    * Falls back to the current `globalThis.WebSocket` when called before
    * `start()`, so the connector always gets a usable constructor.
-   *
-   * @returns The pre-patch `WebSocket` constructor
    */
   getOriginalWebSocket(): typeof WebSocket | undefined {
     return this.originalWebSocket ?? globalThis.WebSocket;
   }
 
-  /**
-   * Whether the given URL should be intercepted by the emulator.
-   */
+  /** Whether the given URL should be intercepted by the emulator. */
   private isTargetUrl(url: string): boolean {
     return this.targetUrls.has(normalizeWebSocketUrl(url));
   }
 
-  /**
-   * Create an emulated socket wired to this emulator's callbacks.
-   */
   private createEmulatedSocket(url: string): EmulatedWebSocket {
     const clientId = generateClientId();
     const socket = new EmulatedWebSocket(url, {
