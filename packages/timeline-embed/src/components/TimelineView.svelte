@@ -13,6 +13,7 @@
    * reconnect banners beside them.
    */
 
+  import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { TimelineState } from '../lib/timeline-controller.ts';
   import Timeline from './Timeline.svelte';
 
@@ -21,6 +22,10 @@
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
+    /** The embedder's buttons, rendered under every card. */
+    actions?: EventAction[];
+    /** Called on a press, after the action's own `onSelect`. */
+    onAction?: (action: EventAction, context: EventActionContext) => void;
     /**
      * Separate from `showOrigin` because the deprecated `show-origin` alias
      * turns the badges on without asking for the rest of the diagnostics.
@@ -41,6 +46,8 @@
     showOrigin = false,
     showAvatars = true,
     showMedia = true,
+    actions = [],
+    onAction,
     debug = false,
     fatal,
     onAuthorVisible,
@@ -110,6 +117,8 @@
         {showOrigin}
         {showAvatars}
         {showMedia}
+        {actions}
+        {onAction}
         {onAuthorVisible}
       />
     {/if}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { EventOrigin } from '../lib/cache-metrics.ts';
 import type { Profile } from '../lib/profile.ts';
@@ -106,6 +106,35 @@ describe('Timeline', () => {
 
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByRole('link', { name: 'https://cdn.example.com/a.jpg' })).toBeInTheDocument();
+  });
+
+  it('puts the same action bar under every card, each pressing with its own event', async () => {
+    const events = [makeEvent({ id: 'a' }), makeEvent({ id: 'b' })];
+    const onAction = vi.fn();
+    const actions = [{ id: 'like', label: 'いいね', icon: '♡' }];
+    render(Timeline, { props: { events, actions, onAction, eose: true } });
+
+    const buttons = screen.getAllByRole('button', { name: 'いいね' });
+    expect(buttons).toHaveLength(2);
+
+    await fireEvent.click(buttons[1]);
+    expect(onAction).toHaveBeenCalledWith(actions[0], { event: events[1] });
+  });
+
+  it('flips only the first card date tooltip downward', async () => {
+    const events = [makeEvent({ id: 'a' }), makeEvent({ id: 'b' })];
+    const { container } = render(Timeline, { props: { events, eose: true } });
+
+    for (const toggle of screen.getAllByRole('button', { name: '日付を表示' })) {
+      await fireEvent.click(toggle);
+    }
+
+    // The list no longer reserves a tooltip's worth of space above the first
+    // card, so that one opens under its header instead; the rest are unchanged.
+    const tips = [...container.querySelectorAll('.date-tip')];
+    expect(tips).toHaveLength(2);
+    expect(tips[0]).toHaveClass('below');
+    expect(tips[1]).not.toHaveClass('below');
   });
 
   it('lets a card name a mention using another author on the timeline', () => {

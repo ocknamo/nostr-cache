@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
+  import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import EventCard from './EventCard.svelte';
@@ -28,6 +29,13 @@
      */
     showMedia?: boolean;
     /**
+     * Buttons to render under every card. Empty by default — the widget ships
+     * no actions of its own, only the mechanism (`lib/event-actions.ts`).
+     */
+    actions?: EventAction[];
+    /** Called on a press, after the action's own `onSelect`. */
+    onAction?: (action: EventAction, context: EventActionContext) => void;
+    /**
      * Called with an author's pubkey the first time one of their cards scrolls
      * into view, so profiles are fetched for what the reader actually sees.
      */
@@ -43,6 +51,8 @@
     showOrigin = true,
     showAvatars = true,
     showMedia = true,
+    actions = [],
+    onAction,
     onAuthorVisible,
   }: Props = $props();
 </script>
@@ -52,7 +62,7 @@
     <p class="empty">{eose ? 'イベントがありません' : '読み込み中…'}</p>
   {:else}
     <ul>
-      {#each events as event (event.id)}
+      {#each events as event, index (event.id)}
         <li>
           <EventCard
             {event}
@@ -62,6 +72,9 @@
             {profiles}
             showAvatar={showAvatars}
             {showMedia}
+            {actions}
+            {onAction}
+            datePlacement={index === 0 ? 'below' : 'above'}
             onVisible={onAuthorVisible && (() => onAuthorVisible(event.pubkey))}
           />
         </li>
@@ -78,10 +91,12 @@
   ul {
     list-style: none;
     margin: 0;
-    /* Room for the first card's date tooltip, which opens above the
-       timestamp: without it, the first card has no space above it and the
-       tooltip clips against the embed's top edge. */
-    padding: var(--nt-tip-clearance, 48px) 0 0;
+    /* Breathing room above the first card, nothing more: the tooltip that used
+       to need 48px here now flips under the header on the first card instead
+       (`datePlacement`), so this is free to be the small gap it looks like.
+       --nt-tip-clearance is the name it had while it was clearance, still read
+       so embeds that raised it keep the spacing they chose. */
+    padding: var(--nt-list-padding-top, var(--nt-tip-clearance, 16px)) 0 0;
     display: flex;
     flex-direction: column;
     /* Cards read as one continuous feed, the way a Nostr client renders it.

@@ -90,6 +90,7 @@ Nostr クライアントとキャッシュを共有できます。対象外の U
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
+| `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 
 `profile-freshness` は iframe（`&profile-freshness=3600`）と Web Component
 （`profile-freshness="3600"`）のどちらでも同じように指定できます。プロフィールの更新を
@@ -165,7 +166,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
-| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `actions` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -291,7 +292,16 @@ nostr-timeline {
   --nt-quote-bar: #4a7dff;      /* 返信 / 引用チップの縦線 */
   --nt-tip-bg: #0f1419;         /* 日付ツールチップの背景 */
   --nt-tip-fg: #ffffff;         /* 日付ツールチップの文字色 */
-  --nt-tip-clearance: 48px;     /* 先頭カードの日付ツールチップ用に確保する上部余白 */
+  --nt-list-padding-top: 16px;  /* リスト先頭の余白 */
+  --nt-unverified-opacity: 0.6; /* 署名未検証カードの不透明度。1 で区別しない */
+
+  /* アクションボタン（--nt-action-* は actions を指定したときだけ効く） */
+  --nt-actions-justify: space-between; /* 行の並べ方。flex-start なども可 */
+  --nt-action-gap: 8px;
+  --nt-action-size: 1rem;       /* アイコンの大きさ */
+  --nt-action-fg: #8b949e;      /* 既定は --nt-muted */
+  --nt-action-hover-fg: #58a6ff;
+  --nt-action-hover-bg: rgb(88 166 255 / 12%);
 
   /* 本文（リンク・メンション・添付） */
   --nt-link-fg: #58a6ff;        /* 本文中のリンク */
@@ -307,7 +317,10 @@ nostr-timeline {
 省いた日付は時刻をホバー、またはタップすると**ツールチップ**で表示されます
 （キーボードでも開けます。Esc で閉じます）。`<time datetime>` には ISO 8601 の
 完全な日時が入っているので、機械可読な値はそのまま取得できます。ツールチップは
-時刻の上に開くため、リスト先頭には常に `--nt-tip-clearance` 分の余白があります。
+時刻の上に開きますが、**先頭カードだけは下向きに開きます**（上に開く場所が無いため）。
+以前はそのために上部へ 48px の余白を確保していました。いまは `--nt-list-padding-top`
+（既定 16px）の小さな余白だけです。旧称の `--nt-tip-clearance` も引き続き読むので、
+余白を広げていた埋め込みはそのままの見た目を保てます。
 
 カードは既定で**区切り線で連なるリスト**です（一般的な Nostr クライアントの見え方）。
 `--nt-gap` を指定すると、従来どおり間隔の空いたブロックとして並びます。
@@ -338,6 +351,86 @@ nostr-timeline {
 メンションは `@表示名` に解決されますが、それ以外は短縮 npub のままです
 （メンション先のプロフィールを追加取得すると、カードごとに購読が増えるため行いません）。
 
+## 投稿ごとのアクションボタン（仕組みのみ）
+
+各投稿の下にボタンの行を出せます。**ウィジェット自身はボタンを 1 つも持ちません** —
+用意してあるのは「置き場所」と「押されたことを伝える経路」だけです。返信・リポスト・
+いいね・Zap はいずれも署名（＝鍵）が要る操作で、このウィジェットは鍵を持たない
+読み取り専用の表示器だからです。押されたあと何をするかは埋め込む側が決めます。
+
+`actions` を指定しなければ行そのものが描画されないので、既存の埋め込みの見た目は変わりません。
+
+### HTML から（Web Component）
+
+```html
+<nostr-timeline
+  relays="wss://nos.lol"
+  actions='[
+    {"id":"reply","label":"返信","icon":"💬"},
+    {"id":"repost","label":"リポスト","icon":"🔁"},
+    {"id":"like","label":"いいね","icon":"♡"},
+    {"id":"zap","label":"Zap","icon":"⚡"},
+    {"id":"share","label":"共有","icon":"↗"}
+  ]'
+></nostr-timeline>
+
+<script>
+  document.querySelector('nostr-timeline').addEventListener('nostr-timeline:action', (e) => {
+    // e.detail = { actionId: 'zap', event: <NostrEvent> }
+    console.log(e.detail.actionId, e.detail.event.id);
+  });
+</script>
+```
+
+イベントは `bubbles` + `composed` なので、祖先要素でまとめて受け取ることもできます。
+`detail.event` は**そのカードが表示しているイベントのコピー**です（ウィジェット内部の
+状態そのものは渡しません）。
+
+### JS から（プロパティで渡す）
+
+属性は文字列なので関数を書けません。プロパティに配列を代入すると `onSelect` を持てます。
+
+```js
+document.querySelector('nostr-timeline').actions = [
+  { id: 'like', label: 'いいね', icon: '♡', onSelect: ({ event }) => like(event) },
+];
+```
+
+`onSelect` を呼んだあとに `nostr-timeline:action` も発火します（両方受け取れます）。
+`onSelect` が例外を投げても、コンソールに出したうえでイベントの発火は続けます。
+
+### iframe から
+
+クエリパラメータ（URL エンコードした JSON）で宣言し、押下は `postMessage` で戻ります。
+高さ通知と同じ経路なので、**送信元が自分の iframe であることを必ず確認してください**:
+
+```js
+window.addEventListener('message', (event) => {
+  if (event.source !== iframe.contentWindow) return;
+  if (event.data?.type === 'nostr-timeline:action') {
+    // event.data = { type, actionId, event: <NostrEvent> }
+  }
+});
+```
+
+### ボタンの定義
+
+| キー | 内容 |
+|---|---|
+| `id` | **必須**。押下を見分ける識別子。DOM イベントと `postMessage` にはこれが載ります |
+| `label` | **必須**。アクセシブル名（`aria-label` と `title`）。アイコンだけのボタンでも省略できません |
+| `icon` | 表示する文字（絵文字など）。無い場合は `label` をそのまま文字として出します |
+| `disabled` | `true` で押せないボタンにする |
+| `onSelect` | 押下時に呼ぶ関数（プロパティで渡す場合のみ） |
+
+- `id` と `label` が揃わないエントリは**そのボタンだけ**警告を出して捨てます。
+- `id` が重複した場合は先勝ちです（受け取り側が区別できないため）。
+- ボタンは**1 投稿あたり 8 個まで**。行は折り返さない前提の 1 行です。
+- JSON が壊れている、配列でない場合は警告を出してボタン無しになります。
+
+見た目は `--nt-action-*` の CSS 変数で調整できます（[下記](#見た目のカスタマイズ)）。
+Shadow DOM の `::part(actions)` / `::part(action)` からも触れます。
+
 ## 制約
 
 - **署名未検証のイベントも表示されます。** ウィジェットはリレーを遅延検証
@@ -345,8 +438,12 @@ nostr-timeline {
   保存・表示され、バックグラウンド検証（既定 5 秒間隔）が署名不正と判断したものを
   あとから削除します。したがって **✓ が付いていないイベントは「検証待ち」か
   「検証に失敗して削除される直前」のどちらか**で、その間は画面に残ります。
-  表示内容の真正性が重要な用途では、✓ が付いたイベントだけを信頼してください
-  （この方式は、クライアント側で暗号処理をせずに済ませるための意図的なトレードオフです）
+  未検証のカードは**半透明**（既定 60%）で表示し、検証が通った時点で不透明になります。
+  読み込み直後は全カードが半透明で、数秒かけて順に濃くなるのが正常な挙動です。
+  表示内容の真正性が重要な用途では、✓ が付いた（＝半透明でない）イベントだけを
+  信頼してください
+  （この方式は、クライアント側で暗号処理をせずに済ませるための意図的なトレードオフです）。
+  半透明表示をやめる場合は `--nt-unverified-opacity: 1` を指定してください（✓ は残ります）
 - **アバター画像は上流リレー由来の任意の URL から読み込まれます。** `picture` は上流が返した
   プロフィールの中身そのままで（`http:` / `https:` 以外のスキームは破棄しますが、ホストは
   制限しません）、画像を読みに行く時点で**閲覧者の IP アドレスとブラウザ情報がその画像ホストに
@@ -445,6 +542,7 @@ import {
 | `Timeline` / `EventCard` / `NoteContent` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 | `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |
+| `normalizeActions` / `dispatchActionEvent` / `ACTION_EVENT` | 投稿下ボタンの定義解釈と押下通知（`EventAction` 型付き） |
 | `parseFollowList` / `selectAuthors` | kind 3 の `p` タグ解釈と `authors` の組み立て（純粋関数。DOM もリレーも要らない） |
 | `followFilterSource` | フォローリストを引いてタイムラインフィルタを返す `FilterSource` |
 | `fetchLatestReplaceable` | replaceable イベントを 1 件だけ引く one-shot REQ（EOSE グレース・`created_at` 最大採用・ウォッチドッグ込み） |
@@ -475,7 +573,7 @@ npm run typecheck -w packages/timeline-embed
   カスタム要素になるのは `<svelte:options customElement="..." />` を持つ
   `nostr-timeline.svelte` と `nostr-follow-timeline.svelte` のみです。
   他のコンポーネントは通常の Svelte コンポーネントとしてライブラリ利用できます
-- 2 つのカスタム要素が重複して持つのは**props 宣言だけ**です。Svelte のカスタム要素は
+- 2 つのカスタム要素が重複して持つのは**props 宣言と `$host()` の受け取り 1 行だけ**です。Svelte のカスタム要素は
   `<svelte:options customElement>` で props を静的に宣言する必要があるためで、
   中身（エラー表示・再接続表示・`Timeline` の描画・スタイル）は
   `components/TimelineView.svelte` に切り出して共有しています。バンドルも 1 本のままです

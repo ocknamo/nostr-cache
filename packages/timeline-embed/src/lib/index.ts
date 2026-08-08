@@ -27,6 +27,13 @@ export type {
   MediaPart,
   TextPart,
 } from './content-parts.ts';
+export {
+  ACTION_EVENT,
+  MAX_ACTIONS,
+  dispatchActionEvent,
+  normalizeActions,
+} from './event-actions.ts';
+export type { EventAction, EventActionContext, EventActionDetail } from './event-actions.ts';
 export { parseRefs } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';
 export { MAX_FILTERS, parseFilterList, toPubkeyHex } from './filter-json.ts';

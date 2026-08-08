@@ -9,6 +9,7 @@
  */
 
 import type { Filter } from '@nostr-cache/shared';
+import { type EventAction, normalizeActions } from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 
 export const DEFAULT_LIMIT = 50;
@@ -346,6 +347,11 @@ export function configFromSearchParams(params: URLSearchParams): {
   showAvatars: boolean;
   /** Whether to render media attachments found in a note's body. */
   showMedia: boolean;
+  /**
+   * The embedder's buttons under each card. A query string carries no
+   * functions, so these are declarative only — a press is reported by event.
+   */
+  actions: EventAction[];
 } {
   return {
     relays: parseRelays(params.get('relays')),
@@ -361,6 +367,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
+    actions: normalizeActions(params.get('actions')),
   };
 }
 
@@ -383,6 +390,8 @@ export interface FollowTimelineConfig {
   debug: boolean;
   showAvatars: boolean;
   showMedia: boolean;
+  /** Declarative action buttons; see {@link configFromSearchParams}. */
+  actions: EventAction[];
 }
 
 /**
@@ -408,5 +417,6 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     debug: parseDebug(params.get('debug')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
+    actions: normalizeActions(params.get('actions')),
   };
 }

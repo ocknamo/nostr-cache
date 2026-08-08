@@ -1,0 +1,124 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '../test-fixtures.ts';
+import {
+  ACTION_EVENT,
+  type EventAction,
+  type EventActionDetail,
+  MAX_ACTIONS,
+  dispatchActionEvent,
+  normalizeActions,
+} from './event-actions.ts';
+
+describe('normalizeActions', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Silences the warnings the defensive paths emit, and lets a test read them. */
+  function quiet(): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(console, 'warn').mockImplementation(() => {});
+  }
+
+  it('reads a JSON array, the way an attribute or query parameter carries one', () => {
+    expect(normalizeActions('[{"id":"reply","label":"返信","icon":"💬"}]')).toEqual([
+      { id: 'reply', label: '返信', icon: '💬' },
+    ]);
+  });
+
+  it('takes the array itself, keeping the handler a JS caller can pass', () => {
+    const onSelect = vi.fn();
+
+    const [action] = normalizeActions([{ id: 'zap', label: 'Zap', onSelect }]);
+
+    expect(action.id).toBe('zap');
+    expect(action.onSelect).toBe(onSelect);
+  });
+
+  it('treats nothing as no buttons', () => {
+    expect(normalizeActions(undefined)).toEqual([]);
+    expect(normalizeActions(null)).toEqual([]);
+    expect(normalizeActions('')).toEqual([]);
+    expect(normalizeActions('   ')).toEqual([]);
+    expect(normalizeActions([])).toEqual([]);
+  });
+
+  it('drops an entry with no usable id or label rather than the whole bar', () => {
+    quiet();
+
+    expect(
+      normalizeActions([
+        { id: 'like', label: 'いいね' },
+        // No id: nothing a listener could tell this press apart by.
+        { label: 'なにか' },
+        // No label: an icon-only button with no accessible name.
+        { id: 'mystery', icon: '⚡' },
+        { id: '  ', label: 'blank' },
+        'not an object',
+      ])
+    ).toEqual([{ id: 'like', label: 'いいね' }]);
+  });
+
+  it('keeps the first of two buttons answering to the same id', () => {
+    const warn = quiet();
+
+    expect(
+      normalizeActions([
+        { id: 'like', label: 'いいね' },
+        { id: 'like', label: 'べつのいいね' },
+      ])
+    ).toEqual([{ id: 'like', label: 'いいね' }]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate action id'));
+  });
+
+  it('caps the bar so it never has to wrap', () => {
+    quiet();
+    const many = Array.from({ length: MAX_ACTIONS + 3 }, (_, index) => ({
+      id: `a${index}`,
+      label: `action ${index}`,
+    }));
+
+    expect(normalizeActions(many)).toHaveLength(MAX_ACTIONS);
+  });
+
+  it('survives broken JSON and JSON that is not an array', () => {
+    const warn = quiet();
+
+    expect(normalizeActions('[{"id":')).toEqual([]);
+    expect(normalizeActions('{"id":"reply","label":"返信"}')).toEqual([]);
+    expect(normalizeActions(42)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('carries only the fields a card renders from', () => {
+    // Whatever else an embedder puts in the JSON stays out of the card: the
+    // list is a rendering instruction, not a bag the widget passes through.
+    expect(
+      normalizeActions('[{"id":"reply","label":"返信","disabled":true,"href":"javascript:0"}]')
+    ).toEqual([{ id: 'reply', label: '返信', disabled: true }]);
+  });
+});
+
+describe('dispatchActionEvent', () => {
+  it('announces the press on the element, escaping the shadow root', () => {
+    const host = document.createElement('div');
+    const parent = document.createElement('div');
+    parent.appendChild(host);
+    const event = makeEvent({ id: 'note-1' });
+    const action: EventAction = { id: 'like', label: 'いいね' };
+    const heard: EventActionDetail[] = [];
+
+    // Listening on an ancestor rather than on the element itself: delegation
+    // has to work, which is what `bubbles` and `composed` are for.
+    parent.addEventListener(ACTION_EVENT, (received) => {
+      heard.push((received as CustomEvent<EventActionDetail>).detail);
+    });
+
+    dispatchActionEvent(host, action, { event });
+
+    expect(heard).toEqual([{ actionId: 'like', event }]);
+    // The iframe host page posts this detail to the embedding window verbatim,
+    // so it has to survive being serialized.
+    expect(JSON.parse(JSON.stringify(heard[0]))).toEqual({ actionId: 'like', event });
+  });
+});

@@ -29,6 +29,22 @@
       }
     });
 
+    // Forward action presses to the embedding page. Inside an iframe there is
+    // no other way back: the query string that declared the buttons could not
+    // carry a handler, and the page cannot reach into this document to add one.
+    // The payload is the event the card is already showing, so nothing crosses
+    // the boundary that the reader was not being shown anyway.
+    widget.addEventListener('nostr-timeline:action', function (pressed) {
+      parent.postMessage(
+        {
+          type: 'nostr-timeline:action',
+          actionId: pressed.detail.actionId,
+          event: pressed.detail.event,
+        },
+        '*'
+      );
+    });
+
     document.body.appendChild(widget);
 
     // Report our height so the embedding page can size the iframe to the

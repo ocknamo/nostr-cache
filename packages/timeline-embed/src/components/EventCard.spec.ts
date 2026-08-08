@@ -228,6 +228,120 @@ describe('EventCard', () => {
     expect(screen.queryByLabelText('署名検証済み')).not.toBeInTheDocument();
   });
 
+  describe('unverified events', () => {
+    const card = (container: HTMLElement) => container.querySelector('.event-card');
+
+    it('fades anything the relay has not vouched for', () => {
+      // `pending` and "no status yet" are the same thing to a reader: the relay
+      // validates lazily, so a card arrives unverified and may stay that way.
+      for (const status of ['pending', 'unknown', undefined] as const) {
+        const { container, unmount } = render(EventCard, {
+          props: { event: makeEvent(), status },
+        });
+
+        expect(card(container)).toHaveClass('unverified');
+        unmount();
+      }
+    });
+
+    it('shows a validated event at full strength', () => {
+      const { container } = render(EventCard, {
+        props: { event: makeEvent(), status: 'validated' },
+      });
+
+      expect(card(container)).not.toHaveClass('unverified');
+    });
+  });
+
+  it('opens the first card of a list downward, where there is room', async () => {
+    const { container } = render(EventCard, {
+      props: { event: makeEvent(), datePlacement: 'below' },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: '日付を表示' }));
+
+    // The list keeps only a small gap above the first card now, so its tooltip
+    // has to flip rather than clip against the embed's top edge.
+    expect(container.querySelector('.date-tip')).toHaveClass('below');
+  });
+
+  describe('action bar', () => {
+    it('renders nothing of its own when the embedder asked for no buttons', () => {
+      const { container } = render(EventCard, { props: { event: makeEvent() } });
+
+      expect(container.querySelector('.actions')).toBeNull();
+    });
+
+    it('names an icon-only button for a screen reader', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'like', label: 'いいね', icon: '♡' }] },
+      });
+
+      const button = screen.getByRole('button', { name: 'いいね' });
+      expect(button).toHaveTextContent('♡');
+      // The id is what a listener switches on, so keep it reachable from the DOM.
+      expect(button).toHaveAttribute('data-action', 'like');
+    });
+
+    it('falls back to the label as the button text when no icon is given', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'reply', label: '返信' }] },
+      });
+
+      expect(screen.getByRole('button', { name: '返信' })).toHaveTextContent('返信');
+    });
+
+    it('reports a press to the action and to the timeline, with its own event', async () => {
+      const event = makeEvent({ id: 'note-1' });
+      const onSelect = vi.fn();
+      const onAction = vi.fn();
+      const action = { id: 'zap', label: 'Zap', icon: '⚡', onSelect };
+      render(EventCard, { props: { event, actions: [action], onAction } });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Zap' }));
+
+      expect(onSelect).toHaveBeenCalledWith({ event });
+      expect(onAction).toHaveBeenCalledWith(action, { event });
+    });
+
+    it('still reports the press when the embedder handler throws', async () => {
+      const onAction = vi.fn();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          actions: [
+            {
+              id: 'boom',
+              label: 'Boom',
+              onSelect: () => {
+                throw new Error('nope');
+              },
+            },
+          ],
+          onAction,
+        },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Boom' }));
+
+      // One embedder's broken handler must not silence every other listener.
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it('renders a disabled action as unpressable', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), actions: [{ id: 'zap', label: 'Zap', disabled: true }] },
+      });
+
+      // The button attribute, not a guard in the handler: the browser is what
+      // withholds the click, and `fireEvent` dispatches straight past it.
+      expect(screen.getByRole('button', { name: 'Zap' })).toBeDisabled();
+    });
+  });
+
   describe('visibility reporting', () => {
     /** Records observers so a test can decide when the card "appears". */
     class FakeIntersectionObserver {

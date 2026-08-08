@@ -542,24 +542,91 @@ describe('Embeddable timeline E2E', () => {
     // it, nor re-flow the header it hangs from.
     expect(await noteTop()).toBe(before);
 
-    const box = await page.$eval('nostr-timeline .date-tip', (tip) => {
-      const { top, bottom, right, width } = tip.getBoundingClientRect();
-      const time = tip.closest('.header-row')?.querySelector('time')?.getBoundingClientRect() ?? {
-        top: 0,
-        right: 0,
-      };
-      return { top, aboveTime: bottom <= time.top, alignedWithTime: right >= time.right, width };
-    });
-    expect(box.aboveTime).toBe(true);
-    expect(box.alignedWithTime).toBe(true);
-    expect(box.width).toBeGreaterThan(0);
-    // This is the first (and only visible) card, with nothing above it: the
-    // list's reserved top padding (see Timeline.svelte) is what keeps the
-    // tooltip from clipping off the top of the embed here.
-    expect(box.top).toBeGreaterThanOrEqual(0);
+    const geometry = () =>
+      page?.$eval('nostr-timeline .date-tip', (tip) => {
+        const { top, bottom, right, width } = tip.getBoundingClientRect();
+        const time = tip.closest('.header-row')?.querySelector('time')?.getBoundingClientRect() ?? {
+          top: 0,
+          bottom: 0,
+          right: 0,
+        };
+        return {
+          top,
+          aboveTime: bottom <= time.top,
+          belowTime: top >= time.bottom,
+          alignedWithTime: right >= time.right,
+          width,
+        };
+      }) ?? Promise.resolve(undefined);
+
+    const first = await geometry();
+    expect(first?.alignedWithTime).toBe(true);
+    expect(first?.width).toBeGreaterThan(0);
+    // The first card has only a small gap above it now, so its tooltip flips
+    // under the header rather than clipping off the top of the embed.
+    expect(first?.belowTime).toBe(true);
+    expect(first?.top).toBeGreaterThanOrEqual(0);
+    // Flipped or not, it floats: the note underneath has not moved.
+    expect(await noteTop()).toBe(before);
 
     await timestamps[0].tap();
     expect(await tooltips()).toEqual([]);
+
+    // Every other card keeps the upward tooltip — there is a card above it to
+    // open into.
+    await timestamps[1].tap();
+    const second = await geometry();
+    expect(second?.aboveTime).toBe(true);
+    expect(second?.top).toBeGreaterThanOrEqual(0);
+
+    await timestamps[1].tap();
+    expect(await tooltips()).toEqual([]);
+  });
+
+  it('renders the embedder actions and reports a press to the embedding page', async () => {
+    page = await browser.newPage();
+    await page.goto(
+      embedUrl({
+        relays: upstream.url,
+        actions: JSON.stringify([
+          { id: 'reply', label: '返信', icon: '💬' },
+          { id: 'zap', label: 'Zap', icon: '⚡' },
+        ]),
+      })
+    );
+    await waitForEventCount(page, 2);
+
+    // The host page is the top-level document here, so its own `parent` is
+    // itself: the message it would post to an embedding page lands back on this
+    // window, which is what makes the protocol observable from a single page.
+    await page.evaluate(() => {
+      (window as unknown as { pressed: unknown[] }).pressed = [];
+      window.addEventListener('message', (message) => {
+        if ((message.data as { type?: string })?.type === 'nostr-timeline:action') {
+          (window as unknown as { pressed: unknown[] }).pressed.push(message.data);
+        }
+      });
+    });
+
+    const buttons = await page.$$('nostr-timeline .action');
+    // Two buttons per card, in the order they were declared.
+    expect(buttons).toHaveLength(4);
+    expect(await buttons[0].getAttribute('aria-label')).toBe('返信');
+
+    await buttons[1].click();
+
+    const pressed = await page.evaluate(
+      () => (window as unknown as { pressed: { actionId: string; event: NostrEvent }[] }).pressed
+    );
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0].actionId).toBe('zap');
+    // The whole event, not just its id: an embedder acting on a press needs the
+    // note it was pressed on, and the iframe boundary allows nothing richer.
+    const firstCard = await page.$eval(
+      'nostr-timeline .content',
+      (note) => note.textContent?.trim() ?? ''
+    );
+    expect(pressed[0].event.content).toBe(firstCard);
   });
 
   it('serves the profile out of the local cache on a reload', async () => {

@@ -15,6 +15,7 @@
       debug: { attribute: 'debug' },
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
+      actions: { attribute: 'actions' },
     },
   }}
 />
@@ -32,6 +33,11 @@
    */
 
   import TimelineView from './components/TimelineView.svelte';
+  import {
+    type EventAction,
+    dispatchActionEvent,
+    normalizeActions,
+  } from './lib/event-actions.ts';
   import { DEFAULT_MAX_FOLLOWS, followFilterSource } from './lib/follow-list.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
   import {
@@ -83,6 +89,13 @@
     debug?: string | boolean;
     showAvatars?: string;
     showMedia?: string;
+    /**
+     * The embedder's buttons under every card, exactly as on
+     * `<nostr-timeline>`: a JSON array from an attribute, or the array itself
+     * (with `onSelect` functions) when set as a property. A press raises
+     * `nostr-timeline:action` on this element.
+     */
+    actions?: string | EventAction[];
   }
 
   const {
@@ -99,7 +112,11 @@
     debug,
     showAvatars,
     showMedia,
+    actions,
   }: Props = $props();
+
+  // The element itself, so a press reaches a page that only wrote HTML.
+  const hostElement = $host();
 
   let state = $state<TimelineState>({
     status: 'disconnected',
@@ -169,5 +186,7 @@
   debug={parseDebug(debug)}
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
+  actions={normalizeActions(actions)}
+  onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(key) => controller?.requestProfile(key)}
 />

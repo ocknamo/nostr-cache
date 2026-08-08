@@ -14,12 +14,18 @@
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
+      actions: { attribute: 'actions' },
     },
   }}
 />
 
 <script lang="ts">
   import TimelineView from './components/TimelineView.svelte';
+  import {
+    type EventAction,
+    dispatchActionEvent,
+    normalizeActions,
+  } from './lib/event-actions.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
   import {
     parseDebug,
@@ -92,6 +98,16 @@
      * this only stops the widget from fetching from whatever host a note names.
      */
     showMedia?: string;
+    /**
+     * Buttons to render under every card, as a JSON array of
+     * `{"id","label","icon"}` — or, when set as a property from JS, the array
+     * itself, whose entries may also carry an `onSelect` function.
+     *
+     * The widget defines no actions of its own; a press is reported as a
+     * `nostr-timeline:action` DOM event on this element. See
+     * `lib/event-actions.ts`.
+     */
+    actions?: string | EventAction[];
   }
 
   const {
@@ -107,7 +123,12 @@
     showOrigin,
     showAvatars,
     showMedia,
+    actions,
   }: Props = $props();
+
+  // The element itself, so a press can be announced to the embedding page —
+  // which, having written HTML rather than JS, has no callback to receive.
+  const hostElement = $host();
 
   let state = $state<TimelineState>({
     status: 'disconnected',
@@ -161,5 +182,7 @@
   debug={parseDebug(debug)}
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
+  actions={normalizeActions(actions)}
+  onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
 />

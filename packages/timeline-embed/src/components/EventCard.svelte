@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
+  import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
@@ -26,6 +27,23 @@
     /** Render image / video / audio attachments found in the body. */
     showMedia?: boolean;
     /**
+     * Which way the date tooltip opens.
+     *
+     * `above` everywhere except the first card of a list, which has nothing
+     * above it to open into — see the list's top padding in `Timeline.svelte`.
+     */
+    datePlacement?: 'above' | 'below';
+    /**
+     * Buttons to render under the note. Empty by default: the widget ships no
+     * actions of its own — see `lib/event-actions.ts`.
+     */
+    actions?: EventAction[];
+    /**
+     * Called on a press, after the action's own `onSelect`. The widget uses it
+     * to raise the `nostr-timeline:action` DOM event on the custom element.
+     */
+    onAction?: (action: EventAction, context: EventActionContext) => void;
+    /**
      * Called once, when the card first enters the viewport. The timeline uses
      * this to look up the author's profile only for cards a reader can see.
      */
@@ -40,6 +58,9 @@
     profiles,
     showAvatar = true,
     showMedia = true,
+    datePlacement = 'above',
+    actions = [],
+    onAction,
     onVisible,
   }: Props = $props();
 
@@ -157,9 +178,41 @@
       hourCycle: 'h23',
     });
   }
+
+  /**
+   * Anything the relay has not vouched for yet, which is every card at first
+   * paint: the relay validates lazily, so `validated` arrives a few seconds
+   * later (or never, for an event it is about to delete as forged). The card is
+   * faded rather than hidden — the same trade-off the ✓ badge already makes,
+   * only now visible without hunting for the absence of a mark.
+   */
+  const unverified = $derived(status !== 'validated');
+
+  function select(action: EventAction): void {
+    // A snapshot, not the event itself: what the timeline holds is a Svelte
+    // state proxy, and handing that out leaks the widget's own reactive state
+    // to the embedder — who could mutate the card from under it, and cannot
+    // `postMessage` it at all (a proxy is not structured-cloneable, which is
+    // exactly how the iframe path breaks).
+    const context: EventActionContext = { event: $state.snapshot(event) };
+    // The embedder's own handler runs first, but must not be able to swallow
+    // the press: without this, one throwing `onSelect` would also stop the DOM
+    // event every other listener on the page is waiting for.
+    try {
+      action.onSelect?.(context);
+    } catch (error) {
+      console.error(`[nostr-timeline] action "${action.id}" threw`, error);
+    }
+    onAction?.(action, context);
+  }
 </script>
 
-<article class="event-card" class:with-avatar={showAvatar} use:whenVisible={onVisible}>
+<article
+  class="event-card"
+  class:with-avatar={showAvatar}
+  class:unverified
+  use:whenVisible={onVisible}
+>
   {#if showAvatar}
     <Avatar pubkey={event.pubkey} {profile} {name} />
   {/if}
@@ -219,7 +272,12 @@
         </span>
       </header>
       {#if dateVisible}
-        <span class="date-tip" id={tooltipId} role="tooltip">{createdAt.toLocaleString()}</span>
+        <span
+          class="date-tip"
+          class:below={datePlacement === 'below'}
+          id={tooltipId}
+          role="tooltip">{createdAt.toLocaleString()}</span
+        >
       {/if}
     </div>
     {#if refs.length > 0}
@@ -236,6 +294,33 @@
     {/if}
     <NoteContent content={event.content} {showMedia} {profiles} />
   </div>
+  <!--
+    The embedder's buttons. Nothing is rendered unless they asked for some, so a
+    plain embed keeps the card it had.
+  -->
+  {#if actions.length > 0}
+    <footer class="actions" part="actions">
+      {#each actions as action (action.id)}
+        <button
+          type="button"
+          class="action"
+          part="action"
+          data-action={action.id}
+          title={action.label}
+          aria-label={action.label}
+          disabled={action.disabled}
+          onclick={() => select(action)}
+        >
+          {#if action.icon}
+            <!-- The glyph is decorative; `aria-label` above carries the name. -->
+            <span class="action-icon" aria-hidden="true">{action.icon}</span>
+          {:else}
+            <span class="action-label">{action.label}</span>
+          {/if}
+        </button>
+      {/each}
+    </footer>
+  {/if}
 </article>
 
 <style>
@@ -252,6 +337,22 @@
 
   .with-avatar {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  /* Everything the relay has not vouched for is faded — which is every card for
+     the first few seconds, since validation runs lazily in the background. Set
+     --nt-unverified-opacity to 1 to switch the distinction off; the ✓ badge
+     still marks the validated ones. */
+  .unverified {
+    opacity: var(--nt-unverified-opacity, 0.6);
+  }
+
+  /* Validation lands in batches, so without this a whole screen of cards snaps
+     to full opacity at once. Not a movement, but honour the setting anyway. */
+  @media (prefers-reduced-motion: no-preference) {
+    .event-card {
+      transition: opacity 200ms ease-out;
+    }
   }
 
   /* Every child of a grid item defaults to min-width:auto, which lets long
@@ -401,6 +502,14 @@
     pointer-events: none;
   }
 
+  /* The first card of a list has nothing above it to open into, so its tooltip
+     flips under the header instead. It floats over the note (out of the flow,
+     click-through) rather than pushing it down. */
+  .date-tip.below {
+    bottom: auto;
+    top: calc(100% + 2px);
+  }
+
   .origin {
     border-radius: 999px;
     padding: 2px 8px;
@@ -453,4 +562,55 @@
     white-space: nowrap;
   }
 
+  /* Spans the avatar gutter too, so the row runs the full width of the card the
+     way a Nostr client's does — and does not shift when avatars are off. */
+  .actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    /* Spread across the card by default, like the clients this mirrors. Set
+       --nt-actions-justify (e.g. `flex-start`) for a bar of one or two. */
+    justify-content: var(--nt-actions-justify, space-between);
+    gap: var(--nt-action-gap, 8px);
+    margin-top: 6px;
+    /* One row, always: the cap in `event-actions.ts` is what keeps it from
+       needing to wrap, and a squeezed embed shrinks the gaps instead. */
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .action {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-radius: 999px;
+    /* Roughly the 44px-square target the pointer guidelines ask for once the
+       glyph's own line box is added. */
+    padding: 6px 10px;
+    font: inherit;
+    font-size: var(--nt-action-size, 1rem);
+    line-height: 1;
+    color: var(--nt-action-fg, var(--nt-muted, #657786));
+    cursor: pointer;
+    min-width: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .action:hover:not(:disabled),
+  .action:focus-visible {
+    color: var(--nt-action-hover-fg, var(--nt-link-fg, #1d9bf0));
+    background: var(--nt-action-hover-bg, rgb(29 155 240 / 10%));
+  }
+
+  .action:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  .action-label {
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 </style>
