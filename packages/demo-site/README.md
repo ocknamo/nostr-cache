@@ -13,7 +13,13 @@ GitHub Pages で公開する透過キャッシュのデモサイト。
 2. **コールド / ウォーム計測** — キャッシュを空にした 1 回目と、同じ REQ をもう一度
    投げた 2 回目を比較。初回イベントまでの時間で効果を示す
 3. **埋め込み** — `<iframe>` と `<nostr-timeline>` の実物を並べ、コピペ用スニペットを表示。
-   デモサイト自身が `@nostr-cache/timeline-embed` の利用者になっている
+   デモサイト自身が `@nostr-cache/timeline-embed` の利用者になっている。各投稿の下には
+   `actions` で宣言したボタン（返信・リポスト・いいね・Zap）が出るが、**見た目の例示だけで
+   押しても何も起きない** — ウィジェットは鍵を持たない読み取り専用の表示器で、押下を受け取る
+   （`nostr-timeline:action`）のは埋め込む側の仕事だから。アイコンは
+   `material-icons="rounded"` による [Material Symbols](https://fonts.google.com/icons) で、
+   **フォントは Google Fonts から読み込まれる**（閲覧者の IP が Google に渡る第三者リクエスト。
+   デモがこの経路を含めて実物であることを優先している）
 
 ## 開発
 

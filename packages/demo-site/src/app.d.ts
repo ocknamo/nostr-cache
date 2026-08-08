@@ -24,6 +24,12 @@ declare namespace svelteHTML {
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
+      /** JSON array of buttons to render under each card. */
+      actions?: string;
+      /** Render those buttons' icons as Material Symbols of this variant. */
+      'material-icons'?: string;
+      /** `none` when the embedding page loads the icon font itself. */
+      'material-icons-font'?: string;
     };
     'nostr-timeline': {
       relays?: string;
@@ -37,6 +43,12 @@ declare namespace svelteHTML {
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
+      /** JSON array of buttons to render under each card. */
+      actions?: string;
+      /** Render those buttons' icons as Material Symbols of this variant. */
+      'material-icons'?: string;
+      /** `none` when the embedding page loads the icon font itself. */
+      'material-icons-font'?: string;
     };
   }
 }

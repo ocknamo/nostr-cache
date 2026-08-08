@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { DEFAULT_PROFILE_FRESHNESS } from '@nostr-cache/timeline-embed';
+  import {
+    DEFAULT_PROFILE_FRESHNESS,
+    type EventAction,
+    type MaterialVariant,
+  } from '@nostr-cache/timeline-embed';
   import { onMount } from 'svelte';
 
   interface Props {
@@ -29,12 +33,57 @@
   const baseUrl = import.meta.env.BASE_URL;
   const origin = typeof location === 'undefined' ? '' : location.origin;
 
+  /**
+   * The action bar the examples below render under every card.
+   *
+   * Display only, on purpose. The widget ships no actions of its own — it holds
+   * no key and never writes to a relay — so these exist to show what the row
+   * looks like once an embedder declares one. Nothing here acts on a press: it
+   * raises `nostr-timeline:action` (and a `postMessage` from the iframe, which
+   * the height listener below drops as an unknown type) and stops there.
+   *
+   * The icons are Material Symbols ligature names rather than literal text, so
+   * they only become icons once the font is registered on the document — see
+   * `MATERIAL_VARIANT`. Until it loads they show as the words they are.
+   */
+  const DEMO_ACTIONS: EventAction[] = [
+    { id: 'reply', label: '返信', icon: 'chat_bubble' },
+    { id: 'repost', label: 'リポスト', icon: 'repeat' },
+    { id: 'like', label: 'いいね', icon: 'favorite' },
+    { id: 'zap', label: 'Zap', icon: 'bolt' },
+  ];
+  /**
+   * Which Material Symbols variant the examples render with.
+   *
+   * Rounded, to sit with the rest of the card (pill badges, a rounded avatar).
+   * Setting this at all has the widget add Google's stylesheet to this page —
+   * a shadow root's `@font-face` is ignored, so the font has to be registered on
+   * the document — which is a third-party request the footnote below owns up to.
+   * An embedder loading the font itself passes `material-icons-font="none"`.
+   *
+   * Typed, because a typo here costs more than it looks: the widget warns once
+   * and leaves every icon as the ligature name it is, in all six places at once.
+   */
+  const MATERIAL_VARIANT: MaterialVariant = 'rounded';
+  /**
+   * What actually reaches the widgets: a JSON string, not the array.
+   *
+   * Svelte hands a custom element's props over as properties when it can and as
+   * attributes otherwise, and an array stringified into an attribute arrives as
+   * `[object Object]`. The string is read the same way down both paths.
+   */
+  const actionsJson = JSON.stringify(DEMO_ACTIONS);
+  /** The same list, laid out to be read inside the copyable HTML snippets. */
+  const actionsSnippet = `[\n${DEMO_ACTIONS.map((action) => `    ${JSON.stringify(action)}`).join(',\n')}\n  ]`;
+
   const query = $derived(
     new URLSearchParams({
       relays,
       kinds,
       limit,
       'profile-freshness': profileFreshness,
+      actions: actionsJson,
+      'material-icons': MATERIAL_VARIANT,
       // The badges are a diagnostic and the widget hides them by default; this
       // page turns them on because showing them is its whole point.
       ...(debug ? { debug: 'true' } : {}),
@@ -50,11 +99,11 @@
   );
 
   const iframeSnippet = $derived(
-    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}${freshnessAttr ? `&profile-freshness=${freshnessAttr}` : ''}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
+    `<iframe\n  src="${embedOrigin}embed/?relays=${encodeURIComponent(relays)}&kinds=${kinds}&limit=${limit}${freshnessAttr ? `&profile-freshness=${freshnessAttr}` : ''}&actions=${encodeURIComponent(actionsJson)}&material-icons=${MATERIAL_VARIANT}${debug ? '&debug' : ''}"\n  style="width: 100%; height: 480px; border: 0"\n  title="Nostr timeline"\n></iframe>`
   );
 
   const webComponentSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"${freshnessAttr ? `\n  profile-freshness="${freshnessAttr}"` : ''}${debug ? '\n  debug' : ''}\n></nostr-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-timeline\n  relays="${relays}"\n  kinds="${kinds}"\n  limit="${limit}"${freshnessAttr ? `\n  profile-freshness="${freshnessAttr}"` : ''}\n  material-icons="${MATERIAL_VARIANT}"\n  actions='${actionsSnippet}'${debug ? '\n  debug' : ''}\n></nostr-timeline>`
   );
 
   /**
@@ -77,7 +126,7 @@
     /^[0-9a-fA-F]{64}$/.test(followPubkey.trim()) || /^n(pub|profile)1\w{20,}$/.test(followPubkey.trim())
   );
   const followSnippet = $derived(
-    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n></nostr-follow-timeline>`
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n  material-icons="${MATERIAL_VARIANT}"\n  actions='${actionsSnippet}'\n></nostr-follow-timeline>`
   );
 
   /** Bounds on the height the embed page may ask for. */
@@ -142,6 +191,17 @@
     同じウィジェットを 2 通りの方法で埋め込めます。下の 2 つはどちらも実際に動いている実物です
     （このページ自身がウィジェットの利用者になっています）。
   </p>
+  <p class="panel-note">
+    各投稿の下に並ぶアイコンは、このページが <code>actions</code> で宣言したボタンです
+    （<code>material-icons="{MATERIAL_VARIANT}"</code> を付けているので、<code>icon</code> は
+    <a href="https://fonts.google.com/icons">Material Symbols</a> のアイコン名として描画されます）。
+    ウィジェット自身はアクションを 1 つも持ちません（鍵を持たない読み取り専用の表示器なので、
+    返信・リポスト・いいね・Zap はいずれも埋め込む側の仕事です）。<strong
+      >このデモでは押しても何も起きません</strong
+    >
+    — 押下は <code>nostr-timeline:action</code> イベント（iframe なら
+    <code>postMessage</code>）で通知されるだけで、このページはそれを使っていません。
+  </p>
 
   <div class="modes">
     <div class="mode">
@@ -181,6 +241,8 @@
           {limit}
           db-name={dbName}
           profile-freshness={profileFreshness}
+          actions={actionsJson}
+          material-icons={MATERIAL_VARIANT}
           debug={debug ? 'true' : 'false'}
         ></nostr-timeline>
       </div>
@@ -219,6 +281,8 @@
         {limit}
         db-name={dbName}
         profile-freshness={profileFreshness}
+        actions={actionsJson}
+        material-icons={MATERIAL_VARIANT}
         debug={debug ? 'true' : 'false'}
       ></nostr-follow-timeline>
     </div>
@@ -259,6 +323,19 @@
     その画像ホストに渡ります。避けたい場合は <code>show-avatars="false"</code>
     （iframe なら <code>&amp;show-avatars=false</code>）を指定してください。表示名は
     そのまま表示されます。
+  </p>
+
+  <p class="footnote">
+    <code>material-icons</code> を付けると、ウィジェットが Material Symbols のスタイルシートを
+    <strong>Google Fonts から</strong> <code>document.head</code> に読み込みます
+    （Shadow DOM 内の <code>@font-face</code> はどのブラウザでも無視されるため、ウィジェット内部だけで
+    完結できません）。読み込みは document ごとに 1 回で、このページでは本体と上の iframe の
+    2 回です。<strong>閲覧者の IP アドレスが Google に渡る第三者リクエスト</strong>なので、
+    避けたい場合はフォントを自前で読み込んだうえで <code>material-icons-font="none"</code> を
+    指定するか、<code>icon</code> に絵文字などの文字を書いて <code>material-icons</code>
+    を外してください。フォントが届くまでの間、アイコンは <code>favorite</code>
+    のようなアイコン名の文字列として表示されます
+    （拡張機能や CSP で読み込みが遮断された場合は、その表示のままになります）。
   </p>
 
   <p class="footnote">
