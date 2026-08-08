@@ -1,8 +1,6 @@
 import type { Filter } from '@nostr-cache/shared';
 
-/**
- * Raw text values from the filter form. Empty strings mean "not specified".
- */
+/** Raw text values from the filter form. Empty strings mean "not specified". */
 export interface FilterFormValues {
   kinds?: string;
   authors?: string;
@@ -14,9 +12,7 @@ export interface FilterFormValues {
 
 export type FilterParseResult = { ok: true; filter: Filter } | { ok: false; error: string };
 
-/**
- * Split a comma/whitespace separated list into trimmed non-empty tokens.
- */
+/** Split a comma/whitespace separated list into trimmed non-empty tokens. */
 function splitList(value: string): string[] {
   return value
     .split(/[\s,]+/)

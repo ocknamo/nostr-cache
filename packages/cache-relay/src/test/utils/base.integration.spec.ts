@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { IntegrationTestBase } from './base.integration.js';
 
-/**
- * Simple test to prevent "empty test suite" error
- */
+/** Simple test to prevent "empty test suite" error */
 describe('Base Integration Setup', () => {
   it('should create and setup test environment', async () => {
     const testBase = new IntegrationTestBase();

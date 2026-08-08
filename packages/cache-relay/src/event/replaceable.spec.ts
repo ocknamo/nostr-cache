@@ -1,6 +1,4 @@
-/**
- * Tests for the NIP-01 replaceable / addressable version comparison.
- */
+/** Tests for the NIP-01 replaceable / addressable version comparison. */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { describe, expect, it } from 'vitest';

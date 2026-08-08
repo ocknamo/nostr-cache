@@ -25,7 +25,6 @@ describe('WebSocketServer', () => {
       port = server.getPort();
       expect(port).toBeGreaterThan(0);
 
-      // Try to connect
       await new Promise<void>((resolve, reject) => {
         client = new WebSocket(`ws://localhost:${port}`);
         client.on('open', () => resolve());

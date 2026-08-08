@@ -1,6 +1,4 @@
-/**
- * Tests for filterUtils
- */
+/** Tests for filterUtils */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import {
@@ -14,7 +12,6 @@ import {
 } from './filter-utils.js';
 
 describe('filterUtils', () => {
-  // Sample event
   const sampleEvent: NostrEvent = {
     id: '123',
     pubkey: 'abc',
@@ -30,7 +27,6 @@ describe('filterUtils', () => {
     sig: 'xyz',
   };
 
-  // Sample filters
   const sampleFilter1: Filter = {
     kinds: [1],
     authors: ['abc'],
@@ -55,7 +51,6 @@ describe('filterUtils', () => {
 
       expect(typeof key).toBe('string');
 
-      // Parse the key back to an object
       const parsedKey = JSON.parse(key);
 
       // Check that the parsed object has the same properties as the original filter
@@ -63,7 +58,6 @@ describe('filterUtils', () => {
       expect(parsedKey).toHaveProperty('authors');
       expect(parsedKey).toHaveProperty('limit');
 
-      // Check that the values are the same
       expect(parsedKey.kinds).toEqual(sampleFilter1.kinds);
       expect(parsedKey.authors).toEqual(sampleFilter1.authors);
       expect(parsedKey.limit).toEqual(sampleFilter1.limit);

@@ -179,9 +179,6 @@ function toAction(entry: unknown): EventAction | undefined {
  * Unusable entries are dropped with a warning rather than taking the bar down
  * with them, and duplicate ids keep the first: a second button answering to the
  * same id would be indistinguishable to the listener that receives the press.
- *
- * @param value Raw `actions` input
- * @returns The buttons to render; at most {@link MAX_ACTIONS}
  */
 export function normalizeActions(value: unknown): EventAction[] {
   const actions: EventAction[] = [];
@@ -218,10 +215,6 @@ export function normalizeActions(value: unknown): EventAction[] {
  *
  * Shared by both elements rather than written twice — they are meant to differ
  * only in how their filters are decided.
- *
- * @param host The custom element itself (`$host()`)
- * @param action The pressed action
- * @param context The card the press came from
  */
 export function dispatchActionEvent(
   host: EventTarget,

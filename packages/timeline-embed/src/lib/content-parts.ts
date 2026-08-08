@@ -200,9 +200,6 @@ function readUrl(raw: string): URL | undefined {
  *
  * A closing bracket is kept when the URL contains its opener — Wikipedia links
  * really do end in `)`.
- *
- * @param raw The greedily matched URL
- * @returns The URL without its trailing punctuation
  */
 function trimUrlTail(raw: string): string {
   let end = raw.length;
@@ -232,8 +229,6 @@ function trimUrlTail(raw: string): string {
  *
  * The query string and fragment are ignored: `photo.jpg?v=2` is still a photo,
  * and `page.html?x=.jpg` is still not one.
- *
- * @returns The media kind, or undefined for an ordinary link
  */
 function classifyMedia(url: URL): MediaKind | undefined {
   const path = url.pathname;
@@ -268,7 +263,6 @@ function startsAtBoundary(content: string, index: number): boolean {
 /**
  * Split a note body into renderable parts.
  *
- * @param content The event's `content`
  * @returns The parts in source order. A note with nothing special in it yields
  *   a single text part.
  */
@@ -386,9 +380,6 @@ function normalize(parts: ContentPart[]): ContentPart[] {
  * A whole run of attachments (`img1 img2 img3`) collapses to one separator
  * rather than one per attachment, which is why this walks forward carrying the
  * gap's whitespace rather than removing each attachment independently.
- *
- * @param parts Output of `parseContent`
- * @returns The inline parts; empty for a note that was nothing but attachments
  */
 export function inlineParts(parts: ContentPart[]): ContentPart[] {
   const result: ContentPart[] = [];
@@ -451,8 +442,6 @@ export function inlineParts(parts: ContentPart[]): ContentPart[] {
  *
  * Every attachment becomes an ordinary link, so turning media off costs the
  * reader the preview but never the URL itself.
- *
- * @param parts Output of `parseContent`
  */
 export function mediaAsLinks(parts: ContentPart[]): ContentPart[] {
   return normalize(
@@ -467,8 +456,6 @@ export function mediaAsLinks(parts: ContentPart[]): ContentPart[] {
  *
  * A URL repeated in one note is shown once: rendering the same image twice is
  * never what the author meant, and it also keeps the list's keys unique.
- *
- * @param parts Output of `parseContent`
  */
 export function mediaParts(parts: ContentPart[]): MediaPart[] {
   const seen = new Set<string>();

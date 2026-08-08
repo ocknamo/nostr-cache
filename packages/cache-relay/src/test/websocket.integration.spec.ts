@@ -31,13 +31,11 @@ describe('WebSocket Integration', () => {
     });
   };
 
-  // Setup before each test
   beforeEach(async () => {
     testBase = new IntegrationTestBase(port);
     await testBase.setup();
     relayUrl = testBase.getServerUrl();
 
-    // Create test events
     events = {
       basic: await createTestEvent(),
       replaceable: await createTestEvent(undefined, {
@@ -49,14 +47,12 @@ describe('WebSocket Integration', () => {
     };
   });
 
-  // Cleanup after each test
   afterEach(async () => {
     await testBase.teardown();
   });
 
   describe('WebSocketServer and MessageHandler', () => {
     it('should handle client connection', async () => {
-      // Create a WebSocket connection to test server
       const connectPromise = new Promise<void>((resolve) => {
         testBase.server.onConnect((clientId) => {
           expect(clientId).toBeTruthy();
@@ -76,32 +72,26 @@ describe('WebSocket Integration', () => {
       // Wait for both client and server to acknowledge connection
       await Promise.all([connectPromise, openPromise]);
 
-      // Cleanup
       ws.close();
     });
 
     it('should process EVENT message and save to storage', async () => {
       let clientId: string | null = null;
 
-      // Save clientId when client connects
       testBase.server.onConnect((id) => {
         clientId = id;
       });
 
-      // Create client connection
       const ws = new WebSocket(relayUrl);
 
-      // Wait for connection to be established
       await new Promise<void>((resolve) => {
         ws.onopen = () => resolve();
       });
 
       expect(clientId).toBeTruthy();
 
-      // Set up response waiting
       const responsePromise = waitForMessage(ws, NostrMessageType.OK);
 
-      // Send EVENT message
       const eventMessage: NostrWireMessage = ['EVENT', events.basic];
       ws.send(JSON.stringify(eventMessage));
 
@@ -116,23 +106,18 @@ describe('WebSocket Integration', () => {
       expect(savedEvents).toHaveLength(1);
       expect(savedEvents[0].id).toBe(events.basic.id);
 
-      // Cleanup
       ws.close();
     });
 
     it('should handle REQ message and return matching events', async () => {
-      // First save an event
       await testBase.storage.saveEvent(events.basic);
 
-      // Create client connection
       const ws = new WebSocket(relayUrl);
 
-      // Wait for connection to be established
       await new Promise<void>((resolve) => {
         ws.onopen = () => resolve();
       });
 
-      // Set up event and EOSE response waiting
       const eventPromise = new Promise<NostrEvent>((resolve) => {
         const messageHandler = (event: MessageEvent) => {
           const message = JSON.parse(event.data) as NostrWireMessage;
@@ -163,48 +148,37 @@ describe('WebSocket Integration', () => {
       ];
       ws.send(JSON.stringify(reqMessage));
 
-      // Check that we get the matching event back
       const receivedEvent = await eventPromise;
       expect(receivedEvent.id).toBe(events.basic.id);
 
-      // Check that we get EOSE
       const eoseReceived = await eosePromise;
       expect(eoseReceived).toBeTruthy();
 
-      // Cleanup
       ws.close();
     });
 
     it('should handle CLOSE message', async () => {
-      // Create client connection
       const ws = new WebSocket(relayUrl);
 
-      // Wait for connection to be established
       await new Promise<void>((resolve) => {
         ws.onopen = () => resolve();
       });
 
-      // Set up CLOSED response waiting
       const closedPromise = waitForMessage(ws, NostrMessageType.CLOSED);
 
-      // First create a subscription
       const reqMessage: NostrWireMessage = ['REQ', 'sub1', { kinds: [1] }];
       ws.send(JSON.stringify(reqMessage));
 
-      // Then close it
       const closeMessage: NostrWireMessage = ['CLOSE', 'sub1'];
       ws.send(JSON.stringify(closeMessage));
 
-      // Check that we get CLOSED response
       const response = await closedPromise;
       expect(response[1]).toBe('sub1');
 
-      // Cleanup
       ws.close();
     });
 
     it('should broadcast events to matching subscriptions', async () => {
-      // Create two WebSocket clients
       const subscriber = new WebSocket(relayUrl);
 
       // Wait for subscriber connection
@@ -212,7 +186,6 @@ describe('WebSocket Integration', () => {
         subscriber.onopen = () => resolve();
       });
 
-      // Set up waiting for EVENT message on subscriber
       const receivedEventPromise = new Promise<NostrWireMessage>((resolve) => {
         const messageHandler = (event: MessageEvent) => {
           const message = JSON.parse(event.data) as NostrWireMessage;
@@ -224,7 +197,6 @@ describe('WebSocket Integration', () => {
         subscriber.addEventListener('message', messageHandler);
       });
 
-      // Create subscription
       const reqMessage: NostrWireMessage = [
         'REQ',
         'sub1',
@@ -235,16 +207,13 @@ describe('WebSocket Integration', () => {
       // Wait a bit for subscription to be created
       await new Promise((r) => setTimeout(r, 500));
 
-      // Connect publisher
       const publisher = new WebSocket(relayUrl);
       await new Promise<void>((resolve) => {
         publisher.onopen = () => resolve();
       });
 
-      // Set up waiting for OK message on publisher
       const publisherResponsePromise = waitForMessage(publisher, NostrMessageType.OK);
 
-      // Publish event
       const eventMessage: NostrWireMessage = ['EVENT', events.basic];
       publisher.send(JSON.stringify(eventMessage));
 
@@ -260,7 +229,6 @@ describe('WebSocket Integration', () => {
       expect(receivedEvent[1]).toBe('sub1');
       expect((receivedEvent[2] as NostrEvent).id).toBe(events.basic.id);
 
-      // Cleanup
       subscriber.close();
       publisher.close();
     });

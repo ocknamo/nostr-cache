@@ -1,6 +1,4 @@
-/**
- * Nostr protocol type definitions
- */
+/** Nostr protocol type definitions */
 
 /**
  * Nostr event as defined in NIP-01
@@ -16,9 +14,7 @@ export interface NostrEvent {
   sig: string;
 }
 
-/**
- * Nostr filter as defined in NIP-01
- */
+/** Nostr filter as defined in NIP-01 */
 export interface Filter {
   ids?: string[];
   authors?: string[];

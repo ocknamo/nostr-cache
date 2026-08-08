@@ -9,9 +9,7 @@ import WebSocket from 'ws';
 
 type WireMessage = unknown[];
 
-/**
- * A test client connected to a relay over a real WebSocket.
- */
+/** A test client connected to a relay over a real WebSocket. */
 export class WsClient {
   private socket: WebSocket;
   private messages: WireMessage[] = [];
@@ -34,9 +32,7 @@ export class WsClient {
     });
   }
 
-  /**
-   * Open a connection and resolve once it is established.
-   */
+  /** Open a connection and resolve once it is established. */
   static connect(port: number): Promise<WsClient> {
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(`ws://127.0.0.1:${port}`);
@@ -45,16 +41,11 @@ export class WsClient {
     });
   }
 
-  /**
-   * Send a wire message (a JSON array such as ['EVENT', event]).
-   */
   send(message: WireMessage): void {
     this.socket.send(JSON.stringify(message));
   }
 
-  /**
-   * Wait for the first (already-received or future) message matching the predicate.
-   */
+  /** Wait for the first (already-received or future) message matching the predicate. */
   waitFor(predicate: (m: WireMessage) => boolean, timeoutMs = 5000): Promise<WireMessage> {
     const existing = this.messages.find(predicate);
     if (existing) return Promise.resolve(existing);
@@ -74,9 +65,7 @@ export class WsClient {
     });
   }
 
-  /**
-   * Assert that no message matching the predicate arrives within the window.
-   */
+  /** Assert that no message matching the predicate arrives within the window. */
   async expectNone(predicate: (m: WireMessage) => boolean, windowMs = 300): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, windowMs));
     if (this.messages.some(predicate)) {

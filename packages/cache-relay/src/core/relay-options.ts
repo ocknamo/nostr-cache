@@ -1,6 +1,4 @@
-/**
- * Options and defaults for {@link NostrCacheRelay}.
- */
+/** Options and defaults for {@link NostrCacheRelay}. */
 
 import { normalizePubkey } from '@nostr-cache/shared';
 import { isReplaceableKind } from '../event/event-kind.js';
@@ -22,24 +20,13 @@ export const DEFAULT_MAX_EVENTS = 500;
  */
 export const LOCAL_CLIENT_ID = 'local';
 
-/**
- * Nostr Cache Relay options
- * flat option
- *
- * 注意: 一部のオプションは現在実装中のため、完全にはサポートされていません。
- * 将来のバージョンで全機能が利用可能になる予定です。
- */
 export interface NostrRelayOptions {
-  /**
-   * Maximum number of subscriptions per client
-   * デフォルト値20
-   */
+  /** 既定 20 */
   maxSubscriptions?: number;
 
   /**
-   * Maximum number of stored events returned per REQ subscription
-   * (relay-imposed cap applied on top of each filter's own `limit`).
-   * デフォルト値500
+   * REQ 1 本あたりに返すストレージイベント数の上限。各フィルタ自身の `limit` の
+   * 上にかぶせるリレー側のキャップ。既定 {@link DEFAULT_MAX_EVENTS}。
    */
   maxEventsPerRequest?: number;
 
@@ -85,23 +72,16 @@ export interface NostrRelayOptions {
 
   /**
    * キャッシュ優先度。指定した pubkey（npub / hex どちらでも可）の発行イベント、
-   * または指定 kind のイベントを優先イベントとして扱う。
+   * または指定 kind のイベントを優先イベントとして扱う。優先イベントは
+   * {@link storageMaxSize} 超過時に最後まで残り（非優先を先に退避し、優先だけに
+   * なったら通常の {@link cacheStrategy} 順で退避するので `storageMaxSize` は常に
+   * 守られる）、{@link ttl} スイープの対象外になる。
    *
-   * Cache priority: events authored by any listed pubkey (accepted as
-   * `npub1...` or 64-char hex) OR of any listed kind are treated as priority
-   * events. Priority events are evicted last under {@link storageMaxSize}
-   * (non-priority events are evicted first; once only priority events remain
-   * they are evicted by the normal {@link cacheStrategy}, so `storageMaxSize`
-   * is always honored) and are exempt from the {@link ttl} sweep.
-   *
-   * Invalid pubkeys or kinds throw at relay construction time. The config can
-   * also be replaced at runtime via `NostrCacheRelay.setCachePriority()`.
+   * 不正な pubkey / kind はリレー生成時に例外。実行中の差し替えは
+   * `NostrCacheRelay.setCachePriority()` で行う。
    */
   cachePriority?: { pubkeys?: string[]; kinds?: number[] };
 
-  /**
-   * Whether to validate events
-   */
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
 
   /**
@@ -116,46 +96,32 @@ export interface NostrRelayOptions {
    */
   lazyValidateBatchSize?: number;
 
-  /**
-   * Port for WebSocket server (Node.js only)
-   */
+  /** Node.js の WebSocket サーバー用 */
   port?: number;
 
   /**
-   * 上流リレーの URL リスト。指定したときだけリードスルー / ライトスルーが有効になる。
-   * 未指定（または空配列）の場合は従来どおり「自分が保存済みのイベントのみ返す独立
-   * リレー」として動作する。
-   *
-   * List of upstream relay URLs. When set (non-empty), the relay becomes a
-   * transparent cache: REQ is read-through (forwarded upstream, results
-   * backfilled) and EVENT is write-through (forwarded upstream). When unset,
-   * behaviour is unchanged (an independent relay).
+   * 上流リレーの URL リスト。指定したときだけ透過キャッシュになる
+   * （REQ はリードスルー、EVENT はライトスルー）。未指定・空配列なら
+   * 「自分が保存済みのイベントのみ返す独立リレー」として動作する。
    */
   upstreamRelays?: string[];
 
   /**
    * リードスルー時、上流の EOSE を待ってクライアントへ EOSE を返す上限 (ms)。
    * 既定は `DEFAULT_SUBSCRIPTION_TIMEOUT`。上流が全滅していても、この時間で EOSE を返す。
-   *
-   * Max time (ms) to hold the client's EOSE waiting for the aggregated upstream
-   * EOSE. Defaults to `DEFAULT_SUBSCRIPTION_TIMEOUT`.
    */
   upstreamEoseTimeout?: number;
 
   /**
-   * 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」。
-   * `{ 0: 3600 }` なら「1時間以内にキャッシュした kind 0 は上流に問い合わせない」。
+   * 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」（HTTP の
+   * `max-age` 相当）。`{ 0: 3600 }` なら「1時間以内にキャッシュした kind 0 は上流に
+   * 問い合わせない」。REQ のフィルタが replaceable イベント（`kinds` + `authors`）だけを
+   * 要求し、要求した (kind, pubkey) すべてが窓の内側のキャッシュから返せた場合、
+   * そのフィルタは上流へ転送しない。1 件でも古い・欠けている・列挙できない場合は
+   * 従来どおり転送する。
    *
-   * Cache-first freshness window per kind (kind → seconds), the cache
-   * equivalent of HTTP `max-age`. When a REQ's filter asks only for replaceable
-   * events (`kinds` + `authors`) and every requested (kind, pubkey) was served
-   * from cache within its window, that filter is **not** forwarded upstream.
-   * Anything stale, missing or not enumerable is forwarded as before.
-   *
-   * Only meaningful together with {@link upstreamRelays}, and requires a
-   * storage adapter implementing `getCachedAt` (`DexieStorage` and
-   * `SqliteStorage` do); otherwise it has no effect aside from a one-time
-   * warning.
+   * {@link upstreamRelays} と併用したときだけ意味を持ち、`getCachedAt` 対応の
+   * ストレージ（`DexieStorage` / `SqliteStorage`）が必要。未対応なら警告 1 回で無効。
    *
    * Only replaceable kinds may be listed (0 / 3 / 10000–19999) — an addressable
    * or regular kind throws at relay construction time, as does a non-positive
@@ -166,23 +132,11 @@ export interface NostrRelayOptions {
   /**
    * テスト・高度用途向け: 上流プールの実装を差し替える。指定時は `upstreamRelays`
    * より優先され、リード/ライトスルーが有効になる。
-   *
-   * Test / advanced hook: inject a custom upstream pool. Takes precedence over
-   * `upstreamRelays` and enables read/write-through when present.
    */
   upstreamPool?: UpstreamPool;
 }
 
-/**
- * Apply the relay's option defaults to a caller-supplied options object.
- *
- * Sets `validateEventsType` (IMMEDIATELY), `maxSubscriptions` (20) and
- * `maxEventsPerRequest` ({@link DEFAULT_MAX_EVENTS}). The last is resolved with
- * `??` so an explicit `undefined` cannot clobber the default.
- *
- * @param options Caller-supplied options
- * @returns A new options object with defaults applied
- */
+/** Apply the relay's option defaults to a caller-supplied options object. */
 export function resolveRelayOptions(options: NostrRelayOptions): NostrRelayOptions {
   return {
     validateEventsType: 'IMMEDIATELY',
@@ -196,13 +150,10 @@ export function resolveRelayOptions(options: NostrRelayOptions): NostrRelayOptio
 
 /**
  * Normalize a caller-supplied cache priority config: pubkeys are converted to
- * 64-char lowercase hex (decoding `npub1...` input), kinds are validated as
- * non-negative integers, and both lists are deduplicated. Downstream code
- * (eviction, TTL sweep) only ever sees normalized hex.
+ * 64-char lowercase hex (decoding `npub1...` input), kinds are validated, and
+ * both lists are deduplicated. Downstream code (eviction, TTL sweep) only ever
+ * sees normalized hex. Returns undefined when there are no effective rules.
  *
- * @param input Caller-supplied config (pubkeys as npub or hex)
- * @returns The normalized config, or undefined when there are no effective
- *   rules
  * @throws Error naming the offending entry on an invalid pubkey or kind
  */
 export function normalizeCachePriority(input?: {
@@ -241,8 +192,6 @@ export function normalizeCachePriority(input?: {
  * everything" is unknowable), and silently dropping it would leave the caller
  * with no way to see why their setting did nothing.
  *
- * @param input Caller-supplied map of kind → window in seconds
- * @returns The normalized windows, or undefined when there are no entries
  * @throws Error naming the offending entry on an invalid kind or window
  */
 export function normalizeFreshnessWindows(

@@ -45,9 +45,6 @@ const ALWAYS_RETAINED_KINDS: ReadonlySet<number> = new Set([DELETION_EVENT_KIND]
  *
  * Note this says nothing about {@link ALWAYS_RETAINED_KINDS}: retention rules
  * always apply, so callers must not use this to skip filtering entirely.
- *
- * @param priority Cache priority config (possibly undefined or empty)
- * @returns True when at least one pubkey or kind is listed
  */
 export function hasPriorityRules(priority?: CachePriority): priority is CachePriority {
   return Boolean(
@@ -55,12 +52,7 @@ export function hasPriorityRules(priority?: CachePriority): priority is CachePri
   );
 }
 
-/**
- * Whether a kind is retained regardless of the configured priority rules.
- *
- * @param kind Event kind
- * @returns True if the kind must survive TTL expiry and be evicted last
- */
+/** Whether a kind is retained regardless of the configured priority rules. */
 export function isAlwaysRetainedKind(kind: number): boolean {
   return ALWAYS_RETAINED_KINDS.has(kind);
 }
@@ -68,8 +60,6 @@ export function isAlwaysRetainedKind(kind: number): boolean {
 /**
  * The kinds that are always retained, for storage backends that express
  * retention as a query condition rather than a per-row predicate.
- *
- * @returns The always-retained kinds
  */
 export function getAlwaysRetainedKinds(): number[] {
   return Array.from(ALWAYS_RETAINED_KINDS);
@@ -80,10 +70,6 @@ export function getAlwaysRetainedKinds(): number[] {
  * either because it matches a configured priority rule or because its kind is
  * always retained. Precomputes lookup sets once so the returned function is
  * cheap per row.
- *
- * @param priority Cache priority config (optional; retention still applies
- *   without it)
- * @returns Function returning true for rows that should be retained
  */
 export function createPriorityMatcher(
   priority?: CachePriority

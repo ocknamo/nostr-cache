@@ -14,9 +14,7 @@ import type { StorageAdapter } from './storage-adapter.js';
 /** Default interval between TTL sweeps, in seconds. */
 export const DEFAULT_TTL_SWEEP_INTERVAL = 60;
 
-/**
- * Options controlling the TTL sweep.
- */
+/** Options controlling the TTL sweep. */
 export interface ExpiryReaperOptions {
   /** Events cached more than this many seconds ago (by storage insertion time) are deleted. */
   ttlSeconds: number;
@@ -28,9 +26,7 @@ export interface ExpiryReaperOptions {
   now?: () => number;
 }
 
-/**
- * Periodically purges expired events from storage on a timer.
- */
+/** Periodically purges expired events from storage on a timer. */
 export class ExpiryReaper {
   private readonly ttlSeconds: number;
   private readonly intervalSeconds: number;
@@ -43,10 +39,6 @@ export class ExpiryReaper {
   /** Ensures the "storage does not support deleteExpired" warning logs once. */
   private unsupportedWarned = false;
 
-  /**
-   * @param storage Storage adapter to purge from (must implement deleteExpired)
-   * @param options Sweep configuration
-   */
   constructor(
     private readonly storage: StorageAdapter,
     options: ExpiryReaperOptions
@@ -98,19 +90,12 @@ export class ExpiryReaper {
   /**
    * Replace the cache priority config. Takes effect from the next sweep
    * (a sweep already in flight keeps the config it started with).
-   *
-   * @param priority New priority config (normalized hex), or undefined to
-   *   clear the exemption
    */
   setPriority(priority?: CachePriority): void {
     this.priority = priority;
   }
 
-  /**
-   * Delete events cached before `now - ttl`.
-   *
-   * @returns Promise resolving to the number of events deleted
-   */
+  /** Delete events cached before `now - ttl`. */
   async sweep(): Promise<number> {
     if (this.ttlSeconds <= 0) {
       return 0;
@@ -135,11 +120,6 @@ export class ExpiryReaper {
     return removed;
   }
 
-  /**
-   * Run a sweep without overlapping a previous one, swallowing errors.
-   *
-   * @private
-   */
   private runSweep(): void {
     if (this.sweeping) {
       return;

@@ -7,10 +7,6 @@ export type { ValidationStatus };
  * from the local relay (direct method call — no emulated WebSocket round
  * trip). The relay verified the signatures (immediately or lazily), so the
  * client can render verification badges without re-verifying anything.
- *
- * @param relay The in-page local relay
- * @param ids Event IDs to look up (deduplicated here)
- * @returns Map with one entry per id
  */
 export async function fetchValidationStatuses(
   relay: NostrCacheRelay,

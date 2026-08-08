@@ -14,9 +14,6 @@ export function normalizeWebSocketUrl(url: string): string {
 
 let clientSequence = 0;
 
-/**
- * Generate a unique client ID for an emulated connection.
- */
 export function generateClientId(): string {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) {
@@ -26,15 +23,10 @@ export function generateClientId(): string {
   return `emulated-client-${clientSequence}`;
 }
 
-/**
- * Internal hooks used by the emulator to observe an emulated socket's lifecycle.
- */
+/** Internal hooks used by the emulator to observe an emulated socket's lifecycle. */
 export interface EmulatedSocketHooks {
-  /** Called once the socket transitions to OPEN */
   onOpen(socket: EmulatedWebSocket): void;
-  /** Called when the client sends data through the socket */
   onSend(socket: EmulatedWebSocket, data: string): void;
-  /** Called when the socket is closed */
   onClose(socket: EmulatedWebSocket): void;
 }
 
@@ -122,9 +114,6 @@ export class EmulatedWebSocket extends EventTarget {
     this.setHandler('error', handler);
   }
 
-  /**
-   * Send data from the client to the emulated relay.
-   */
   send(data: string): void {
     if (this.readyState === EmulatedWebSocket.CONNECTING) {
       throw new Error('EmulatedWebSocket: send() called before the connection is open');

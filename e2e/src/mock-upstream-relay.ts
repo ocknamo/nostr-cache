@@ -63,12 +63,7 @@ export interface MockUpstreamRelayOptions {
   tls?: { key: Buffer; cert: Buffer };
 }
 
-/**
- * Start the mock relay.
- *
- * @param events Events returned for every REQ, in order, before EOSE
- * @param options Transport options
- */
+/** Start the mock relay. */
 export async function startMockUpstreamRelay(
   events: NostrEvent[],
   options: MockUpstreamRelayOptions = {}

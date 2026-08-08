@@ -52,9 +52,6 @@ export class CacheMetrics {
   /**
    * Record an event observed arriving from an upstream relay. Must be called
    * before the event is forwarded on to the relay (see the module docblock).
-   *
-   * @param eventId Event id as received upstream
-   * @param relayUrl URL of the upstream relay that sent it
    */
   recordUpstreamEvent(eventId: string, relayUrl: string): void {
     const sightings = this.pendingUpstream.get(eventId);
@@ -74,9 +71,6 @@ export class CacheMetrics {
   /**
    * Classify one delivery of an event to a client, consuming the upstream
    * sighting that explains it (if any).
-   *
-   * @param eventId Event id delivered to the client
-   * @returns Where this particular delivery came from
    */
   classifyDelivered(eventId: string): EventOrigin {
     this.delivered += 1;
@@ -88,11 +82,7 @@ export class CacheMetrics {
     return origin;
   }
 
-  /**
-   * Take one unexpired sighting for an event, if there is one.
-   *
-   * @returns True when this delivery is attributable to an upstream fetch
-   */
+  /** Take one unexpired sighting for an event, if there is one. */
   private consumeUpstreamSighting(eventId: string): boolean {
     const sightings = this.pendingUpstream.get(eventId);
     if (!sightings) {
@@ -127,12 +117,6 @@ export class CacheMetrics {
     };
   }
 
-  /**
-   * Subscribe to counter changes so a UI can re-render.
-   *
-   * @param listener Called after every recorded change
-   * @returns Unsubscribe function
-   */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {

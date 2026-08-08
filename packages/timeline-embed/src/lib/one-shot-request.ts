@@ -23,7 +23,6 @@ import type { RelayConnection } from './relay-connection.ts';
  *
  * @param events Versions as they arrived — two upstream relays can each answer
  *   with their own copy, in either order
- * @returns The version to keep, or `undefined` for an empty list
  */
 export function latestReplaceable(events: NostrEvent[]): NostrEvent | undefined {
   let current: NostrEvent | undefined;
@@ -38,10 +37,6 @@ export function latestReplaceable(events: NostrEvent[]): NostrEvent | undefined 
 /**
  * Fetch the current version of one replaceable event.
  *
- * @param connection Live relay connection to issue the REQ on
- * @param filter Filter naming one replaceable coordinate, e.g.
- *   `{kinds:[3],authors:[pubkey]}`
- * @param options `signal` abandons the fetch
  * @returns The event, or `undefined` when none arrived — which covers "not
  *   published", "not upstream" and "the relay never answered" alike, because
  *   none of them is distinguishable from here

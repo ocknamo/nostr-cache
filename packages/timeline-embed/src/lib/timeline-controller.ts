@@ -442,8 +442,6 @@ export class TimelineController {
    * Repeat calls for the same author are ignored: that is request de-duplication
    * (the same card can scroll in and out), not a second cache in front of the
    * relay's — whether a cached copy is still fresh remains the relay's call.
-   *
-   * @param pubkey Hex pubkey of the author to look up
    */
   requestProfile(pubkey: string): void {
     // `suspended` matters because the trigger lives in the DOM now: the cards
@@ -499,8 +497,6 @@ export class TimelineController {
    * kind 0 is replaceable, so there is exactly one event to wait for: the
    * subscription is closed as soon as EOSE says the relay has nothing more,
    * which is what frees the slot for the next queued author.
-   *
-   * @param pubkey Hex pubkey of the author to look up
    */
   private openProfileRequest(pubkey: string): void {
     this.profileSeq += 1;
@@ -533,8 +529,6 @@ export class TimelineController {
    * (`UpstreamCoordinator` ingests on a promise chain and drops deliveries once
    * the subscription is closed); `flushEose` now waits for that chain, so EOSE
    * genuinely means "delivered".
-   *
-   * @param subId Subscription that reached EOSE
    */
   private finishAfterEose(subId: string): void {
     const entry = this.profileSubs.get(subId);
@@ -547,11 +541,7 @@ export class TimelineController {
     );
   }
 
-  /**
-   * Close a finished lookup and let the next queued one start.
-   *
-   * @param subId Subscription that is done with
-   */
+  /** Close a finished lookup and let the next queued one start. */
   private finishProfileRequest(subId: string): void {
     const entry = this.profileSubs.get(subId);
     if (!entry) {
@@ -653,7 +643,7 @@ export class TimelineController {
    * exactly that rather than naming a cause it cannot know.
    *
    * `validated` ends the watch: the relay has checked the signature, which is
-   * the question §11 was actually asking.
+   * the question actually being asked.
    *
    * An event that never appears at all is reported too, after
    * {@link VALIDATION_WATCH_MAX_MISSES} tries. Waiting for a `pending` sighting
@@ -661,9 +651,6 @@ export class TimelineController {
    * validation runs every 5s and can delete a forged event *before* the first
    * poll, leaving a status that is `unknown` from the outset and a timeline
    * built on it running untouched for the rest of the session.
-   *
-   * @param eventId Event whose presence decides whether the timeline stands
-   * @param onDropped Called once, if and when the cache stops holding it
    */
   private watchValidation(eventId: string, onDropped: () => void): void {
     const { signal } = this.filterSourceAbort;

@@ -16,9 +16,6 @@ const PAGE_HTML = `<!doctype html>
   <body><script src="/bundle.js"></script></body>
 </html>`;
 
-/**
- * A running static server for the browser test page.
- */
 export interface StaticServer {
   /** Bound port. */
   port: number;
@@ -30,9 +27,7 @@ export interface StaticServer {
   close: () => Promise<void>;
 }
 
-/**
- * Start serving the given bundle file over http.
- */
+/** Start serving the given bundle file over http. */
 export async function startStaticServer(bundlePath: string): Promise<StaticServer> {
   const bundle = await readFile(bundlePath, 'utf8');
 

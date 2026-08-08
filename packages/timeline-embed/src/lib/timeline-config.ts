@@ -34,9 +34,6 @@ function splitList(value: string | null | undefined): string[] {
  * as mixed content — worth catching here, where we can explain it, rather than
  * letting the connection fail silently later. (The intercepted local URL is
  * exempt: it is served in-page and never reaches the network.)
- *
- * @param value Raw attribute value, e.g. `"wss://nos.lol, wss://relay.damus.io"`
- * @returns The relay URLs that passed validation
  */
 export function parseRelays(value: string | null | undefined): string[] {
   const secureContext = typeof location !== 'undefined' && location.protocol === 'https:';
@@ -88,10 +85,8 @@ function parseNumberList(value: string | null | undefined): number[] {
  * default (`DEFAULT_PROFILE_FRESHNESS`) in place — a typo in an embed URL should
  * cost the reader nothing more than the default behaviour.
  *
- * @param value Raw attribute or query-parameter value, e.g. `"3600"`
  * @param label Attribute this came from, so the warning names the one the
  *   embedder actually wrote — `follows-freshness` reaches here too
- * @returns Seconds, or `undefined` when nothing usable was given
  */
 export function parseFreshness(
   value: string | null | undefined,
@@ -126,9 +121,6 @@ export function parseFreshness(
  * Booleans are accepted as well as strings: a Svelte parent writing
  * `<nostr-timeline debug>` sets the custom element's property rather than an
  * attribute, so what arrives is `true`, not `""`.
- *
- * @param value Raw attribute, property or query-parameter value
- * @returns Whether debug UI should be rendered
  */
 export function parseDebug(value: string | boolean | null | undefined): boolean {
   if (value === null || value === undefined) {
@@ -153,9 +145,6 @@ let showOriginWarned = false;
  * default this flag was moved away from. So `show-origin="true"` still shows
  * them (that embedder asked for them explicitly), `show-origin="false"` still
  * hides them, and an embed that never mentioned either gets the new default.
- *
- * @param value Raw attribute or query-parameter value
- * @returns Whether this legacy switch asks for the badges
  */
 export function parseShowOriginAlias(value: string | boolean | null | undefined): boolean {
   if (value === null || value === undefined) {
@@ -241,9 +230,6 @@ export function parseFilters(input: FilterInput): Filter[] {
  * survivable: `pubkey` is the one input the widget cannot supply a default for,
  * since there is no sensible follow list to fall back to. The caller reports it
  * to the reader rather than subscribing to something else.
- *
- * @param value Raw attribute or query-parameter value
- * @returns Lowercase hex, or `undefined` when the value is not a pubkey
  */
 export function parsePubkey(value: string | null | undefined): string | undefined {
   if (value === null || value === undefined || value.trim() === '') {
@@ -256,11 +242,7 @@ export function parsePubkey(value: string | null | undefined): string | undefine
   return hex;
 }
 
-/**
- * Parse a comma-separated `kinds` list.
- *
- * @returns The kinds to request; never empty
- */
+/** Parse a comma-separated `kinds` list. */
 export function parseKinds(value: string | null | undefined): number[] {
   const kinds = parseNumberList(value);
   return kinds.length > 0 ? kinds : DEFAULT_KINDS;
@@ -294,12 +276,7 @@ export function parseMaxFollows(value: string | null | undefined): number | unde
   return parsed;
 }
 
-/**
- * Parse `since-days`, the optional recency bound on a follow timeline.
- *
- * @param value Whole days
- * @returns Seconds to look back, or `undefined` for no bound
- */
+/** Parse `since-days`, the optional recency bound on a follow timeline. */
 export function parseSinceDays(value: string | null | undefined): number | undefined {
   if (value === null || value === undefined || value.trim() === '') {
     return undefined;

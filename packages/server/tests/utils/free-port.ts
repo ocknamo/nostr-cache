@@ -1,12 +1,6 @@
 /**
  * 統合テスト用のポート確保ユーティリティ。
  *
- * 以前は spec ごとに `Math.floor(Math.random() * 10000) + <帯>` で採番していたが、
- * 帯の幅 10000 に対して N 回起動したときの衝突確率は N/10000 ではなく誕生日の
- * パラドックスで N²/20000 になる（1 帯で 100 回起動すればおよそ 5 割）。
- * `beforeEach` ごとに引き直すため 1 ファイルで数十回起動し、「たまに落ちる」ではなく
- * 「かなりの確率で落ちる」状態だった。
- *
  * ## なぜ「OS に選ばせて即解放」ではないのか
  *
  * 素直な代替案は `listen(0)` で空きポートを教えてもらい、閉じてからその番号を
@@ -81,14 +75,12 @@ function listen(port: number): Promise<Server> {
   });
 }
 
-/** 捨てサーバーを閉じる。 */
 function close(server: Server): Promise<void> {
   return new Promise((resolve) => {
     server.close(() => resolve());
   });
 }
 
-/** 待ち受け中の捨てサーバーのポート番号を取り出す。 */
 function portOf(server: Server): number {
   const address = server.address();
   if (typeof address !== 'object' || address === null) {
@@ -114,10 +106,6 @@ function nextSlot(portsPerRelay: number): number {
  * カーソルが単調増加するので、続けて呼んでも同じ番号は返らない（1 テストで複数の
  * サーバーを立てる spec でも自己衝突しない）。念のため各枠は実際に bind して空きを
  * 確かめ、無関係なプロセスに埋められていれば次の枠へ進む。
- *
- * @param portsPerRelay 1 台が消費する連番ポート数（2 = WebSocket + ヘルスチェック）
- * @param attempts 枠の試行上限
- * @returns リレーに渡すポート番号
  */
 async function allocateSlot(portsPerRelay: number, attempts: number): Promise<number> {
   let lastError: unknown;
@@ -157,7 +145,6 @@ interface StartStoppable {
   stop(): Promise<void>;
 }
 
-/** エラーが「ポートが埋まっていた」ことを示すか。 */
 function isAddressInUse(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === 'EADDRINUSE';
 }
@@ -175,10 +162,6 @@ function isAddressInUse(error: unknown): boolean {
  * ヘルスチェック用ポート（`PORT + 1`）の確保失敗は本番実装が握り潰して警告ログだけを
  * 出す仕様のため、ここでは検出できない。ヘルスチェックを検証する spec は
  * `healthCheck.port` を明示すること。
- *
- * @param create ポート番号を受け取ってリレーを生成するファクトリ
- * @param options `portsPerRelay`（既定 2）と `attempts`（既定 10）
- * @returns 起動済みのリレーと、実際に使ったポート番号
  */
 export async function startRelayServer<T extends StartStoppable>(
   create: (port: number) => T,
@@ -213,9 +196,7 @@ export async function startRelayServer<T extends StartStoppable>(
 
 /** {@link reservePort} が返す、掴んだままの空きポート。 */
 export interface ReservedPort {
-  /** 確保中のポート番号。 */
   port: number;
-  /** ポートを解放する。 */
   release(): Promise<void>;
 }
 
@@ -226,8 +207,6 @@ export interface ReservedPort {
  * ここでは ephemeral 帯（`listen(0)`）で構わない — 解放しない限り誰にも割り当て
  * られないため。番号を取ってすぐ解放すると、同じテスト内で起動するサーバーに OS が
  * 同じ番号を割り当ててしまい、検証が偽陰性で落ちうる。
- *
- * @returns 確保したポートと、その解放関数
  */
 export async function reservePort(): Promise<ReservedPort> {
   const server = await listen(0);

@@ -6,28 +6,14 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { eventMatchesFilter } from '../utils/filter-utils.js';
-/**
- * Subscription information
- */
 interface Subscription {
-  /**
-   * ID of the client that created the subscription
-   */
   clientId: string;
 
-  /**
-   * ID of the subscription
-   */
   id: string;
 
-  /**
-   * Filters for the subscription
-   */
   filters: Filter[];
 
-  /**
-   * When the subscription was created
-   */
+  /** When the subscription was created */
   createdAt: number;
 }
 
@@ -39,14 +25,6 @@ export class SubscriptionManager {
   private subscriptions: Map<string, Subscription> = new Map();
   private clientSubscriptions: Map<string, Set<string>> = new Map();
 
-  /**
-   * Create a new subscription
-   *
-   * @param clientId ID of the client creating the subscription
-   * @param subscriptionId ID of the subscription
-   * @param filters Filters for the subscription
-   * @returns The created subscription
-   */
   createSubscription(clientId: string, subscriptionId: string, filters: Filter[]): Subscription {
     // Remove any existing subscription with the same ID
     this.removeSubscription(clientId, subscriptionId);
@@ -72,13 +50,6 @@ export class SubscriptionManager {
     return subscription;
   }
 
-  /**
-   * Remove a subscription
-   *
-   * @param clientId ID of the client that created the subscription
-   * @param subscriptionId ID of the subscription
-   * @returns True if the subscription was removed, false if it didn't exist
-   */
   removeSubscription(clientId: string, subscriptionId: string): boolean {
     const key = this.getSubscriptionKey(clientId, subscriptionId);
     const removed = this.subscriptions.delete(key);
@@ -96,12 +67,6 @@ export class SubscriptionManager {
     return removed;
   }
 
-  /**
-   * Remove all subscriptions for a client
-   *
-   * @param clientId ID of the client
-   * @returns Number of subscriptions removed
-   */
   removeAllSubscriptions(clientId: string): number {
     const subscriptionIds = this.clientSubscriptions.get(clientId);
 
@@ -123,12 +88,6 @@ export class SubscriptionManager {
     return count;
   }
 
-  /**
-   * Remove a subscription by ID for all clients
-   *
-   * @param subscriptionId ID of the subscription
-   * @returns Number of subscriptions removed
-   */
   removeSubscriptionByIdForAllClients(subscriptionId: string): number {
     let count = 0;
 
@@ -150,24 +109,11 @@ export class SubscriptionManager {
     return count;
   }
 
-  /**
-   * Get a subscription
-   *
-   * @param clientId ID of the client that created the subscription
-   * @param subscriptionId ID of the subscription
-   * @returns The subscription, or undefined if it doesn't exist
-   */
   getSubscription(clientId: string, subscriptionId: string): Subscription | undefined {
     const key = this.getSubscriptionKey(clientId, subscriptionId);
     return this.subscriptions.get(key);
   }
 
-  /**
-   * Get all subscriptions for a client
-   *
-   * @param clientId ID of the client
-   * @returns Array of subscriptions
-   */
   getClientSubscriptions(clientId: string): Subscription[] {
     const subscriptionIds = this.clientSubscriptions.get(clientId);
 
@@ -189,31 +135,15 @@ export class SubscriptionManager {
     return subscriptions;
   }
 
-  /**
-   * Get all subscriptions
-   *
-   * @returns Array of all subscriptions
-   */
   getAllSubscriptions(): Subscription[] {
     return Array.from(this.subscriptions.values());
   }
 
-  /**
-   * Get the number of subscriptions for a client
-   *
-   * @param clientId ID of the client
-   * @returns Number of subscriptions
-   */
+  /** Get the number of subscriptions for a client */
   getClientSubscriptionCount(clientId: string): number {
     return this.clientSubscriptions.get(clientId)?.size || 0;
   }
 
-  /**
-   * Find subscriptions that match an event
-   *
-   * @param event Event to match
-   * @returns Map of client IDs to arrays of matching subscriptions
-   */
   findMatchingSubscriptions(event: NostrEvent): Map<string, Subscription[]> {
     const matches = new Map<string, Subscription[]>();
 
@@ -233,14 +163,6 @@ export class SubscriptionManager {
     return matches;
   }
 
-  /**
-   * Get the key for a subscription
-   *
-   * @param clientId ID of the client
-   * @param subscriptionId ID of the subscription
-   * @returns Key for the subscription
-   * @private
-   */
   private getSubscriptionKey(clientId: string, subscriptionId: string): string {
     return `${clientId}:${subscriptionId}`;
   }

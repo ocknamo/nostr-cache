@@ -1,6 +1,4 @@
-/**
- * Tests for the cache-first freshness window.
- */
+/** Tests for the cache-first freshness window. */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { type Mock, describe, expect, it, vi } from 'vitest';

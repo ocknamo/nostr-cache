@@ -11,11 +11,6 @@ import { getIndexedTagValues } from './tag-index.js';
  * Dexie の `between()` は既定で上限排他のため、両端を明示的に包含指定する。
  * 最終判定を行う {@link eventMatchesFilter} も包含なので、ここで境界のイベントを
  * 落とすと二段構えの絞り込みが不整合になり、そのイベントは復活しない。
- *
- * @param table The Dexie events table
- * @param since Inclusive lower bound (unset = no lower bound)
- * @param until Inclusive upper bound (unset = no upper bound)
- * @returns A Dexie collection covering the requested time range
  */
 function betweenCreatedAt(
   table: Dexie.Table<NostrEventTable, string>,
@@ -35,10 +30,6 @@ function betweenCreatedAt(
  * falling back to a full-table collection when nothing indexable is present.
  * The returned collection still needs {@link eventRowMatchesFilter} applied to
  * enforce the parts of the filter the index cannot express exactly.
- *
- * @param table The Dexie events table
- * @param filter Filter conditions
- * @returns A Dexie collection narrowed by the chosen index
  */
 export function buildOptimizedQuery(
   table: Dexie.Table<NostrEventTable, string>,
@@ -47,12 +38,10 @@ export function buildOptimizedQuery(
   const { ids, authors, kinds, since, until, ...tagFilters } = filter;
   let collection: Dexie.Collection<NostrEventTable, string>;
 
-  // Extract single-letter tag filters
   const indexedTagValues: string[] = [];
   for (const [key, values] of Object.entries(tagFilters)) {
     if (key.startsWith('#') && Array.isArray(values) && values.length > 0) {
       const tagName = key.slice(1);
-      // タグ名が単一のアルファベットであることを確認
       if (tagName.length === 1 && /^[a-zA-Z]$/.test(tagName)) {
         const indexedValues = getIndexedTagValues(tagName, values as string[]);
         if (indexedValues.length > 0) {
@@ -65,39 +54,29 @@ export function buildOptimizedQuery(
   // Use indexed_tags if available and no other primary filters
   if (indexedTagValues.length > 0 && !ids?.length && !authors?.length && !kinds?.length) {
     collection = table.where('indexed_tags').anyOf(indexedTagValues);
-  }
-  // Use specific index based on filter combination
-  else if (ids?.length) {
-    // Use primary key index for id lookups
+  } else if (ids?.length) {
     collection = table.where('id').anyOf(ids);
   }
   // authors + kinds + 時間範囲の組み合わせ
   else if (authors?.length && kinds?.length && (since !== undefined || until !== undefined)) {
-    // 時間範囲でフィルタリング
     collection = betweenCreatedAt(table, since, until);
-    // authorsとkindsでフィルタリング
     collection = collection.filter(
       (event) => authors.includes(event.pubkey) && kinds.includes(event.kind)
     );
   }
   // authors + 時間範囲の組み合わせ
   else if (authors?.length && (since !== undefined || until !== undefined)) {
-    // 時間範囲でフィルタリング
     collection = betweenCreatedAt(table, since, until);
-    // authorsでフィルタリング
     collection = collection.filter((event) => authors.includes(event.pubkey));
   }
   // authors + kinds の組み合わせ
   else if (authors?.length && kinds?.length) {
-    // Use compound index for author+kind combinations
     const combinations = authors.flatMap((author) => kinds.map((kind) => [author, kind]));
     collection = table.where('[pubkey+kind]').anyOf(combinations);
   }
   // kinds + 時間範囲の組み合わせ
   else if (kinds?.length && (since !== undefined || until !== undefined)) {
-    // 時間範囲でフィルタリング
     collection = betweenCreatedAt(table, since, until);
-    // kindsでフィルタリング
     collection = collection.filter((event) => kinds.includes(event.kind));
   }
   // 単一条件の場合
@@ -121,21 +100,14 @@ export function buildOptimizedQuery(
  * single letter, or whose values are not all non-empty strings) and otherwise
  * defers to the shared {@link eventMatchesFilter}. This reproduces the exact
  * conditions the index cannot express.
- *
- * @param row Stored table row
- * @param filter Filter to validate the row against
- * @returns Whether the row matches the filter
  */
 export function eventRowMatchesFilter(row: NostrEventTable, filter: Filter): boolean {
-  // タグフィルターの追加検証
   for (const [key, values] of Object.entries(filter)) {
     if (key.startsWith('#')) {
       const tagName = key.slice(1);
-      // タグ名が無効な場合は結果に含めない
       if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
         return false;
       }
-      // タグ値が無効な場合は結果に含めない
       if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
         return false;
       }

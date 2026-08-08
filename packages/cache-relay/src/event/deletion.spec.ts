@@ -1,6 +1,4 @@
-/**
- * Tests for the NIP-09 deletion request helpers
- */
+/** Tests for the NIP-09 deletion request helpers */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mocked, beforeEach, describe, expect, it, vi } from 'vitest';

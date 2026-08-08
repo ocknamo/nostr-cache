@@ -1,8 +1,6 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 
-/**
- * Build a NostrEvent for component tests. Override any field via `overrides`.
- */
+/** Build a NostrEvent for component tests. Override any field via `overrides`. */
 export function makeEvent(overrides: Partial<NostrEvent> = {}): NostrEvent {
   return {
     id: 'id0000000000000000000000000000000000000000000000000000000000000',

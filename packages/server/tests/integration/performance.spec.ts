@@ -35,9 +35,6 @@ async function connect(port: number): Promise<WebSocket> {
   return client;
 }
 
-/**
- * クライアントを閉じ、close が完了するまで待機する。
- */
 async function closeClient(client: WebSocket): Promise<void> {
   if (client.readyState === WebSocket.CLOSED) {
     return;
@@ -48,9 +45,7 @@ async function closeClient(client: WebSocket): Promise<void> {
   });
 }
 
-/**
- * 条件が成立するまで短間隔でポーリングする（固定スリープによるフレークを避ける）。
- */
+/** 条件が成立するまで短間隔でポーリングする（固定スリープによるフレークを避ける）。 */
 async function waitFor(predicate: () => boolean, timeoutMs = 5000, intervalMs = 20): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
@@ -61,11 +56,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000, intervalMs = 
   }
 }
 
-/**
- * 1 接続で複数イベントを送信し、全イベントの OK を受信するまで待機する。
- *
- * @returns 成功（success=true）として OK が返ったイベント ID の集合
- */
+/** 1 接続で複数イベントを送信し、全イベントの OK を受信するまで待機する。 */
 async function publishAll(
   client: WebSocket,
   events: NostrEvent[],
@@ -104,9 +95,7 @@ async function publishAll(
   return acked;
 }
 
-/**
- * REQ を送信し、EOSE を受信するまでに届いた EVENT 件数を返す。
- */
+/** REQ を送信し、EOSE を受信するまでに届いた EVENT 件数を返す。 */
 async function countReqEvents(
   client: WebSocket,
   subscriptionId: string,

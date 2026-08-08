@@ -79,9 +79,6 @@ type Bech32Result = { ok: true; hrp: string; bytes: Uint8Array } | { ok: false; 
  *
  * hrp は検証しない。`npub` を期待するのか `nevent` を期待するのかは呼び出し側の
  * 都合なので、ここでは区切り文字とチェックサムだけを見る。
- *
- * @param input bech32 文字列
- * @returns 成功時は hrp とデータ部のバイト列、失敗時は理由
  */
 function decodeBech32(input: string): Bech32Result {
   if (input.length === 0 || input.length > MAX_BECH32_LENGTH) {
@@ -149,8 +146,6 @@ function rejectSecretKey(input: string): void {
  * Decode an `npub1...` string (NIP-19) into a 64-character lowercase hex
  * public key.
  *
- * @param npub The bech32-encoded public key
- * @returns The 64-character lowercase hex public key
  * @throws Error on a wrong prefix, mixed case, bad checksum, or a payload
  *   that is not exactly 32 bytes
  */
@@ -175,8 +170,6 @@ export function npubToHex(npub: string): string {
  * Normalize a public key given as either 64-character hex (any case) or an
  * `npub1...` string into 64-character lowercase hex.
  *
- * @param input Hex or npub public key
- * @returns The 64-character lowercase hex public key
  * @throws Error naming the offending input (abbreviated, so secrets passed by
  *   mistake are never echoed in full) when it is neither valid hex nor a
  *   valid npub
@@ -241,8 +234,6 @@ export type Nip19Entity = Nip19Profile | Nip19Event | Nip19Address;
  *
  * 同じ type が複数回現れる（relay がその典型）ので値は配列で持つ。長さが足り
  * ない打ち切られたストリームは、部分的に読めても信用できないので拒否する。
- *
- * @returns type をキーにした値の配列、壊れていれば null
  */
 function parseTlv(bytes: Uint8Array): Map<number, Uint8Array[]> | null {
   const entries = new Map<number, Uint8Array[]>();
@@ -291,9 +282,6 @@ function readKind(value: Uint8Array | undefined): number | undefined {
  * 片端から試す用途があり、そこでは失敗が例外ではなく常態だからである。
  *
  * `nsec`（秘密鍵）は誤って表示に載せないよう、デコードを試みずに拒否する。
- *
- * @param input `nostr:` を除いた bech32 文字列
- * @returns デコード結果、または解釈できなければ null
  */
 export function decodeNip19(input: string): Nip19Entity | null {
   if (input.toLowerCase().startsWith('nsec1')) {

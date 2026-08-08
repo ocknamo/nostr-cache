@@ -4,9 +4,6 @@ import type { NostrWireMessage } from '@nostr-cache/shared';
 import { WebSocketServer as WS, WebSocket } from 'ws';
 import type { TransportAdapter } from './transport-adapter.js';
 
-/**
- * WebSocket server implementation for Node.js environment
- */
 export class WebSocketServer implements TransportAdapter {
   private server: WS | null = null;
   private clients: Map<string, WebSocket> = new Map();
@@ -15,18 +12,10 @@ export class WebSocketServer implements TransportAdapter {
   private disconnectCallback?: (clientId: string) => void;
   private port = 0;
 
-  /**
-   * Create a new WebSocket server
-   * @param port Optional port number (default: dynamically assigned)
-   */
   constructor(port?: number) {
     this.port = port || 0; // 0 = dynamically assigned port
   }
 
-  /**
-   * Start the WebSocket server
-   * @returns Promise resolving when transport is started
-   */
   async start(): Promise<void> {
     this.server = new WS({ port: this.port });
 
@@ -54,12 +43,10 @@ export class WebSocketServer implements TransportAdapter {
       });
     });
 
-    // Handle server errors
     this.server.on('error', (error) => {
       logger.error('WebSocket server error:', error);
     });
 
-    // Wait for server to start
     await new Promise<void>((resolve, reject) => {
       if (!this.server) {
         resolve();
@@ -71,7 +58,6 @@ export class WebSocketServer implements TransportAdapter {
       });
 
       this.server.once('listening', () => {
-        // Get the actual port number (in case we used 0 for dynamic assignment)
         const address = this.server?.address();
         this.port = typeof address === 'object' && address ? address.port : this.port;
         logger.info(`WebSocket server started on port ${this.port}`);
@@ -80,34 +66,21 @@ export class WebSocketServer implements TransportAdapter {
     });
   }
 
-  /**
-   * Get the port the server is listening on
-   */
   getPort(): number {
     return this.port;
   }
 
-  /**
-   * Get the number of currently connected clients
-   *
-   * @returns The number of active client connections
-   */
   getConnectionCount(): number {
     return this.clients.size;
   }
 
-  /**
-   * Stop the WebSocket server
-   */
   async stop(): Promise<void> {
     if (this.server) {
-      // Close all client connections
       for (const [clientId, socket] of this.clients) {
         socket.close();
         this.clients.delete(clientId);
       }
 
-      // Close server
       await new Promise<void>((resolve, reject) => {
         if (!this.server) {
           resolve();
@@ -126,9 +99,6 @@ export class WebSocketServer implements TransportAdapter {
     }
   }
 
-  /**
-   * Send a message to a client
-   */
   send(clientId: string, message: NostrWireMessage): void {
     const socket = this.clients.get(clientId);
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -136,23 +106,14 @@ export class WebSocketServer implements TransportAdapter {
     }
   }
 
-  /**
-   * Register message handler
-   */
   onMessage(callback: (clientId: string, message: NostrWireMessage) => void): void {
     this.messageCallback = callback;
   }
 
-  /**
-   * Register connect handler
-   */
   onConnect(callback: (clientId: string) => void): void {
     this.connectCallback = callback;
   }
 
-  /**
-   * Register disconnect handler
-   */
   onDisconnect(callback: (clientId: string) => void): void {
     this.disconnectCallback = callback;
   }

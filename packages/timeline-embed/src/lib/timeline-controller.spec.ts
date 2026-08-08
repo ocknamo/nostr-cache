@@ -625,8 +625,8 @@ describe('TimelineController', () => {
     });
 
     /**
-     * The watch behind `follows.status === 'dropped'` (design §11), driven
-     * through the real relay rather than by calling its callback directly.
+     * The watch behind `follows.status === 'dropped'`, driven through the real
+     * relay rather than by calling its callback directly.
      *
      * Every other spec around this stubs `watchValidation` or invokes
      * `setFollows` itself, which leaves the loop — the `pending` sighting, the
@@ -694,8 +694,8 @@ describe('TimelineController', () => {
 
         const { dropped } = await startWatch(dbName, 'follows-2');
 
-        // `validated` is terminal and is the question §11 actually asks: the
-        // relay checked the signature and it held.
+        // `validated` is terminal and is the question actually being asked:
+        // the relay checked the signature and it held.
         await new Promise((resolve) => setTimeout(resolve, POLL_MS * 10));
         expect(dropped()).toBe(false);
       });

@@ -212,9 +212,6 @@ interface NostrRelayOptions {
 }
 ```
 
-> `※未実装` の項目は型としては存在しますが、現状フルにはサポートされていません。
-> Options marked `※未実装` exist in the type but are not fully implemented yet.
-
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /
 `UpstreamCoordinator` と型 `UpstreamPool` / `UpstreamPoolOptions` が

@@ -22,9 +22,7 @@ import { SqliteStorage } from './storage/sqlite-storage.js';
 // として一度だけ導入される必要がある。ここで import しても評価順の都合で手遅れになる。
 // （SQLite モードではこの制約は無関係だが、既定モードのために維持している）
 
-/**
- * Options for {@link createStorage}.
- */
+/** Options for {@link createStorage}. */
 export interface CreateStorageOptions {
   /** IndexedDB database name (default mode only) */
   dbName?: string;
@@ -36,12 +34,6 @@ export interface CreateStorageOptions {
   dbPath?: string;
 }
 
-/**
- * Create the server's storage adapter.
- *
- * @param options Storage options (see {@link CreateStorageOptions})
- * @returns A storage adapter for the relay
- */
 export function createStorage(options: CreateStorageOptions = {}): StorageAdapter {
   if (options.dbPath) {
     return new SqliteStorage(options.dbPath);

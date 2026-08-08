@@ -12,9 +12,6 @@ import {
   isReqMessage,
 } from '../types/message.js';
 
-/**
- * Convert internal message format to wire format
- */
 export function messageToWire(message: NostrMessageUnion | NostrResponseUnion): NostrWireMessage {
   if (isEventMessage(message)) {
     return message.subscriptionId

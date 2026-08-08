@@ -1,6 +1,4 @@
-/**
- * Tests for NostrCacheRelay
- */
+/** Tests for NostrCacheRelay */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
@@ -18,7 +16,6 @@ describe('NostrCacheRelay', () => {
     enforceLimit: vi.fn().mockResolvedValue(0),
   });
 
-  // Mock transport adapter
   const mockTransport: TransportAdapter = {
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +41,6 @@ describe('NostrCacheRelay', () => {
     });
   }
 
-  // Sample event
   const sampleEvent: NostrEvent = {
     content: 'sample',
     created_at: 1742660714,
@@ -55,7 +51,6 @@ describe('NostrCacheRelay', () => {
     sig: '5057c68f57d829758af5090beb86738bdd09679f0997995b6d7f2b012c3698ff0519f79f01d5b44704c393a145caea1f415908b486ba0d34359134386b9a4650',
   };
 
-  // Sample filter
   const sampleFilter: Filter = {
     kinds: [1],
     limit: 10,

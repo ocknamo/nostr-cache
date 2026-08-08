@@ -29,9 +29,7 @@ export function resolveChromiumExecutable(): string | undefined {
   return undefined;
 }
 
-/**
- * Launch a headless Chromium instance using the resolved executable.
- */
+/** Launch a headless Chromium instance using the resolved executable. */
 export function launchBrowser(): Promise<Browser> {
   const executablePath = resolveChromiumExecutable();
   return chromium.launch(executablePath ? { executablePath } : {});

@@ -37,14 +37,12 @@ describe('NostrRelayServer', () => {
     const client = new WebSocket(`ws://localhost:${port}`);
     const event = await createTestEvent();
 
-    // 接続待機
     await new Promise<void>((resolve) => {
       client.on('open', () => {
         resolve();
       });
     });
 
-    // OK応答待機
     const responsePromise = new Promise<string[]>((resolve) => {
       client.on('message', (data) => {
         const message = JSON.parse(data.toString());
@@ -71,7 +69,6 @@ describe('NostrRelayServer', () => {
     const client = new WebSocket(`ws://localhost:${port}`);
     const event = await createTestEvent();
 
-    // 接続待機
     await new Promise<void>((resolve) => {
       client.on('open', resolve);
     });
@@ -105,7 +102,6 @@ describe('NostrRelayServer', () => {
       });
     });
 
-    // EOSE受信待機
     const eosePromise = new Promise<string[]>((resolve) => {
       client.on('message', (data) => {
         const message = JSON.parse(data.toString());
@@ -115,7 +111,6 @@ describe('NostrRelayServer', () => {
       });
     });
 
-    // サブスクリプション作成
     client.send(JSON.stringify(['REQ', 'sub1', { kinds: [1], authors: [event.pubkey] }]));
 
     // 結果検証
@@ -124,7 +119,6 @@ describe('NostrRelayServer', () => {
     expect(receivedEvent[1]).toBe('sub1');
     expect(receivedEvent[2].id).toBe(event.id);
 
-    // EOSEも受信することを確認
     const eose = await eosePromise;
     expect(eose[0]).toBe('EOSE');
     expect(eose[1]).toBe('sub1');
@@ -136,12 +130,10 @@ describe('NostrRelayServer', () => {
     // CLOSEメッセージを処理することを確認
     const client = new WebSocket(`ws://localhost:${port}`);
 
-    // 接続待機
     await new Promise<void>((resolve) => {
       client.on('open', resolve);
     });
 
-    // CLOSEDメッセージ待機
     const closedPromise = new Promise<string[]>((resolve) => {
       client.on('message', (data) => {
         const message = JSON.parse(data.toString());
@@ -151,7 +143,6 @@ describe('NostrRelayServer', () => {
       });
     });
 
-    // サブスクリプション作成
     client.send(JSON.stringify(['REQ', 'sub1', { kinds: [1] }]));
 
     // 少し待機してからサブスクリプションを終了

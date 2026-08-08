@@ -33,9 +33,6 @@ function isEventId(value: unknown): value is string {
  * (`["e", <id>, <relay>, "reply"|"root"|"mention"]`) is authoritative when
  * present; otherwise the deprecated positional form applies, where the last
  * `e` tag is the direct parent. `mention` never denotes a parent.
- *
- * @param tags The event's tags
- * @returns The parent's id, or undefined when this is not a reply
  */
 function findReplyTarget(tags: string[][]): string | undefined {
   const eTags = tags.filter((tag) => tag[0] === 'e' && isEventId(tag[1]));
@@ -62,7 +59,6 @@ function findReplyTarget(tags: string[][]): string | undefined {
 /**
  * Extract the references worth showing on a card.
  *
- * @param event The event being rendered
  * @returns Reply first (at most one), then quotes in tag order. Empty when the
  *   event stands alone.
  */

@@ -17,9 +17,6 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 /** Path to the built server entry point. Requires `npm run build` first. */
 export const SERVER_ENTRY = resolve(currentDir, '../../packages/server/dist/index.js');
 
-/**
- * Handle for a running server child process.
- */
 export interface RunningServer {
   /** Port the server is listening on. */
   port: number;
@@ -41,7 +38,6 @@ function listenOnce(port: number): Promise<ReturnType<typeof createServer>> {
   });
 }
 
-/** Close a throwaway server. */
 function closeOnce(srv: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((done) => {
     srv.close(() => done());
@@ -91,9 +87,7 @@ export async function getFreePort(attempts = 20): Promise<number> {
   );
 }
 
-/**
- * Poll until a WebSocket connection to the given port succeeds.
- */
+/** Poll until a WebSocket connection to the given port succeeds. */
 function waitForRelay(port: number, timeoutMs = 10000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
@@ -123,17 +117,13 @@ function waitForRelay(port: number, timeoutMs = 10000): Promise<void> {
   });
 }
 
-/**
- * Options for {@link startServer}.
- */
+/** Options for {@link startServer}. */
 export interface StartServerOptions {
   /** Extra environment variables for the child process (e.g. NOSTR_DB_PATH). */
   env?: Record<string, string>;
 }
 
-/**
- * Spawn the built relay server on a free port and wait until it accepts connections.
- */
+/** Spawn the built relay server on a free port and wait until it accepts connections. */
 export async function startServer(options: StartServerOptions = {}): Promise<RunningServer> {
   const port = await getFreePort();
   const child = spawn(process.execPath, [SERVER_ENTRY], {

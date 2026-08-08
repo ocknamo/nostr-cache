@@ -18,14 +18,12 @@ describe('Subscription Integration', () => {
     await testBase.setup();
   });
 
-  // Cleanup after each test
   afterEach(async () => {
     await testBase.teardown();
   });
 
   describe('Subscription Management', () => {
     it('should create subscriptions and store them', async () => {
-      // Create a subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
       // Verify subscription was created
@@ -47,7 +45,6 @@ describe('Subscription Integration', () => {
         { authors: ['test-author'] },
       ]);
 
-      // Verify both subscriptions were created
       const subscription1 = testBase.subscriptionManager.getSubscription('test-client', 'sub1');
       const subscription2 = testBase.subscriptionManager.getSubscription('test-client', 'sub2');
 
@@ -56,19 +53,16 @@ describe('Subscription Integration', () => {
       expect(subscription1?.id).toBe('sub1');
       expect(subscription2?.id).toBe('sub2');
 
-      // Verify client subscriptions
       const clientSubs = testBase.subscriptionManager.getClientSubscriptions('test-client');
       expect(clientSubs).toHaveLength(2);
     });
 
     it('should remove subscriptions on CLOSE message', async () => {
-      // Create a subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
       // Verify subscription exists
       expect(testBase.subscriptionManager.getSubscription('test-client', 'sub1')).toBeDefined();
 
-      // Close the subscription
       await testBase.messageHandler.handleMessage('test-client', ['CLOSE', 'sub1']);
 
       // Verify subscription was removed
@@ -76,10 +70,8 @@ describe('Subscription Integration', () => {
     });
 
     it('should replace subscriptions with same ID', async () => {
-      // Create a subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
-      // Replace it with new filter
       await testBase.messageHandler.handleMessage('test-client', [
         'REQ',
         'sub1',
@@ -124,10 +116,8 @@ describe('Subscription Integration', () => {
         2
       );
 
-      // Create first subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
-      // Create second subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub2', { kinds: [2] }]);
 
       // Try to create third subscription (should fail)
@@ -153,7 +143,6 @@ describe('Subscription Integration', () => {
 
   describe('Subscription Filtering', () => {
     it('should filter events based on subscription criteria', async () => {
-      // Create test events
       const event1 = await createTestEvent(undefined, {
         kind: 1,
       });
@@ -162,11 +151,9 @@ describe('Subscription Integration', () => {
         kind: 1000,
       });
 
-      // Store events
       await testBase.storage.saveEvent(event1);
       await testBase.storage.saveEvent(event2);
 
-      // Track events received by subscription
       const receivedEvents: string[] = [];
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'test-client' && msg[0] === NostrMessageType.EVENT) {
@@ -203,7 +190,6 @@ describe('Subscription Integration', () => {
         tags: [['e', 'ref2']],
       });
 
-      // Store all events
       await testBase.storage.saveEvent(event1);
       await testBase.storage.saveEvent(event2);
       await testBase.storage.saveEvent(event3);
@@ -233,11 +219,9 @@ describe('Subscription Integration', () => {
     });
 
     it('should send EOSE after delivering initial events', async () => {
-      // Store a test event
       const event = await createTestEvent();
       await testBase.storage.saveEvent(event);
 
-      // Track EOSE messages
       let eoseReceived = false;
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'test-client' && msg[0] === NostrMessageType.EOSE) {
@@ -245,18 +229,14 @@ describe('Subscription Integration', () => {
         }
       });
 
-      // Create subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
-      // Verify EOSE was sent
       expect(eoseReceived).toBe(true);
     });
 
     it('should deliver new matching events to existing subscriptions', async () => {
-      // Create subscription first
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
-      // Track events received by subscription
       const receivedEvents: string[] = [];
       testBase.messageHandler.onResponse((clientId, msg) => {
         if (clientId === 'test-client' && msg[0] === NostrMessageType.EVENT && msg[1] === 'sub1') {
@@ -268,7 +248,6 @@ describe('Subscription Integration', () => {
       // Wait a bit to ensure subscription is created
       await new Promise((r) => setTimeout(r, 50));
 
-      // Now publish a matching event
       const event = await createTestEvent(undefined, {
         kind: 1,
       });
@@ -282,10 +261,8 @@ describe('Subscription Integration', () => {
 
   describe('Performance', () => {
     it('should handle a large number of events', async () => {
-      // Create subscription
       await testBase.messageHandler.handleMessage('test-client', ['REQ', 'sub1', { kinds: [1] }]);
 
-      // Count received events
       let eventCount1 = 0;
       let eventCount2 = 0;
       testBase.messageHandler.onResponse((clientId, msg) => {

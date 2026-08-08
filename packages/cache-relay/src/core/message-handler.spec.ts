@@ -1,6 +1,4 @@
-/**
- * Tests for MessageHandler
- */
+/** Tests for MessageHandler */
 
 import type { Filter, NostrEvent, NostrWireMessage } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
@@ -16,7 +14,6 @@ import type { SubscriptionManager } from './subscription-manager.js';
 describe('MessageHandler', () => {
   const mockStorage = createMockStorage({ enforceLimit: vi.fn().mockResolvedValue(0) });
 
-  // Mock subscription manager
   const mockSubscriptionManager = {
     subscriptions: new Map(),
     clientSubscriptions: new Map(),
@@ -51,7 +48,6 @@ describe('MessageHandler', () => {
     });
   }
 
-  // Sample events
   const sampleEvent: NostrEvent = {
     content: 'sample',
     created_at: 1742660714,

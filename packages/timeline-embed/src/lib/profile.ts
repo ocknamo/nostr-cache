@@ -45,8 +45,6 @@ export interface Profile {
  * Control characters are stripped rather than rejected: a name is rendered on
  * one line, and a newline or a bidi override in it would let an author reshape
  * the card around their own text.
- *
- * @returns The cleaned value, or undefined when it is unusable
  */
 function readString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') {
@@ -65,8 +63,6 @@ function readString(value: unknown, maxLength: number): string | undefined {
  * `javascript:` is the obvious attack, but `data:` is excluded too: an
  * embedding page's CSP is not ours to assume, and a data URL is an easy way to
  * push a multi-megabyte payload into the DOM.
- *
- * @returns The URL, or undefined when it is missing, malformed or unsafe
  */
 function readImageUrl(value: unknown): string | undefined {
   const raw = readString(value, MAX_URL_LENGTH);
@@ -87,12 +83,7 @@ function readImageUrl(value: unknown): string | undefined {
   return url.href;
 }
 
-/**
- * Parse the `content` of a kind 0 event.
- *
- * @param content Raw JSON string from the event
- * @returns The recognised fields, or undefined when nothing usable was found
- */
+/** Parse the `content` of a kind 0 event. */
 export function parseProfileContent(content: string): Profile | undefined {
   let parsed: unknown;
   try {
@@ -136,8 +127,6 @@ export function parseProfileContent(content: string): Profile | undefined {
  *
  * Used both as the author name when no profile is available and as the label
  * on a reference chip.
- *
- * @param pubkey Hex pubkey (or event id)
  */
 export function shortPubkey(pubkey: string): string {
   return pubkey.length <= 16 ? pubkey : `${pubkey.slice(0, 8)}…${pubkey.slice(-8)}`;
@@ -149,9 +138,6 @@ export function shortPubkey(pubkey: string): string {
  * `display_name` is the field clients show most prominently, `name` is the
  * handle, and the shortened pubkey is what is left when neither was published
  * (or the profile has not arrived yet).
- *
- * @param pubkey Author's hex pubkey
- * @param profile Their profile, if one has been fetched
  */
 export function authorName(pubkey: string, profile?: Profile): string {
   return profile?.displayName ?? profile?.name ?? shortPubkey(pubkey);
@@ -161,9 +147,6 @@ export function authorName(pubkey: string, profile?: Profile): string {
  * The `@handle` to render next to the name, if there is one worth showing.
  *
  * Suppressed when it would merely repeat the displayed name.
- *
- * @param pubkey Author's hex pubkey
- * @param profile Their profile, if one has been fetched
  */
 export function authorHandle(pubkey: string, profile?: Profile): string | undefined {
   const handle = profile?.name;

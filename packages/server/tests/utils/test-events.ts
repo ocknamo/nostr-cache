@@ -1,17 +1,9 @@
-/**
- * テストイベント生成関数
- */
+/** テストイベント生成関数 */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
 import { seckeySigner } from '@rx-nostr/crypto';
 
-/**
- * Create a test event
- * @param seckey 秘密鍵（オプション）
- * @param overrides イベントのプロパティをオーバーライド
- * @returns NostrEvent object
- */
 export async function createTestEvent(
   seckey?: string,
   overrides: Omit<Partial<NostrEvent>, 'id' | 'pubkey' | 'sig'> = {}

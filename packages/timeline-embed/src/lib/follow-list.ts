@@ -4,8 +4,8 @@
  * The parsing is pure functions over an event, so the NIP-02 rules can be
  * tested without a DOM or a relay; `followFilterSource` is the thin adapter
  * that turns them into the `FilterSource` the controller calls between
- * connecting and subscribing. See `doc/plan/follow-timeline.md` §4 for why the
- * controller is deliberately left ignorant of all of this.
+ * connecting and subscribing. Teaching the controller about NIP-02 instead
+ * would mean every test of follow-list parsing had to boot a relay first.
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
@@ -17,8 +17,8 @@ import { fetchLatestReplaceable } from './one-shot-request.ts';
  * Follow-list entries put on the timeline REQ unless `max-follows` says fewer.
  *
  * A safety valve, not a tuning knob. Two real relays answered a 982-author
- * filter only ~10ms slower than a 500-author one (`doc/plan/follow-timeline.md`
- * §7.2), so a cap low enough to bite would drop a large share of someone's
+ * filter only ~10ms slower than a 500-author one when this was measured, so a
+ * cap low enough to bite would drop a large share of someone's
  * follows without making anything faster — it would just be the *wrong*
  * timeline. The remaining reasons to cap are client-side (Dexie materializing
  * every matching row before applying `limit`, serialized ingest) and still
@@ -34,10 +34,7 @@ const HEX64 = /^[0-9a-fA-F]{64}$/;
  * Defensive throughout, because this is upstream-supplied data that decides the
  * whole timeline: a tag that is not `["p", <hex>]` is skipped rather than
  * taking the list down with it. The relay hint and petname NIP-02 allows after
- * the pubkey are ignored — see `doc/plan/follow-timeline.md` §10.
- *
- * @param event The subject's kind 3 event
- * @returns Lowercase hex pubkeys, in the order the event lists them
+ * the pubkey are ignored.
  */
 export function parseFollowList(event: NostrEvent): string[] {
   if (event.kind !== 3) {
@@ -105,8 +102,8 @@ export interface FollowFilterSourceOptions {
    * Trades completeness for a narrower local query: a quiet follow list
    * produces an empty timeline, and the reader cannot tell "nobody posted" from
    * "the window cut it off". Goes on the timeline filter only — a `since` makes
-   * a filter ineligible for the freshness window (§8), which is the one thing
-   * the kind 3 fetch depends on.
+   * a filter ineligible for the freshness window, which is the one thing the
+   * kind 3 fetch depends on.
    */
   sinceSeconds?: number;
   /** Injectable so the `since` a spec sees is deterministic. */
@@ -122,7 +119,7 @@ export interface FollowFilterSourceOptions {
  * relays for the global feed, on behalf of a page whose author only wanted one
  * person's home timeline. An empty `authors` array is not sent either — this
  * repository alone interprets it three different ways, and every one of them
- * still forwards the REQ upstream (`doc/plan/follow-timeline.md` §6).
+ * still forwards the REQ upstream.
  */
 export function followFilterSource(options: FollowFilterSourceOptions): FilterSource {
   const now = options.now ?? (() => Math.floor(Date.now() / 1000));
@@ -166,8 +163,8 @@ export function followFilterSource(options: FollowFilterSourceOptions): FilterSo
     // The relay verifies signatures in the background, so the list that decided
     // this author set is still unverified. A forged kind 3 with a newer
     // created_at picks the entire population the reader sees, and the list is
-    // fetched once and never re-read (§10) — so without this, the relay
-    // detecting the forgery would not correct the screen.
+    // fetched once and never re-read — so without this, the relay detecting the
+    // forgery would not correct the screen.
     watchValidation(event.id, () =>
       setFollows({ status: 'dropped', count: authors.length, truncated })
     );

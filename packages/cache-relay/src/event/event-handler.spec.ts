@@ -1,6 +1,4 @@
-/**
- * Tests for EventHandler
- */
+/** Tests for EventHandler */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type Mocked, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +10,6 @@ import type { EventValidator } from './event-validator.js';
 describe('EventHandler', () => {
   const mockStorage = createMockStorage();
 
-  // Mock subscription manager
   const mockSubscriptionManager = {
     subscriptions: new Map(),
     clientSubscriptions: new Map(),
@@ -29,12 +26,10 @@ describe('EventHandler', () => {
     getSubscriptionKey: vi.fn(),
   } as unknown as Mocked<SubscriptionManager>;
 
-  // Mock event validator
   const mockEventValidator = {
     validate: vi.fn().mockReturnValue(true),
   } as unknown as Mocked<EventValidator>;
 
-  // Sample events
   const regularEvent: NostrEvent = {
     id: '123',
     pubkey: 'abc',

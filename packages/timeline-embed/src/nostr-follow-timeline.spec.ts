@@ -226,8 +226,8 @@ describe('<nostr-follow-timeline> custom element', () => {
     const element = mount({ pubkey: SUBJECT, 'db-name': dbName });
 
     // The kind 3 REQ is opened by the filter source, outside the controller's
-    // profile bookkeeping — design §4 names it as the one subscription none of
-    // the existing teardown paths would reach.
+    // profile bookkeeping — the one subscription none of the existing teardown
+    // paths would reach.
     const host = await acquireRelayHost({ dbName });
     seeded.push(host);
     const relay = host.relay as unknown as {
