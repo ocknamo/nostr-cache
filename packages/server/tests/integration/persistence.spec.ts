@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import type { NostrEvent } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 /** Connect and resolve once the socket is open. */
@@ -56,22 +57,24 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  const randomPort = () => Math.floor(Math.random() * 10000) + 9000;
+  // どのサーバーもワーカー専用帯からポートを確保して起動する（startRelayServer）
 
   it('keeps events across stop/restart when dbPath is set', async () => {
     const dbPath = join(dataDir, 'relay.db');
     const event = await createTestEvent();
 
     // 1st server: publish, then stop (must NOT clear the persistent storage)
-    const first = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
-    await first.start();
+    const { server: first } = await startRelayServer(
+      (p) => new NostrRelayServer({ port: p, storageOptions: { dbPath } })
+    );
     await publish(first.getPort(), event);
     expect(await first.getEventCount()).toBe(1);
     await first.stop();
 
     // 2nd server on the same database file: the event must still be there
-    const second = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
-    await second.start();
+    const { server: second } = await startRelayServer(
+      (p) => new NostrRelayServer({ port: p, storageOptions: { dbPath } })
+    );
     try {
       expect(await second.getEventCount()).toBe(1);
 
@@ -95,11 +98,13 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
 
     // 同一インスタンスの stop() → start() でも、閉じた DB が再オープンされ
     // データが保持されていること（既定モードとの lifecycle 対称性）
-    const server = new NostrRelayServer({ port: randomPort(), storageOptions: { dbPath } });
-    await server.start();
+    const { server } = await startRelayServer(
+      (p) => new NostrRelayServer({ port: p, storageOptions: { dbPath } })
+    );
     await publish(server.getPort(), event);
     await server.stop();
 
+    // 同一インスタンスの再起動なので、同じポートをそのまま bind し直す
     await server.start();
     try {
       expect(await server.getEventCount()).toBe(1);
@@ -111,8 +116,7 @@ describe('NostrRelayServer persistence (storageOptions.dbPath)', () => {
   it('clears events on stop in the default in-memory mode', async () => {
     const event = await createTestEvent();
 
-    const server = new NostrRelayServer({ port: randomPort() });
-    await server.start();
+    const { server } = await startRelayServer((p) => new NostrRelayServer({ port: p }));
     await publish(server.getPort(), event);
     expect(await server.getEventCount()).toBe(1);
     await server.stop();

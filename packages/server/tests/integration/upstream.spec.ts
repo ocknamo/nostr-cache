@@ -13,6 +13,7 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 function openClient(url: string): Promise<WebSocket> {
@@ -48,26 +49,31 @@ describe('NostrRelayServer upstream option', () => {
   let cachePort: number;
 
   beforeEach(async () => {
-    upstreamPort = Math.floor(Math.random() * 10000) + 20000;
-    cachePort = upstreamPort + 1;
+    // どちらもヘルスチェックを無効にしているので、消費するポートは 1 台 1 つ。
+    // 上流の URL を組み立てるのは上流のポートが確定してから。
+    ({ server: upstream, port: upstreamPort } = await startRelayServer(
+      (p) =>
+        new NostrRelayServer({
+          port: p,
+          storageOptions: { dbName: 'UpstreamRelayDb' },
+          healthCheck: { enabled: false },
+        }),
+      { portsPerRelay: 1 }
+    ));
 
-    upstream = new NostrRelayServer({
-      port: upstreamPort,
-      storageOptions: { dbName: 'UpstreamRelayDb' },
-      healthCheck: { enabled: false },
-    });
-    await upstream.start();
-
-    cache = new NostrRelayServer({
-      port: cachePort,
-      storageOptions: { dbName: 'CacheRelayDb' },
-      healthCheck: { enabled: false },
-      relay: {
-        upstreamRelays: [`ws://localhost:${upstreamPort}`],
-        upstreamEoseTimeout: 500,
-      },
-    });
-    await cache.start();
+    ({ server: cache, port: cachePort } = await startRelayServer(
+      (p) =>
+        new NostrRelayServer({
+          port: p,
+          storageOptions: { dbName: 'CacheRelayDb' },
+          healthCheck: { enabled: false },
+          relay: {
+            upstreamRelays: [`ws://localhost:${upstreamPort}`],
+            upstreamEoseTimeout: 500,
+          },
+        }),
+      { portsPerRelay: 1 }
+    ));
     // Give the cache relay a moment to establish its upstream connection.
     await delay(300);
   });

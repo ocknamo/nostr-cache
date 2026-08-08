@@ -10,6 +10,7 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 /**
@@ -106,9 +107,8 @@ describe('NostrRelayServer NIP-01 compliance', () => {
   let port: number;
 
   beforeEach(async () => {
-    port = Math.floor(Math.random() * 10000) + 9000;
-    server = new NostrRelayServer({ port });
-    await server.start();
+    // ワーカー専用帯から確保し、埋まっていれば別の枠で自動リトライして起動する
+    ({ server, port } = await startRelayServer((p) => new NostrRelayServer({ port: p })));
   });
 
   afterEach(async () => {
@@ -383,12 +383,9 @@ describe('NostrRelayServer NIP-01 compliance', () => {
 
   describe('subscription limit (rate limiting)', () => {
     it('should reject subscriptions beyond the configured maximum', async () => {
-      const limitedPort = Math.floor(Math.random() * 10000) + 20000;
-      const limitedServer = new NostrRelayServer({
-        port: limitedPort,
-        relay: { maxSubscriptions: 2 },
-      });
-      await limitedServer.start();
+      const { server: limitedServer, port: limitedPort } = await startRelayServer(
+        (p) => new NostrRelayServer({ port: p, relay: { maxSubscriptions: 2 } })
+      );
 
       try {
         const client = await connect(limitedPort);

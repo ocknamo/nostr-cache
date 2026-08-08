@@ -29,25 +29,66 @@ export interface RunningServer {
   stop: () => Promise<number | null>;
 }
 
-/**
- * Reserve a currently-free TCP port by briefly binding to port 0.
- */
-export function getFreePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
+/** Bind a throwaway server to `port` (0 = let the OS choose) and hand it back. */
+function listenOnce(port: number): Promise<ReturnType<typeof createServer>> {
+  return new Promise((resolveServer, reject) => {
     const srv = createServer();
-    srv.on('error', reject);
-    srv.listen(0, () => {
-      const address = srv.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      srv.close(() => {
-        if (port) {
-          resolvePort(port);
-        } else {
-          reject(new Error('Failed to acquire a free port'));
-        }
-      });
+    srv.once('error', reject);
+    srv.listen(port, () => {
+      srv.removeAllListeners('error');
+      resolveServer(srv);
     });
   });
+}
+
+/** Close a throwaway server. */
+function closeOnce(srv: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((done) => {
+    srv.close(() => done());
+  });
+}
+
+/**
+ * Reserve a currently-free TCP port by briefly binding to port 0.
+ *
+ * The spawned server consumes *two* ports: `PORT` for the WebSocket relay and,
+ * by default, `PORT + 1` for the health check endpoint. So the follow-on port is
+ * probed too and a busy one sends us back for another draw — otherwise the
+ * health endpoint silently fails to bind (the relay itself stays up, so the
+ * failure would go unnoticed until something actually queried `/health`).
+ */
+export async function getFreePort(attempts = 20): Promise<number> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const held: ReturnType<typeof createServer>[] = [];
+    try {
+      const first = await listenOnce(0);
+      held.push(first);
+
+      const address = first.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      if (!port) {
+        throw new Error('Failed to acquire a free port');
+      }
+
+      // Health check endpoint defaults to PORT + 1; make sure it is free too.
+      held.push(await listenOnce(port + 1));
+      return port;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      // Runs before the `return` above hands the number out, so the ports are
+      // released by the time the caller uses them.
+      await Promise.all(held.map(closeOnce));
+    }
+  }
+
+  // The ES2020 target has no `cause` option on Error; fold the reason into the message.
+  throw new Error(
+    `Failed to acquire a free port pair after ${attempts} attempts` +
+      ` (last error: ${lastError instanceof Error ? lastError.message : String(lastError)})`
+  );
 }
 
 /**

@@ -10,6 +10,7 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 /**
@@ -143,9 +144,8 @@ describe('NostrRelayServer performance', () => {
   let port: number;
 
   beforeEach(async () => {
-    port = Math.floor(Math.random() * 10000) + 40000;
-    server = new NostrRelayServer({ port });
-    await server.start();
+    // ワーカー専用帯から確保し、埋まっていれば別の枠で自動リトライして起動する
+    ({ server, port } = await startRelayServer((p) => new NostrRelayServer({ port: p })));
   });
 
   afterEach(async () => {

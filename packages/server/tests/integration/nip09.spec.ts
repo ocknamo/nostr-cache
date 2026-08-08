@@ -11,6 +11,7 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { getRandomSecret } from '@nostr-cache/shared';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 /**
@@ -113,10 +114,8 @@ describe('NostrRelayServer NIP-09 event deletion', () => {
   let port: number;
 
   beforeEach(async () => {
-    // ポート帯は spec ファイルごとに分けている（並列実行時の衝突回避）
-    port = Math.floor(Math.random() * 10000) + 50000;
-    server = new NostrRelayServer({ port });
-    await server.start();
+    // ワーカー専用帯から確保し、埋まっていれば別の枠で自動リトライして起動する
+    ({ server, port } = await startRelayServer((p) => new NostrRelayServer({ port: p })));
   });
 
   afterEach(async () => {
