@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DEFAULT_PROFILE_FRESHNESS } from '@nostr-cache/timeline-embed';
+  import { DEFAULT_PROFILE_FRESHNESS, type EventAction } from '@nostr-cache/timeline-embed';
   import { onMount } from 'svelte';
 
   interface Props {
@@ -34,15 +34,15 @@
    *
    * Display only, on purpose. The widget ships no actions of its own — it holds
    * no key and never writes to a relay — so these exist to show what the row
-   * looks like once an embedder declares one. This page declares them and
-   * listens for nothing: a press raises `nostr-timeline:action` (and a
-   * `postMessage` from the iframe) and stops there.
+   * looks like once an embedder declares one. Nothing here acts on a press: it
+   * raises `nostr-timeline:action` (and a `postMessage` from the iframe, which
+   * the height listener below drops as an unknown type) and stops there.
    *
    * Text icons rather than `material-icons`, which would have the widget inject
    * Google's stylesheet into this page — a third-party request the demo does not
    * otherwise make.
    */
-  const DEMO_ACTIONS = [
+  const DEMO_ACTIONS: EventAction[] = [
     { id: 'reply', label: '返信', icon: '💬' },
     { id: 'repost', label: 'リポスト', icon: '🔁' },
     { id: 'like', label: 'いいね', icon: '♡' },
@@ -180,7 +180,7 @@
       >このデモでは押しても何も起きません</strong
     >
     — 押下は <code>nostr-timeline:action</code> イベント（iframe なら
-    <code>postMessage</code>）で通知されるだけで、このページは受け取っていません。
+    <code>postMessage</code>）で通知されるだけで、このページはそれを使っていません。
   </p>
 
   <div class="modes">
