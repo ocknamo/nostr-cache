@@ -70,6 +70,16 @@ describe('Demo site action bar E2E', () => {
     return typeof raw === 'string' ? JSON.parse(raw) : raw;
   }
 
+  /** The Material Symbols variant the live `<nostr-timeline>` renders with. */
+  async function materialVariant(target: Page): Promise<string | null | undefined> {
+    return target.evaluate(() => {
+      const element = document.querySelector('nostr-timeline') as
+        | (Element & { materialIcons?: string })
+        | null;
+      return element?.materialIcons ?? element?.getAttribute('material-icons');
+    });
+  }
+
   it('gives the live widgets and the iframe the same buttons', async () => {
     page = await open();
 
@@ -86,12 +96,7 @@ describe('Demo site action bar E2E', () => {
     // The icons are Material Symbols ligature names, so the two examples only
     // look alike while both sides ask for the same variant: without it the
     // iframe would render the names as the words they are.
-    const variant = await page.evaluate(() => {
-      const element = document.querySelector('nostr-timeline') as
-        | (Element & { materialIcons?: string })
-        | null;
-      return element?.materialIcons ?? element?.getAttribute('material-icons');
-    });
+    const variant = await materialVariant(page);
     expect(variant).toBeTruthy();
     expect(iframeParams.get('material-icons')).toBe(variant);
 
@@ -106,7 +111,8 @@ describe('Demo site action bar E2E', () => {
     await page.fill('.follow-input input', FOLLOW_PUBKEY);
     await page.waitForSelector('nostr-follow-timeline', { timeout: TIMEOUT });
 
-    const actions = (await widgetActions(page, 'nostr-timeline')) as { id: string }[];
+    const actions = (await widgetActions(page, 'nostr-timeline')) as { id: string; icon: string }[];
+    const variant = await materialVariant(page);
     const snippets = await page.$$eval('.snippet code', (blocks) =>
       blocks.map((block) => block.textContent ?? '')
     );
@@ -118,12 +124,18 @@ describe('Demo site action bar E2E', () => {
       // The iframe snippet carries the list URL-encoded inside its `src`, the
       // other two write it inline as an HTML attribute. Decoding just that
       // parameter — rather than the whole snippet, which holds `%` signs of its
-      // own — leaves all three comparable on the ids.
+      // own — leaves all three comparable.
       const encoded = /[?&]actions=([^&"']+)/.exec(snippet);
       const declaration = encoded ? decodeURIComponent(encoded[1]) : snippet;
       for (const action of actions) {
         expect(declaration).toContain(`"id":"${action.id}"`);
+        // The icons matter as much as the ids: a snippet left on the old set
+        // hands the reader a card whose buttons are a different four.
+        expect(declaration).toContain(`"icon":"${action.icon}"`);
       }
+      // …and without the variant, those ligature names stay words. Quoted as an
+      // HTML attribute in two of the snippets, bare in the iframe's URL.
+      expect(/material-icons="?([\w-]+)"?/.exec(snippet)?.[1]).toBe(variant);
     }
   });
 });

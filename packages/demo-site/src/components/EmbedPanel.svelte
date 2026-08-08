@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { DEFAULT_PROFILE_FRESHNESS, type EventAction } from '@nostr-cache/timeline-embed';
+  import {
+    DEFAULT_PROFILE_FRESHNESS,
+    type EventAction,
+    type MaterialVariant,
+  } from '@nostr-cache/timeline-embed';
   import { onMount } from 'svelte';
 
   interface Props {
@@ -56,8 +60,11 @@
    * a shadow root's `@font-face` is ignored, so the font has to be registered on
    * the document — which is a third-party request the footnote below owns up to.
    * An embedder loading the font itself passes `material-icons-font="none"`.
+   *
+   * Typed, because a typo here costs more than it looks: the widget warns once
+   * and leaves every icon as the ligature name it is, in all six places at once.
    */
-  const MATERIAL_VARIANT = 'rounded';
+  const MATERIAL_VARIANT: MaterialVariant = 'rounded';
   /**
    * What actually reaches the widgets: a JSON string, not the array.
    *
@@ -320,13 +327,15 @@
 
   <p class="footnote">
     <code>material-icons</code> を付けると、ウィジェットが Material Symbols のスタイルシートを
-    <strong>Google Fonts から</strong> <code>document.head</code> に 1 回だけ読み込みます
+    <strong>Google Fonts から</strong> <code>document.head</code> に読み込みます
     （Shadow DOM 内の <code>@font-face</code> はどのブラウザでも無視されるため、ウィジェット内部だけで
-    完結できません）。<strong>閲覧者の IP アドレスが Google に渡る第三者リクエスト</strong>なので、
+    完結できません）。読み込みは document ごとに 1 回で、このページでは本体と上の iframe の
+    2 回です。<strong>閲覧者の IP アドレスが Google に渡る第三者リクエスト</strong>なので、
     避けたい場合はフォントを自前で読み込んだうえで <code>material-icons-font="none"</code> を
     指定するか、<code>icon</code> に絵文字などの文字を書いて <code>material-icons</code>
     を外してください。フォントが届くまでの間、アイコンは <code>favorite</code>
-    のようなアイコン名の文字列として表示されます。
+    のようなアイコン名の文字列として表示されます
+    （拡張機能や CSP で読み込みが遮断された場合は、その表示のままになります）。
   </p>
 
   <p class="footnote">
