@@ -13,6 +13,7 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { NostrRelayServer } from '../../src/nostr-relay-server.js';
+import { startRelayServer } from '../utils/free-port.js';
 import { createTestEvent } from '../utils/test-events.js';
 
 function openClient(url: string): Promise<WebSocket> {
@@ -48,27 +49,31 @@ describe('NostrRelayServer upstream option', () => {
   let cachePort: number;
 
   beforeEach(async () => {
-    // 両サーバーともポート 0（OS 任せ）で起動し、実ポートを読み戻す。
-    // 上流の URL を組み立てるのは上流が起動して実ポートが確定してから。
-    upstream = new NostrRelayServer({
-      port: 0,
-      storageOptions: { dbName: 'UpstreamRelayDb' },
-      healthCheck: { enabled: false },
-    });
-    await upstream.start();
-    upstreamPort = upstream.getPort();
+    // どちらもヘルスチェックを無効にしているので、消費するポートは 1 台 1 つ。
+    // 上流の URL を組み立てるのは上流のポートが確定してから。
+    ({ server: upstream, port: upstreamPort } = await startRelayServer(
+      (p) =>
+        new NostrRelayServer({
+          port: p,
+          storageOptions: { dbName: 'UpstreamRelayDb' },
+          healthCheck: { enabled: false },
+        }),
+      { portsPerRelay: 1 }
+    ));
 
-    cache = new NostrRelayServer({
-      port: 0,
-      storageOptions: { dbName: 'CacheRelayDb' },
-      healthCheck: { enabled: false },
-      relay: {
-        upstreamRelays: [`ws://localhost:${upstreamPort}`],
-        upstreamEoseTimeout: 500,
-      },
-    });
-    await cache.start();
-    cachePort = cache.getPort();
+    ({ server: cache, port: cachePort } = await startRelayServer(
+      (p) =>
+        new NostrRelayServer({
+          port: p,
+          storageOptions: { dbName: 'CacheRelayDb' },
+          healthCheck: { enabled: false },
+          relay: {
+            upstreamRelays: [`ws://localhost:${upstreamPort}`],
+            upstreamEoseTimeout: 500,
+          },
+        }),
+      { portsPerRelay: 1 }
+    ));
     // Give the cache relay a moment to establish its upstream connection.
     await delay(300);
   });

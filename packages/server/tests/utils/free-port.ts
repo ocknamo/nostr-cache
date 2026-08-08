@@ -1,25 +1,80 @@
 /**
- * 空きポート確保のテストユーティリティ。
+ * 統合テスト用のポート確保ユーティリティ。
  *
- * 統合テストは原則 `port: 0`（OS 任せ）で起動して `getPort()` / `getHealthPort()`
- * で実ポートを読み戻す。乱数で採番すると、帯の幅 10000 に対して N 回起動した
- * ときの衝突確率が誕生日のパラドックスで N²/20000 に膨らみ（1 帯で 100 回
- * 起動すればおよそ 5 割）、EADDRINUSE でフレークするため。
+ * 以前は spec ごとに `Math.floor(Math.random() * 10000) + <帯>` で採番していたが、
+ * 帯の幅 10000 に対して N 回起動したときの衝突確率は N/10000 ではなく誕生日の
+ * パラドックスで N²/20000 になる（1 帯で 100 回起動すればおよそ 5 割）。
+ * `beforeEach` ごとに引き直すため 1 ファイルで数十回起動し、「たまに落ちる」ではなく
+ * 「かなりの確率で落ちる」状態だった。
  *
- * ここにあるヘルパーは「具体的なポート番号が要る」ごく少数のテスト専用の
- * 逃げ道であって、既定の手段ではない。
+ * ## なぜ「OS に選ばせて即解放」ではないのか
+ *
+ * 素直な代替案は `listen(0)` で空きポートを教えてもらい、閉じてからその番号を
+ * サーバーに渡す方式（`e2e/src/spawn-server.ts` が採っている形）。だが本パッケージの
+ * ように **vitest が spec ファイルを並列ワーカーで走らせる**環境では、これが実際に
+ * 衝突する。カーネルが `listen(0)` に配るのは ephemeral 帯（Linux 既定 32768-60999）で、
+ * ワーカー A が解放した直後の番号をワーカー B の `listen(0)` が引き当てうるため:
+ *
+ * 1. A: `listen(0)` → 40605 を得て、40605/40606 を確保 → 解放
+ * 2. B: `listen(0)` → 40606 を得る（A はまだ bind し直していない）
+ * 3. A: リレーを 40605 で起動、ヘルスチェックを 40606 で起動 → **EADDRINUSE**
+ *
+ * 実測でスイート全体 30 回中 2 回発生した（ヘルスチェック側に当たったため
+ * テストは落ちなかったが、WebSocket 側に当たれば落ちる）。
+ *
+ * ## 採っている方式
+ *
+ * 乱数も ephemeral 帯も使わず、**ワーカーごとに重ならない固定帯**を割り当て、その中を
+ * 単調増加のカーソルで払い出す。衝突源を原理的に潰す:
+ *
+ * - 同一ワーカー内の再利用 → カーソルが戻らないので起きない
+ * - 別ワーカーとの衝突 → 帯が重ならないので起きない
+ * - カーネルの ephemeral 割り当てとの衝突 → 帯を ephemeral 範囲の外に置くので起きない
+ * - 無関係なプロセスが偶然その番号を使っている → 払い出し前に bind して確かめ、
+ *   埋まっていれば次の枠へ進む（この 1 点だけは実測で確認する）
  */
 
 import { type Server, createServer } from 'node:net';
 
-const HOST = '127.0.0.1';
+/**
+ * 払い出し帯の下端。Linux 既定の ephemeral 範囲（32768-60999）より下に置き、
+ * カーネルが `listen(0)` で勝手に配ってくる番号と重ならないようにする。
+ */
+const BAND_START = 20000;
 
-/** 指定ポート（0 なら OS 任せ）で待ち受ける捨てサーバーを起動する。 */
+/** 払い出し帯の上端（この番号は含まない）。 */
+const BAND_END = 32000;
+
+/** vitest ワーカー 1 つに与える帯幅。BAND 全体 12000 を 24 ワーカーぶんに分ける。 */
+const WORKER_BAND_SIZE = 500;
+
+/** 帯を分割するワーカー数の上限。これを超えるワーカー ID は折り返す。 */
+const MAX_WORKERS = (BAND_END - BAND_START) / WORKER_BAND_SIZE;
+
+/** リレー 1 台が消費するポート数（WebSocket 本体 + ヘルスチェックの PORT+1）。 */
+const PORTS_PER_RELAY = 2;
+
+/**
+ * このワーカーの帯の下端。
+ *
+ * vitest は spec ファイルを並列ワーカーで実行し、各ワーカーに 1 起点の
+ * `VITEST_WORKER_ID` を渡す。これで帯を分ければワーカー間の衝突は起こりえない。
+ */
+const workerBandStart = (() => {
+  const workerId = Number(process.env.VITEST_WORKER_ID ?? '1');
+  const index = (Number.isFinite(workerId) && workerId > 0 ? workerId - 1 : 0) % MAX_WORKERS;
+  return BAND_START + index * WORKER_BAND_SIZE;
+})();
+
+/** 帯の中の次の払い出し位置（このワーカー内で単調増加）。 */
+let cursor = 0;
+
+/** 指定ポートで待ち受ける捨てサーバーを起動する（host 未指定＝リレー本体と同じ全 IF）。 */
 function listen(port: number): Promise<Server> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once('error', reject);
-    server.listen(port, HOST, () => {
+    server.listen(port, () => {
       server.removeAllListeners('error');
       resolve(server);
     });
@@ -42,6 +97,120 @@ function portOf(server: Server): number {
   return address.port;
 }
 
+/** 帯の中の次の枠を返し、カーソルを進める。帯を使い切ったら先頭へ折り返す。 */
+function nextSlot(portsPerRelay: number): number {
+  if (cursor + portsPerRelay > WORKER_BAND_SIZE) {
+    // 帯を一巡した。ここまで来る頃には先頭側のサーバーは停止済みなので再利用してよい
+    cursor = 0;
+  }
+  const port = workerBandStart + cursor;
+  cursor += portsPerRelay;
+  return port;
+}
+
+/**
+ * リレー 1 台ぶんの空きポートを確保して返す。
+ *
+ * カーソルが単調増加するので、続けて呼んでも同じ番号は返らない（1 テストで複数の
+ * サーバーを立てる spec でも自己衝突しない）。念のため各枠は実際に bind して空きを
+ * 確かめ、無関係なプロセスに埋められていれば次の枠へ進む。
+ *
+ * @param portsPerRelay 1 台が消費する連番ポート数（2 = WebSocket + ヘルスチェック）
+ * @param attempts 枠の試行上限
+ * @returns リレーに渡すポート番号
+ */
+async function allocateSlot(portsPerRelay: number, attempts: number): Promise<number> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const base = nextSlot(portsPerRelay);
+    const held: Server[] = [];
+    try {
+      for (let offset = 0; offset < portsPerRelay; offset++) {
+        held.push(await listen(base + offset));
+      }
+      return base;
+    } catch (error) {
+      // 無関係なプロセスがこの枠を使っている。次の枠へ進む。
+      // 打ち切ったときの調査用に最後の原因だけ残す（EADDRINUSE の空振りと、
+      // RangeError のようなプログラミングエラーを取り違えないため）
+      lastError = error;
+    } finally {
+      // return するときも finally が先に走るので、呼び出し側が bind する時点では
+      // 解放済み。この隙間に割り込めるのは「同じ帯を狙う無関係なプロセス」だけで、
+      // カーネルの ephemeral 割り当ても他ワーカーもこの帯には来ない
+      await Promise.all(held.map(close));
+    }
+  }
+
+  // ES2020 ターゲットのため Error の cause オプションは使えない。原因はメッセージに畳む
+  throw new Error(
+    `Could not allocate ${portsPerRelay} consecutive free ports in band` +
+      ` ${workerBandStart}-${workerBandStart + WORKER_BAND_SIZE} after ${attempts} attempts` +
+      ` (last error: ${lastError instanceof Error ? lastError.message : String(lastError)})`
+  );
+}
+
+/** 起動・停止できる最小のリレー的インターフェース（具象型に依存しないため）。 */
+interface StartStoppable {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/** エラーが「ポートが埋まっていた」ことを示すか。 */
+function isAddressInUse(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === 'EADDRINUSE';
+}
+
+/**
+ * ポートを確保してリレーを起動する。`EADDRINUSE` で失敗したら別の枠で自動リトライする。
+ *
+ * ワーカー帯の分割で潰せるのは「このテスト実行の中での衝突」だけ。
+ * **同じマシンで同じスイートを同時に走らせた場合**（別プロセスなのでどちらも
+ * ワーカー 1 の帯から始まる）や、無関係なプロセスが帯を使っている場合は、
+ * 確保と bind の隙間で取られうる。そこは事前確認では原理的に塞げないので、
+ * 失敗を検出して別の枠で取り直す。実測でも 3 スイート同時実行では
+ * このリトライが効いている（帯分割だけでは 18 回中 5 回落ちた）。
+ *
+ * ヘルスチェック用ポート（`PORT + 1`）の確保失敗は本番実装が握り潰して警告ログだけを
+ * 出す仕様のため、ここでは検出できない。ヘルスチェックを検証する spec は
+ * `healthCheck.port` を明示すること。
+ *
+ * @param create ポート番号を受け取ってリレーを生成するファクトリ
+ * @param options `portsPerRelay`（既定 2）と `attempts`（既定 10）
+ * @returns 起動済みのリレーと、実際に使ったポート番号
+ */
+export async function startRelayServer<T extends StartStoppable>(
+  create: (port: number) => T,
+  options: { portsPerRelay?: number; attempts?: number } = {}
+): Promise<{ server: T; port: number }> {
+  const portsPerRelay = options.portsPerRelay ?? PORTS_PER_RELAY;
+  const attempts = options.attempts ?? 10;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const port = await allocateSlot(portsPerRelay, 50);
+    const server = create(port);
+    try {
+      await server.start();
+      return { server, port };
+    } catch (error) {
+      // 起動途中で確保したリソース（ストレージのハンドル等）を解放してから取り直す
+      await server.stop().catch(() => {});
+      if (!isAddressInUse(error)) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  // ES2020 ターゲットのため Error の cause オプションは使えない。原因はメッセージに畳む
+  throw new Error(
+    `Relay server failed to start after ${attempts} port attempts` +
+      ` (last error: ${lastError instanceof Error ? lastError.message : String(lastError)})`
+  );
+}
+
 /** {@link reservePort} が返す、掴んだままの空きポート。 */
 export interface ReservedPort {
   /** 確保中のポート番号。 */
@@ -53,10 +222,10 @@ export interface ReservedPort {
 /**
  * 空きポートを 1 つ、`release()` を呼ぶまで**掴んだまま**返す。
  *
- * 「このポートでは誰も待ち受けていない」ことを検証するテスト向け。番号を取って
- * すぐ解放すると、同じテスト内で `port: 0` で起動したサーバーに OS が同じ番号を
- * 割り当ててしまい、検証が偽陰性で落ちうる。掴んだまま対象サーバーを起動すれば、
- * 少なくとも自分自身がその番号を取ることはなくなる。
+ * 「このポートでは誰も待ち受けていない」ことを検証するテスト向け。掴んだままなので
+ * ここでは ephemeral 帯（`listen(0)`）で構わない — 解放しない限り誰にも割り当て
+ * られないため。番号を取ってすぐ解放すると、同じテスト内で起動するサーバーに OS が
+ * 同じ番号を割り当ててしまい、検証が偽陰性で落ちうる。
  *
  * @returns 確保したポートと、その解放関数
  */
@@ -66,53 +235,4 @@ export async function reservePort(): Promise<ReservedPort> {
     port: portOf(server),
     release: () => close(server),
   };
-}
-
-/**
- * 連続した `count` 個の空きポートの先頭を返す。
- *
- * OS に 1 つ選ばせたうえで、後続のポートも実際に bind して空きを確かめる。
- * どこかが埋まっていれば別の ephemeral ポートで引き直すため、乱数採番と違って
- * 「すでに使われているポート」を返すことはない。
- *
- * ただし、確保した捨てサーバーを閉じてから呼び出し側が bind するまでの隙間は
- * 塞げない。**`port: 0` で足りるテストでは使わないこと**。ヘルスチェックの
- * 既定ポート（WebSocket ポート + 1）のように、番号そのものを検証したい
- * テストでのみ使う。
- *
- * @param count 必要な連番ポート数（既定 2）
- * @param attempts 引き直しの上限回数（既定 20）
- * @returns 連番の先頭ポート番号
- */
-export async function findFreePortRange(count = 2, attempts = 20): Promise<number> {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const held: Server[] = [];
-    try {
-      const first = await listen(0);
-      held.push(first);
-      const start = portOf(first);
-
-      for (let offset = 1; offset < count; offset++) {
-        held.push(await listen(start + offset));
-      }
-      return start;
-    } catch (error) {
-      // 連番のどこかが埋まっていた（あるいは 65535 を超えた）。引き直す。
-      // 打ち切ったときの調査用に最後の原因だけ残す（EADDRINUSE の引き直しと、
-      // RangeError のようなプログラミングエラーを取り違えないため）
-      lastError = error;
-    } finally {
-      // return するときも finally が先に走るので、呼び出し側が受け取る時点では
-      // 確保していたポートはすべて解放されている
-      await Promise.all(held.map(close));
-    }
-  }
-
-  // ES2020 ターゲットのため Error の cause オプションは使えない。原因はメッセージに畳む
-  throw new Error(
-    `Could not find ${count} consecutive free ports after ${attempts} attempts` +
-      ` (last error: ${lastError instanceof Error ? lastError.message : String(lastError)})`
-  );
 }

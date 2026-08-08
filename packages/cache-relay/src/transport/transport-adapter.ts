@@ -60,22 +60,6 @@ export interface TransportAdapter {
   getConnectionCount(): number;
 
   /**
-   * Return the port this transport is actually listening on.
-   *
-   * Transports that bind a real socket should read the port off the live
-   * server, so that starting with port 0 (let the OS pick a free port) can be
-   * resolved back to the concrete port by the caller. This is the only
-   * collision-free way to pick a port; guessing one and hoping it is free
-   * races with every other process on the machine.
-   *
-   * Optional: transports with no network port (e.g. the browser emulator) omit
-   * it, and callers should treat that as "no port".
-   *
-   * @returns The bound port, or null when not listening / not applicable
-   */
-  getBoundPort?(): number | null;
-
-  /**
    * Return the original `WebSocket` constructor for transports that replace the
    * global one (i.e. the browser emulator). The upstream relay connector uses
    * this to reach real relays without going through the patched global — which

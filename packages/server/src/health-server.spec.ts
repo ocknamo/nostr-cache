@@ -64,21 +64,6 @@ describe('HealthServer', () => {
     expect(wrongMethod.status).toBe(404);
   });
 
-  it('falls back to a dynamic port when the WebSocket port is dynamic', async () => {
-    // wsPort が 0（OS 任せ）のとき、既定の "+1" は 1（特権ポート）になり確保
-    // できない。そのケースではヘルスチェックも 0 で listen する。
-    server = new HealthServer(undefined, 0, undefined, okSnapshot);
-    await server.start();
-
-    const port = server.getBoundPort();
-    expect(port).not.toBeNull();
-    expect(port).toBeGreaterThan(1);
-
-    const response = await fetch(`http://localhost:${port}/health`);
-    expect(response.status).toBe(200);
-    await response.text();
-  });
-
   it('does not listen when disabled', async () => {
     server = new HealthServer({ enabled: false, port: 0 }, 8008, undefined, okSnapshot);
     await server.start();

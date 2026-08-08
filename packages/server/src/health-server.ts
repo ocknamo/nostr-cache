@@ -15,9 +15,7 @@ import { logger } from '@nostr-cache/shared';
 export interface HealthCheckOptions {
   // ヘルスチェックを有効にするか（デフォルト: true）
   enabled?: boolean;
-  // ヘルスチェック用 HTTP ポート（デフォルト: WebSocket ポート + 1。ただし
-  // WebSocket ポートが 0（OS 任せ）のときは同じく 0）。0 を指定した場合の
-  // 実ポートは getBoundPort() で取得する
+  // ヘルスチェック用 HTTP ポート（デフォルト: WebSocket ポート + 1）
   port?: number;
   // ヘルスチェックのパス（デフォルト: '/health'）
   path?: string;
@@ -49,7 +47,7 @@ export class HealthServer {
 
   /**
    * @param options ヘルスチェック設定（未指定なら既定で有効）
-   * @param wsPort WebSocket ポートの設定値。既定ポート（+1）の導出に使う
+   * @param wsPort WebSocket ポート。既定ポート（+1）の導出に使う
    * @param host バインドするホスト
    * @param snapshot 現在の稼働状況スナップショットを返すコールバック
    */
@@ -72,17 +70,10 @@ export class HealthServer {
   /**
    * ヘルスチェック用ポートを取得（デフォルトは WebSocket ポート + 1）
    *
-   * WebSocket 側が動的ポート（0 = OS 任せ）のときは「+1」を使わない。0 + 1 = 1 は
-   * 特権ポートで確保できないうえ、OS が割り当てた実ポートの隣が空いている保証も
-   * ないため、ヘルスチェックも同じく OS に選ばせる（実ポートは getBoundPort()）。
-   *
    * @returns ヘルスチェック用ポート番号
    */
   private getPort(): number {
-    if (this.options?.port !== undefined) {
-      return this.options.port;
-    }
-    return this.wsPort === 0 ? 0 : this.wsPort + 1;
+    return this.options?.port ?? this.wsPort + 1;
   }
 
   /**

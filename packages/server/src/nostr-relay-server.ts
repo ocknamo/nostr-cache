@@ -20,8 +20,6 @@ import { createStorage } from './storage.js';
  */
 interface NostrRelayServerOptions {
   // サーバー設定
-  // 0 を指定すると OS が空きポートを割り当てる。実際のポートは start() 後に
-  // getPort() で読み戻せる（テストなど、ポート衝突を避けたい場合に使う）
   port: number;
   host?: string;
 
@@ -156,8 +154,7 @@ export class NostrRelayServer {
     }
     await this.relay.connect();
     await this.healthServer.start();
-    // 設定値ではなく実際にバインドされたポートを出す（port: 0 のとき 0 と出ないように）
-    logger.info(`Nostr relay server started on port ${this.getPort()}`);
+    logger.info(`Nostr relay server started on port ${this.options.port}`);
   }
 
   /**
@@ -211,13 +208,10 @@ export class NostrRelayServer {
   /**
    * サーバーが使用しているポート番号を取得
    *
-   * 設定値ではなく実際にバインドされたポートを返すため、`port: 0`（OS に空き
-   * ポートを選ばせる）でも起動後に実ポートが取れる。未起動の間は設定値を返す。
-   *
    * @returns ポート番号
    */
   getPort(): number {
-    return this.server.getBoundPort?.() ?? this.options.port;
+    return this.options.port;
   }
 
   /**
