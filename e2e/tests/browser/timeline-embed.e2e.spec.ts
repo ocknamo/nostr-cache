@@ -583,6 +583,78 @@ describe('Embeddable timeline E2E', () => {
     expect(await tooltips()).toEqual([]);
   });
 
+  it('caps a long post and scrolls it inside its own card', async () => {
+    // Long enough to fill several screens on its own, which is the thing the
+    // cap exists for: one post like this used to push everything else out of
+    // the timeline.
+    const long = Array.from({ length: 80 }, (_, line) => `${line + 1} 行目のとても長い本文`).join(
+      '\n'
+    );
+    const events = await Promise.all([
+      createTestEvent(getRandomSecret(), { content: long, created_at: 1_700_000_300 }),
+      createTestEvent(undefined, { content: 'みじかい投稿', created_at: 1_700_000_200 }),
+    ]);
+    const disposable = await startMockUpstreamRelay(events);
+    try {
+      page = await browser.newPage({ viewport: { width: 360, height: 900 } });
+      await page.goto(
+        embedUrl({
+          relays: disposable.url,
+          actions: JSON.stringify([{ id: 'reply', label: '返信', icon: '💬' }]),
+        })
+      );
+      await waitForEventCount(page, 2);
+
+      const cards = await page.$$eval('nostr-timeline .event-card', (nodes) =>
+        nodes.map((card) => {
+          const note = card.querySelector('.note') as HTMLElement;
+          const header = card.querySelector('header') as HTMLElement;
+          const bar = card.querySelector('.actions') as HTMLElement;
+          const box = card.getBoundingClientRect();
+          return {
+            height: Math.round(box.height),
+            scrolls: note.scrollHeight - note.clientHeight > 1,
+            tabindex: note.getAttribute('tabindex'),
+            faded: note.classList.contains('overflowing'),
+            headerInside: header.getBoundingClientRect().top >= box.top - 1,
+            actionsInside: bar.getBoundingClientRect().bottom <= box.bottom + 1,
+          };
+        })
+      );
+
+      // The whole post, padding included: --nt-card-max-height is a border-box
+      // height, so the number an embedder writes is the height they get.
+      expect(cards[0].height).toBe(420);
+      expect(cards[0].scrolls).toBe(true);
+      // The parts that must not scroll away with the body.
+      expect(cards[0].headerInside).toBe(true);
+      expect(cards[0].actionsInside).toBe(true);
+      // WCAG 2.1.1: the scroll area is reachable without a pointer, and the
+      // bottom fade says there is more below.
+      expect(cards[0].tabindex).toBe('0');
+      expect(cards[0].faded).toBe(true);
+
+      // A post that fits is untouched — no cap artefacts, no stray tab stop.
+      expect(cards[1].height).toBeLessThan(420);
+      expect(cards[1].scrolls).toBe(false);
+      expect(cards[1].tabindex).toBeNull();
+      expect(cards[1].faded).toBe(false);
+
+      // The long post scrolls inside its own box rather than moving the page.
+      const scrolled = await page.$eval('nostr-timeline .note', (note) => {
+        note.scrollTop = note.scrollHeight;
+        return {
+          scrollTop: note.scrollTop,
+          pageScrolled: window.scrollY,
+        };
+      });
+      expect(scrolled.scrollTop).toBeGreaterThan(0);
+      expect(scrolled.pageScrolled).toBe(0);
+    } finally {
+      await disposable.close();
+    }
+  });
+
   it('keeps a small top gap and fades what the relay has not validated yet', async () => {
     page = await browser.newPage();
     await page.goto(embedUrl({ relays: upstream.url }));

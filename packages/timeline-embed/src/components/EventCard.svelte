@@ -141,6 +141,58 @@
     };
   }
 
+  /**
+   * Whether the note is taller than the cap, and whether it is scrolled to the
+   * bottom.
+   *
+   * Both are measured rather than assumed: a card only becomes a scroll area
+   * when its note actually overflows, and until then it must not pick up a tab
+   * stop (one per card, on a 50-card timeline) or the bottom fade.
+   */
+  let noteOverflowing = $state(false);
+  let noteAtEnd = $state(false);
+
+  /**
+   * Track the note's overflow, so the box can announce itself as a scroll area
+   * only while it is one.
+   *
+   * Watched with a `ResizeObserver` because a note grows after first paint: an
+   * attached image has no height until it loads, and a profile arriving turns a
+   * short npub into a name. Where the observer is missing (jsdom) the note stays
+   * a plain box — the cap still clips it, it just gets no keyboard affordance,
+   * which is the safe way round.
+   */
+  function watchOverflow(node: HTMLElement) {
+    const measure = () => {
+      // A sub-pixel line box rounds the two apart on a note that fits, so a
+      // whole pixel is the smallest difference worth calling an overflow.
+      noteOverflowing = node.scrollHeight - node.clientHeight > 1;
+      noteAtEnd = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+    };
+
+    measure();
+    node.addEventListener('scroll', measure, { passive: true });
+
+    if (typeof ResizeObserver === 'undefined') {
+      return {
+        destroy: () => node.removeEventListener('scroll', measure),
+      };
+    }
+    // The box itself for a resized embed, the content for a note that grew
+    // inside it — neither alone catches both.
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    for (const child of node.children) {
+      observer.observe(child);
+    }
+    return {
+      destroy: () => {
+        observer.disconnect();
+        node.removeEventListener('scroll', measure);
+      },
+    };
+  }
+
   const name = $derived(authorName(event.pubkey, profile));
   const handle = $derived(authorHandle(event.pubkey, profile));
   const refs = $derived(parseRefs(event));
@@ -322,7 +374,32 @@
         {/each}
       </ul>
     {/if}
-    <NoteContent content={event.content} {showMedia} {profiles} />
+    <!--
+      The note, and the only part of the card that scrolls.
+
+      A single very long post used to fill the whole timeline; now the card is
+      capped (--nt-card-max-height) and the overflow is scrolled here, so the
+      header, the reference chips and the action row all stay put while the
+      body moves under them.
+
+      The scroll area is only announced as one — labelled, and reachable by
+      keyboard — while it actually overflows: WCAG 2.1.1 asks for a scrollable
+      region to be operable without a mouse, but an unconditional tab stop
+      would put one on every card in the list. The rule below flags exactly
+      that pattern, which is the one WCAG asks for here.
+    -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="note"
+      class:overflowing={noteOverflowing}
+      class:at-end={noteAtEnd}
+      role={noteOverflowing ? 'region' : undefined}
+      tabindex={noteOverflowing ? 0 : undefined}
+      aria-label={noteOverflowing ? '投稿本文（スクロールできます）' : undefined}
+      use:watchOverflow
+    >
+      <NoteContent content={event.content} {showMedia} {profiles} />
+    </div>
   </div>
   <!--
     The embedder's buttons. Nothing is rendered unless they asked for some, so a
@@ -373,6 +450,30 @@
     /* One column until an avatar is asked for, so hiding avatars closes the
        gutter instead of leaving the text indented. */
     grid-template-columns: 1fr;
+    /*
+     * One long post must not take the whole timeline: past this height the
+     * note scrolls inside the card instead of pushing every other post off
+     * the screen. Set --nt-card-max-height to `none` to go back to cards that
+     * are as tall as their content.
+     *
+     * The row holding the note is minmax(0, 1fr) so it is the part that gives
+     * up height when the cap bites — an `auto` row refuses to shrink below its
+     * content, which leaves the note at full height and the card overflowing
+     * past the cap (measured, not guessed). With an indefinite height there is
+     * no free space to distribute, so a card that fits stays exactly as tall
+     * as its content.
+     *
+     * Only that one row is declared. The action row is left implicit (`auto`),
+     * so it keeps its own height — it is the last thing a reader should have to
+     * scroll to reach — and a card without actions gets no second track, and so
+     * no row gap under a note that has nothing below it.
+     *
+     * border-box so the cap means the height of the whole post, padding
+     * included, rather than 420px plus whatever --nt-card-padding is.
+     */
+    box-sizing: border-box;
+    max-height: var(--nt-card-max-height, 420px);
+    grid-template-rows: minmax(0, 1fr);
     gap: var(--nt-avatar-gap, 10px);
     padding: var(--nt-card-padding, 10px 12px);
     background: var(--nt-card-bg, transparent);
@@ -413,6 +514,57 @@
      unbroken content push the card wider than the embed. */
   .body {
     min-width: 0;
+    /* Column flex so the header and the reference chips keep their height and
+       the note absorbs whatever the card's cap leaves. min-height for the same
+       reason as min-width: without it this item refuses to shrink below its
+       content and the cap above has nothing to act on. */
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .note {
+    /* How much of the bottom edge the fade below covers. Unprefixed because it
+       is internal to this card, not part of the --nt-* API. */
+    --note-fade: 28px;
+    /* The one scrolling box in the card. It takes the space the header and the
+       chips leave, and scrolls once its content no longer fits. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* Horizontal overflow is already impossible (everything inside wraps or
+       breaks); saying so keeps a stray wide child from adding a second bar. */
+    overflow-x: hidden;
+    /* Reaching the end of a note should carry on scrolling the timeline, the
+       way a nested scroll area in a Nostr client does — `contain` here would
+       stop the wheel dead on every long post. */
+    overscroll-behavior-y: auto;
+    /* Tabbing to a link near the bottom scrolls it into view; without this the
+       browser would stop with it half under the fade. */
+    scroll-padding-bottom: var(--note-fade);
+  }
+
+  /*
+   * A hint that there is more note below.
+   *
+   * A mask rather than an overlaid gradient: it is painted in the box's own
+   * coordinates, so it stays at the bottom edge while the content scrolls
+   * under it, and it needs no extra element to hang off. It lifts at the end
+   * of the note, where fading the last line would just look like a rendering
+   * bug. Overlay scrollbars (macOS, touch) are invisible until a scroll
+   * starts, so without this a capped note gives no sign it was cut.
+   */
+  .note.overflowing:not(.at-end) {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--note-fade)), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--note-fade)), transparent);
+  }
+
+  /* The box only becomes focusable while it overflows, so this only ever marks
+     a real scroll area. */
+  .note:focus-visible {
+    outline: 2px solid var(--nt-link-fg, #1d9bf0);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 
   header {
