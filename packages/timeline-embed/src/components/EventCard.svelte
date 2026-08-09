@@ -692,6 +692,27 @@
     /* The whole distance between the note and the buttons: the card's grid adds
        no row gap of its own. */
     margin-top: var(--nt-actions-margin-top, 6px);
+    /*
+     * The height floor on `.action` makes the button taller than the glyph
+     * inside it — 4px above and below at the defaults (24px floor, 16px icon).
+     * Below the row that overshoot lands on top of the card's own bottom
+     * padding, so the gap under the icons read as ~14px against the ~10px above
+     * the header: the row looked like it was sitting in a band of empty card.
+     * Pulling the row's box back by the same 4px puts the two ends of the card
+     * in balance, and takes nothing off the press target — the button keeps its
+     * height, only the space the row claims below itself shrinks.
+     *
+     * Unlike `.timestamp` above, which cancels its own padding symmetrically
+     * and moves nothing, this one pulls a single edge: the buttons end up
+     * 4px inside the card's bottom padding rather than above it. Two things
+     * follow, both settable away with --nt-actions-margin-bottom: 0.
+     *   - The bottom of --nt-card-padding must stay above 4px. At exactly 4px
+     *     the buttons touch the separator; below it they cross the line.
+     *   - The 4px is the default floor's overshoot, not a derived value. Raise
+     *     --nt-action-min-height (or give --nt-action-padding vertical values)
+     *     and the balance wants (icon − button) / 2 instead.
+     */
+    margin-bottom: var(--nt-actions-margin-bottom, -4px);
     /* One row, always. The buttons shrink and their labels ellipsize, and what
        still will not fit is clipped here — the header above does the same, for
        the same reason: a row that grew past the card would hand the embedding
@@ -719,7 +740,8 @@
      * for an icon and 47x24 for a label (both checked in Chromium).
      *
      * It costs the card 6px against the 24px the padding and the grid's row
-     * gap used to cost it — so the row is still much tighter than it was.
+     * gap used to cost it — and the row's negative bottom margin gives 4px of
+     * that back, so the row is much tighter than it was.
      */
     min-height: var(--nt-action-min-height, 24px);
     /* The floor makes the button taller than its content, and a `button` is
