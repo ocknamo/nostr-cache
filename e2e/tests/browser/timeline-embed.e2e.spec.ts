@@ -843,17 +843,36 @@ describe('Embeddable timeline E2E', () => {
     const layout = await page.$eval('nostr-timeline .event-card', (card) => {
       const bar = card.querySelector('.actions') as HTMLElement;
       const last = bar.lastElementChild as HTMLElement;
+      const header = card.querySelector('header') as HTMLElement;
+      const box = card.getBoundingClientRect();
       return {
         justify: getComputedStyle(bar).justifyContent,
         gapToRight: bar.getBoundingClientRect().right - last.getBoundingClientRect().right,
         overflows: bar.scrollWidth > bar.clientWidth + 1,
         pageScrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        // The two ends of the card, measured against what a reader actually
+        // sees: the glyph inside the button, not the button's own box.
+        spaceAboveHeader: header.getBoundingClientRect().top - box.top,
+        spaceBelowGlyph:
+          box.bottom -
+          (last.querySelector('.action-icon') as HTMLElement).getBoundingClientRect().bottom,
+        buttonHeight: last.getBoundingClientRect().height,
       };
     });
     expect(layout.justify).toBe('flex-end');
     expect(layout.gapToRight).toBeLessThan(2);
     expect(layout.overflows).toBe(false);
     expect(layout.pageScrolls).toBe(false);
+
+    // The card is balanced top to bottom. The height floor on a button makes it
+    // taller than the glyph inside it, and that overshoot lands on top of the
+    // card's bottom padding — so without the row's negative bottom margin the
+    // buttons sit in a band of empty card, ~4px deeper than the header's own
+    // inset. The tolerance is a pixel, not the 4px this guards against.
+    expect(Math.abs(layout.spaceBelowGlyph - layout.spaceAboveHeader)).toBeLessThan(2);
+    // ...and the tightening cost the press target nothing: WCAG 2.2 §2.5.8 asks
+    // for 24px, which is what the floor is set to.
+    expect(layout.buttonHeight).toBeGreaterThanOrEqual(24);
 
     await buttons[1].click();
 

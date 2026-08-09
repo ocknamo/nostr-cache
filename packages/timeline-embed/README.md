@@ -305,9 +305,12 @@ nostr-timeline {
   --nt-actions-justify: flex-end; /* 既定は右寄せ。space-between で横いっぱい */
   --nt-actions-margin-top: 6px; /* 本文とボタン行の間隔 */
   --nt-actions-margin-bottom: -4px; /* ボタン行とカード下端の間隔の調整。
-                                       ボタンはアイコンより上下 4px 高いので、
-                                       負の値でその分を打ち消してカード上下の余白を揃えます。
-                                       --nt-card-padding の下側を 4px 未満にする場合は 0 に */
+                                       既定ではボタンがアイコンより上下 4px 高く、
+                                       その分だけカード下側の余白が広く見えるため、
+                                       負の値で打ち消してカード上下の余白を揃えています。
+                                       次の場合は 0 に戻してください:
+                                       ・--nt-card-padding の下側が 4px 以下（区切り線に接触・交差）
+                                       ・--nt-action-min-height を上げた（ずれ量が 4px でなくなる） */
   --nt-action-gap: 8px;
   --nt-action-padding: 0 10px;  /* 既定は上下 0。高さは --nt-action-min-height が確保します */
   --nt-action-min-height: 24px; /* ボタンの高さの下限。WCAG 2.2 §2.5.8 の最小値なので下げないこと */
