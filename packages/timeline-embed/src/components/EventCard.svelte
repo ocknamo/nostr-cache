@@ -692,6 +692,20 @@
     /* The whole distance between the note and the buttons: the card's grid adds
        no row gap of its own. */
     margin-top: var(--nt-actions-margin-top, 6px);
+    /*
+     * The height floor on `.action` makes each button 4px taller than the 16px
+     * glyph inside it, top and bottom. Below the row that overshoot lands on
+     * top of the card's own bottom padding, so the gap under the icons read as
+     * ~14px against the ~10px above the header — the row looked like it was
+     * sitting in a band of empty card. Pulling the row's box back by the same
+     * 4px puts the two ends of the card back in balance, and takes nothing off
+     * the press target: the button keeps its height, only the space the row
+     * claims below itself shrinks. Same trick as `.timestamp` above.
+     *
+     * Set --nt-actions-margin-bottom to 0 when shrinking --nt-card-padding
+     * below 4px of bottom padding, or the buttons will hang past the card.
+     */
+    margin-bottom: var(--nt-actions-margin-bottom, -4px);
     /* One row, always. The buttons shrink and their labels ellipsize, and what
        still will not fit is clipped here — the header above does the same, for
        the same reason: a row that grew past the card would hand the embedding

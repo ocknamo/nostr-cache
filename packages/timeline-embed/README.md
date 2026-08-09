@@ -304,6 +304,10 @@ nostr-timeline {
   /* アクションボタン（--nt-action-* は actions を指定したときだけ効く） */
   --nt-actions-justify: flex-end; /* 既定は右寄せ。space-between で横いっぱい */
   --nt-actions-margin-top: 6px; /* 本文とボタン行の間隔 */
+  --nt-actions-margin-bottom: -4px; /* ボタン行とカード下端の間隔の調整。
+                                       ボタンはアイコンより上下 4px 高いので、
+                                       負の値でその分を打ち消してカード上下の余白を揃えます。
+                                       --nt-card-padding の下側を 4px 未満にする場合は 0 に */
   --nt-action-gap: 8px;
   --nt-action-padding: 0 10px;  /* 既定は上下 0。高さは --nt-action-min-height が確保します */
   --nt-action-min-height: 24px; /* ボタンの高さの下限。WCAG 2.2 §2.5.8 の最小値なので下げないこと */
@@ -502,7 +506,8 @@ window.addEventListener('message', (event) => {
 ### 見た目の調整
 
 - CSS 変数: `--nt-actions-justify`（既定 `flex-end` = 右寄せ。`space-between` で横いっぱいに広げる）、
-  `--nt-actions-margin-top` / `--nt-action-gap` / `--nt-action-padding` / `--nt-action-min-height` /
+  `--nt-actions-margin-top` / `--nt-actions-margin-bottom` / `--nt-action-gap` /
+  `--nt-action-padding` / `--nt-action-min-height` /
   `--nt-action-size` / `--nt-action-icon-size` / `--nt-action-fg` / `--nt-action-hover-fg` /
   `--nt-action-hover-bg`（[上記](#見た目のカスタマイズ)）
 - Shadow parts: 行全体が `::part(actions)`、ボタンが `::part(action)`、
