@@ -398,7 +398,12 @@
     box-sizing: border-box;
     max-height: var(--nt-card-max-height, 420px);
     grid-template-rows: minmax(0, 1fr);
-    gap: var(--nt-avatar-gap, 10px);
+    /* Column only: the gap belongs between the avatar and the text, and a
+       shorthand `gap` would space the action row off the note by the same
+       amount on top of the row's own margin — which is what made the buttons
+       sit in a band of empty card. The action row owns that spacing instead. */
+    column-gap: var(--nt-avatar-gap, 10px);
+    row-gap: 0;
     padding: var(--nt-card-padding, 10px 12px);
     background: var(--nt-card-bg, transparent);
     color: var(--nt-fg, #0f1419);
@@ -684,7 +689,9 @@
        them under the note, `center` centres them. */
     justify-content: var(--nt-actions-justify, flex-end);
     gap: var(--nt-action-gap, 8px);
-    margin-top: 6px;
+    /* The whole distance between the note and the buttons: the card's grid adds
+       no row gap of its own. */
+    margin-top: var(--nt-actions-margin-top, 6px);
     /* One row, always. The buttons shrink and their labels ellipsize, and what
        still will not fit is clipped here — the header above does the same, for
        the same reason: a row that grew past the card would hand the embedding
@@ -699,9 +706,17 @@
     background: none;
     border: 0;
     border-radius: 999px;
-    /* Roughly the 44px-square target the pointer guidelines ask for once the
-       glyph's own line box is added. */
-    padding: var(--nt-action-padding, 6px 10px);
+    /*
+     * Horizontal only: vertical padding here is height every post pays for,
+     * and it read as a band of empty card rather than as a button.
+     *
+     * That leaves a target under the 24px WCAG 2.2 §2.5.8 asks for (~38x18 at
+     * the default icon size), which the same rule's spacing exception covers:
+     * the gap keeps neighbouring centres ~46px apart, far more than the 24px
+     * circles that must not overlap. An embed that widens its icons or drops
+     * --nt-action-gap towards 0 loses that, and should put the padding back.
+     */
+    padding: var(--nt-action-padding, 0 10px);
     font: inherit;
     font-size: var(--nt-action-size, 1rem);
     line-height: 1;
@@ -764,7 +779,7 @@
     font-family: var(--nt-material-font, 'Material Symbols Outlined');
     font-weight: normal;
     font-style: normal;
-    font-size: var(--nt-action-icon-size, 20px);
+    font-size: var(--nt-action-icon-size, 18px);
     line-height: 1;
     letter-spacing: normal;
     text-transform: none;
@@ -775,7 +790,8 @@
     font-feature-settings: 'liga';
     -webkit-font-smoothing: antialiased;
     /* Filled/weight are the two axes worth exposing; the rest stay at Google's
-       defaults for the 20px optical size this renders at. */
+       defaults. `opsz` stays at 20 — the smallest optical size the font ships,
+       and the nearest one to the 18px this renders at. */
     font-variation-settings:
       'FILL' var(--nt-material-fill, 0),
       'wght' var(--nt-material-weight, 400),
