@@ -440,6 +440,57 @@ describe('EventCard', () => {
     });
   });
 
+  describe('height cap', () => {
+    function note(container: HTMLElement): HTMLElement {
+      const found = container.querySelector<HTMLElement>('.note');
+      if (!found) {
+        throw new Error('no .note in the card');
+      }
+      return found;
+    }
+
+    it('puts the body in its own box, so the cap has something to scroll', () => {
+      const { container } = render(EventCard, {
+        props: {
+          event: makeEvent({ content: 'hello there', tags: [['e', 'b'.repeat(64), '', 'reply']] }),
+          actions: [{ id: 'like', label: 'いいね', icon: '♡' }],
+        },
+      });
+
+      // Only the body scrolls: the header, the chips and the action row stay
+      // in place while a long note moves under them.
+      expect(note(container)).toContainElement(container.querySelector('.content'));
+      expect(note(container)).not.toContainElement(container.querySelector('header'));
+      expect(note(container)).not.toContainElement(container.querySelector('.refs'));
+      expect(note(container)).not.toContainElement(container.querySelector('.actions'));
+    });
+
+    it('keeps the attachments inside the scrolling box', () => {
+      const { container } = render(EventCard, {
+        props: { event: makeEvent({ content: 'https://cdn.example.com/a.jpg' }) },
+      });
+
+      expect(note(container)).toContainElement(container.querySelector('.media'));
+    });
+
+    it('adds no scroll attributes of its own', () => {
+      const { container } = render(EventCard, { props: { event: makeEvent() } });
+
+      // The tab stop is the browser's own handling of a scroll container,
+      // applied only while the note scrolls. Nothing here measures anything,
+      // so nothing here can put a stray tab stop on all 50 cards.
+      expect(note(container)).not.toHaveAttribute('tabindex');
+      expect(note(container)).not.toHaveAttribute('role');
+      expect(note(container)).not.toHaveAttribute('aria-label');
+    });
+
+    it('exposes the scroll box as a part, so an embed can style it', () => {
+      const { container } = render(EventCard, { props: { event: makeEvent() } });
+
+      expect(note(container)).toHaveAttribute('part', 'note');
+    });
+  });
+
   describe('visibility reporting', () => {
     /** Records observers so a test can decide when the card "appears". */
     class FakeIntersectionObserver {

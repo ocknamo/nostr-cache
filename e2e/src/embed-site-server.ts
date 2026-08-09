@@ -12,6 +12,7 @@ import { type RequestListener, createServer as createHttpServer } from 'node:htt
 import { createServer as createHttpsServer } from 'node:https';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deflateSync } from 'node:zlib';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const EMBED_DIST = resolve(currentDir, '../../packages/timeline-embed/dist');
@@ -24,6 +25,56 @@ const TRANSPARENT_PNG = Buffer.from(
   'base64'
 );
 
+/** Path this server serves a tall image from. See {@link EmbedSiteServer.photoUrl}. */
+const PHOTO_PATH = '/photo.png';
+
+/**
+ * A PNG far taller than any height the card gives an attachment.
+ *
+ * Built rather than embedded: a picture that is genuinely 1000px tall is the
+ * only way to test the height an attachment is *given*, and one large enough to
+ * matter is too big to paste in as base64.
+ */
+function buildTallPng(width = 600, height = 1000): Buffer {
+  // One filter byte (0 = none) then RGB triples, per scanline.
+  const scanline = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x80)]);
+  const raw = Buffer.concat(Array.from({ length: height }, () => scanline));
+
+  const crc32 = (bytes: Buffer): number => {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit += 1) {
+        crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+      }
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, checksum]);
+  };
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  // 8 bits per channel, colour type 2 (truecolour), no interlacing.
+  header.set([8, 2, 0, 0, 0], 8);
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const TALL_PNG = buildTallPng();
+
 export interface EmbedSiteServer {
   port: number;
   /** Origin the widget is served from. */
@@ -34,6 +85,8 @@ export interface EmbedSiteServer {
   followEmbedUrl: string;
   /** URL of a real image, for use as a profile's `picture`. */
   avatarUrl: string;
+  /** URL of a tall image, for a note whose body is a photo. */
+  photoUrl: string;
   close: () => Promise<void>;
 }
 
@@ -104,6 +157,13 @@ export async function startEmbedSiteServer(
       res.end(TRANSPARENT_PNG);
       return;
     }
+    // A picture with a real height, for the attachment a note carries in its
+    // body — the avatar above is 1x1, so it can say nothing about layout.
+    if (path === PHOTO_PATH) {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(TALL_PNG);
+      return;
+    }
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
   };
@@ -124,6 +184,7 @@ export async function startEmbedSiteServer(
     embedUrl: `${baseUrl}/embed/`,
     followEmbedUrl: `${baseUrl}/embed/follow/`,
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
+    photoUrl: `${baseUrl}${PHOTO_PATH}`,
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };
 }
