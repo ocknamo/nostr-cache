@@ -291,7 +291,7 @@ nostr-timeline {
   --nt-scrollbar: #8b949e;      /* 上限を超えた投稿のスクロールバー。既定は --nt-muted */
   --nt-avatar-size: 40px;
   --nt-avatar-radius: 8px;
-  --nt-avatar-gap: 10px;        /* アバターと本文の間隔 */
+  --nt-avatar-gap: 10px;        /* アバターと本文の間隔（横方向のみ。本文とボタン行の間隔は --nt-actions-margin-top） */
   --nt-name-fg: #e6edf3;        /* 表示名 */
   --nt-handle-fg: #8b949e;      /* @handle。既定は --nt-muted */
   --nt-quote-bar: #4a7dff;      /* 返信 / 引用チップの縦線 */
@@ -305,7 +305,8 @@ nostr-timeline {
   --nt-actions-justify: flex-end; /* 既定は右寄せ。space-between で横いっぱい */
   --nt-actions-margin-top: 6px; /* 本文とボタン行の間隔 */
   --nt-action-gap: 8px;
-  --nt-action-padding: 0 10px;  /* 既定は上下 0。--nt-action-gap を詰める場合は上下も戻してください */
+  --nt-action-padding: 0 10px;  /* 既定は上下 0。高さは --nt-action-min-height が確保します */
+  --nt-action-min-height: 24px; /* ボタンの高さの下限。WCAG 2.2 §2.5.8 の最小値なので下げないこと */
   --nt-action-size: 1rem;       /* 文字アイコン・ラベルの大きさ */
   --nt-action-icon-size: 18px;  /* Material Symbols の大きさ */
   --nt-action-fg: #8b949e;      /* 既定は --nt-muted */
@@ -501,9 +502,9 @@ window.addEventListener('message', (event) => {
 ### 見た目の調整
 
 - CSS 変数: `--nt-actions-justify`（既定 `flex-end` = 右寄せ。`space-between` で横いっぱいに広げる）、
-  `--nt-actions-margin-top` / `--nt-action-gap` / `--nt-action-padding` / `--nt-action-size` /
-  `--nt-action-icon-size` / `--nt-action-fg` / `--nt-action-hover-fg` / `--nt-action-hover-bg`
-  （[上記](#見た目のカスタマイズ)）
+  `--nt-actions-margin-top` / `--nt-action-gap` / `--nt-action-padding` / `--nt-action-min-height` /
+  `--nt-action-size` / `--nt-action-icon-size` / `--nt-action-fg` / `--nt-action-hover-fg` /
+  `--nt-action-hover-bg`（[上記](#見た目のカスタマイズ)）
 - Shadow parts: 行全体が `::part(actions)`、ボタンが `::part(action)`、
   **個別のボタンが `::part(action-<id>)`**（例: `nostr-timeline::part(action-like) { color: crimson }`）
 

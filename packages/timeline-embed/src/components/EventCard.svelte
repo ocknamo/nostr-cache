@@ -391,7 +391,7 @@
      * an `auto` row refuses to shrink below its content, leaving the card
      * overflowing past the cap (measured, not guessed). The action row is left
      * implicit, which keeps its height and — on a card without actions — keeps
-     * a second track, and its row gap, from existing at all.
+     * a second track from existing at all.
      *
      * border-box so the cap is the height of the whole post, padding included.
      */
@@ -706,17 +706,28 @@
     background: none;
     border: 0;
     border-radius: 999px;
-    /*
-     * Horizontal only: vertical padding here is height every post pays for,
-     * and it read as a band of empty card rather than as a button.
-     *
-     * That leaves a target under the 24px WCAG 2.2 §2.5.8 asks for (~38x18 at
-     * the default icon size), which the same rule's spacing exception covers:
-     * the gap keeps neighbouring centres ~46px apart, far more than the 24px
-     * circles that must not overlap. An embed that widens its icons or drops
-     * --nt-action-gap towards 0 loses that, and should put the padding back.
-     */
+    /* Horizontal only: vertical padding here is height every post pays for on
+       top of the glyph's own box, and it read as a band of empty card rather
+       than as a button. The height floor below keeps the press target. */
     padding: var(--nt-action-padding, 0 10px);
+    /*
+     * The press target's height, now that no padding sets it. Every
+     * configuration's content is shorter than this on its own — an 18px icon,
+     * a 13.6px label — so without the floor the button is what the glyph
+     * happens to measure, which is under the 24x24 WCAG 2.2 §2.5.8 asks for.
+     * With it, and the horizontal padding above, the defaults measure 38x24
+     * for an icon and 47x24 for a label (both checked in Chromium).
+     *
+     * It costs the card 6px against the 24px the padding and the grid's row
+     * gap used to cost it — so the row is still much tighter than it was.
+     */
+    min-height: var(--nt-action-min-height, 24px);
+    /* The floor makes the button taller than its content, and a `button` is
+       not a flex container by default — without this the glyph sits at the top
+       of the box rather than in the middle of it. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font: inherit;
     font-size: var(--nt-action-size, 1rem);
     line-height: 1;
@@ -745,6 +756,10 @@
      ellipsize however narrow the embed got. */
   .action-label {
     display: block;
+    /* The button is a flex container now, and a flex item defaults to
+       min-width:auto — which refuses to shrink below the text and leaves the
+       ellipsis below unreachable however narrow the embed gets. */
+    min-width: 0;
     font-size: 0.85em;
     white-space: nowrap;
     overflow: hidden;
@@ -758,10 +773,9 @@
   }
 
   /* A button showing both needs them side by side, and the label is the part
-     that gives up width. */
+     that gives up width. The flex box itself is on `.action`, for the height
+     floor; this is only the space between the two. */
   .with-label {
-    display: inline-flex;
-    align-items: center;
     gap: 4px;
   }
 
