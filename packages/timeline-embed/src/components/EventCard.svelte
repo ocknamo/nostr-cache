@@ -712,10 +712,10 @@
     padding: var(--nt-action-padding, 0 10px);
     /*
      * The press target's height, now that no padding sets it. Every
-     * configuration's content is shorter than this on its own — an 18px icon,
+     * configuration's content is shorter than this on its own — a 16px icon,
      * a 13.6px label — so without the floor the button is what the glyph
      * happens to measure, which is under the 24x24 WCAG 2.2 §2.5.8 asks for.
-     * With it, and the horizontal padding above, the defaults measure 38x24
+     * With it, and the horizontal padding above, the defaults measure 36x24
      * for an icon and 47x24 for a label (both checked in Chromium).
      *
      * It costs the card 6px against the 24px the padding and the grid's row
@@ -793,7 +793,7 @@
     font-family: var(--nt-material-font, 'Material Symbols Outlined');
     font-weight: normal;
     font-style: normal;
-    font-size: var(--nt-action-icon-size, 18px);
+    font-size: var(--nt-action-icon-size, 16px);
     line-height: 1;
     letter-spacing: normal;
     text-transform: none;
@@ -805,7 +805,7 @@
     -webkit-font-smoothing: antialiased;
     /* Filled/weight are the two axes worth exposing; the rest stay at Google's
        defaults. `opsz` stays at 20 — the smallest optical size the font ships,
-       and the nearest one to the 18px this renders at. */
+       and so the nearest one to the 16px this renders at. */
     font-variation-settings:
       'FILL' var(--nt-material-fill, 0),
       'wght' var(--nt-material-weight, 400),

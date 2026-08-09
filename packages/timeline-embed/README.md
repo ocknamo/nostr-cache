@@ -308,7 +308,7 @@ nostr-timeline {
   --nt-action-padding: 0 10px;  /* 既定は上下 0。高さは --nt-action-min-height が確保します */
   --nt-action-min-height: 24px; /* ボタンの高さの下限。WCAG 2.2 §2.5.8 の最小値なので下げないこと */
   --nt-action-size: 1rem;       /* 文字アイコン・ラベルの大きさ */
-  --nt-action-icon-size: 18px;  /* Material Symbols の大きさ */
+  --nt-action-icon-size: 16px;  /* Material Symbols の大きさ */
   --nt-action-fg: #8b949e;      /* 既定は --nt-muted */
   --nt-action-hover-fg: #58a6ff;
   --nt-action-hover-bg: rgb(88 166 255 / 12%);
