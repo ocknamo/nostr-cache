@@ -72,6 +72,78 @@ window.addEventListener('message', (event) => {
 Nostr クライアントとキャッシュを共有できます。対象外の URL への接続は元の実装へ
 そのまま委譲されるので、他の通信には影響しません。詳細は下の「制約」を参照。
 
+### ウィジェットを置かずにページ内リレーだけ使う（JS API）
+
+同じスクリプトから**ページ共有リレーの起動 API そのもの**も呼べます。`<nostr-timeline>` を
+DOM に置かずにリレーだけを立ち上げられるので、**ページ内の他の Nostr クライアント**
+（タイムライン以外の表示や自作のコンポーネント）を透過キャッシュ経由にできます。
+npm パッケージを入れられない構成のための入口です。
+
+```html
+<script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
+<script>
+  (async () => {
+    const { acquireRelayHost } = globalThis.NostrTimelineEmbed;
+
+    // ページ内リレーを起動する（すでに動いていれば参照を1つ増やすだけ）
+    const host = await acquireRelayHost({ upstreamRelays: ['wss://nos.lol'] });
+
+    // 以降、この URL への接続だけがリレーに横取りされる
+    const ws = new WebSocket(host.interceptUrl); // 'ws://nostr-cache.invalid'
+    ws.onopen = () => ws.send(JSON.stringify(['REQ', 'sub', { kinds: [1], limit: 50 }]));
+
+    // 自前のクライアントもこの中（await のあと）で起動する
+    // startMyNostrClient({ relayUrl: host.interceptUrl });
+
+    // ページを離れる等でキャッシュを畳むとき（最後の1つで実際に停止する）
+    // await host.release();
+  })();
+</script>
+```
+
+**キャッシュを通したいクライアントの初期化は `await acquireRelayHost()` の後に
+行ってください。** `globalThis.WebSocket` の差し替えはリレーの起動（IndexedDB の
+オープンと接続）が終わった時点で完了するので、**それ以前に作られたソケットは
+横取りされません**。スクリプトを同期読み込みしただけでは足りない（バンドルの評価が
+終わるだけで、起動は非同期に続く）点に注意してください。
+
+`acquireRelayHost(config)` の `config`（すべて省略可）:
+
+| キー | 対応する属性 | 既定値 |
+|---|---|---|
+| `upstreamRelays` | `relays`（こちらは**配列**） | `[]`（キャッシュのみ） |
+| `dbName` | `db-name` | `nostr-cache-embed` |
+| `profileFreshness` | `profile-freshness` | `86400` |
+| `followsFreshness` | `follows-freshness` | `600` |
+| `interceptUrl` / `lazyValidateInterval` | （属性なし） | `ws://nostr-cache.invalid` / `5` |
+
+エクスポートされるもの:
+
+| 名前 | 内容 |
+|---|---|
+| `acquireRelayHost(config?)` | ページ共有リレーを取得（未起動なら起動）。`{ relay, storage, metrics, interceptUrl, getConnectedUpstreams(), release() }` を返す（**埋め込む側が使うのは `interceptUrl` と `release()` だけで十分です**。`relay` / `storage` / `metrics` は内部実装のインスタンスなので、予告なく変わり得ます） |
+| `getRelayHostRefCount()` | 未 `release()` の取得数。0 は「停止処理に入った」であって、`globalThis.WebSocket` が戻るのは最後の `release()` の await が解決したあとです |
+| `DEFAULT_INTERCEPT_URL` / `DEFAULT_DB_NAME` / `DEFAULT_PROFILE_FRESHNESS` / `DEFAULT_FOLLOWS_FRESHNESS` / `DEFAULT_LAZY_VALIDATE_INTERVAL` | 上表の既定値 |
+| `default` | `<nostr-timeline>` のコンポーネント（**通常は使いません**。要素は読み込み時に自動登録されます） |
+
+注意点:
+
+- **`acquireRelayHost()` 1 回につき `release()` を必ず 1 回**呼んでください。最後の 1 つを
+  `release()` するとリレーが停止し、その `await` が解決した時点で `globalThis.WebSocket` が
+  元に戻ります。逆に、
+  **アプリ側で 1 つ取得したままにしておけば、ウィジェットが出入りしてもリレーは落ちません**
+  （タブの切り替えなどでウィジェットが全部消える構成では、これで再起動のコストを避けられます）。
+- **同じページに `<nostr-timeline>` / `<nostr-follow-timeline>` も置く場合は、設定を要素の属性と
+  揃えてください。** 1 ページにリレーは 1 つで、**最初に取得した側の設定が採用されます**
+  （食い違うとコンソールに警告が出ます。上表の対応関係を参照）。
+- `globalThis.NostrTimelineEmbed` は**名前空間オブジェクト**です。コンポーネント自体を
+  JS から触っていた場合は `NostrTimelineEmbed.default` になります（HTML に
+  `<nostr-timeline>` と書く通常の使い方は影響を受けません）。
+- **このスクリプトを 1 ページで 2 回読み込まないでください。** 読み込み時に
+  `customElements.define()` を呼ぶため、2 回目は登録済みエラーで評価が止まります。
+  すでにウィジェット用に読み込んでいるページでは、その 1 本から
+  `globalThis.NostrTimelineEmbed.acquireRelayHost` を呼んでください。
+
 ## 属性 / クエリパラメータ（`<nostr-timeline>`）
 
 `<nostr-follow-timeline>` の属性は[フォロータイムライン](#フォロータイムライン)を参照してください。
@@ -570,8 +642,9 @@ window.addEventListener('message', (event) => {
   `profile-freshness` を短く（`0` なら毎回上流に問い合わせ）してください
 - **1 ページにつきリレーは 1 つ**です。複数の `<nostr-timeline>` を置いた場合、リレーは
   共有されます（購読はウィジェットごとに独立するので表示内容は別々にできます）。
-  設定は**最初に mount されたウィジェットのものが採用され**、異なる設定を要求した
-  ウィジェットには警告が出ます。これは、1 ページから同じ上流リレーへ何本も接続を
+  設定は**最初に mount されたウィジェット**（あるいは最初に
+  [`acquireRelayHost()`](#ウィジェットを置かずにページ内リレーだけ使うjs-api) を呼んだ側）
+  **のものが採用され**、異なる設定を要求した側には警告が出ます。これは、1 ページから同じ上流リレーへ何本も接続を
   張らないための意図的な制約です。設定を分けたい場合は iframe を使ってください。
 - **`globalThis.WebSocket` を差し替えます**（Web Component 方式のみ）。差し替え前に
   `const WS = WebSocket` のようにコンストラクタ参照を保持しているライブラリには
@@ -584,7 +657,7 @@ window.addEventListener('message', (event) => {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **334 KB（gzip 約 111 KB）** の自己完結した IIFE です
+`dist/nostr-timeline.js` は約 **354 KB（gzip 約 118 KB）** の自己完結した IIFE です
 （`<nostr-timeline>` と `<nostr-follow-timeline>` の両方を含みます）。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、
