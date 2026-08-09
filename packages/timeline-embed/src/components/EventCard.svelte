@@ -391,14 +391,19 @@
      * an `auto` row refuses to shrink below its content, leaving the card
      * overflowing past the cap (measured, not guessed). The action row is left
      * implicit, which keeps its height and — on a card without actions — keeps
-     * a second track, and its row gap, from existing at all.
+     * a second track from existing at all.
      *
      * border-box so the cap is the height of the whole post, padding included.
      */
     box-sizing: border-box;
     max-height: var(--nt-card-max-height, 420px);
     grid-template-rows: minmax(0, 1fr);
-    gap: var(--nt-avatar-gap, 10px);
+    /* Column only: the gap belongs between the avatar and the text, and a
+       shorthand `gap` would space the action row off the note by the same
+       amount on top of the row's own margin — which is what made the buttons
+       sit in a band of empty card. The action row owns that spacing instead. */
+    column-gap: var(--nt-avatar-gap, 10px);
+    row-gap: 0;
     padding: var(--nt-card-padding, 10px 12px);
     background: var(--nt-card-bg, transparent);
     color: var(--nt-fg, #0f1419);
@@ -684,7 +689,9 @@
        them under the note, `center` centres them. */
     justify-content: var(--nt-actions-justify, flex-end);
     gap: var(--nt-action-gap, 8px);
-    margin-top: 6px;
+    /* The whole distance between the note and the buttons: the card's grid adds
+       no row gap of its own. */
+    margin-top: var(--nt-actions-margin-top, 6px);
     /* One row, always. The buttons shrink and their labels ellipsize, and what
        still will not fit is clipped here — the header above does the same, for
        the same reason: a row that grew past the card would hand the embedding
@@ -699,9 +706,28 @@
     background: none;
     border: 0;
     border-radius: 999px;
-    /* Roughly the 44px-square target the pointer guidelines ask for once the
-       glyph's own line box is added. */
-    padding: var(--nt-action-padding, 6px 10px);
+    /* Horizontal only: vertical padding here is height every post pays for on
+       top of the glyph's own box, and it read as a band of empty card rather
+       than as a button. The height floor below keeps the press target. */
+    padding: var(--nt-action-padding, 0 10px);
+    /*
+     * The press target's height, now that no padding sets it. Every
+     * configuration's content is shorter than this on its own — a 16px icon,
+     * a 13.6px label — so without the floor the button is what the glyph
+     * happens to measure, which is under the 24x24 WCAG 2.2 §2.5.8 asks for.
+     * With it, and the horizontal padding above, the defaults measure 36x24
+     * for an icon and 47x24 for a label (both checked in Chromium).
+     *
+     * It costs the card 6px against the 24px the padding and the grid's row
+     * gap used to cost it — so the row is still much tighter than it was.
+     */
+    min-height: var(--nt-action-min-height, 24px);
+    /* The floor makes the button taller than its content, and a `button` is
+       not a flex container by default — without this the glyph sits at the top
+       of the box rather than in the middle of it. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font: inherit;
     font-size: var(--nt-action-size, 1rem);
     line-height: 1;
@@ -730,6 +756,10 @@
      ellipsize however narrow the embed got. */
   .action-label {
     display: block;
+    /* The button is a flex container now, and a flex item defaults to
+       min-width:auto — which refuses to shrink below the text and leaves the
+       ellipsis below unreachable however narrow the embed gets. */
+    min-width: 0;
     font-size: 0.85em;
     white-space: nowrap;
     overflow: hidden;
@@ -743,10 +773,9 @@
   }
 
   /* A button showing both needs them side by side, and the label is the part
-     that gives up width. */
+     that gives up width. The flex box itself is on `.action`, for the height
+     floor; this is only the space between the two. */
   .with-label {
-    display: inline-flex;
-    align-items: center;
     gap: 4px;
   }
 
@@ -764,7 +793,7 @@
     font-family: var(--nt-material-font, 'Material Symbols Outlined');
     font-weight: normal;
     font-style: normal;
-    font-size: var(--nt-action-icon-size, 20px);
+    font-size: var(--nt-action-icon-size, 16px);
     line-height: 1;
     letter-spacing: normal;
     text-transform: none;
@@ -775,7 +804,8 @@
     font-feature-settings: 'liga';
     -webkit-font-smoothing: antialiased;
     /* Filled/weight are the two axes worth exposing; the rest stay at Google's
-       defaults for the 20px optical size this renders at. */
+       defaults. `opsz` stays at 20 — the smallest optical size the font ships,
+       and so the nearest one to the 16px this renders at. */
     font-variation-settings:
       'FILL' var(--nt-material-fill, 0),
       'wght' var(--nt-material-weight, 400),
