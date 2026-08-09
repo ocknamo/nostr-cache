@@ -92,15 +92,20 @@ npm パッケージを入れられない構成のための入口です。
     const ws = new WebSocket(host.interceptUrl); // 'ws://nostr-cache.invalid'
     ws.onopen = () => ws.send(JSON.stringify(['REQ', 'sub', { kinds: [1], limit: 50 }]));
 
+    // 自前のクライアントもこの中（await のあと）で起動する
+    // startMyNostrClient({ relayUrl: host.interceptUrl });
+
     // ページを離れる等でキャッシュを畳むとき（最後の1つで実際に停止する）
     // await host.release();
   })();
 </script>
 ```
 
-**`acquireRelayHost()` は他のクライアントが最初の `new WebSocket()` を呼ぶ前に
-完了させてください。** 差し替えは起動時に行われるので、それ以前に作られたソケットは
-横取りされません（スクリプトを `<head>` で同期読み込みするなど）。
+**キャッシュを通したいクライアントの初期化は `await acquireRelayHost()` の後に
+行ってください。** `globalThis.WebSocket` の差し替えはリレーの起動（IndexedDB の
+オープンと接続）が終わった時点で完了するので、**それ以前に作られたソケットは
+横取りされません**。スクリプトを同期読み込みしただけでは足りない（バンドルの評価が
+終わるだけで、起動は非同期に続く）点に注意してください。
 
 `acquireRelayHost(config)` の `config`（すべて省略可）:
 
@@ -116,15 +121,16 @@ npm パッケージを入れられない構成のための入口です。
 
 | 名前 | 内容 |
 |---|---|
-| `acquireRelayHost(config?)` | ページ共有リレーを取得（未起動なら起動）。`{ relay, storage, metrics, interceptUrl, getConnectedUpstreams(), release() }` を返す |
-| `getRelayHostRefCount()` | 未 `release()` の取得数。0 ならリレーは停止している |
-| `DEFAULT_INTERCEPT_URL` / `DEFAULT_DB_NAME` / `DEFAULT_PROFILE_FRESHNESS` / `DEFAULT_FOLLOWS_FRESHNESS` | 上表の既定値 |
+| `acquireRelayHost(config?)` | ページ共有リレーを取得（未起動なら起動）。`{ relay, storage, metrics, interceptUrl, getConnectedUpstreams(), release() }` を返す（**埋め込む側が使うのは `interceptUrl` と `release()` だけで十分です**。`relay` / `storage` / `metrics` は内部実装のインスタンスなので、予告なく変わり得ます） |
+| `getRelayHostRefCount()` | 未 `release()` の取得数。0 は「停止処理に入った」であって、`globalThis.WebSocket` が戻るのは最後の `release()` の await が解決したあとです |
+| `DEFAULT_INTERCEPT_URL` / `DEFAULT_DB_NAME` / `DEFAULT_PROFILE_FRESHNESS` / `DEFAULT_FOLLOWS_FRESHNESS` / `DEFAULT_LAZY_VALIDATE_INTERVAL` | 上表の既定値 |
 | `default` | `<nostr-timeline>` のコンポーネント（**通常は使いません**。要素は読み込み時に自動登録されます） |
 
 注意点:
 
-- **`acquireRelayHost()` 1 回につき `release()` を必ず 1 回**呼んでください。参照カウントが
-  0 になった時点でリレーが停止し、`globalThis.WebSocket` が元に戻ります。逆に、
+- **`acquireRelayHost()` 1 回につき `release()` を必ず 1 回**呼んでください。最後の 1 つを
+  `release()` するとリレーが停止し、その `await` が解決した時点で `globalThis.WebSocket` が
+  元に戻ります。逆に、
   **アプリ側で 1 つ取得したままにしておけば、ウィジェットが出入りしてもリレーは落ちません**
   （タブの切り替えなどでウィジェットが全部消える構成では、これで再起動のコストを避けられます）。
 - **同じページに `<nostr-timeline>` / `<nostr-follow-timeline>` も置く場合は、設定を要素の属性と
@@ -133,6 +139,10 @@ npm パッケージを入れられない構成のための入口です。
 - `globalThis.NostrTimelineEmbed` は**名前空間オブジェクト**です。コンポーネント自体を
   JS から触っていた場合は `NostrTimelineEmbed.default` になります（HTML に
   `<nostr-timeline>` と書く通常の使い方は影響を受けません）。
+- **このスクリプトを 1 ページで 2 回読み込まないでください。** 読み込み時に
+  `customElements.define()` を呼ぶため、2 回目は登録済みエラーで評価が止まります。
+  すでにウィジェット用に読み込んでいるページでは、その 1 本から
+  `globalThis.NostrTimelineEmbed.acquireRelayHost` を呼んでください。
 
 ## 属性 / クエリパラメータ（`<nostr-timeline>`）
 

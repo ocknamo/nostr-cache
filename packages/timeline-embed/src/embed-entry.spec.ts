@@ -3,7 +3,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import * as relayHost from './lib/relay-host.ts';
-import NostrTimeline from './nostr-timeline.svelte';
 
 /**
  * The packaging contract of the embed bundle, as seen by a page that loads
@@ -19,14 +18,24 @@ import NostrTimeline from './nostr-timeline.svelte';
  *
  * `import * as` rather than named imports on purpose — the assertions are about
  * what the module namespace carries, which is exactly what the IIFE global is.
+ * For the same reason the components are never imported statically here: doing
+ * so would register the elements on the entry point's behalf, and the
+ * registration assertions below would pass with the side-effect imports gone.
  */
 describe('embed entry point', () => {
   const originalWebSocket = globalThis.WebSocket;
   let entry: typeof import('./embed-entry.ts');
+  let registered: { timeline: boolean; followTimeline: boolean };
 
   beforeAll(async () => {
     // Importing for the side effect is exactly how the embed bundle registers.
     entry = await import('./embed-entry.ts');
+    // Snapshotted here, before any test can pull a component in on its own, so
+    // what is asserted is what *this* import defined.
+    registered = {
+      timeline: Boolean(customElements.get('nostr-timeline')),
+      followTimeline: Boolean(customElements.get('nostr-follow-timeline')),
+    };
   });
 
   afterEach(async () => {
@@ -36,11 +45,12 @@ describe('embed entry point', () => {
   });
 
   it('registers both custom elements', () => {
-    expect(customElements.get('nostr-timeline')).toBeDefined();
-    expect(customElements.get('nostr-follow-timeline')).toBeDefined();
+    expect(registered).toEqual({ timeline: true, followTimeline: true });
   });
 
-  it('keeps the timeline component as the default export', () => {
+  it('keeps the timeline component as the default export', async () => {
+    // Imported dynamically, after the snapshot above was taken.
+    const { default: NostrTimeline } = await import('./nostr-timeline.svelte');
     // Not `customElements.get('nostr-timeline')`: Svelte registers a generated
     // wrapper class around the component, so the two are deliberately not the
     // same object. What matters is that the default export did not become
@@ -56,6 +66,7 @@ describe('embed entry point', () => {
     expect(entry.getRelayHostRefCount).toBe(relayHost.getRelayHostRefCount);
     expect(entry.DEFAULT_INTERCEPT_URL).toBe(relayHost.DEFAULT_INTERCEPT_URL);
     expect(entry.DEFAULT_DB_NAME).toBe(relayHost.DEFAULT_DB_NAME);
+    expect(entry.DEFAULT_LAZY_VALIDATE_INTERVAL).toBe(relayHost.DEFAULT_LAZY_VALIDATE_INTERVAL);
     expect(entry.DEFAULT_PROFILE_FRESHNESS).toBe(relayHost.DEFAULT_PROFILE_FRESHNESS);
     expect(entry.DEFAULT_FOLLOWS_FRESHNESS).toBe(relayHost.DEFAULT_FOLLOWS_FRESHNESS);
   });

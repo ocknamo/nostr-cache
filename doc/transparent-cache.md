@@ -71,22 +71,35 @@ await relay.connect(); // ここでグローバル WebSocket が差し替わる
 遅延検証・上流プール）は上の手順と同じものがパッケージ済みです。
 
 ```html
-<!-- 他のクライアントが new WebSocket() する前に読み込む -->
 <script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
 <script>
   (async () => {
     const { acquireRelayHost } = globalThis.NostrTimelineEmbed;
     const host = await acquireRelayHost({ upstreamRelays: ['wss://nos.lol'] });
     // host.interceptUrl === 'ws://nostr-cache.invalid'
+    // キャッシュを通したいクライアントは、この await のあとで初期化する
     // 後始末は await host.release()（最後の1つでリレーが停止し、WebSocket が戻る）
   })();
 </script>
 ```
 
-引数と注意点（参照カウント、同一ページのウィジェットと設定を揃えること）は
+引き換えに次の点を受け入れることになります。
+
+- **バンドルは約 118 KB（gzip）** で、リレーだけが欲しい場合もウィジェット 2 種
+  （`<nostr-timeline>` / `<nostr-follow-timeline>`）の**カスタム要素が読み込み時に登録されます**。
+  要素を使わなければ描画コストはかかりませんが、要素名は占有されます。
+- **バージョン付きの配信ではありません**（固定 URL の最新版を読みます）。
+- `validateEventsType` の変更や、横取り URL に実リレーの URL を使う構成
+  （後述の[パターン B](#対象-url-の指定パターン)）はできません。細かく制御したい場合は上の自前組み立てを使ってください。
+
+引数と注意点（参照カウント、同一ページのウィジェットと設定を揃えること、二重読み込み不可）は
 [packages/timeline-embed/README.md](../packages/timeline-embed/README.md#ウィジェットを置かずにページ内リレーだけ使うjs-api)
-を参照してください。細かく制御したい場合（`validateEventsType` を変える、
-横取り URL に実リレーの URL を使うなど）は上の自前組み立てを使ってください。
+を参照してください。
+
+> **注意**: この named export の追加により、`globalThis.NostrTimelineEmbed` は
+> コンポーネント自体ではなく**名前空間オブジェクト**になりました。グローバルから
+> コンポーネントを直接触っていた場合は `NostrTimelineEmbed.default` を参照してください
+> （HTML に `<nostr-timeline>` と書く通常の使い方は影響を受けません）。
 
 ### 3. クライアントは普通に接続する
 

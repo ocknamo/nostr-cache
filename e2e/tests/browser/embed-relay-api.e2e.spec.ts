@@ -32,6 +32,7 @@ interface EmbedGlobal {
   getRelayHostRefCount(): number;
   DEFAULT_INTERCEPT_URL: string;
   DEFAULT_DB_NAME: string;
+  DEFAULT_LAZY_VALIDATE_INTERVAL: number;
   DEFAULT_PROFILE_FRESHNESS: number;
   DEFAULT_FOLLOWS_FRESHNESS: number;
   default: unknown;
@@ -53,7 +54,6 @@ describe('Embed bundle relay API E2E', () => {
   let site: EmbedSiteServer;
   let upstream: MockUpstreamRelay;
   let page: Page | undefined;
-  let dbCounter = 0;
   let cannedEvent: NostrEvent;
 
   beforeAll(async () => {
@@ -77,11 +77,15 @@ describe('Embed bundle relay API E2E', () => {
     page = undefined;
   });
 
-  /** Open the bundle-only page; a fresh database keeps the cases independent. */
+  /**
+   * Open the page that loads the bundle and mounts nothing.
+   *
+   * `newPage()` gives each test its own browser context, so the IndexedDB
+   * databases are already isolated from one another without naming them apart.
+   */
   async function openScriptOnlyPage(): Promise<Page> {
     const opened = await browser.newPage();
     await opened.goto(site.scriptOnlyUrl, { waitUntil: 'load' });
-    dbCounter += 1;
     return opened;
   }
 
@@ -95,6 +99,7 @@ describe('Embed bundle relay API E2E', () => {
         refCount: typeof embed?.getRelayHostRefCount,
         interceptUrl: embed?.DEFAULT_INTERCEPT_URL,
         dbName: embed?.DEFAULT_DB_NAME,
+        lazyValidateInterval: embed?.DEFAULT_LAZY_VALIDATE_INTERVAL,
         profileFreshness: embed?.DEFAULT_PROFILE_FRESHNESS,
         followsFreshness: embed?.DEFAULT_FOLLOWS_FRESHNESS,
         // Named exports moved the component to `.default`; it must still be
@@ -112,6 +117,7 @@ describe('Embed bundle relay API E2E', () => {
       refCount: 'function',
       interceptUrl: 'ws://nostr-cache.invalid',
       dbName: 'nostr-cache-embed',
+      lazyValidateInterval: 5,
       profileFreshness: 86_400,
       followsFreshness: 600,
       component: 'function',
@@ -139,7 +145,7 @@ describe('Embed bundle relay API E2E', () => {
           patched: win.WebSocket !== win.__originalWebSocket,
         };
       },
-      [upstream.url, `e2e-relay-api-${dbCounter}`] as const
+      [upstream.url, 'e2e-relay-api'] as const
     );
 
     expect(first).toEqual({
@@ -198,7 +204,7 @@ describe('Embed bundle relay API E2E', () => {
 
   it('shares its relay with a widget added to the same page', async () => {
     page = await openScriptOnlyPage();
-    const dbName = `e2e-relay-api-shared-${dbCounter}`;
+    const dbName = 'e2e-relay-api-shared';
 
     await page.evaluate(
       async ([relayUrl, name]) => {
