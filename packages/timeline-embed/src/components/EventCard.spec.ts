@@ -457,9 +457,8 @@ describe('EventCard', () => {
         },
       });
 
-      // The note is the only scrolling part of the card, which is what keeps
-      // the header, the reference chips and the action row in place while a
-      // long body moves under them.
+      // Only the body scrolls: the header, the chips and the action row stay
+      // in place while a long note moves under them.
       expect(note(container)).toContainElement(container.querySelector('.content'));
       expect(note(container)).not.toContainElement(container.querySelector('header'));
       expect(note(container)).not.toContainElement(container.querySelector('.refs'));
@@ -471,18 +470,15 @@ describe('EventCard', () => {
         props: { event: makeEvent({ content: 'https://cdn.example.com/a.jpg' }) },
       });
 
-      // An attachment is body content: it has to scroll with the note rather
-      // than hang below the cap.
       expect(note(container)).toContainElement(container.querySelector('.media'));
     });
 
     it('adds no scroll attributes of its own', () => {
       const { container } = render(EventCard, { props: { event: makeEvent() } });
 
-      // The cap and the scrolling are CSS; the tab stop is the browser's own
-      // handling of a scroll container, which it applies only while the note
-      // actually scrolls. Nothing here measures anything, so nothing here can
-      // put a stray tab stop on all 50 cards of a timeline.
+      // The tab stop is the browser's own handling of a scroll container,
+      // applied only while the note scrolls. Nothing here measures anything,
+      // so nothing here can put a stray tab stop on all 50 cards.
       expect(note(container)).not.toHaveAttribute('tabindex');
       expect(note(container)).not.toHaveAttribute('role');
       expect(note(container)).not.toHaveAttribute('aria-label');

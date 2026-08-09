@@ -323,20 +323,12 @@
       </ul>
     {/if}
     <!--
-      The note, and the only part of the card that scrolls.
-
-      A single very long post used to fill the whole timeline; now the card is
-      capped (--nt-card-max-height) and the overflow is scrolled here, so the
-      header, the reference chips and the action row all stay put while the
-      body moves under them.
-
-      No `tabindex` of its own: a browser puts a scroll container that has no
+      No `tabindex` of its own: a browser puts a scroll container with no
       focusable children into the tab order by itself, and only while it
-      actually scrolls — which is what WCAG 2.1.1 asks for here, and exactly
-      the distinction a hand-written attribute would have to measure to make.
-      (Checked in Chromium: an overflowing note is tabbable and scrolls with
-      the arrow keys, a note that fits is skipped.) In a browser without that
-      behaviour a capped note stays readable by mouse and touch.
+      actually scrolls — which is what WCAG 2.1.1 asks for here, and the
+      distinction a hand-written attribute would have to measure to make.
+      (Checked in Chromium.) Where a browser lacks that, a capped note stays
+      readable by mouse and touch.
     -->
     <div class="note" part="note">
       <NoteContent content={event.content} {showMedia} {profiles} />
@@ -392,25 +384,16 @@
        gutter instead of leaving the text indented. */
     grid-template-columns: 1fr;
     /*
-     * One long post must not take the whole timeline: past this height the
-     * note scrolls inside the card instead of pushing every other post off
-     * the screen. Set --nt-card-max-height to `none` to go back to cards that
-     * are as tall as their content.
+     * Past this height the note scrolls inside the card instead of pushing
+     * every other post off the screen. `none` restores content-sized cards.
      *
-     * The row holding the note is minmax(0, 1fr) so it is the part that gives
-     * up height when the cap bites — an `auto` row refuses to shrink below its
-     * content, which leaves the note at full height and the card overflowing
-     * past the cap (measured, not guessed). With an indefinite height there is
-     * no free space to distribute, so a card that fits stays exactly as tall
-     * as its content.
+     * The note's row is minmax(0, 1fr) so it is the part that gives up height:
+     * an `auto` row refuses to shrink below its content, leaving the card
+     * overflowing past the cap (measured, not guessed). The action row is left
+     * implicit, which keeps its height and — on a card without actions — keeps
+     * a second track, and its row gap, from existing at all.
      *
-     * Only that one row is declared. The action row is left implicit (`auto`),
-     * so it keeps its own height — it is the last thing a reader should have to
-     * scroll to reach — and a card without actions gets no second track, and so
-     * no row gap under a note that has nothing below it.
-     *
-     * border-box so the cap means the height of the whole post, padding
-     * included, rather than 420px plus whatever --nt-card-padding is.
+     * border-box so the cap is the height of the whole post, padding included.
      */
     box-sizing: border-box;
     max-height: var(--nt-card-max-height, 420px);
@@ -455,42 +438,34 @@
      unbroken content push the card wider than the embed. */
   .body {
     min-width: 0;
-    /* Column flex so the header and the reference chips keep their height and
-       the note absorbs whatever the card's cap leaves. min-height for the same
-       reason as min-width: without it this item refuses to shrink below its
-       content and the cap above has nothing to act on. */
+    /* min-height for the same reason as min-width: without it this item
+       refuses to shrink below its content, and the cap has nothing to act on. */
     min-height: 0;
     display: flex;
     flex-direction: column;
   }
 
+  /* The one scrolling box in the card: it takes the space the header and the
+     chips leave, and scrolls once its content no longer fits. */
   .note {
-    /* The one scrolling box in the card. It takes the space the header and the
-       chips leave, and scrolls once its content no longer fits. */
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    /* Horizontal overflow is already impossible (everything inside wraps or
-       breaks); saying so keeps a stray wide child from adding a second bar. */
+    /* Everything inside wraps or breaks, so this only stops a stray wide child
+       from adding a second bar. */
     overflow-x: hidden;
-    /* The default, spelled out because the alternative is tempting and wrong:
-       `contain` would stop a wheel here for good. It is worth knowing that
-       `auto` does not buy as much as it sounds like either — a browser latches
-       a scroll gesture to the box it started over, so a flick that ends inside
-       a long note does not carry on into the timeline; the reader has to lift
-       off and start again outside the note. That is the cost of scrolling a
-       post in place, and the reason the cap is generous enough that most posts
-       never become a scroll box at all. */
+    /* The default, spelled out because `contain` is tempting and would stop a
+       wheel here for good. Note that `auto` buys less than it sounds like: a
+       browser latches a gesture to the box it started over, so a flick inside
+       a long note never carries on into the timeline. */
     overscroll-behavior-y: auto;
-    /* Where scrollbars take space (Windows, most Linux desktops) a fat one
-       would make an overflowing note narrower than the card next to it, in a
-       colour the embed never chose. */
+    /* A fat scrollbar (Windows, most Linux desktops) would make an overflowing
+       note narrower than the card beside it, in a colour the embed never
+       chose. */
     scrollbar-width: thin;
     scrollbar-color: var(--nt-scrollbar, var(--nt-muted, #657786)) transparent;
   }
 
-  /* Only ever seen on a note the browser made focusable, which it only does
-     while the note scrolls. */
   .note:focus-visible {
     outline: 2px solid var(--nt-link-fg, #1d9bf0);
     outline-offset: 2px;

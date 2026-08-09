@@ -638,9 +638,8 @@ describe('Embeddable timeline E2E', () => {
       expect(cards[0].tabindex).toBeNull();
       expect(cards[1].tabindex).toBeNull();
 
-      // A real wheel gesture over the long post, rather than assigning
-      // `scrollTop`: what is worth knowing is that the note is the box the
-      // browser hands the scroll to.
+      // A real gesture rather than assigning `scrollTop`: what is worth
+      // knowing is that the note is the box the browser hands the scroll to.
       const note = await page.$('nostr-timeline .note');
       const box = (await note?.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -651,10 +650,8 @@ describe('Embeddable timeline E2E', () => {
         await page.$eval('nostr-timeline .note', (scroller) => scroller.scrollTop)
       ).toBeGreaterThan(0);
 
-      // WCAG 2.1.1, met without a line of JS: a browser makes a scroll
-      // container with no focusable children keyboard-operable by itself, and
-      // only while it scrolls. The widget leans on that instead of measuring
-      // the overflow, so this pins the behaviour it depends on.
+      // WCAG 2.1.1, met without a line of JS. The widget leans on the
+      // browser's own handling of scroll containers, so this pins it.
       const keyboard = await page.evaluate(async () => {
         const root = document.querySelector('nostr-timeline')?.shadowRoot as ShadowRoot;
         const [long, short] = [...root.querySelectorAll('.note')] as HTMLElement[];
@@ -666,12 +663,9 @@ describe('Embeddable timeline E2E', () => {
         return { reachable, before, shortReachable: root.activeElement === short };
       });
       expect(keyboard.reachable).toBe(true);
-      // ...and the post that fits stays out of the tab order, which is the
-      // whole reason for leaving this to the browser.
+      // ...and the post that fits stays out of the tab order.
       expect(keyboard.shortReachable).toBe(false);
 
-      // Arrow keys scroll the focused note, so the clipped text is readable
-      // without a pointer.
       await page.evaluate(() => {
         const root = document.querySelector('nostr-timeline')?.shadowRoot as ShadowRoot;
         (root.querySelector('.note') as HTMLElement).focus();
@@ -686,10 +680,8 @@ describe('Embeddable timeline E2E', () => {
   });
 
   it('shows a photo post whole rather than turning it into a scroll box', async () => {
-    // The two defaults have to agree: an attachment is capped
-    // (--nt-media-max-height) inside a card that is itself capped
-    // (--nt-card-max-height), and if the first does not fit inside the second
-    // then *every* photo post becomes a scroll area with a tab stop.
+    // The two defaults have to agree: if --nt-media-max-height does not fit
+    // inside --nt-card-max-height, *every* photo post becomes a scroll area.
     const events = await Promise.all([
       createTestEvent(getRandomSecret(), {
         content: site.photoUrl,
@@ -706,8 +698,7 @@ describe('Embeddable timeline E2E', () => {
         })
       );
       await waitForEventCount(page, 1);
-      // The picture is 1000px tall at source, so it only settles into its
-      // capped height once the bytes have arrived.
+      // The height only settles once the bytes have arrived.
       await page.waitForFunction(
         () =>
           (

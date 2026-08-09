@@ -71,18 +71,13 @@
   .attachment {
     display: block;
     max-width: 100%;
-    /*
-     * Bounded height, so one tall photo does not push the rest of the timeline
-     * off the screen. `contain` because the aspect ratio is unknown.
-     *
-     * The default is chosen to fit *inside* the card's own cap
-     * (--nt-card-max-height, 420px) with room for a header and an action row,
-     * so an ordinary photo post is shown whole rather than turned into a
-     * scroll box — scrolling a picture is a worse way to see it than shrinking
-     * it. Raising this past roughly 300px on a capped card buys nothing but a
-     * scrollbar; embeds that want bigger pictures should raise the card cap
-     * (or set it to `none`) at the same time.
-     */
+    /* Bounded height, so one tall photo does not push the rest of the timeline
+       off the screen. `contain` because the aspect ratio is unknown.
+
+       The default fits inside the card's own cap (--nt-card-max-height, 420px)
+       with room for a header and an action row, so a photo post is shown whole
+       rather than turned into a scroll box. Raising it past ~300px on a capped
+       card buys nothing but a scrollbar — raise the card cap too. */
     max-height: var(--nt-media-max-height, 300px);
     object-fit: contain;
     border-radius: var(--nt-media-radius, 10px);
