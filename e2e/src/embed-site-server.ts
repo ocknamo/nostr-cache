@@ -75,12 +75,41 @@ function buildTallPng(width = 600, height = 1000): Buffer {
 
 const TALL_PNG = buildTallPng();
 
+/** Path of the bare host page. See {@link EmbedSiteServer.scriptOnlyUrl}. */
+const SCRIPT_ONLY_PATH = '/script-only/';
+/**
+ * A page that loads the bundle and puts no widget on itself.
+ *
+ * The bundle also publishes the relay API, for pages that want the cache
+ * without a timeline on them, and that half cannot be reached through the
+ * iframe host pages — they mount an element as they load. A real origin is
+ * still required (IndexedDB refuses to work on an opaque one), which rules out
+ * building this page with Playwright's `setContent`.
+ */
+const SCRIPT_ONLY_PAGE = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>nostr-cache embed: script only</title>
+    <script>
+      // Captured before the bundle can patch it, so a test can tell whether the
+      // relay is running by comparing constructors.
+      window.__originalWebSocket = window.WebSocket;
+    </script>
+    <script src="/nostr-timeline.js"></script>
+  </head>
+  <body></body>
+</html>
+`;
+
 export interface EmbedSiteServer {
   port: number;
   /** Origin the widget is served from. */
   baseUrl: string;
   /** URL of the iframe host page. */
   embedUrl: string;
+  /** URL of a page that loads the bundle without mounting a widget. */
+  scriptOnlyUrl: string;
   /** URL of the follow-timeline iframe host page. */
   followEmbedUrl: string;
   /** URL of a real image, for use as a profile's `picture`. */
@@ -133,6 +162,11 @@ export async function startEmbedSiteServer(
       res.end(bundle);
       return;
     }
+    if (path === SCRIPT_ONLY_PATH) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(SCRIPT_ONLY_PAGE);
+      return;
+    }
     if (path === '/embed/' || path === '/embed/index.html') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(embedPage);
@@ -182,6 +216,7 @@ export async function startEmbedSiteServer(
     port,
     baseUrl,
     embedUrl: `${baseUrl}/embed/`,
+    scriptOnlyUrl: `${baseUrl}${SCRIPT_ONLY_PATH}`,
     followEmbedUrl: `${baseUrl}/embed/follow/`,
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     photoUrl: `${baseUrl}${PHOTO_PATH}`,

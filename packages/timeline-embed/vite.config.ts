@@ -28,5 +28,15 @@ export default defineConfig({
       name: 'NostrTimelineEmbed',
       fileName: () => 'nostr-timeline.js',
     },
+    rollupOptions: {
+      output: {
+        // The entry has both named exports (the relay API) and a default one
+        // (the component), so `globalThis.NostrTimelineEmbed` is the module
+        // namespace and the component lives at `.default`. That is intended —
+        // see `src/embed-entry.ts` — and this setting only says so out loud,
+        // silencing Rollup's warning that assumes it was an accident.
+        exports: 'named',
+      },
+    },
   },
 });
