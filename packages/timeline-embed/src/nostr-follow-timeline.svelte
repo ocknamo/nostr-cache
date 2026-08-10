@@ -15,6 +15,7 @@
       debug: { attribute: 'debug' },
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
+      showEmbeds: { attribute: 'show-embeds' },
       actions: { attribute: 'actions' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
@@ -93,6 +94,12 @@
     showAvatars?: string;
     showMedia?: string;
     /**
+     * Set to "false" to leave a `nostr:` reference in a note's body as a chip
+     * rather than fetching what it points at and rendering it nested, exactly
+     * as on `<nostr-timeline>`.
+     */
+    showEmbeds?: string;
+    /**
      * The embedder's buttons under every card, exactly as on
      * `<nostr-timeline>`: a JSON array from an attribute, or the array itself
      * (with `onSelect` functions) when set as a property. A press raises
@@ -133,6 +140,7 @@
     debug,
     showAvatars,
     showMedia,
+    showEmbeds,
     actions,
     materialIcons,
     materialIconsFont,
@@ -164,6 +172,7 @@
     origins: new Map(),
     validationStatuses: new Map(),
     profiles: new Map(),
+    embeds: new Map(),
     eose: false,
   });
 
@@ -226,8 +235,10 @@
   debug={parseDebug(debug)}
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
+  showEmbeds={showEmbeds !== 'false'}
   actions={normalizeActions(actions)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(key) => controller?.requestProfile(key)}
+  onEmbedRequest={(target) => controller?.requestEmbed(target)}
 />

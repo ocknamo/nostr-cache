@@ -23,7 +23,9 @@
 - アバター・表示名・`@handle` を kind 0（プロフィール）から表示。kind 0 は replaceable として
   同じキャッシュに載り、`upstreamFreshness` の鮮度ウィンドウ（既定 24 時間・
   `profile-freshness` で変更可）が効くため、リロード後は上流に問い合わせず即座に出ます
-- 返信・引用（`e` / `q` タグ）がある投稿には参照チップを表示（参照先の本文は取得しません）
+- 返信・引用（`e` / `q` タグ）がある投稿には参照チップを表示（タグだけが根拠の参照は本文を取得しません）
+- 本文中の `nostr:` 参照（NIP-21 / NIP-27）は参照先を取得し、**入れ子のカード**として表示
+  （5 段まで・[下記](#入れ子の投稿引用)）
 - フォローリスト（kind 3）も replaceable として同じキャッシュに載り、鮮度ウィンドウ
   （既定 10 分・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
   2 回目以降のロードは**上流に問い合わせずフォローリストがキャッシュから即座に出ます**
@@ -162,6 +164,7 @@ npm パッケージを入れられない構成のための入口です。
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
+| `show-embeds` | `false` で本文中の `nostr:` 参照の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 | `material-icons` | ボタンのアイコンを [Material Symbols](https://fonts.google.com/icons) で描画する。`outlined` / `rounded` / `sharp`（値なしは `outlined`） | なし（`icon` は文字そのまま） |
 | `material-icons-font` | `none` で Google Fonts の読み込みを止める（埋め込み先ページが自前で読み込む場合） | `google`（Google Fonts から読み込む） |
@@ -241,7 +244,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
-| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `actions` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -402,6 +405,16 @@ nostr-timeline {
   --nt-media-max-height: 300px; /* 添付画像・動画の高さの上限。カード上限に収まる値 */
   --nt-media-radius: 10px;
   --nt-media-bg: #161b22;       /* 読み込み中の添付の背景 */
+
+  /* 入れ子の投稿（nostr: 参照の引用カード） */
+  --nt-quote-border: #30363d;   /* 既定は --nt-border */
+  --nt-quote-bg: transparent;
+  --nt-quote-radius: 10px;      /* 既定は --nt-radius */
+  --nt-quote-padding: 8px 10px;
+  --nt-quote-font-size: 1em;    /* 1 未満にすると入れ子ごとに掛け算で小さくなります */
+  --nt-quote-avatar-size: 20px; /* ヘッダー行のアイコン。親カードの --nt-avatar-size とは別 */
+  --nt-quote-avatar-radius: 999px;
+  --nt-embed-gap: 8px;          /* 本文と引用カードの間隔、引用カード同士の間隔 */
 }
 ```
 
@@ -452,7 +465,8 @@ nostr-timeline {
 | 画像 URL（`.jpg` `.jpeg` `.png` `.gif` `.webp` `.avif`） | `<img>`。クリックで原寸を新規タブに開く |
 | 動画 URL（`.mp4` `.webm` `.ogv` `.mov`） | `<video controls preload="none">` |
 | 音声 URL（`.mp3` `.ogg` `.oga` `.wav` `.m4a`） | `<audio controls preload="none">` |
-| `nostr:npub1…` / `nprofile` / `note` / `nevent` / `naddr`（`nostr:` 無しの裸の形も可） | 短縮表示のチップ。**リンクにはしません** |
+| `nostr:npub1…` / `nprofile`（`nostr:` 無しの裸の形も可） | 短縮表示のチップ。**リンクにはしません** |
+| `nostr:note1…` / `nevent` / `naddr`（同上） | 参照先のイベントを取得し、**入れ子のカード**として本文の下に表示（[下記](#入れ子の投稿引用)） |
 
 **HTML は一切組み立てません。** 解析結果は「元の文字列のどの範囲が何か」というトークン列で、
 描画は Svelte の通常の補間だけで行います（`{@html}` も `innerHTML` もこのパッケージには
@@ -467,6 +481,38 @@ nostr-timeline {
 ないので、送り先として妥当な URL を持っていません。**すでにタイムライン上にいる著者**への
 メンションは `@表示名` に解決されますが、それ以外は短縮 npub のままです
 （メンション先のプロフィールを追加取得すると、カードごとに購読が増えるため行いません）。
+
+### 入れ子の投稿（引用）
+
+本文中の `nostr:note1…` / `nevent` / `naddr` は、参照先のイベントを取得して
+**枠付きの入れ子カード**として本文の下に表示します（NIP-27 が「読み手クライアントは
+`nostr:` 参照をプレビューとして描画してよい」と定めているもの。`naddr` は NIP-01 の
+置換可能座標なので、最新版を表示します）。展開したトークンは本文から取り除かれるので、
+1 つの引用がカードとチップの二重表示になることはありません。
+
+**入れ子カードは親カードとレイアウトが違います。** 親カードはアイコンが独立した列にあり、
+本文はその幅だけ字下げされますが、入れ子カードはアイコンをヘッダー行にだけ置き、
+**本文は枠の左右いっぱいに広がります**。こうしないと入れ子が深くなるたびに本文幅が
+段階的に痩せていくためです。
+
+| 上限 | 値 | 理由 |
+|---|---|---|
+| 入れ子の深さ | **5 段** | 6 段目の参照は短縮チップのまま残ります |
+| 1 投稿あたりの引用 | **2 件** | 深さと掛け算になるため（2 件 × 5 段で最大 62 件の取得）。超えた分はチップのまま |
+
+- 取得は**カードが画面に入ってから**で（プロフィールと同じ `IntersectionObserver`）、
+  同時に走るのは 2 本までです。取得は購読ではなく一発の REQ（EOSE で完了・5 秒でタイムアウト）で、
+  同じイベントは何枚のカードから参照されても 1 回しか取りに行きません。
+- **取得できなかった参照は短縮チップに戻ります。** 未投稿・上流に無い・リレーが答えない、の
+  どれなのかはウィジェットからは区別できないため、区別しているふりはしません。
+- 入れ子カードにも親と同じく**署名検証待ちの半透明表示**（`--nt-unverified-opacity`）が
+  かかりますが、**半透明にするのは一番外側の 1 つだけ**です（`opacity` は入れ子で
+  掛け算になるため、5 段すべてに掛けると 0.6⁵ ≒ 8% になり「薄い」ではなく「見えない」に
+  なります）。
+- 引用は `q` タグ（NIP-18）にも書かれるのが通例なので、**本文でカードとして展開した id は
+  「引用」チップから省きます**（同じイベントを 2 か所で指さないため）。「返信先」チップは
+  そのままです。
+- 追加の取得を一切させたくない場合は `show-embeds="false"` を指定してください。
 
 ## 投稿ごとのアクションボタン（仕組みのみ）
 
@@ -691,8 +737,10 @@ import {
 | `RelayConnection` | rx-nostr を使った NIP-01 クライアント。切断時の自動再接続と REQ の再送を担う |
 | `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
 | `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
-| `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
-| `Timeline` / `EventCard` / `NoteContent` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
+| `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
+| `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ |
+| `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィールと引用の取得トリガ） |
+| `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 | `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |
 | `normalizeActions` / `dispatchActionEvent` / `ACTION_EVENT` / `MAX_ACTIONS` | 投稿下ボタンの定義解釈と押下通知（`EventAction` 型付き） |

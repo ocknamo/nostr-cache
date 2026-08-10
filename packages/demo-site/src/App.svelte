@@ -57,6 +57,7 @@
     origins: new Map(),
     validationStatuses: new Map(),
     profiles: new Map(),
+    embeds: new Map(),
     eose: false,
   });
   let metrics = $state<MetricsSnapshot>({ cacheHits: 0, upstreamEvents: 0, delivered: 0 });
@@ -279,7 +280,9 @@
         showOrigin={debug}
         validationStatuses={timeline.validationStatuses}
         profiles={timeline.profiles}
+        embeds={timeline.embeds}
         onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
+        onEmbedRequest={(target) => controller?.requestEmbed(target)}
       />
     </div>
   </section>

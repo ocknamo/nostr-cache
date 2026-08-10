@@ -3,6 +3,7 @@
   import type { EventOrigin } from '../lib/cache-metrics.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { MaterialVariant } from '../lib/material-symbols.ts';
+  import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import EventCard from './EventCard.svelte';
@@ -15,6 +16,8 @@
     validationStatuses?: Map<string, ValidationStatus>;
     /** Author profiles (kind 0), keyed by pubkey. */
     profiles?: Map<string, Profile>;
+    /** Events quoted by a `nostr:` reference in a body, keyed by `embedKey`. */
+    embeds?: Map<string, EmbeddedEvent>;
     /**
      * Render the diagnostic cache/upstream badge on each event. On by default
      * for direct users of this component (the demo site is one, and showing the
@@ -30,6 +33,12 @@
      */
     showMedia?: boolean;
     /**
+     * Render the events a `nostr:` reference in a body points at, as nested
+     * cards. On by default; turning it off leaves the references as chips and
+     * costs the relay nothing.
+     */
+    showEmbeds?: boolean;
+    /**
      * Buttons to render under every card. Empty by default — the widget ships
      * no actions of its own, only the mechanism (`lib/event-actions.ts`).
      */
@@ -43,6 +52,11 @@
      * into view, so profiles are fetched for what the reader actually sees.
      */
     onAuthorVisible?: (pubkey: string) => void;
+    /**
+     * Called with the lookup for a `nostr:` reference the first time the nested
+     * card standing for it appears on screen.
+     */
+    onEmbedRequest?: (target: EmbedTarget) => void;
   }
 
   const {
@@ -51,13 +65,16 @@
     origins = new Map(),
     validationStatuses = new Map(),
     profiles = new Map(),
+    embeds = new Map(),
     showOrigin = true,
     showAvatars = true,
     showMedia = true,
+    showEmbeds = true,
     actions = [],
     onAction,
     materialIcons,
     onAuthorVisible,
+    onEmbedRequest,
   }: Props = $props();
 </script>
 
@@ -74,13 +91,17 @@
             status={validationStatuses.get(event.id)}
             profile={profiles.get(event.pubkey)}
             {profiles}
+            {validationStatuses}
+            {embeds}
             showAvatar={showAvatars}
             {showMedia}
+            {showEmbeds}
             {actions}
             {onAction}
             {materialIcons}
             datePlacement={index === 0 ? 'below' : 'above'}
             onVisible={onAuthorVisible && (() => onAuthorVisible(event.pubkey))}
+            {onEmbedRequest}
           />
         </li>
       {/each}

@@ -325,6 +325,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   showAvatars: boolean;
   /** Whether to render media attachments found in a note's body. */
   showMedia: boolean;
+  /** Whether to render `nostr:` references in a body as nested cards. */
+  showEmbeds: boolean;
   /**
    * The embedder's buttons under each card. A query string carries no
    * functions, so these are declarative only — a press is reported by event.
@@ -349,6 +351,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
+    showEmbeds: params.get('show-embeds') !== 'false',
     actions: normalizeActions(params.get('actions')),
     materialIcons: parseMaterialVariant(params.get('material-icons')),
     materialIconsFont: params.get('material-icons-font') ?? undefined,
@@ -374,6 +377,7 @@ export interface FollowTimelineConfig {
   debug: boolean;
   showAvatars: boolean;
   showMedia: boolean;
+  showEmbeds: boolean;
   /** Declarative action buttons; see {@link configFromSearchParams}. */
   actions: EventAction[];
   /** Material Symbols variant for the action icons, if asked for. */
@@ -405,6 +409,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     debug: parseDebug(params.get('debug')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
+    showEmbeds: params.get('show-embeds') !== 'false',
     actions: normalizeActions(params.get('actions')),
     materialIcons: parseMaterialVariant(params.get('material-icons')),
     materialIconsFont: params.get('material-icons-font') ?? undefined,

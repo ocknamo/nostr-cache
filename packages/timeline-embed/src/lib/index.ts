@@ -14,6 +14,7 @@ export { CacheMetrics } from './cache-metrics.ts';
 export type { EventOrigin, MetricsSnapshot } from './cache-metrics.ts';
 export {
   abbreviateBech32,
+  embedKey,
   inlineParts,
   mediaAsLinks,
   mediaParts,
@@ -57,6 +58,14 @@ export {
 } from './material-symbols.ts';
 export type { MaterialVariant } from './material-symbols.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
+export {
+  MAX_EMBEDS_PER_NOTE,
+  MAX_EMBED_DEPTH,
+  embedKeys,
+  embedTarget,
+  selectEmbeds,
+} from './note-embeds.ts';
+export type { EmbedStatus, EmbedTarget, EmbeddedEvent } from './note-embeds.ts';
 export { fetchLatestReplaceable, latestReplaceable } from './one-shot-request.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
 export type { Profile } from './profile.ts';
@@ -108,3 +117,4 @@ export type {
 export { DEFAULT_TIMELINE_CAP, insertEvent } from './timeline-utils.ts';
 export { fetchValidationStatuses, hasPending } from './validation-status.ts';
 export type { ValidationStatus } from './validation-status.ts';
+export { whenVisible } from './when-visible.ts';

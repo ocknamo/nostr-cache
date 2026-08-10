@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import EventCard from './EventCard.svelte';
 
+const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
+const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
+
 /**
  * Fire a `pointerenter` that carries a `pointerType`.
  *
@@ -187,6 +190,93 @@ describe('EventCard', () => {
     });
 
     expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('renders a nostr: reference as a nested card and asks for the event', () => {
+    const onEmbedRequest = vi.fn();
+    const event = makeEvent({ content: `see nostr:${NOTE} for context` });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        onEmbedRequest,
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: 'quoted body' }) }],
+        ]),
+      },
+    });
+
+    expect(onEmbedRequest).toHaveBeenCalledWith({
+      key: NOTE_HEX,
+      filter: { ids: [NOTE_HEX] },
+      replaceable: false,
+    });
+    // The reference is a card now, so it is no longer a chip in the text.
+    expect(container.querySelector('.note > .content')).toHaveTextContent('see for context');
+    expect(container.querySelector('.quote')).not.toBeNull();
+  });
+
+  it('drops the quote chip for a reference the body already shows as a card', () => {
+    // NIP-18's `q` tag and NIP-27's body reference name the same event, and
+    // showing both would point at the card sitting right underneath.
+    const event = makeEvent({ content: `nostr:${NOTE}`, tags: [['q', NOTE_HEX]] });
+    render(EventCard, { props: { event, showAvatar: false, onEmbedRequest: () => {} } });
+
+    expect(screen.queryByText('引用')).not.toBeInTheDocument();
+  });
+
+  it('keeps the quote chip for an event the body does not reference', () => {
+    const event = makeEvent({ content: 'no references here', tags: [['q', NOTE_HEX]] });
+    render(EventCard, { props: { event, showAvatar: false } });
+
+    expect(screen.getByText('引用')).toBeInTheDocument();
+  });
+
+  it('leaves a reference as a chip when embeds are switched off', () => {
+    const onEmbedRequest = vi.fn();
+    const event = makeEvent({ content: `see nostr:${NOTE}` });
+    const { container } = render(EventCard, {
+      props: { event, showAvatar: false, showEmbeds: false, onEmbedRequest },
+    });
+
+    expect(container.querySelector('.quote')).toBeNull();
+    expect(onEmbedRequest).not.toHaveBeenCalled();
+    expect(container.querySelector('.content')).toHaveTextContent('see note1tszz…elrl');
+  });
+
+  it('lets an unverified card carry the fade for the quotes inside it', () => {
+    // The card is already faded, and `opacity` multiplies: a quote fading again
+    // inside it would come out at 0.36 rather than 0.6.
+    const event = makeEvent({ content: `nostr:${NOTE}` });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: 'quoted' }) }],
+        ]),
+      },
+    });
+
+    expect(container.querySelector('.event-card')).toHaveClass('unverified');
+    expect(container.querySelector('.quote')).not.toHaveClass('unverified');
+  });
+
+  it('keeps the quotes inside the scrolling note, under the height cap', () => {
+    // Outside it, a chain of quotes would grow the card past
+    // --nt-card-max-height instead of scrolling within it.
+    const event = makeEvent({ content: `nostr:${NOTE}` });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: 'quoted' }) }],
+        ]),
+      },
+    });
+
+    expect(container.querySelector('.note .quote')).not.toBeNull();
   });
 
   it('shows no reference row on a standalone note', () => {

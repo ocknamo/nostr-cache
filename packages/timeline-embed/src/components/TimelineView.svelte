@@ -15,6 +15,7 @@
 
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { MaterialVariant } from '../lib/material-symbols.ts';
+  import type { EmbedTarget } from '../lib/note-embeds.ts';
   import type { TimelineState } from '../lib/timeline-controller.ts';
   import Timeline from './Timeline.svelte';
 
@@ -23,6 +24,7 @@
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
+    showEmbeds?: boolean;
     /** The embedder's buttons, rendered under every card. */
     actions?: EventAction[];
     /** Called on a press, after the action's own `onSelect`. */
@@ -42,6 +44,7 @@
      */
     fatal?: string;
     onAuthorVisible?: (pubkey: string) => void;
+    onEmbedRequest?: (target: EmbedTarget) => void;
   }
 
   const {
@@ -49,12 +52,14 @@
     showOrigin = false,
     showAvatars = true,
     showMedia = true,
+    showEmbeds = true,
     actions = [],
     onAction,
     materialIcons,
     debug = false,
     fatal,
     onAuthorVisible,
+    onEmbedRequest,
   }: Props = $props();
 
   const follows = $derived(state.follows);
@@ -118,13 +123,16 @@
         origins={state.origins}
         validationStatuses={state.validationStatuses}
         profiles={state.profiles}
+        embeds={state.embeds}
         {showOrigin}
         {showAvatars}
         {showMedia}
+        {showEmbeds}
         {actions}
         {onAction}
         {materialIcons}
         {onAuthorVisible}
+        {onEmbedRequest}
       />
     {/if}
   {/if}

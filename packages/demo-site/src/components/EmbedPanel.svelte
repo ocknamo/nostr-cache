@@ -352,8 +352,16 @@
     本文中の URL はリンクになり、画像・動画・音声は投稿者が指定したホストから直接埋め込まれます
     （アバターと同じく閲覧者の IP がそのホストに渡ります）。避けたい場合は
     <code>show-media="false"</code>（iframe なら <code>&amp;show-media=false</code>）を
-    指定してください。URL はリンクとして残ります。<code>nostr:</code> のメンションは
-    短縮表示するだけで、リンクにはしません。
+    指定してください。URL はリンクとして残ります。<code>nostr:</code> の人へのメンション
+    （<code>npub</code> / <code>nprofile</code>）は短縮表示するだけで、リンクにはしません。
+  </p>
+
+  <p class="footnote">
+    本文中の <code>nostr:note1…</code> / <code>nevent</code> / <code>naddr</code> は、
+    参照先の投稿を取得して<strong>入れ子のカード</strong>として表示します（深さ 5 段・
+    1 投稿あたり 2 件まで。取得できなかった参照は短縮表示に戻ります）。
+    追加の取得をさせたくない場合は <code>show-embeds="false"</code>
+    （iframe なら <code>&amp;show-embeds=false</code>）を指定してください。
   </p>
 </section>
 
