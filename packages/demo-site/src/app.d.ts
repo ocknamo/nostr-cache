@@ -24,6 +24,7 @@ declare namespace svelteHTML {
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
+      'show-embeds'?: string;
       /** JSON array of buttons to render under each card. */
       actions?: string;
       /** Render those buttons' icons as Material Symbols of this variant. */
@@ -43,6 +44,7 @@ declare namespace svelteHTML {
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
+      'show-embeds'?: string;
       /** JSON array of buttons to render under each card. */
       actions?: string;
       /** Render those buttons' icons as Material Symbols of this variant. */

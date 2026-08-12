@@ -240,6 +240,24 @@ function classifyMedia(url: URL): MediaKind | undefined {
 }
 
 /**
+ * The identity of the event an entity points at, or undefined for a person.
+ *
+ * Two spellings of the same event (`note1…` and `nevent1…`) collapse onto the
+ * same key, so a note referencing one event twice renders a single card. The
+ * `naddr` key is NIP-01's `kind:pubkey:d`, which cannot collide with a 64-hex
+ * id.
+ */
+export function embedKey(entity: Nip19Entity): string | undefined {
+  if (entity.type === 'note' || entity.type === 'nevent') {
+    return entity.id;
+  }
+  if (entity.type === 'naddr') {
+    return `${entity.kind}:${entity.pubkey}:${entity.identifier}`;
+  }
+  return undefined;
+}
+
+/**
  * Shorten a bech32 string for display, keeping its prefix legible.
  *
  * `npub10elf…jptg` reads as "some npub" at a glance, which is the most a
@@ -370,20 +388,19 @@ function normalize(parts: ContentPart[]): ContentPart[] {
   return merged.filter((part) => part.kind !== 'text' || part.text.length > 0);
 }
 
+type Lifted = (part: ContentPart) => boolean;
+
 /**
- * The parts to render inside the note's paragraph.
+ * Remove the parts rendered below the text, and close the hole they leave, so
+ * an image — or a quoted note — on its own line does not leave a blank one.
  *
- * Attachments are lifted out — they are rendered below the text, the way a
- * Nostr client does it — and the whitespace they leave behind is collapsed, so
- * an image on its own line does not leave a blank one.
- *
- * A whole run of attachments (`img1 img2 img3`) collapses to one separator
- * rather than one per attachment, which is why this walks forward carrying the
- * gap's whitespace rather than removing each attachment independently.
+ * A whole run of lifted parts (`img1 img2 img3`) collapses to one separator
+ * rather than one per part, which is why this walks forward carrying the gap's
+ * whitespace rather than removing each part independently.
  */
-export function inlineParts(parts: ContentPart[]): ContentPart[] {
+function liftParts(parts: ContentPart[], isLifted: Lifted): ContentPart[] {
   const result: ContentPart[] = [];
-  /** Whitespace around the attachments removed since the last real content. */
+  /** Whitespace around the parts removed since the last real content. */
   let gap: string | undefined;
 
   /** Take the whitespace trailing the text already emitted, into the gap. */
@@ -400,8 +417,8 @@ export function inlineParts(parts: ContentPart[]): ContentPart[] {
   };
 
   for (const part of parts) {
-    if (part.kind === 'media') {
-      // Only the first attachment of a run has anything left to steal.
+    if (isLifted(part)) {
+      // Only the first of a run has anything left to steal.
       if (gap === undefined) {
         gap = stealTrailingWhitespace();
       }
@@ -438,17 +455,42 @@ export function inlineParts(parts: ContentPart[]): ContentPart[] {
 }
 
 /**
- * The parts to render when attachments are switched off.
- *
- * Every attachment becomes an ordinary link, so turning media off costs the
- * reader the preview but never the URL itself.
+ * Keyed rather than compared by token: the same event can be written as a
+ * `note1…` in one place and an `nevent1…` in another, and both belong to the
+ * one card.
  */
-export function mediaAsLinks(parts: ContentPart[]): ContentPart[] {
-  return normalize(
-    parts.map((part) =>
-      part.kind === 'media' ? { kind: 'link' as const, href: part.url, label: part.url } : part
-    )
+function isEmbedded(part: ContentPart, embedded: ReadonlySet<string> | undefined): boolean {
+  if (part.kind !== 'entity' || !embedded) {
+    return false;
+  }
+  const key = embedKey(part.entity);
+  return key !== undefined && embedded.has(key);
+}
+
+/**
+ * The parts to render inside the note's paragraph. Attachments are lifted out —
+ * rendered below the text, the way a Nostr client does it — and so are the
+ * entities the caller has decided to render as nested cards.
+ *
+ * @param embedded Keys ({@link embedKey}) of the entities rendered as cards. An
+ *   entity that is not in here stays in the text as an abbreviated chip, which
+ *   is what the depth and per-note caps come out as.
+ */
+export function inlineParts(parts: ContentPart[], embedded?: ReadonlySet<string>): ContentPart[] {
+  return liftParts(parts, (part) => part.kind === 'media' || isEmbedded(part, embedded));
+}
+
+/**
+ * Every attachment becomes an ordinary link, so turning media off costs the
+ * reader the preview but never the URL itself. Nested cards are unaffected:
+ * they cost no request to a third-party host, which is what `show-media` is
+ * about.
+ */
+export function mediaAsLinks(parts: ContentPart[], embedded?: ReadonlySet<string>): ContentPart[] {
+  const linked = parts.map((part) =>
+    part.kind === 'media' ? { kind: 'link' as const, href: part.url, label: part.url } : part
   );
+  return liftParts(linked, (part) => isEmbedded(part, embedded));
 }
 
 /**

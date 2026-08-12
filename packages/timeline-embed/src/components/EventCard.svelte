@@ -1,12 +1,21 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
+  import { embedKey, parseContent } from '../lib/content-parts.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
+  import {
+    type EmbedTarget,
+    type EmbeddedEvent,
+    embedKeys,
+    selectEmbeds,
+  } from '../lib/note-embeds.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
+  import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
+  import EmbeddedNote from './EmbeddedNote.svelte';
   import NoteContent from './NoteContent.svelte';
 
   interface Props {
@@ -18,6 +27,12 @@
     /** The author's kind 0 profile, once it has been fetched. */
     profile?: Profile;
     /**
+     * Used only by the nested cards — this card's own verdict is `status`.
+     */
+    validationStatuses?: Map<string, ValidationStatus>;
+    /** Events quoted by a `nostr:` reference in some body, keyed by `embedKey`. */
+    embeds?: Map<string, EmbeddedEvent>;
+    /**
      * Every profile the timeline has, keyed by pubkey. Used only to put a name
      * on a `nostr:` mention in the body; the author's own name comes from
      * `profile`.
@@ -27,6 +42,13 @@
     showAvatar?: boolean;
     /** Render image / video / audio attachments found in the body. */
     showMedia?: boolean;
+    /**
+     * Render the events a `nostr:` reference in the body points at, as nested
+     * cards (NIP-27). With this off — or with neither an `onEmbedRequest` to
+     * fetch through nor `embeds` already resolved — a reference stays the
+     * abbreviated chip it has always been.
+     */
+    showEmbeds?: boolean;
     /**
      * Which way the date tooltip opens.
      *
@@ -55,6 +77,7 @@
      * this to look up the author's profile only for cards a reader can see.
      */
     onVisible?: () => void;
+    onEmbedRequest?: (target: EmbedTarget) => void;
   }
 
   const {
@@ -63,13 +86,17 @@
     status,
     profile,
     profiles,
+    validationStatuses,
+    embeds,
     showAvatar = true,
     showMedia = true,
+    showEmbeds = true,
     datePlacement = 'above',
     actions = [],
     onAction,
     materialIcons,
     onVisible,
+    onEmbedRequest,
   }: Props = $props();
 
   /** Whether this button's `icon` is a ligature name rather than literal text. */
@@ -88,62 +115,30 @@
     materialIcons ? `font-family: '${materialFontFamily(materialIcons)}'` : undefined
   );
 
-  /**
-   * Report the card's first appearance on screen, then stop watching.
-   *
-   * Falls back to reporting immediately where `IntersectionObserver` is missing
-   * (jsdom, older browsers): the lookup being eager is a far better failure than
-   * every author staying an anonymous pubkey.
-   */
-  function whenVisible(node: HTMLElement, callback?: () => void) {
-    // Read through a mutable holder so `update` can swap the callback in: an
-    // action captures its argument once, and the prop is optional, so a card
-    // that gains an `onVisible` later would otherwise never report.
-    let current = callback;
-    let reported = false;
-
-    const report = () => {
-      if (reported || !current) {
-        return;
-      }
-      reported = true;
-      current();
-    };
-
-    if (typeof IntersectionObserver === 'undefined') {
-      report();
-      return {
-        update: (next?: () => void) => {
-          current = next;
-          report();
-        },
-        destroy: () => {},
-      };
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          observer.disconnect();
-          report();
-        }
-      },
-      // Start the lookup just before the card arrives, so the name is usually
-      // there by the time it is read rather than popping in afterwards.
-      { rootMargin: '200px' }
-    );
-    observer.observe(node);
-    return {
-      update: (next?: () => void) => {
-        current = next;
-      },
-      destroy: () => observer.disconnect(),
-    };
-  }
-
   const name = $derived(authorName(event.pubkey, profile));
   const handle = $derived(authorHandle(event.pubkey, profile));
-  const refs = $derived(parseRefs(event));
+
+  const parts = $derived(parseContent(event.content));
+  /**
+   * Without either a way to fetch (`onEmbedRequest`) or events already resolved
+   * for it (`embeds`), lifting a reference out of the text would leave nothing
+   * to put in its place — so a consumer that wires neither gets the body it
+   * always got, rather than a placeholder that never resolves.
+   */
+  const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
+  const embedded = $derived(showEmbeds && resolvable ? selectEmbeds(parts, 0) : []);
+  const embeddedKeys = $derived(embedKeys(embedded));
+
+  /**
+   * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
+   * and as a `q` tag (NIP-18) — so a quote already showing as a nested card
+   * would otherwise also show as a chip pointing at the same event. The reply
+   * chip stays whatever the body does: a reply's parent is context the author
+   * did not choose to quote, and "返信先" says something the quote card does not.
+   */
+  const refs = $derived(
+    parseRefs(event).filter((ref) => ref.kind !== 'quote' || !embeddedKeys.has(ref.id))
+  );
 
   const REF_LABELS: Record<'reply' | 'quote', string> = {
     reply: '返信先',
@@ -331,7 +326,28 @@
       readable by mouse and touch.
     -->
     <div class="note" part="note">
-      <NoteContent content={event.content} {showMedia} {profiles} />
+      <NoteContent content={event.content} {parts} embedded={embeddedKeys} {showMedia} {profiles} />
+      <!-- Inside the scrolling box on purpose: a chain of quotes then grows the
+           scroll rather than the card, keeping the height cap. -->
+      {#if embedded.length > 0}
+        <ul class="embeds">
+          {#each embedded as part (embedKey(part.entity))}
+            <li>
+              <EmbeddedNote
+                entity={part}
+                depth={1}
+                {embeds}
+                {profiles}
+                {validationStatuses}
+                {showAvatar}
+                {showMedia}
+                ancestorUnverified={unverified}
+                {onEmbedRequest}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   </div>
   <!--
@@ -644,6 +660,18 @@
   .origin.upstream {
     background: var(--nt-upstream-bg, #eef2f8);
     color: var(--nt-upstream-fg, #4a5b73);
+  }
+
+  .embeds {
+    list-style: none;
+    margin: var(--nt-embed-gap, 8px) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--nt-embed-gap, 8px);
+    /* A flex item defaults to min-width:auto; without this a wide quote would
+       stretch the card. */
+    min-width: 0;
   }
 
   .refs {

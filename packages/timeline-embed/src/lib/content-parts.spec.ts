@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ContentPart,
   abbreviateBech32,
+  embedKey,
   inlineParts,
   mediaAsLinks,
   mediaParts,
@@ -12,6 +13,12 @@ const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
 const NPUB_HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
 const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
 const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
+/** The same event as NOTE, written the other way — id, author and kind TLVs. */
+const NEVENT =
+  'nevent1qqs9cppf9vggqpfdty7ykh6wdu72pc8qukmkukeapcxu6j7trd487ygpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgzypl8a8zz4ydlauvl4y57tldpkuhqa0q6fsg5zee7y72zxnvx4h05uqcyqqqqqqg4dxgkd';
+/** kind 30023, author NPUB_HEX, `d` tag `my-article`. */
+const NADDR =
+  'naddr1qq9x67fdv9e8g6trd3jsz9mhwden5te0wfjkccte9ejhsctdwpkx2tnrdaksygr706wy92gmlmcel2ffuh76rdewp67p5nq3g9nnufu5ydxcdtwlfcpsgqqqw4rstnle8h';
 
 /** The text a card would show, ignoring how it is split up. */
 function textOf(parts: ContentPart[]): string {
@@ -240,6 +247,31 @@ describe('inlineParts', () => {
     const parts = parseContent(`a https://example.com/x b nostr:${NPUB}`);
     expect(inlineParts(parts).map((part) => part.kind)).toEqual(['text', 'link', 'text', 'entity']);
   });
+
+  it('lifts an embedded entity out and closes the gap', () => {
+    const parts = parseContent(`see nostr:${NOTE} for context`);
+    expect(inlineParts(parts, new Set([NOTE_HEX]))).toEqual([
+      { kind: 'text', text: 'see for context' },
+    ]);
+  });
+
+  it('lifts the same event however it was written', () => {
+    const parts = parseContent(`${NOTE} and nostr:${NEVENT}`);
+    expect(inlineParts(parts, new Set([NOTE_HEX]))).toEqual([{ kind: 'text', text: 'and' }]);
+  });
+
+  it('leaves an entity that is not being embedded in the text', () => {
+    const parts = parseContent(`see nostr:${NOTE} and nostr:${NPUB}`);
+    expect(inlineParts(parts, new Set([NOTE_HEX]))).toEqual([
+      { kind: 'text', text: 'see and ' },
+      expect.objectContaining({ kind: 'entity', raw: `nostr:${NPUB}` }),
+    ]);
+  });
+
+  it('collapses an attachment and an embed standing next to each other', () => {
+    const parts = parseContent(`a https://cdn.example.com/1.jpg nostr:${NOTE} b`);
+    expect(inlineParts(parts, new Set([NOTE_HEX]))).toEqual([{ kind: 'text', text: 'a b' }]);
+  });
 });
 
 describe('mediaAsLinks', () => {
@@ -254,6 +286,32 @@ describe('mediaAsLinks', () => {
       },
       { kind: 'text', text: ' at this' },
     ]);
+  });
+
+  it('still lifts an embedded entity out', () => {
+    // Turning attachments off is about not fetching from a third-party host,
+    // which a nested card does not do.
+    const parts = parseContent(`see nostr:${NOTE} now`);
+    expect(mediaAsLinks(parts, new Set([NOTE_HEX]))).toEqual([{ kind: 'text', text: 'see now' }]);
+  });
+});
+
+describe('embedKey', () => {
+  it('keys note and nevent by the event id', () => {
+    const [note] = parseContent(NOTE);
+    const [nevent] = parseContent(NEVENT);
+    expect(note.kind === 'entity' && embedKey(note.entity)).toBe(NOTE_HEX);
+    expect(nevent.kind === 'entity' && embedKey(nevent.entity)).toBe(NOTE_HEX);
+  });
+
+  it('keys naddr by its replaceable coordinate', () => {
+    const [naddr] = parseContent(NADDR);
+    expect(naddr.kind === 'entity' && embedKey(naddr.entity)).toBe(`30023:${NPUB_HEX}:my-article`);
+  });
+
+  it('has no key for a person', () => {
+    const [npub] = parseContent(NPUB);
+    expect(npub.kind === 'entity' && embedKey(npub.entity)).toBeUndefined();
   });
 });
 

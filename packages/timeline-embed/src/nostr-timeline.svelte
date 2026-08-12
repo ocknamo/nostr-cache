@@ -14,6 +14,7 @@
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
+      showEmbeds: { attribute: 'show-embeds' },
       actions: { attribute: 'actions' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
@@ -102,6 +103,17 @@
      */
     showMedia?: string;
     /**
+     * Set to "false" to stop rendering the events a `nostr:` reference in a
+     * note's body points at as nested cards (NIP-27). The references then stay
+     * abbreviated chips, as they were before the feature existed — which is
+     * also what the widget falls back to for a reference it cannot fetch.
+     *
+     * Each nested card costs one lookup through the cache relay, up to two per
+     * note and five levels deep, so this is the switch for an embed that wants
+     * the timeline to ask for nothing but the timeline.
+     */
+    showEmbeds?: string;
+    /**
      * Buttons to render under every card, as a JSON array of
      * `{"id","label","icon"}` — or, when set as a property from JS, the array
      * itself, whose entries may also carry an `onSelect` function.
@@ -144,6 +156,7 @@
     showOrigin,
     showAvatars,
     showMedia,
+    showEmbeds,
     actions,
     materialIcons,
     materialIconsFont,
@@ -176,6 +189,7 @@
     origins: new Map(),
     validationStatuses: new Map(),
     profiles: new Map(),
+    embeds: new Map(),
     eose: false,
   });
 
@@ -222,8 +236,10 @@
   debug={parseDebug(debug)}
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
+  showEmbeds={showEmbeds !== 'false'}
   actions={normalizeActions(actions)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
+  onEmbedRequest={(target) => controller?.requestEmbed(target)}
 />

@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    type ContentPart,
     type EntityPart,
     inlineParts,
     mediaAsLinks,
@@ -12,6 +13,18 @@
   interface Props {
     /** The event's raw `content`. */
     content: string;
+    /**
+     * The parsed content, when the caller has it already: a card that renders
+     * quoted events has to parse the body to find them. Unset, this component
+     * parses `content` itself, as it always has.
+     */
+    parts?: ContentPart[];
+    /**
+     * Keys (`embedKey`) of the entities the caller renders as nested cards below
+     * this text, lifted out of the paragraph the way attachments are so a quote
+     * is not both a card and a chip. An entity not named here stays a chip.
+     */
+    embedded?: ReadonlySet<string>;
     /**
      * Render image / video / audio attachments. With this off the URLs stay in
      * the text as ordinary links, so nothing is hidden — the widget just never
@@ -28,10 +41,12 @@
     profiles?: Map<string, Profile>;
   }
 
-  const { content, showMedia = true, profiles }: Props = $props();
+  const { content, parts: given, embedded, showMedia = true, profiles }: Props = $props();
 
-  const parts = $derived(parseContent(content));
-  const inline = $derived(showMedia ? inlineParts(parts) : mediaAsLinks(parts));
+  const parts = $derived(given ?? parseContent(content));
+  const inline = $derived(
+    showMedia ? inlineParts(parts, embedded) : mediaAsLinks(parts, embedded)
+  );
   const media = $derived(showMedia ? mediaParts(parts) : []);
 
   /**

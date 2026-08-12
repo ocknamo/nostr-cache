@@ -757,4 +757,154 @@ describe('TimelineController', () => {
       expect(states.at(-1)?.follows?.status).toBe('missing');
     });
   });
+
+  describe('quoted events', () => {
+    const QUOTED_ID = 'q'.repeat(64);
+
+    /** The lookup a card asks for when it references QUOTED_ID. */
+    const quotedTarget = {
+      key: QUOTED_ID,
+      filter: { ids: [QUOTED_ID] },
+      replaceable: false,
+    };
+
+    /** Embed keys the controller has already started a lookup for. */
+    function requestedEmbeds(controller: TimelineController): Set<string> {
+      return (controller as unknown as { requestedEmbeds: Set<string> }).requestedEmbeds;
+    }
+
+    it('resolves a quote out of the cache and looks its author up', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [
+        makeEvent({ id: QUOTED_ID, pubkey: 'alice', content: 'the quoted note' }),
+      ]);
+      const { controller, states } = createController(dbName);
+      await controller.start([{ kinds: [1], limit: 10 }]);
+
+      controller.requestEmbed(quotedTarget);
+      // Something to render while the REQ is in flight, rather than nothing.
+      expect(states.at(-1)?.embeds.get(QUOTED_ID)).toEqual({ status: 'loading' });
+
+      await waitFor(
+        () => states.at(-1)?.embeds.get(QUOTED_ID)?.status === 'ready',
+        'the quoted event'
+      );
+      expect(states.at(-1)?.embeds.get(QUOTED_ID)?.event?.content).toBe('the quoted note');
+      // The nested card names its author, so the kind 0 has to be asked for too.
+      // Read from the controller rather than the relay: a lookup with no grace
+      // closes on EOSE, so the subscription is gone before this can see it.
+      const requestedProfiles = (controller as unknown as { requestedProfiles: Set<string> })
+        .requestedProfiles;
+      expect(requestedProfiles.has('alice')).toBe(true);
+    });
+
+    it('reports a quote nothing answered for as missing', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+
+      controller.requestEmbed(quotedTarget);
+
+      // Cache-only, and the event was never stored: "not published", "not
+      // upstream" and "no answer" all come out the same way here.
+      await waitFor(
+        () => states.at(-1)?.embeds.get(QUOTED_ID)?.status === 'missing',
+        'the missing verdict'
+      );
+    });
+
+    it('asks for the same quote once however many cards reference it', async () => {
+      const { controller } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+
+      controller.requestEmbed(quotedTarget);
+      controller.requestEmbed(quotedTarget);
+      controller.requestEmbed(quotedTarget);
+
+      expect(requestedEmbeds(controller).size).toBe(1);
+    });
+
+    it('holds the extra lookups back rather than opening one per reference', async () => {
+      const { controller } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+
+      for (let index = 0; index < 6; index++) {
+        const key = `${index}`.repeat(64);
+        controller.requestEmbed({ key, filter: { ids: [key] }, replaceable: false });
+      }
+
+      // The relay caps a client at 20 subscriptions and the timeline's own REQ
+      // plus four profile lookups already share that budget.
+      const inFlight = (controller as unknown as { embedsInFlight: number }).embedsInFlight;
+      const queued = (controller as unknown as { pendingEmbeds: unknown[] }).pendingEmbeds;
+      expect(inFlight).toBeLessThanOrEqual(2);
+      expect(inFlight + queued.length).toBe(6);
+    });
+
+    it('polls the relay for the quoted events verdicts too', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [makeEvent({ id: QUOTED_ID, pubkey: 'alice' })]);
+      const { controller, states } = createController(dbName);
+      // No timeline events at all: a card can be quoting something long before
+      // the subscription it lives on has delivered anything.
+      await controller.start([{ kinds: [9999], limit: 10 }]);
+      controller.requestEmbed(quotedTarget);
+
+      await waitFor(
+        () => states.at(-1)?.validationStatuses.has(QUOTED_ID) === true,
+        "the quoted event's verdict"
+      );
+    });
+
+    it('refuses to start a lookup while suspended, and forgets the ones it had', async () => {
+      const { controller } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      controller.requestEmbed(quotedTarget);
+
+      controller.suspend();
+
+      // A lookup running through a suspend would refill the very cache the demo
+      // is about to measure cold.
+      expect(requestedEmbeds(controller).size).toBe(0);
+      controller.requestEmbed(quotedTarget);
+      expect(requestedEmbeds(controller).size).toBe(0);
+    });
+
+    it('drops resolved quotes when the filters are replaced', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [makeEvent({ id: QUOTED_ID, pubkey: 'alice' })]);
+      const { controller, states } = createController(dbName);
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      controller.requestEmbed(quotedTarget);
+      await waitFor(
+        () => states.at(-1)?.embeds.get(QUOTED_ID)?.status === 'ready',
+        'the quoted event'
+      );
+
+      controller.applyFilter([{ kinds: [1], limit: 5 }]);
+
+      // They were keyed off bodies that are no longer on screen.
+      expect(states.at(-1)?.embeds.size).toBe(0);
+      // …and the new timeline must be able to ask for them again.
+      expect(requestedEmbeds(controller).size).toBe(0);
+    });
+
+    it('lets a resumed controller ask again after a suspend', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [makeEvent({ id: QUOTED_ID, pubkey: 'alice' })]);
+      const { controller, states } = createController(dbName);
+      await controller.start([{ kinds: [1], limit: 10 }]);
+
+      controller.suspend();
+      controller.applyFilter([{ kinds: [1], limit: 10 }]);
+      controller.requestEmbed(quotedTarget);
+
+      // `suspend()` aborts the signal the lookups run under; reusing that same
+      // controller afterwards would have every later lookup resolve instantly
+      // with nothing and report a perfectly cached event as missing.
+      await waitFor(
+        () => states.at(-1)?.embeds.get(QUOTED_ID)?.status === 'ready',
+        'the quoted event after resuming'
+      );
+    });
+  });
 });

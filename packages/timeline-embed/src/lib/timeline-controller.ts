@@ -10,6 +10,8 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { CacheMetrics, EventOrigin } from './cache-metrics.ts';
+import type { EmbedTarget, EmbeddedEvent } from './note-embeds.ts';
+import { fetchLatestReplaceable } from './one-shot-request.ts';
 import { type Profile, parseProfileContent } from './profile.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
@@ -27,6 +29,15 @@ const VALIDATION_FETCH_DEBOUNCE_MS = 200;
  * widget and the timeline's own subscription is the only thing sharing it.
  */
 const MAX_CONCURRENT_PROFILE_REQUESTS = 4;
+/**
+ * Lookups for quoted events allowed in flight at once.
+ *
+ * Shares the relay's per-client `maxSubscriptions` (20) with the timeline's own
+ * REQ and the four profile lookups above, so the widget's ceiling is seven —
+ * with plenty of headroom, because a nested card that fails for want of a
+ * subscription slot is indistinguishable from one whose event does not exist.
+ */
+const MAX_CONCURRENT_EMBED_REQUESTS = 2;
 /**
  * How long a profile lookup stays open after EOSE.
  *
@@ -110,6 +121,8 @@ export interface TimelineState {
   validationStatuses: Map<string, ValidationStatus>;
   /** Author profiles (kind 0) fetched so far, keyed by pubkey. */
   profiles: Map<string, Profile>;
+  /** Events quoted by a `nostr:` reference in some body, keyed by `embedKey`. */
+  embeds: Map<string, EmbeddedEvent>;
   eose: boolean;
   error?: string;
   /** Set only by a {@link FilterSource} that reports one; see {@link FollowsState}. */
@@ -156,6 +169,18 @@ export class TimelineController {
   /** created_at of the profile we kept, so an older copy cannot overwrite it. */
   private readonly profileSeenAt = new Map<string, number>();
   private profileSeq = 0;
+  /** Embed keys a lookup has been started for, so a repeat costs nothing. */
+  private requestedEmbeds = new Set<string>();
+  private pendingEmbeds: EmbedTarget[] = [];
+  private embedsInFlight = 0;
+  /**
+   * Cancels the in-flight embed lookups.
+   *
+   * Separate from {@link filterSourceAbort} because these outlive a filter
+   * source and are torn down on a different schedule — a `suspend()` must end
+   * them, and a later `applyFilter()` must be able to start new ones.
+   */
+  private embedAbort = new AbortController();
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -164,6 +189,7 @@ export class TimelineController {
     origins: new Map(),
     validationStatuses: new Map(),
     profiles: new Map(),
+    embeds: new Map(),
     eose: false,
   };
   private currentSubId: string | null = null;
@@ -213,6 +239,7 @@ export class TimelineController {
           // started from here.
           this.patch({ error: undefined });
           this.pumpProfileQueue();
+          this.pumpEmbedQueue();
         } else if (status === 'error' && this.connectedOnce) {
           // Reconnection gave up. Say so, or the widget goes on showing a
           // timeline that stopped updating some minutes ago with nothing to
@@ -338,6 +365,7 @@ export class TimelineController {
     this.filterSourceAbort.abort();
     this.patch({ follows: undefined });
     this.closeProfiles();
+    this.closeEmbeds();
     this.clearTimers();
   }
 
@@ -351,6 +379,7 @@ export class TimelineController {
     this.filterSourceAbort.abort();
     this.clearTimers();
     this.closeProfiles();
+    this.closeEmbeds();
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -378,12 +407,18 @@ export class TimelineController {
     }
     this.closeProfiles();
     this.requestedProfiles = new Set();
+    // Unlike profiles, quoted events are dropped rather than kept: they are
+    // keyed off the bodies of the events being replaced, and the cards that
+    // asked for them are about to go away.
+    this.closeEmbeds();
+    this.embedAbort = new AbortController();
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
       events: [],
       origins: new Map(),
       validationStatuses: new Map(),
+      embeds: new Map(),
       eose: false,
       error: undefined,
     });
@@ -603,6 +638,116 @@ export class TimelineController {
   }
 
   /**
+   * Fetch an event quoted by a `nostr:` reference (NIP-27).
+   *
+   * Called by a card when it scrolls into view, for the same reason
+   * {@link requestProfile} is: a timeline of 500 events must only pay for the
+   * quotes a reader can actually see. Nesting is bounded by the caller — see
+   * `note-embeds.ts`.
+   *
+   * Repeat calls for the same target are ignored, which is request
+   * de-duplication and not a cache in front of the relay's: the same reference
+   * appears on every card that quotes it, and those cards scroll in and out.
+   */
+  requestEmbed(target: EmbedTarget): void {
+    if (this.stopped || this.suspended) {
+      return;
+    }
+    if (this.requestedEmbeds.has(target.key)) {
+      return;
+    }
+    this.requestedEmbeds.add(target.key);
+    // Before the lookup starts, so the card has something to render while it
+    // waits in the queue below.
+    this.setEmbed(target.key, { status: 'loading' });
+    this.pendingEmbeds.push(target);
+    this.pumpEmbedQueue();
+  }
+
+  /**
+   * Nothing is started while the socket is down: `fetchOnce` runs its own
+   * deadline, so a lookup issued into a dead socket would burn a slot and then
+   * report the quoted event as missing — permanently, since the key is already
+   * in `requestedEmbeds`. They wait in the queue instead, and the `connected`
+   * status handler pumps it again.
+   */
+  private pumpEmbedQueue(): void {
+    if (this.stopped || this.suspended || !this.connection.isConnected) {
+      return;
+    }
+    while (this.pendingEmbeds.length > 0 && this.embedsInFlight < MAX_CONCURRENT_EMBED_REQUESTS) {
+      const target = this.pendingEmbeds.shift();
+      if (target !== undefined) {
+        void this.openEmbedRequest(target);
+      }
+    }
+  }
+
+  /**
+   * A one-shot REQ rather than a subscription: there is exactly one event to
+   * wait for, and `fetchOnce` already completes on EOSE, carries its own
+   * timeout and sends the CLOSE on every path — including when `embedAbort`
+   * fires, which is what stops a torn-down widget from refilling the cache.
+   *
+   * Nothing here is allowed to throw. `fetchOnce` resolves rather than rejects,
+   * but `fetchLatestReplaceable` compares versions through `supersedes` — code
+   * from another package — and a throw would both leave an unhandled rejection
+   * on the page and stop the queue, since the pump below would never run.
+   */
+  private async openEmbedRequest(target: EmbedTarget): Promise<void> {
+    this.embedsInFlight += 1;
+    const { signal } = this.embedAbort;
+    let event: NostrEvent | undefined;
+    try {
+      event = target.replaceable
+        ? await fetchLatestReplaceable(this.connection, target.filter, { signal })
+        : (await this.connection.fetchOnce([target.filter], { signal }))[0];
+    } catch (error) {
+      console.error(`[nostr-timeline] embed lookup for ${target.key} failed`, error);
+    } finally {
+      this.embedsInFlight -= 1;
+    }
+    if (this.stopped || signal.aborted) {
+      return;
+    }
+    if (!event) {
+      // Not published, not upstream, or the relay never answered — none of
+      // which is distinguishable from here, and all of which come out as the
+      // abbreviated chip the reference was before this feature existed.
+      this.setEmbed(target.key, { status: 'missing' });
+      this.pumpEmbedQueue();
+      return;
+    }
+    // Classified for the same reason profile deliveries are: the cache/upstream
+    // counters must describe the same population of events the widget renders.
+    this.relayHost?.metrics.classifyDelivered(event.id);
+    this.setEmbed(target.key, { status: 'ready', event });
+    this.requestProfile(event.pubkey);
+    // A nested card is faded until the relay has vouched for it, exactly like a
+    // timeline card, so its verdict has to be polled for too.
+    this.scheduleValidationRefresh();
+    this.pumpEmbedQueue();
+  }
+
+  /** A fresh Map rather than a mutation, so the view re-renders. */
+  private setEmbed(key: string, embed: EmbeddedEvent): void {
+    const embeds = new Map(this.state.embeds);
+    embeds.set(key, embed);
+    this.patch({ embeds });
+  }
+
+  /**
+   * `requestedEmbeds` is dropped with them: the cards that asked are being torn
+   * down, and a widget resumed with {@link applyFilter} must be able to ask
+   * again.
+   */
+  private closeEmbeds(): void {
+    this.pendingEmbeds = [];
+    this.requestedEmbeds = new Set();
+    this.embedAbort.abort();
+  }
+
+  /**
    * Publish what a {@link FilterSource} reported about its resolution.
    *
    * `dropped` is acted on rather than merely displayed: the subscription is
@@ -713,15 +858,21 @@ export class TimelineController {
 
   private async refreshValidationStatuses(): Promise<void> {
     const host = this.relayHost;
-    if (!host || this.state.events.length === 0) {
+    // Quoted events count: a nested card is faded until the relay vouches for
+    // it, so a timeline that is still empty but has already resolved a quote
+    // has something to ask about.
+    const ids = new Set(this.state.events.map((event) => event.id));
+    for (const embed of this.state.embeds.values()) {
+      if (embed.event) {
+        ids.add(embed.event.id);
+      }
+    }
+    if (!host || ids.size === 0) {
       return;
     }
     let statuses: Map<string, ValidationStatus>;
     try {
-      statuses = await fetchValidationStatuses(
-        host.relay,
-        this.state.events.map((event) => event.id)
-      );
+      statuses = await fetchValidationStatuses(host.relay, [...ids]);
     } catch {
       // A failed lookup only costs us the ✓ badges; the timeline is unaffected.
       return;

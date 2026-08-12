@@ -258,6 +258,7 @@ describe('configFromSearchParams', () => {
       debug: true,
       showAvatars: true,
       showMedia: true,
+      showEmbeds: true,
       actions: [],
     });
   });
@@ -288,12 +289,18 @@ describe('configFromSearchParams', () => {
     expect(configFromSearchParams(new URLSearchParams('show-media=true')).showMedia).toBe(true);
   });
 
+  it('turns nested quotes off only when asked', () => {
+    expect(configFromSearchParams(new URLSearchParams('show-embeds=false')).showEmbeds).toBe(false);
+    expect(configFromSearchParams(new URLSearchParams('show-embeds=true')).showEmbeds).toBe(true);
+  });
+
   it('keeps the debug badges off and takes no explicit database name by default', () => {
     const config = configFromSearchParams(new URLSearchParams(''));
 
     expect(config.debug).toBe(false);
     expect(config.showAvatars).toBe(true);
     expect(config.showMedia).toBe(true);
+    expect(config.showEmbeds).toBe(true);
     expect(config.dbName).toBeUndefined();
     expect(config.profileFreshness).toBeUndefined();
     expect(config.relays).toEqual([]);
@@ -433,6 +440,7 @@ describe('followConfigFromSearchParams', () => {
       debug: true,
       showAvatars: true,
       showMedia: true,
+      showEmbeds: true,
       actions: [],
     });
   });

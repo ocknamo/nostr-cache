@@ -2,11 +2,13 @@
  * Works out whether an event points at another event — a reply (NIP-10 `e`
  * tags) or a quote (NIP-18 `q` tags).
  *
- * The widget only reports *that* a reference exists; it never fetches the
- * referenced event. Rendering a real preview would mean a second subscription
- * per card and a decision about what to show when the target is not in the
- * cache, which is out of scope here. Showing the reference is still worth it:
- * without it a reply reads as a non-sequitur, because its context is missing.
+ * What this produces is a chip that reports *that* a reference exists; nothing
+ * here fetches the referenced event. The body's own `nostr:` references are
+ * fetched and rendered as nested cards (`note-embeds.ts`), and a `q` tag whose
+ * event is already shown that way has its chip dropped by the card — but a
+ * reference that exists only as a tag stays a chip, because a reply's parent is
+ * context the author did not choose to quote. Showing it is still worth it:
+ * without it a reply reads as a non-sequitur.
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
