@@ -33,26 +33,16 @@
   interface Props {
     /** The reference this card stands for, as it was written in the body. */
     entity: EntityPart;
-    /**
-     * How deep this card sits: 1 for a quote on a timeline card, 2 for a quote
-     * inside that, and so on. Passed to `selectEmbeds`, which stops at
-     * `MAX_EMBED_DEPTH`.
-     */
+    /** 1 for a quote on a timeline card, 2 for a quote inside that, and so on. */
     depth: number;
     /** Every quoted event resolved so far, keyed by `embedKey`. */
     embeds?: Map<string, EmbeddedEvent>;
-    /** Author profiles (kind 0), keyed by pubkey. */
     profiles?: Map<string, Profile>;
     /** The relay's verification verdicts, keyed by event id. */
     validationStatuses?: Map<string, ValidationStatus>;
-    /** Render the quoted author's avatar. */
     showAvatar?: boolean;
-    /** Render image / video / audio attachments found in the quoted body. */
     showMedia?: boolean;
     /**
-     * Whether something above this card is already fading itself for want of a
-     * verdict.
-     *
      * `opacity` multiplies down the tree, so a five-deep chain of unverified
      * quotes would come out at 0.6^5 — under 8%, which is invisible rather than
      * faded. The outermost unverified box owns the fade and everything inside
@@ -81,8 +71,8 @@
 
   const target = $derived(embedTarget(entity.entity));
   const key = $derived(embedKey(entity.entity));
-  // Not named `state`: a local by that name turns the `$state(…)` rune below
-  // into a store subscription to it, which is not what either one means.
+  // Not named `state`: that would turn the `$state(…)` rune below into a store
+  // subscription to it.
   const resolved = $derived(key === undefined ? undefined : embeds?.get(key));
   const event = $derived(resolved?.status === 'ready' ? resolved.event : undefined);
 
@@ -95,28 +85,19 @@
   const unverified = $derived(
     event !== undefined && validationStatuses?.get(event.id) !== 'validated'
   );
-  /** Only the outermost unverified box draws the fade; see `ancestorUnverified`. */
   const fade = $derived(unverified && !ancestorUnverified);
 
   const parts = $derived(event ? parseContent(event.content) : []);
-  /**
-   * Nothing is lifted out of the quoted body unless it can become a card —
-   * either because there is a way to fetch it, or because the caller has
-   * already resolved some. See `resolvable` in `EventCard.svelte`.
-   */
+  /** See `resolvable` in `EventCard.svelte`. */
   const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
   const nested = $derived(resolvable ? selectEmbeds(parts, depth) : []);
   const nestedKeys = $derived(embedKeys(nested));
 
-  /** Set once this card has actually asked for its event. */
   let requested = $state(false);
   /**
-   * Whether a lookup is outstanding, and so worth a placeholder.
-   *
-   * Deliberately not "we have no event yet": with no `onEmbedRequest` nobody is
-   * going to fetch one, and a placeholder would sit there for the life of the
-   * page. The same goes for a `ready` entry with no event on it — a shape the
-   * type allows and nothing produces, which must not read as "still coming".
+   * Whether a lookup is outstanding, and so worth a placeholder. Deliberately
+   * not "we have no event yet": with no `onEmbedRequest` nobody is going to
+   * fetch one, and a placeholder would sit there for the life of the page.
    */
   const pending = $derived(
     target !== undefined &&
@@ -124,8 +105,6 @@
   );
 
   /**
-   * The time of day only, matching the timeline card's header.
-   *
    * `hourCycle` rather than `hour12: false`, which some engines resolve to the
    * `h24` cycle — where midnight reads as `24:00:00`.
    */
@@ -165,8 +144,6 @@
         {formatTime(createdAt)}
       </time>
     </header>
-    <!-- No indent under the avatar above: the body runs the full width of the
-         frame, which is the whole point of this component. -->
     <NoteContent
       content={event.content}
       {parts}
@@ -206,7 +183,7 @@
 <style>
   .quote {
     /* Column, not the card's grid: the avatar lives in the header row and the
-       body below it starts at the frame's edge. */
+       body below it starts at the frame's edge — see the docblock above. */
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -246,9 +223,7 @@
        header into the space the body is meant to have. */
     flex-wrap: nowrap;
     overflow: hidden;
-    /* A quoted author's avatar is a marker beside the name rather than the
-       column the card's is, so it is small and round. Avatar.svelte reads
-       these, so nothing about that component has to know it is nested. */
+    /* Avatar.svelte reads these, so nothing about it has to know it is nested. */
     --nt-avatar-size: var(--nt-quote-avatar-size, 20px);
     --nt-avatar-radius: var(--nt-quote-avatar-radius, 999px);
   }
@@ -269,8 +244,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
-    /* Never shrink, but never exceed the row either, and leave room for the
-       handle beside it — the same split the timeline card's header makes. */
+    /* Leaves room for the handle beside it — the split the card's header makes. */
     max-width: max(60%, 100% - 4.5em);
     flex: 0 0 auto;
   }

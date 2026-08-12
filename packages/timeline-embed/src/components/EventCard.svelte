@@ -27,14 +27,10 @@
     /** The author's kind 0 profile, once it has been fetched. */
     profile?: Profile;
     /**
-     * The relay's verdicts for every event on the timeline, keyed by id. Used
-     * only by the nested cards — this card's own verdict is `status`.
+     * Used only by the nested cards — this card's own verdict is `status`.
      */
     validationStatuses?: Map<string, ValidationStatus>;
-    /**
-     * Events quoted by a `nostr:` reference in some body, keyed by `embedKey`.
-     * Filled in by the timeline as the lookups this card asks for resolve.
-     */
+    /** Events quoted by a `nostr:` reference in some body, keyed by `embedKey`. */
     embeds?: Map<string, EmbeddedEvent>;
     /**
      * Every profile the timeline has, keyed by pubkey. Used only to put a name
@@ -81,10 +77,6 @@
      * this to look up the author's profile only for cards a reader can see.
      */
     onVisible?: () => void;
-    /**
-     * Called by a nested card when it first appears on screen, with the lookup
-     * that would resolve it.
-     */
     onEmbedRequest?: (target: EmbedTarget) => void;
   }
 
@@ -128,27 +120,21 @@
 
   const parts = $derived(parseContent(event.content));
   /**
-   * Whether a reference can become a card at all.
-   *
    * Without either a way to fetch (`onEmbedRequest`) or events already resolved
    * for it (`embeds`), lifting a reference out of the text would leave nothing
    * to put in its place — so a consumer that wires neither gets the body it
    * always got, rather than a placeholder that never resolves.
    */
   const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
-  /** The references rendered as nested cards, capped by depth and by count. */
   const embedded = $derived(showEmbeds && resolvable ? selectEmbeds(parts, 0) : []);
   const embeddedKeys = $derived(embedKeys(embedded));
 
   /**
-   * The reply/quote chips.
-   *
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
    * and as a `q` tag (NIP-18) — so a quote already showing as a nested card
    * would otherwise also show as a chip pointing at the same event. The reply
    * chip stays whatever the body does: a reply's parent is context the author
-   * did not choose to quote, and "返信先" says something the quote card does not
-   * — even when the body happens to reference the parent as well.
+   * did not choose to quote, and "返信先" says something the quote card does not.
    */
   const refs = $derived(
     parseRefs(event).filter((ref) => ref.kind !== 'quote' || !embeddedKeys.has(ref.id))
@@ -341,9 +327,8 @@
     -->
     <div class="note" part="note">
       <NoteContent content={event.content} {parts} embedded={embeddedKeys} {showMedia} {profiles} />
-      <!-- Inside the scrolling box on purpose: a quote lives in the note it was
-           written in, so it scrolls with it and stays under the card's height
-           cap instead of pushing past it. -->
+      <!-- Inside the scrolling box on purpose: a chain of quotes then grows the
+           scroll rather than the card, keeping the height cap. -->
       {#if embedded.length > 0}
         <ul class="embeds">
           {#each embedded as part (embedKey(part.entity))}
@@ -677,7 +662,6 @@
     color: var(--nt-upstream-fg, #4a5b73);
   }
 
-  /* The quoted notes, under the text they were written in. */
   .embeds {
     list-style: none;
     margin: var(--nt-embed-gap, 8px) 0 0;

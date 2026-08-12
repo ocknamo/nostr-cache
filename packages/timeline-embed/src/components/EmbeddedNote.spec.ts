@@ -93,6 +93,39 @@ describe('EmbeddedNote', () => {
     expect(container.querySelector('.content')).toHaveTextContent('quoted body');
   });
 
+  it('renders a hostile quoted body as inert text', () => {
+    // The quoted event is upstream-controlled and arrives through a different
+    // path from the timeline's own, so pin it to the same guarantee: markup is
+    // never built, and a non-http scheme never reaches an `href`.
+    const hostile = '<img src=x onerror=alert(1)> javascript:alert(2) <script>alert(3)</script>';
+    const { container } = render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: ready(NOTE_HEX, hostile),
+      },
+    });
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.querySelector('.content')).toHaveTextContent(hostile);
+  });
+
+  it('never gives a quoted attachment a non-http scheme', () => {
+    const { container } = render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: ready(NOTE_HEX, 'https://cdn.example.com/a.jpg data:text/html;base64,PHN2Zz4='),
+      },
+    });
+
+    for (const node of container.querySelectorAll('img, a')) {
+      expect(node.getAttribute('src') ?? node.getAttribute('href')).toMatch(/^https?:/);
+    }
+  });
+
   it('puts the avatar in the header row rather than in a column of its own', () => {
     // The whole point of the component: the body must not be indented past the
     // avatar, so nesting does not narrow it level by level.

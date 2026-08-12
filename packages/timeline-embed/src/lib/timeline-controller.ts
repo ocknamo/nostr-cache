@@ -121,11 +121,7 @@ export interface TimelineState {
   validationStatuses: Map<string, ValidationStatus>;
   /** Author profiles (kind 0) fetched so far, keyed by pubkey. */
   profiles: Map<string, Profile>;
-  /**
-   * Events quoted by a `nostr:` reference in some body, keyed by the referring
-   * entity's `embedKey`. Every card the reader can see has an entry, whether it
-   * is still loading, has arrived, or could not be found.
-   */
+  /** Events quoted by a `nostr:` reference in some body, keyed by `embedKey`. */
   embeds: Map<string, EmbeddedEvent>;
   eose: boolean;
   error?: string;
@@ -175,9 +171,7 @@ export class TimelineController {
   private profileSeq = 0;
   /** Embed keys a lookup has been started for, so a repeat costs nothing. */
   private requestedEmbeds = new Set<string>();
-  /** Lookups waiting for an in-flight slot. */
   private pendingEmbeds: EmbedTarget[] = [];
-  /** Lookups currently in flight. */
   private embedsInFlight = 0;
   /**
    * Cancels the in-flight embed lookups.
@@ -644,18 +638,16 @@ export class TimelineController {
   }
 
   /**
-   * Fetch an event quoted by a `nostr:` reference, so the card that carries the
-   * reference can render it nested inside itself (NIP-27).
+   * Fetch an event quoted by a `nostr:` reference (NIP-27).
    *
    * Called by a card when it scrolls into view, for the same reason
    * {@link requestProfile} is: a timeline of 500 events must only pay for the
    * quotes a reader can actually see. Nesting is bounded by the caller — see
-   * `note-embeds.ts` — so a chain of quotes costs at most five lookups deep.
+   * `note-embeds.ts`.
    *
    * Repeat calls for the same target are ignored, which is request
    * de-duplication and not a cache in front of the relay's: the same reference
-   * appears on every card that quotes it, and both those cards scroll in and
-   * out.
+   * appears on every card that quotes it, and those cards scroll in and out.
    */
   requestEmbed(target: EmbedTarget): void {
     if (this.stopped || this.suspended) {
@@ -665,16 +657,14 @@ export class TimelineController {
       return;
     }
     this.requestedEmbeds.add(target.key);
-    // Recorded before the lookup starts so the card has something to render
-    // while it is in flight — including while it waits in the queue below.
+    // Before the lookup starts, so the card has something to render while it
+    // waits in the queue below.
     this.setEmbed(target.key, { status: 'loading' });
     this.pendingEmbeds.push(target);
     this.pumpEmbedQueue();
   }
 
   /**
-   * Start as many queued lookups as the in-flight budget allows.
-   *
    * Nothing is started while the socket is down: `fetchOnce` runs its own
    * deadline, so a lookup issued into a dead socket would burn a slot and then
    * report the quoted event as missing — permanently, since the key is already
@@ -694,8 +684,6 @@ export class TimelineController {
   }
 
   /**
-   * Run one lookup to completion.
-   *
    * A one-shot REQ rather than a subscription: there is exactly one event to
    * wait for, and `fetchOnce` already completes on EOSE, carries its own
    * timeout and sends the CLOSE on every path — including when `embedAbort`
@@ -734,8 +722,6 @@ export class TimelineController {
     // counters must describe the same population of events the widget renders.
     this.relayHost?.metrics.classifyDelivered(event.id);
     this.setEmbed(target.key, { status: 'ready', event });
-    // The nested card names its author, so it needs the same kind 0 the
-    // timeline's own cards do.
     this.requestProfile(event.pubkey);
     // A nested card is faded until the relay has vouched for it, exactly like a
     // timeline card, so its verdict has to be polled for too.
@@ -743,7 +729,7 @@ export class TimelineController {
     this.pumpEmbedQueue();
   }
 
-  /** Record one embed's progress, replacing the map so the view re-renders. */
+  /** A fresh Map rather than a mutation, so the view re-renders. */
   private setEmbed(key: string, embed: EmbeddedEvent): void {
     const embeds = new Map(this.state.embeds);
     embeds.set(key, embed);
@@ -751,10 +737,8 @@ export class TimelineController {
   }
 
   /**
-   * Abandon every lookup, in flight or queued.
-   *
-   * `requestedEmbeds` goes with them: the cards that asked are being torn down,
-   * and a widget that is resumed with {@link applyFilter} must be able to ask
+   * `requestedEmbeds` is dropped with them: the cards that asked are being torn
+   * down, and a widget resumed with {@link applyFilter} must be able to ask
    * again.
    */
   private closeEmbeds(): void {

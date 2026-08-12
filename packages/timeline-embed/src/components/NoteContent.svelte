@@ -14,20 +14,15 @@
     /** The event's raw `content`. */
     content: string;
     /**
-     * The parsed content, when the caller has it already.
-     *
-     * A card that renders quoted events has to parse the body to find them, and
-     * passing the result down saves parsing it a second time here. Left unset,
-     * this component parses `content` itself, as it always has.
+     * The parsed content, when the caller has it already: a card that renders
+     * quoted events has to parse the body to find them. Unset, this component
+     * parses `content` itself, as it always has.
      */
     parts?: ContentPart[];
     /**
-     * Keys (`embedKey`) of the entities the caller is rendering as nested cards
-     * below this text. They are lifted out of the paragraph the way attachments
-     * are, so a quote is not both a card and a chip.
-     *
-     * An entity that is not named here stays an abbreviated chip, which is what
-     * the depth and per-note caps in `lib/note-embeds.ts` come out as.
+     * Keys (`embedKey`) of the entities the caller renders as nested cards below
+     * this text, lifted out of the paragraph the way attachments are so a quote
+     * is not both a card and a chip. An entity not named here stays a chip.
      */
     embedded?: ReadonlySet<string>;
     /**

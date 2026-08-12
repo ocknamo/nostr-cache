@@ -1,15 +1,10 @@
 /**
- * A Svelte action that reports the first time its element appears on screen.
+ * Report the element's first appearance on screen, then stop watching.
  *
  * Everything the widget fetches beyond the timeline itself — an author's kind 0,
- * a quoted event — is fetched for the cards a reader can actually see, and this
- * is the trigger both of them hang off. A timeline holds 50 events by default
- * and can hold 500; looking all of them up on first paint would cost the
- * embedding page a burst of requests for cards nobody scrolled to.
- */
-
-/**
- * Report the element's first appearance on screen, then stop watching.
+ * a quoted event — hangs off this: a timeline can hold 500 events, and looking
+ * all of them up on first paint would cost the embedding page a burst of
+ * requests for cards nobody scrolled to.
  *
  * Falls back to reporting immediately where `IntersectionObserver` is missing
  * (jsdom, older browsers): the lookup being eager is a far better failure than
