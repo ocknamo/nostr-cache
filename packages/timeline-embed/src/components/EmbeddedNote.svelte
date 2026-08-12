@@ -213,7 +213,11 @@
     border: 1px solid var(--nt-quote-border, var(--nt-border, #e1e8ed));
     border-radius: var(--nt-quote-radius, var(--nt-radius, 10px));
     background: var(--nt-quote-bg, transparent);
-    padding: var(--nt-quote-padding, 8px 10px);
+    /* Tighter left and right than top and bottom, and deliberately so: the
+       horizontal half is the only part nesting pays for again at every level,
+       so 6px costs a five-deep chain 60px of width where 10px cost it 100px.
+       The vertical half is paid once per quote either way. */
+    padding: var(--nt-quote-padding, 8px 6px);
     /* Long unbroken content must not push the frame wider than the card. */
     min-width: 0;
     /* `1em` by default, and deliberately: this is relative to the box it sits

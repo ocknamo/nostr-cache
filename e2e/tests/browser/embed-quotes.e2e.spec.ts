@@ -207,9 +207,7 @@ describe('Nested quotes E2E', () => {
   it(
     'keeps a five-deep chain inside the card height cap',
     async () => {
-      // Narrow enough that five quotes of wrapped text are taller than the cap;
-      // at desktop width the same chain fits and proves nothing.
-      page = await browser.newPage({ viewport: { width: 360, height: 900 } });
+      page = await browser.newPage();
       await page.goto(embedUrl());
       await page.waitForFunction(
         (expected) =>
@@ -219,6 +217,12 @@ describe('Nested quotes E2E', () => {
         MAX_EMBED_DEPTH,
         { timeout: TIMEOUT }
       );
+      // A cap the chain is certainly taller than, rather than a narrow viewport
+      // the text happens to overflow: how much a chain wraps depends on the
+      // quote frame's padding, so tightening that would silently stop this test
+      // from testing anything. Custom properties cross the shadow boundary, so
+      // the page can set it from outside.
+      await page.addStyleTag({ content: 'nostr-timeline { --nt-card-max-height: 160px }' });
 
       const card = await page.$eval('nostr-timeline .event-card', (node) => {
         const note = node.querySelector('.note') as HTMLElement;
@@ -229,8 +233,8 @@ describe('Nested quotes E2E', () => {
       });
 
       // The quotes live inside the one scrolling box, so a chain grows the
-      // scroll rather than the card — the 420px default still holds.
-      expect(card.height).toBeLessThanOrEqual(420);
+      // scroll rather than the card.
+      expect(card.height).toBeLessThanOrEqual(160);
       expect(card.noteScrolls).toBe(true);
     },
     TIMEOUT
