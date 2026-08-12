@@ -410,7 +410,7 @@ nostr-timeline {
   --nt-quote-border: #30363d;   /* 既定は --nt-border */
   --nt-quote-bg: transparent;
   --nt-quote-radius: 10px;      /* 既定は --nt-radius */
-  --nt-quote-padding: 8px 6px;  /* 左右は入れ子ごとに効くので上下より狭くしています */
+  --nt-quote-padding: 8px 6px 4px; /* 上・左右・下。左右は入れ子ごとに効くので狭めです */
   --nt-quote-font-size: 1em;    /* 1 未満にすると入れ子ごとに掛け算で小さくなります */
   --nt-quote-avatar-size: 20px; /* ヘッダー行のアイコン。親カードの --nt-avatar-size とは別 */
   --nt-quote-avatar-radius: 999px;
