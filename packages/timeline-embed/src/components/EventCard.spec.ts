@@ -225,11 +225,33 @@ describe('EventCard', () => {
     expect(screen.queryByText('引用')).not.toBeInTheDocument();
   });
 
+  it('keeps the reply chip even when the body quotes the parent too', () => {
+    // "返信先" says something the quote card does not, and a reply's parent is
+    // named by an `e` tag whether or not the author also wrote it in the body.
+    const event = makeEvent({
+      content: `nostr:${NOTE}`,
+      tags: [['e', NOTE_HEX, '', 'reply']],
+    });
+    render(EventCard, { props: { event, showAvatar: false, onEmbedRequest: () => {} } });
+
+    expect(screen.getByText('返信先')).toBeInTheDocument();
+  });
+
   it('keeps the quote chip for an event the body does not reference', () => {
     const event = makeEvent({ content: 'no references here', tags: [['q', NOTE_HEX]] });
     render(EventCard, { props: { event, showAvatar: false } });
 
     expect(screen.getByText('引用')).toBeInTheDocument();
+  });
+
+  it('leaves the body alone when there is nothing to fetch through', () => {
+    // Lifting the reference out of the text with no way to resolve it would
+    // lose it: the card would show a placeholder that never resolves.
+    const event = makeEvent({ content: `see nostr:${NOTE}` });
+    const { container } = render(EventCard, { props: { event, showAvatar: false } });
+
+    expect(container.querySelector('.quote')).toBeNull();
+    expect(container.querySelector('.content')).toHaveTextContent('see note1tszz…elrl');
   });
 
   it('leaves a reference as a chip when embeds are switched off', () => {

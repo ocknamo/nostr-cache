@@ -48,8 +48,9 @@
     showMedia?: boolean;
     /**
      * Render the events a `nostr:` reference in the body points at, as nested
-     * cards (NIP-27). With this off — or with no `onEmbedRequest` to fetch
-     * through — a reference stays the abbreviated chip it has always been.
+     * cards (NIP-27). With this off — or with neither an `onEmbedRequest` to
+     * fetch through nor `embeds` already resolved — a reference stays the
+     * abbreviated chip it has always been.
      */
     showEmbeds?: boolean;
     /**
@@ -126,20 +127,32 @@
   const handle = $derived(authorHandle(event.pubkey, profile));
 
   const parts = $derived(parseContent(event.content));
+  /**
+   * Whether a reference can become a card at all.
+   *
+   * Without either a way to fetch (`onEmbedRequest`) or events already resolved
+   * for it (`embeds`), lifting a reference out of the text would leave nothing
+   * to put in its place — so a consumer that wires neither gets the body it
+   * always got, rather than a placeholder that never resolves.
+   */
+  const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
   /** The references rendered as nested cards, capped by depth and by count. */
-  const embedded = $derived(showEmbeds ? selectEmbeds(parts, 0) : []);
+  const embedded = $derived(showEmbeds && resolvable ? selectEmbeds(parts, 0) : []);
   const embeddedKeys = $derived(embedKeys(embedded));
 
   /**
    * The reply/quote chips.
    *
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
-   * and as a `q` tag (NIP-18) — so a reference already showing as a nested card
+   * and as a `q` tag (NIP-18) — so a quote already showing as a nested card
    * would otherwise also show as a chip pointing at the same event. The reply
-   * chip is untouched: a reply's parent is named by an `e` tag alone, and is not
-   * something the body quotes.
+   * chip stays whatever the body does: a reply's parent is context the author
+   * did not choose to quote, and "返信先" says something the quote card does not
+   * — even when the body happens to reference the parent as well.
    */
-  const refs = $derived(parseRefs(event).filter((ref) => !embeddedKeys.has(ref.id)));
+  const refs = $derived(
+    parseRefs(event).filter((ref) => ref.kind !== 'quote' || !embeddedKeys.has(ref.id))
+  );
 
   const REF_LABELS: Record<'reply' | 'quote', string> = {
     reply: '返信先',

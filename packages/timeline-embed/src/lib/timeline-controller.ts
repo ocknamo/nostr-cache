@@ -700,6 +700,11 @@ export class TimelineController {
    * wait for, and `fetchOnce` already completes on EOSE, carries its own
    * timeout and sends the CLOSE on every path — including when `embedAbort`
    * fires, which is what stops a torn-down widget from refilling the cache.
+   *
+   * Nothing here is allowed to throw. `fetchOnce` resolves rather than rejects,
+   * but `fetchLatestReplaceable` compares versions through `supersedes` — code
+   * from another package — and a throw would both leave an unhandled rejection
+   * on the page and stop the queue, since the pump below would never run.
    */
   private async openEmbedRequest(target: EmbedTarget): Promise<void> {
     this.embedsInFlight += 1;
@@ -709,6 +714,8 @@ export class TimelineController {
       event = target.replaceable
         ? await fetchLatestReplaceable(this.connection, target.filter, { signal })
         : (await this.connection.fetchOnce([target.filter], { signal }))[0];
+    } catch (error) {
+      console.error(`[nostr-timeline] embed lookup for ${target.key} failed`, error);
     } finally {
       this.embedsInFlight -= 1;
     }

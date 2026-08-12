@@ -823,6 +823,38 @@ describe('TimelineController', () => {
       expect(requestedEmbeds(controller).size).toBe(1);
     });
 
+    it('holds the extra lookups back rather than opening one per reference', async () => {
+      const { controller } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+
+      for (let index = 0; index < 6; index++) {
+        const key = `${index}`.repeat(64);
+        controller.requestEmbed({ key, filter: { ids: [key] }, replaceable: false });
+      }
+
+      // The relay caps a client at 20 subscriptions and the timeline's own REQ
+      // plus four profile lookups already share that budget.
+      const inFlight = (controller as unknown as { embedsInFlight: number }).embedsInFlight;
+      const queued = (controller as unknown as { pendingEmbeds: unknown[] }).pendingEmbeds;
+      expect(inFlight).toBeLessThanOrEqual(2);
+      expect(inFlight + queued.length).toBe(6);
+    });
+
+    it('polls the relay for the quoted events verdicts too', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [makeEvent({ id: QUOTED_ID, pubkey: 'alice' })]);
+      const { controller, states } = createController(dbName);
+      // No timeline events at all: a card can be quoting something long before
+      // the subscription it lives on has delivered anything.
+      await controller.start([{ kinds: [9999], limit: 10 }]);
+      controller.requestEmbed(quotedTarget);
+
+      await waitFor(
+        () => states.at(-1)?.validationStatuses.has(QUOTED_ID) === true,
+        "the quoted event's verdict"
+      );
+    });
+
     it('refuses to start a lookup while suspended, and forgets the ones it had', async () => {
       const { controller } = createController();
       await controller.start([{ kinds: [1], limit: 10 }]);

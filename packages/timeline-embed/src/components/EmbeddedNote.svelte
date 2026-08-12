@@ -61,8 +61,8 @@
     ancestorUnverified?: boolean;
     /**
      * Called when this card first appears on screen, with the lookup that would
-     * resolve it. Nothing is fetched without it — a consumer rendering the
-     * component on its own gets the chip.
+     * resolve it. Without it — and without an `embeds` entry already — nothing
+     * can resolve, so the reference is left as the chip it was.
      */
     onEmbedRequest?: (target: EmbedTarget) => void;
   }
@@ -81,8 +81,10 @@
 
   const target = $derived(embedTarget(entity.entity));
   const key = $derived(embedKey(entity.entity));
-  const state = $derived(key === undefined ? undefined : embeds?.get(key));
-  const event = $derived(state?.status === 'ready' ? state.event : undefined);
+  // Not named `state`: a local by that name turns the `$state(…)` rune below
+  // into a store subscription to it, which is not what either one means.
+  const resolved = $derived(key === undefined ? undefined : embeds?.get(key));
+  const event = $derived(resolved?.status === 'ready' ? resolved.event : undefined);
 
   const profile = $derived(event && profiles?.get(event.pubkey));
   const name = $derived(event ? authorName(event.pubkey, profile) : '');
@@ -97,8 +99,29 @@
   const fade = $derived(unverified && !ancestorUnverified);
 
   const parts = $derived(event ? parseContent(event.content) : []);
-  const nested = $derived(selectEmbeds(parts, depth));
+  /**
+   * Nothing is lifted out of the quoted body unless it can become a card —
+   * either because there is a way to fetch it, or because the caller has
+   * already resolved some. See `resolvable` in `EventCard.svelte`.
+   */
+  const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
+  const nested = $derived(resolvable ? selectEmbeds(parts, depth) : []);
   const nestedKeys = $derived(embedKeys(nested));
+
+  /** Set once this card has actually asked for its event. */
+  let requested = $state(false);
+  /**
+   * Whether a lookup is outstanding, and so worth a placeholder.
+   *
+   * Deliberately not "we have no event yet": with no `onEmbedRequest` nobody is
+   * going to fetch one, and a placeholder would sit there for the life of the
+   * page. The same goes for a `ready` entry with no event on it — a shape the
+   * type allows and nothing produces, which must not read as "still coming".
+   */
+  const pending = $derived(
+    target !== undefined &&
+      (resolved?.status === 'loading' || (resolved === undefined && requested))
+  );
 
   /**
    * The time of day only, matching the timeline card's header.
@@ -115,9 +138,11 @@
   }
 
   function request(): void {
-    if (target) {
-      onEmbedRequest?.(target);
+    if (!target || !onEmbedRequest) {
+      return;
     }
+    requested = true;
+    onEmbedRequest(target);
   }
 </script>
 
@@ -169,12 +194,13 @@
       </ul>
     {/if}
   </article>
-{:else if state?.status === 'missing' || target === undefined}
-  <!-- Nothing came back, so the reference is shown the way it was before this
-       feature existed. A frame around it would claim there is a post here. -->
-  <span class="chip" title={entity.raw} use:whenVisible={request}>{entity.label}</span>
-{:else}
+{:else if pending}
   <p class="quote loading" part="quote" use:whenVisible={request}>読み込み中…</p>
+{:else}
+  <!-- Nothing came back — or nothing is going to — so the reference is shown the
+       way it was before this feature existed. A frame around it would claim
+       there is a post here. -->
+  <span class="chip" title={entity.raw} use:whenVisible={request}>{entity.label}</span>
 {/if}
 
 <style>

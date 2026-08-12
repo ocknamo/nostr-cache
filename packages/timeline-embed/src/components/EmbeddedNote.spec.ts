@@ -69,6 +69,17 @@ describe('EmbeddedNote', () => {
     expect(screen.getByTitle(`nostr:${NOTE}`)).toHaveTextContent('note1tszz…elrl');
   });
 
+  it('shows the chip rather than a placeholder when nobody can fetch for it', () => {
+    // No `onEmbedRequest`: the lookup is never going to happen, so a "loading"
+    // frame would sit there for the life of the page.
+    const { container } = render(EmbeddedNote, {
+      props: { entity: entityOf(`nostr:${NOTE}`), depth: 1 },
+    });
+
+    expect(container.querySelector('.quote')).toBeNull();
+    expect(screen.getByTitle(`nostr:${NOTE}`)).toHaveTextContent('note1tszz…elrl');
+  });
+
   it('renders the quoted body inside a frame', () => {
     const { container } = render(EmbeddedNote, {
       props: {
