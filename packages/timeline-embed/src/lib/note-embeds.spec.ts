@@ -6,6 +6,9 @@ import {
   MAX_EMBED_DEPTH,
   embedKeys,
   embedTarget,
+  noteSegments,
+  segmentKey,
+  segmentMedia,
   selectEmbeds,
 } from './note-embeds.ts';
 
@@ -133,5 +136,152 @@ describe('embedKeys', () => {
     expect(embedKeys(selectEmbeds(parts, 0))).toEqual(
       new Set([NOTE_HEX, `30023:${NPUB_HEX}:my-article`])
     );
+  });
+});
+
+describe('noteSegments', () => {
+  it('returns one text segment covering everything when nothing is embedded', () => {
+    const parts = parseContent(`hi nostr:${NOTE}`);
+    expect(noteSegments(parts, new Set())).toEqual([{ kind: 'text', parts }]);
+  });
+
+  it('alternates text and card segments in source order', () => {
+    const parts = parseContent(`No1: ${NOTE}\nNo2: ${OTHER_NOTES[0]}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.map((segment) => segment.kind)).toEqual(['text', 'embed', 'text', 'embed']);
+    expect(segments[1]).toEqual({ kind: 'embed', part: entityOf(NOTE) });
+    expect(segments[3]).toEqual({ kind: 'embed', part: entityOf(OTHER_NOTES[0]) });
+  });
+
+  it('starts with a card and no leading empty text segment when the body opens with one', () => {
+    const parts = parseContent(`${NOTE} then some text`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments[0]).toEqual({ kind: 'embed', part: entityOf(NOTE) });
+    expect(segments).toHaveLength(2);
+  });
+
+  it('places one card for an event referenced twice, at its first position', () => {
+    // NOTE and NEVENT name the same event, so `selectEmbeds` keys them as one
+    // card — the second mention must not become a second card.
+    const parts = parseContent(`${NOTE} and nostr:${NEVENT} again`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.filter((segment) => segment.kind === 'embed')).toHaveLength(1);
+    expect(segments[0]).toEqual({ kind: 'embed', part: entityOf(NOTE) });
+    // The second mention stays in the trailing text run, for NoteContent's own
+    // lift (by key) to remove — the same disappearing-not-chip behaviour the
+    // pre-existing dedup already gave a note quoted twice.
+    const trailing = segments[1];
+    if (trailing.kind !== 'text') {
+      throw new Error('expected a trailing text segment');
+    }
+    expect(trailing.parts.some((part) => part.kind === 'entity')).toBe(true);
+  });
+
+  it('produces no text segment between two references with only whitespace between them', () => {
+    const parts = parseContent(`${NOTE}\n${OTHER_NOTES[0]}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    // Not `['embed', 'text', 'embed']`: a run that is only the newline
+    // between the two references renders nothing, so it must not become a
+    // segment at all — see `--nt-embed-gap` margin collapsing in
+    // EventCard.svelte, which only has to reason about adjacent `.embed`s.
+    expect(segments.map((segment) => segment.kind)).toEqual(['embed', 'embed']);
+  });
+
+  it('produces no text segment for a run of only a repeat reference', () => {
+    // NOTE and NEVENT name the same event: the second mention is lifted out
+    // of the text by NoteContent, so a run holding nothing else renders
+    // nothing and must not become a segment.
+    const parts = parseContent(`${NOTE} ${NEVENT} ${OTHER_NOTES[0]}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.map((segment) => segment.kind)).toEqual(['embed', 'embed']);
+  });
+
+  it('leaves references past the cap in the trailing text segment as chips', () => {
+    const parts = parseContent([NOTE, ...OTHER_NOTES].join(' '));
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.filter((segment) => segment.kind === 'embed')).toHaveLength(
+      MAX_EMBEDS_PER_TOP_NOTE
+    );
+    const trailing = segments[segments.length - 1];
+    if (trailing.kind !== 'text') {
+      throw new Error('expected a trailing text segment');
+    }
+    // OTHER_NOTES has more references than the cap leaves room for, so at
+    // least one stays an in-text chip rather than becoming a card.
+    expect(trailing.parts.some((part) => part.kind === 'entity')).toBe(true);
+  });
+});
+
+describe('segmentMedia', () => {
+  it('dedups a URL repeated across the segments a card split the body into', () => {
+    const url = 'https://cdn.example.com/a.jpg';
+    const parts = parseContent(`${url} ${NOTE} again ${url}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    const media = segmentMedia(segments);
+    // One `MediaPart` in total, not one per segment it was written in — the
+    // second mention of the same URL must not be shown, and re-fetched,
+    // again after the card.
+    expect(media.flat()).toHaveLength(1);
+    expect(media.flat()[0].url).toBe(url);
+    // It belongs to the first segment, where the URL was actually written.
+    expect(media[0]).toEqual([{ kind: 'media', media: 'image', url }]);
+  });
+
+  it('has nothing for an embed segment', () => {
+    const parts = parseContent(NOTE);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.map((segment) => segment.kind)).toEqual(['embed']);
+    expect(segmentMedia(segments)).toEqual([[]]);
+  });
+
+  it('returns the same lists however many times it is called', () => {
+    // The dedup set is built per call. A `$derived` re-evaluating this must
+    // not find the URLs already "seen" from the previous run and drop them.
+    const parts = parseContent(`https://cdn.example.com/a.jpg ${NOTE} tail`);
+    const segments = noteSegments(parts, embedKeys(selectEmbeds(parts, 0)));
+
+    const once = segmentMedia(segments);
+    expect(once.flat()).toHaveLength(1);
+    expect(segmentMedia(segments)).toEqual(once);
+    expect(segmentMedia(segments)).toEqual(once);
+  });
+});
+
+describe('segmentKey', () => {
+  it('keys an embed by the event it names, not by its position', () => {
+    const parts = parseContent(`a ${NOTE} b`);
+    const segments = noteSegments(parts, embedKeys(selectEmbeds(parts, 0)));
+
+    expect(segmentKey(segments[1], 1)).toBe(NOTE_HEX);
+    // Moving the same reference to another index keeps its key, so the card
+    // is never re-created — nor handed another card's in-flight request.
+    expect(segmentKey(segments[1], 7)).toBe(NOTE_HEX);
+  });
+
+  it('cannot collide a text key with an embed one', () => {
+    const parts = parseContent(`a ${NOTE} b`);
+    const segments = noteSegments(parts, embedKeys(selectEmbeds(parts, 0)));
+    const keys = segments.map(segmentKey);
+
+    expect(new Set(keys).size).toBe(keys.length);
+    // An embedKey is 64 hex characters or `kind:pubkey:d`; neither can start
+    // with the prefix the text runs use.
+    expect(keys.filter((key) => key.startsWith('text-'))).toEqual(['text-0', 'text-2']);
   });
 });

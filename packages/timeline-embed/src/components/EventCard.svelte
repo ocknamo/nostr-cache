@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
-  import { embedKey, parseContent } from '../lib/content-parts.ts';
+  import { parseContent } from '../lib/content-parts.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
@@ -9,6 +9,9 @@
     type EmbedTarget,
     type EmbeddedEvent,
     embedKeys,
+    noteSegments,
+    segmentKey,
+    segmentMedia,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
@@ -128,6 +131,13 @@
   const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
   const embedded = $derived(showEmbeds && resolvable ? selectEmbeds(parts, 0) : []);
   const embeddedKeys = $derived(embedKeys(embedded));
+  /** Text and card segments, in the order the author actually wrote them. */
+  const segments = $derived(noteSegments(parts, embeddedKeys));
+  /**
+   * Attachments per `text` segment, deduped by URL across the whole note —
+   * not just within whichever segment a repeated URL happens to fall in.
+   */
+  const segmentMediaLists = $derived(showMedia ? segmentMedia(segments) : []);
 
   /**
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
@@ -326,28 +336,35 @@
       readable by mouse and touch.
     -->
     <div class="note" part="note">
-      <NoteContent content={event.content} {parts} embedded={embeddedKeys} {showMedia} {profiles} />
       <!-- Inside the scrolling box on purpose: a chain of quotes then grows the
-           scroll rather than the card, keeping the height cap. -->
-      {#if embedded.length > 0}
-        <ul class="embeds">
-          {#each embedded as part (embedKey(part.entity))}
-            <li>
-              <EmbeddedNote
-                entity={part}
-                depth={1}
-                {embeds}
-                {profiles}
-                {validationStatuses}
-                {showAvatar}
-                {showMedia}
-                ancestorUnverified={unverified}
-                {onEmbedRequest}
-              />
-            </li>
-          {/each}
-        </ul>
-      {/if}
+           scroll rather than the card, keeping the height cap. Cards render
+           where the author's own `nostr:` reference sat in the text, rather
+           than all collapsed to the bottom. -->
+      {#each segments as segment, index (segmentKey(segment, index))}
+        {#if segment.kind === 'text'}
+          <NoteContent
+            parts={segment.parts}
+            embedded={embeddedKeys}
+            {showMedia}
+            {profiles}
+            media={segmentMediaLists[index]}
+          />
+        {:else}
+          <div class="embed">
+            <EmbeddedNote
+              entity={segment.part}
+              depth={1}
+              {embeds}
+              {profiles}
+              {validationStatuses}
+              {showAvatar}
+              {showMedia}
+              ancestorUnverified={unverified}
+              {onEmbedRequest}
+            />
+          </div>
+        {/if}
+      {/each}
     </div>
   </div>
   <!--
@@ -662,16 +679,23 @@
     color: var(--nt-upstream-fg, #4a5b73);
   }
 
-  .embeds {
-    list-style: none;
-    margin: var(--nt-embed-gap, 8px) 0 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--nt-embed-gap, 8px);
-    /* A flex item defaults to min-width:auto; without this a wide quote would
-       stretch the card. */
-    min-width: 0;
+  /*
+   * A block box, not a flex item: the margins below collapse against the
+   * text's own (`.content { margin: 0 }`, `.media { margin-top: 8px }`) and
+   * against a neighbouring `.embed`'s, so a run of adjacent quotes ends up
+   * `--nt-embed-gap` apart — one collapsed margin, the same as the old
+   * flex `gap` produced for the list of cards below the text.
+   */
+  .embed {
+    margin: var(--nt-embed-gap, 8px) 0;
+  }
+
+  .embed:first-child {
+    margin-top: 0;
+  }
+
+  .embed:last-child {
+    margin-bottom: 0;
   }
 
   .refs {

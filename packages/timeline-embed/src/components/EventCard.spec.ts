@@ -203,6 +203,26 @@ describe('EventCard', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 
+  it('shows a URL repeated on both sides of a card once, not once per segment', () => {
+    // The card splits the body into two text segments, each with its own
+    // slice of parts — the dedup that used to run once over the whole note
+    // must still span both slices rather than resetting at the card.
+    const url = 'https://cdn.example.com/a.jpg';
+    const event = makeEvent({ content: `${url} nostr:${NOTE} again ${url}` });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        onEmbedRequest: () => {},
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: 'quoted' }) }],
+        ]),
+      },
+    });
+
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+  });
+
   it('renders a nostr: reference as a nested card and asks for the event', () => {
     const onEmbedRequest = vi.fn();
     const event = makeEvent({ content: `see nostr:${NOTE} for context` });
@@ -222,9 +242,44 @@ describe('EventCard', () => {
       filter: { ids: [NOTE_HEX] },
       replaceable: false,
     });
-    // The reference is a card now, so it is no longer a chip in the text.
-    expect(container.querySelector('.note > .content')).toHaveTextContent('see for context');
+    // The reference is a card now, so it is no longer a chip in the text —
+    // and the card sits where the reference was, splitting the text in two
+    // rather than collapsing it to one run above the card.
+    const runs = container.querySelectorAll('.note > .content');
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toHaveTextContent('see');
+    expect(runs[1]).toHaveTextContent('for context');
     expect(container.querySelector('.quote')).not.toBeNull();
+  });
+
+  it('renders each card where its own reference sat in the text, in source order', () => {
+    const event = makeEvent({ content: `No1: ${NOTE}\nNo2: ${MORE_NOTES[0]}` });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        onEmbedRequest: () => {},
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: 'quoted 1' }) }],
+          [
+            MORE_NOTES_HEX[0],
+            { status: 'ready' as const, event: makeEvent({ content: 'quoted 2' }) },
+          ],
+        ]),
+      },
+    });
+
+    // Checks for `.embed` directly rather than inferring it from "not
+    // `.content`" — a text segment with an attachment also renders a
+    // `ul.media` sibling, which the inverse check would misclassify.
+    const order = [...container.querySelectorAll('.note > *')].map((node) =>
+      node.classList.contains('embed') ? 'embed' : 'text'
+    );
+    expect(order).toEqual(['text', 'embed', 'text', 'embed']);
+
+    const runs = container.querySelectorAll('.note > .content');
+    expect(runs[0]).toHaveTextContent('No1:');
+    expect(runs[1]).toHaveTextContent('No2:');
   });
 
   it('renders more nested cards than a quote would, being a timeline card', () => {

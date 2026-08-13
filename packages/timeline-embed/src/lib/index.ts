@@ -64,9 +64,12 @@ export {
   MAX_EMBED_DEPTH,
   embedKeys,
   embedTarget,
+  noteSegments,
+  segmentKey,
+  segmentMedia,
   selectEmbeds,
 } from './note-embeds.ts';
-export type { EmbedStatus, EmbedTarget, EmbeddedEvent } from './note-embeds.ts';
+export type { EmbedStatus, EmbedTarget, EmbeddedEvent, NoteSegment } from './note-embeds.ts';
 export { fetchLatestReplaceable, latestReplaceable } from './one-shot-request.ts';
 export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
 export type { Profile } from './profile.ts';

@@ -2,6 +2,7 @@
   import {
     type ContentPart,
     type EntityPart,
+    type MediaPart,
     inlineParts,
     mediaAsLinks,
     mediaParts,
@@ -10,19 +11,14 @@
   import type { Profile } from '../lib/profile.ts';
   import MediaAttachment from './MediaAttachment.svelte';
 
-  interface Props {
-    /** The event's raw `content`. */
-    content: string;
+  interface CommonProps {
     /**
-     * The parsed content, when the caller has it already: a card that renders
-     * quoted events has to parse the body to find them. Unset, this component
-     * parses `content` itself, as it always has.
-     */
-    parts?: ContentPart[];
-    /**
-     * Keys (`embedKey`) of the entities the caller renders as nested cards below
-     * this text, lifted out of the paragraph the way attachments are so a quote
-     * is not both a card and a chip. An entity not named here stays a chip.
+     * Keys (`embedKey`) of the entities the caller renders as nested cards
+     * elsewhere in the body, lifted out of this text the way attachments are so
+     * a quote is not both a card and a chip. Applies by key to every
+     * occurrence, not just the one that became a card: a second mention of an
+     * event already carded elsewhere disappears from the text rather than
+     * repeating as a chip. An entity not named here stays a chip.
      */
     embedded?: ReadonlySet<string>;
     /**
@@ -39,15 +35,50 @@
      * another subscription per card.
      */
     profiles?: Map<string, Profile>;
+    /**
+     * The attachments to render, precomputed by the caller. A note split into
+     * segments around its inline quote cards passes this (see
+     * `segmentMedia`), so a URL already shown in an earlier segment is not
+     * shown — and re-fetched — again in a later one. Unset, this component
+     * computes it from `parts` itself, deduped only within what it was given.
+     *
+     * Never overrides `showMedia`: with media off nothing here is rendered,
+     * so the switch stays a property of this component rather than something
+     * every caller has to remember to apply to what it passes.
+     */
+    media?: MediaPart[];
   }
 
-  const { content, parts: given, embedded, showMedia = true, profiles }: Props = $props();
+  type Props =
+    | (CommonProps & {
+        /** The event's raw `content`. */
+        content: string;
+        parts?: ContentPart[];
+      })
+    | (CommonProps & {
+        /**
+         * The parsed content, when the caller has it already — a note split
+         * into segments around its inline quote cards passes each segment's
+         * slice directly, since there is no single `content` string for one.
+         */
+        parts: ContentPart[];
+        content?: never;
+      });
 
-  const parts = $derived(given ?? parseContent(content));
+  const {
+    content,
+    parts: given,
+    embedded,
+    showMedia = true,
+    profiles,
+    media: givenMedia,
+  }: Props = $props();
+
+  const parts = $derived(given ?? parseContent(content ?? ''));
   const inline = $derived(
     showMedia ? inlineParts(parts, embedded) : mediaAsLinks(parts, embedded)
   );
-  const media = $derived(showMedia ? mediaParts(parts) : []);
+  const media = $derived(showMedia ? (givenMedia ?? mediaParts(parts)) : []);
 
   /**
    * What to show for a mention.

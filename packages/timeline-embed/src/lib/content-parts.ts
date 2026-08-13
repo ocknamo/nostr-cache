@@ -494,10 +494,13 @@ export function mediaAsLinks(parts: ContentPart[], embedded?: ReadonlySet<string
 }
 
 /**
- * The attachments to render below the note's text.
+ * The attachments to render for this stretch of parts.
  *
  * A URL repeated in one note is shown once: rendering the same image twice is
- * never what the author meant, and it also keeps the list's keys unique.
+ * never what the author meant, and it also keeps the list's keys unique. A
+ * note split into segments around its inline quote cards calls this once per
+ * segment, so carrying that dedup across the segments is `segmentMedia`'s job
+ * — this stays the pure classifier the rest of the module is.
  */
 export function mediaParts(parts: ContentPart[]): MediaPart[] {
   const seen = new Set<string>();
