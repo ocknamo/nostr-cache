@@ -7,6 +7,7 @@ import {
   embedKeys,
   embedTarget,
   noteSegments,
+  segmentKey,
   segmentMedia,
   selectEmbeds,
 } from './note-embeds.ts';
@@ -194,6 +195,17 @@ describe('noteSegments', () => {
     expect(segments.map((segment) => segment.kind)).toEqual(['embed', 'embed']);
   });
 
+  it('produces no text segment for a run of only a repeat reference', () => {
+    // NOTE and NEVENT name the same event: the second mention is lifted out
+    // of the text by NoteContent, so a run holding nothing else renders
+    // nothing and must not become a segment.
+    const parts = parseContent(`${NOTE} ${NEVENT} ${OTHER_NOTES[0]}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.map((segment) => segment.kind)).toEqual(['embed', 'embed']);
+  });
+
   it('leaves references past the cap in the trailing text segment as chips', () => {
     const parts = parseContent([NOTE, ...OTHER_NOTES].join(' '));
     const embedded = embedKeys(selectEmbeds(parts, 0));
@@ -236,5 +248,40 @@ describe('segmentMedia', () => {
 
     expect(segments.map((segment) => segment.kind)).toEqual(['embed']);
     expect(segmentMedia(segments)).toEqual([[]]);
+  });
+
+  it('returns the same lists however many times it is called', () => {
+    // The dedup set is built per call. A `$derived` re-evaluating this must
+    // not find the URLs already "seen" from the previous run and drop them.
+    const parts = parseContent(`https://cdn.example.com/a.jpg ${NOTE} tail`);
+    const segments = noteSegments(parts, embedKeys(selectEmbeds(parts, 0)));
+
+    const once = segmentMedia(segments);
+    expect(once.flat()).toHaveLength(1);
+    expect(segmentMedia(segments)).toEqual(once);
+    expect(segmentMedia(segments)).toEqual(once);
+  });
+});
+
+describe('segmentKey', () => {
+  it('keys an embed by the event it names, not by its position', () => {
+    const parts = parseContent(`a ${NOTE} b`);
+    const segments = noteSegments(parts, embedKeys(selectEmbeds(parts, 0)));
+
+    expect(segmentKey(segments[1], 1)).toBe(NOTE_HEX);
+    // Moving the same reference to another index keeps its key, so the card
+    // is never re-created — nor handed another card's in-flight request.
+    expect(segmentKey(segments[1], 7)).toBe(NOTE_HEX);
+  });
+
+  it('cannot collide a text key with an embed one', () => {
+    const parts = parseContent(`a ${NOTE} b`);
+    const segments = noteSegments(parts, embedKeys(selectEmbeds(parts, 0)));
+    const keys = segments.map(segmentKey);
+
+    expect(new Set(keys).size).toBe(keys.length);
+    // An embedKey is 64 hex characters or `kind:pubkey:d`; neither can start
+    // with the prefix the text runs use.
+    expect(keys.filter((key) => key.startsWith('text-'))).toEqual(['text-0', 'text-2']);
   });
 });

@@ -760,7 +760,7 @@ import {
 | `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
 | `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで |
-| `noteSegments` / `segmentMedia` | 本文をテキスト区間と入れ子カードの並びに分割し(引用の展開位置を決める本体)、添付の重複排除をその区間をまたいで通す |
+| `noteSegments` / `segmentMedia` / `segmentKey` | 本文をテキスト区間と入れ子カードの並びに分割し(引用の展開位置を決める本体)、添付の重複排除をその区間をまたいで通す。`segmentKey` は描画時のキー |
 | `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィールと引用の取得トリガ） |
 | `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |

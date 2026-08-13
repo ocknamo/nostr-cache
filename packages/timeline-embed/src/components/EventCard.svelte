@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
-  import { embedKey, parseContent } from '../lib/content-parts.ts';
+  import { parseContent } from '../lib/content-parts.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
@@ -10,6 +10,7 @@
     type EmbeddedEvent,
     embedKeys,
     noteSegments,
+    segmentKey,
     segmentMedia,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
@@ -136,17 +137,7 @@
    * Attachments per `text` segment, deduped by URL across the whole note —
    * not just within whichever segment a repeated URL happens to fall in.
    */
-  const segmentMediaLists = $derived(segmentMedia(segments));
-
-  /**
-   * Stable across a reactive update even though `segments` can grow from a
-   * single run to several (once embeds resolve to something worth fetching):
-   * an `embed` segment is keyed by the event it names, so a nested card never
-   * inherits another one's in-flight request state at the same list index.
-   */
-  function segmentKey(segment: (typeof segments)[number], index: number): string {
-    return segment.kind === 'embed' ? (embedKey(segment.part.entity) ?? `embed-${index}`) : `text-${index}`;
-  }
+  const segmentMediaLists = $derived(showMedia ? segmentMedia(segments) : []);
 
   /**
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
@@ -356,7 +347,7 @@
             embedded={embeddedKeys}
             {showMedia}
             {profiles}
-            media={showMedia ? segmentMediaLists[index] : undefined}
+            media={segmentMediaLists[index]}
           />
         {:else}
           <div class="embed">

@@ -41,6 +41,10 @@
      * `segmentMedia`), so a URL already shown in an earlier segment is not
      * shown — and re-fetched — again in a later one. Unset, this component
      * computes it from `parts` itself, deduped only within what it was given.
+     *
+     * Never overrides `showMedia`: with media off nothing here is rendered,
+     * so the switch stays a property of this component rather than something
+     * every caller has to remember to apply to what it passes.
      */
     media?: MediaPart[];
   }
@@ -74,7 +78,7 @@
   const inline = $derived(
     showMedia ? inlineParts(parts, embedded) : mediaAsLinks(parts, embedded)
   );
-  const media = $derived(givenMedia ?? (showMedia ? mediaParts(parts) : []));
+  const media = $derived(showMedia ? (givenMedia ?? mediaParts(parts)) : []);
 
   /**
    * What to show for a mention.

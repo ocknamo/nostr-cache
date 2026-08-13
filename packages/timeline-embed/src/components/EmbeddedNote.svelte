@@ -22,6 +22,7 @@
     embedKeys,
     embedTarget,
     noteSegments,
+    segmentKey,
     segmentMedia,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
@@ -97,12 +98,7 @@
   /** Text and card segments, in the order the quoted author wrote them. */
   const segments = $derived(noteSegments(parts, nestedKeys));
   /** See `segmentMediaLists` in `EventCard.svelte`. */
-  const segmentMediaLists = $derived(segmentMedia(segments));
-
-  /** See `segmentKey` in `EventCard.svelte`. */
-  function segmentKey(segment: (typeof segments)[number], index: number): string {
-    return segment.kind === 'embed' ? (embedKey(segment.part.entity) ?? `embed-${index}`) : `text-${index}`;
-  }
+  const segmentMediaLists = $derived(showMedia ? segmentMedia(segments) : []);
 
   let requested = $state(false);
   /**
@@ -163,7 +159,7 @@
             embedded={nestedKeys}
             {showMedia}
             {profiles}
-            media={showMedia ? segmentMediaLists[index] : undefined}
+            media={segmentMediaLists[index]}
           />
         {:else}
           <div class="embed">
@@ -288,20 +284,11 @@
     word-break: break-all;
   }
 
-  /*
-   * Block, not the frame's own flex column: a `.embed` inside needs its
-   * margins to collapse against the text around it — see `.embed` below.
-   * `.quote` is the flex container, and `.quote-body` is the item that would
-   * otherwise refuse to shrink below its content's width (the default
-   * `min-width: auto` on a flex item) and stretch the frame — the same
-   * min-width:0 pattern as `.body` in EventCard.svelte.
-   */
-  .quote-body {
-    min-width: 0;
-  }
-
   /* See `.embed` in EventCard.svelte: the same collapsing-margin trick, so a
-     run of adjacent quotes ends up `--nt-embed-gap` apart either way. */
+     run of adjacent quotes ends up `--nt-embed-gap` apart either way. The
+     `.quote-body` wrapper exists to make it work at all — `.quote` is a flex
+     column, where margins do not collapse, so the segments need a block box
+     of their own to collapse inside. */
   .embed {
     margin: var(--nt-embed-gap, 8px) 0;
   }

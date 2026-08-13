@@ -132,9 +132,27 @@ export type NoteSegment =
   | { kind: 'text'; parts: ContentPart[] }
   | { kind: 'embed'; part: EntityPart };
 
-/** Whether a run has nothing in it a reader would ever see. */
-function isBlank(run: ContentPart[]): boolean {
-  return run.every((part) => part.kind === 'text' && part.text.trim().length === 0);
+/**
+ * Whether a run renders nothing at all, and so is not worth a segment.
+ *
+ * Two things are invisible: whitespace, which `normalize` would trim away
+ * anyway, and a repeat reference to an event already placed as a card, which
+ * `NoteContent` lifts out by key. A run of only those would be an element-less
+ * segment sitting between two cards — harmless to look at, but it would break
+ * the "every `text` segment renders something" property the margin collapsing
+ * around `.embed` is reasoned about with.
+ */
+function isBlank(run: ContentPart[], embedded: ReadonlySet<string>): boolean {
+  return run.every((part) => {
+    if (part.kind === 'text') {
+      return part.text.trim().length === 0;
+    }
+    if (part.kind !== 'entity') {
+      return false;
+    }
+    const key = embedKey(part.entity);
+    return key !== undefined && embedded.has(key);
+  });
 }
 
 /**
@@ -147,8 +165,8 @@ function isBlank(run: ContentPart[]): boolean {
  *
  * @param embedded Keys ({@link embedKey}) of the entities to place as cards,
  *   i.e. `embedKeys(selectEmbeds(parts, depth))`
- * @returns Segments in source order, with no `text` segment for a run that is
- *   only whitespace — two references back to back produce two adjacent
+ * @returns Segments in source order, and every `text` one renders something
+ *   (see {@link isBlank}) — two references back to back produce two adjacent
  *   `embed` segments, not an empty `text` one between them. A second
  *   reference to an event already placed as a card stays in its `text` run,
  *   for `NoteContent`'s own lift (by key) to remove — the same "one quote,
@@ -156,23 +174,24 @@ function isBlank(run: ContentPart[]): boolean {
  *   repeat mention disappears rather than becoming a second card or a chip.
  */
 export function noteSegments(parts: ContentPart[], embedded: ReadonlySet<string>): NoteSegment[] {
-  if (embedded.size === 0) {
-    return [{ kind: 'text', parts }];
-  }
-
   const segments: NoteSegment[] = [];
   const placed = new Set<string>();
   let run: ContentPart[] = [];
+
+  /** Close the run that has been collected, if a reader would see any of it. */
+  const flush = () => {
+    if (run.length > 0 && !isBlank(run, embedded)) {
+      segments.push({ kind: 'text', parts: run });
+    }
+    run = [];
+  };
 
   for (const part of parts) {
     if (part.kind === 'entity') {
       const key = embedKey(part.entity);
       if (key !== undefined && embedded.has(key) && !placed.has(key)) {
         placed.add(key);
-        if (run.length > 0 && !isBlank(run)) {
-          segments.push({ kind: 'text', parts: run });
-        }
-        run = [];
+        flush();
         segments.push({ kind: 'embed', part });
         continue;
       }
@@ -180,24 +199,47 @@ export function noteSegments(parts: ContentPart[], embedded: ReadonlySet<string>
     run.push(part);
   }
 
-  if (run.length > 0 && !isBlank(run)) {
-    segments.push({ kind: 'text', parts: run });
-  }
-
+  flush();
   return segments;
 }
 
 /**
- * {@link mediaParts}, threaded across every `text` segment {@link noteSegments}
- * produced, so the dedup by URL stays a property of the whole note rather than
- * resetting at each quote card — a photo linked once above a quote and again
- * below it must still render (and be fetched) once.
+ * The `{#each}` key for a segment.
+ *
+ * Derived from the segment's own content rather than its position: the list
+ * grows from a single run to several as embeds resolve, and a bare index would
+ * let a nested card inherit the request state of whichever card previously sat
+ * at that index. An `embedKey` cannot collide with the `text-` prefix — it is
+ * either 64 hex characters or NIP-01's `kind:pubkey:d`.
+ */
+export function segmentKey(segment: NoteSegment, index: number): string {
+  if (segment.kind !== 'embed') {
+    return `text-${index}`;
+  }
+  return embedKey(segment.part.entity) ?? `embed-${index}`;
+}
+
+/**
+ * {@link mediaParts} for every `text` segment {@link noteSegments} produced,
+ * with the dedup by URL carried across them: `mediaParts` alone dedups only
+ * within the run it is given, so a photo linked once above a quote and again
+ * below it would otherwise render — and be fetched — twice.
  *
  * @returns One list per segment, in the same order, empty for an `embed` one.
+ *   A URL belongs to the first segment it was written in.
  */
 export function segmentMedia(segments: NoteSegment[]): MediaPart[][] {
   const seen = new Set<string>();
-  return segments.map((segment) =>
-    segment.kind === 'text' ? mediaParts(segment.parts, seen) : []
-  );
+  return segments.map((segment) => {
+    if (segment.kind !== 'text') {
+      return [];
+    }
+    return mediaParts(segment.parts).filter((part) => {
+      if (seen.has(part.url)) {
+        return false;
+      }
+      seen.add(part.url);
+      return true;
+    });
+  });
 }

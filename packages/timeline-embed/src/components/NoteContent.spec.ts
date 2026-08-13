@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
+import { parseContent } from '../lib/content-parts.ts';
 import type { Profile } from '../lib/profile.ts';
 import NoteContent from './NoteContent.svelte';
 
@@ -64,6 +65,22 @@ describe('NoteContent', () => {
       'href',
       'https://cdn.example.com/a.jpg'
     );
+  });
+
+  it('renders no attachment for precomputed media when media is switched off', () => {
+    // `media` is an optimization for a body split into segments, not a way
+    // around `show-media` — the switch is what keeps the widget from asking
+    // an arbitrary third-party host for bytes.
+    const url = 'https://cdn.example.com/a.jpg';
+    const { container } = render(NoteContent, {
+      props: {
+        parts: parseContent(url),
+        showMedia: false,
+        media: [{ kind: 'media' as const, media: 'image' as const, url }],
+      },
+    });
+
+    expect(container.querySelector('img')).toBeNull();
   });
 
   it('falls back to a link when the image fails to load', async () => {

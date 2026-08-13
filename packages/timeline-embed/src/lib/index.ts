@@ -65,6 +65,7 @@ export {
   embedKeys,
   embedTarget,
   noteSegments,
+  segmentKey,
   segmentMedia,
   selectEmbeds,
 } from './note-embeds.ts';
