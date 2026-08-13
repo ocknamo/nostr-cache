@@ -27,3 +27,21 @@ jobs:
     - run: npm run format:check
     - run: npm run lint:check
     - run: npm test
+
+  # 依存関係の既知脆弱性チェック。lint-and-test とは独立に走らせて、
+  # どちらが落ちたのかがひと目で分かるようにしている。
+  audit:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22.x"
+        cache: 'npm'
+    # npm audit は package-lock.json だけで動くため npm ci は不要。
+    # high 未満（moderate / low）では落とさない。開発依存に軽微な advisory が
+    # 出るたびに無関係な PR が止まるのを避けるための閾値。
+    - run: npm audit --audit-level=high
