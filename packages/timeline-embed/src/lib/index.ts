@@ -60,6 +60,7 @@ export type { MaterialVariant } from './material-symbols.ts';
 export type { UpstreamObserver } from './instrumented-upstream-pool.ts';
 export {
   MAX_EMBEDS_PER_NOTE,
+  MAX_EMBEDS_PER_TOP_NOTE,
   MAX_EMBED_DEPTH,
   embedKeys,
   embedTarget,

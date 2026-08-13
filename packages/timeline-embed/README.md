@@ -498,7 +498,13 @@ nostr-timeline {
 | 上限 | 値 | 理由 |
 |---|---|---|
 | 入れ子の深さ | **5 段** | 6 段目の参照は短縮チップのまま残ります |
-| 1 投稿あたりの引用 | **2 件** | 深さと掛け算になるため（2 件 × 5 段で最大 62 件の取得）。超えた分はチップのまま |
+| タイムライン投稿の引用 | **10 件** | 読者が開いた投稿そのものなので、参照はひと通り見せます。深さ方向の掛け算の底にはならないため、上限を上げても増えるのはこの 1 段だけです |
+| 入れ子の引用の引用 | **2 件** | ここは深さと掛け算になるため（1 枚の引用の下は 2+4+8+16 = 最大 30 件）。超えた分はチップのまま |
+
+1 枚のタイムラインカードが引き起こす取得は最大 10+20+40+80+160 = 310 件です。
+`show-media` と同じく、この上限は**プライバシー上の上限でもあります**。展開された引用の
+アバターや添付は第三者ホストから読み込まれるため、1 投稿が閲覧者の IP を晒しうるホスト数の
+上限でもあります。
 
 - 取得は**カードが画面に入ってから**で（プロフィールと同じ `IntersectionObserver`）、
   同時に走るのは 2 本までです。取得は購読ではなく一発の REQ（EOSE で完了・5 秒でタイムアウト）で、
@@ -745,7 +751,7 @@ import {
 | `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
 | `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
-| `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ |
+| `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで |
 | `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィールと引用の取得トリガ） |
 | `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
