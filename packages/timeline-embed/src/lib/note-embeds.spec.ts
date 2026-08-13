@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { type EntityPart, parseContent } from './content-parts.ts';
 import {
   MAX_EMBEDS_PER_NOTE,
+  MAX_EMBEDS_PER_TOP_NOTE,
   MAX_EMBED_DEPTH,
   embedKeys,
   embedTarget,
@@ -18,11 +19,23 @@ const NEVENT =
 const NADDR =
   'naddr1qq9x67fdv9e8g6trd3jsz9mhwden5te0wfjkccte9ejhsctdwpkx2tnrdaksygr706wy92gmlmcel2ffuh76rdewp67p5nq3g9nnufu5ydxcdtwlfcpsgqqqw4rstnle8h';
 const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
-/** Distinct event ids, so a body can reference more than one thing. */
+/**
+ * Distinct event ids, so a body can reference more than one thing — and enough
+ * of them to overrun the larger of the two caps.
+ */
 const OTHER_NOTES = [
   'note1424242424242424242424242424242424242424242424242424qv3q9y6',
   'note1hwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwashyvgw5',
   'note1enxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxqzqztj2',
+  'note1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqskcx45n',
+  'note1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqmwpjpm',
+  'note1qvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvps7ucghe',
+  'note1qszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszq0skkn7',
+  'note1q5zs2pg9q5zs2pg9q5zs2pg9q5zs2pg9q5zs2pg9q5zs2pg9q5zs2z0v9u',
+  'note1qcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrq85gts5',
+  'note1qurswpc8qurswpc8qurswpc8qurswpc8qurswpc8qurswpc8qurszx33xk',
+  'note1pqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyq6x97uv',
+  'note1pyysjzgfpyysjzgfpyysjzgfpyysjzgfpyysjzgfpyysjzgfpyysl5uy2w',
 ];
 
 /** The single entity a one-reference body parses to. */
@@ -86,9 +99,17 @@ describe('selectEmbeds', () => {
     expect(selected[0].raw).toBe(NOTE);
   });
 
-  it('stops at the per-note cap', () => {
+  it('stops at the larger cap on a timeline card', () => {
     const parts = parseContent([NOTE, ...OTHER_NOTES].join(' '));
-    expect(selectEmbeds(parts, 0)).toHaveLength(MAX_EMBEDS_PER_NOTE);
+    expect(parts.filter((part) => part.kind === 'entity').length).toBeGreaterThan(
+      MAX_EMBEDS_PER_TOP_NOTE
+    );
+    expect(selectEmbeds(parts, 0)).toHaveLength(MAX_EMBEDS_PER_TOP_NOTE);
+  });
+
+  it('stops at the smaller cap inside a quote', () => {
+    const parts = parseContent([NOTE, ...OTHER_NOTES].join(' '));
+    expect(selectEmbeds(parts, 1)).toHaveLength(MAX_EMBEDS_PER_NOTE);
   });
 
   it('embeds nothing at the depth cap', () => {

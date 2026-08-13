@@ -745,7 +745,7 @@ import {
 | `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
 | `parseRefs` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方） |
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
-| `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ |
+| `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで |
 | `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィールと引用の取得トリガ） |
 | `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `Avatar` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |

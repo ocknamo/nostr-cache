@@ -17,11 +17,21 @@ import { type ContentPart, type EntityPart, embedKey } from './content-parts.ts'
 export const MAX_EMBED_DEPTH = 5;
 
 /**
- * Two, not more, because the depth multiplies it: two per note over five levels
- * is at most 2+4+8+16+32 = 62 lookups for one timeline card, and the relay caps
- * a client at 20 concurrent subscriptions. References past the cap stay chips.
+ * The cap below depth 0, where it is the base of an exponent: two per note over
+ * the remaining four levels is at most 2+4+8+16 = 30 lookups under a single
+ * quote, and the relay caps a client at 20 concurrent subscriptions. References
+ * past the cap stay chips.
  */
 export const MAX_EMBEDS_PER_NOTE = 2;
+
+/**
+ * Higher than {@link MAX_EMBEDS_PER_NOTE} because a timeline card is the note
+ * the reader actually asked for, and its references are the ones worth showing
+ * in full. It costs a flat ten lookups rather than compounding — the deeper
+ * levels stay on the smaller cap, so the tree under each of the ten is still
+ * bounded by it.
+ */
+export const MAX_EMBEDS_PER_TOP_NOTE = 10;
 
 export type EmbedStatus = 'loading' | 'ready' | 'missing';
 
@@ -68,7 +78,9 @@ export function embedTarget(entity: EntityPart['entity']): EmbedTarget | undefin
 /**
  * The references to render as nested cards, in the order they appear.
  *
- * @param depth Depth of the card doing the rendering — 0 for a timeline card
+ * @param depth Depth of the card doing the rendering — 0 for a timeline card,
+ *   which is capped at {@link MAX_EMBEDS_PER_TOP_NOTE} rather than
+ *   {@link MAX_EMBEDS_PER_NOTE}
  * @returns Empty once {@link MAX_EMBED_DEPTH} is reached, which is what leaves
  *   the deepest level's references in the text as chips
  */
@@ -76,10 +88,11 @@ export function selectEmbeds(parts: ContentPart[], depth: number): EntityPart[] 
   if (depth >= MAX_EMBED_DEPTH) {
     return [];
   }
+  const max = depth === 0 ? MAX_EMBEDS_PER_TOP_NOTE : MAX_EMBEDS_PER_NOTE;
   const selected: EntityPart[] = [];
   const seen = new Set<string>();
   for (const part of parts) {
-    if (selected.length >= MAX_EMBEDS_PER_NOTE) {
+    if (selected.length >= max) {
       break;
     }
     if (part.kind !== 'entity') {
