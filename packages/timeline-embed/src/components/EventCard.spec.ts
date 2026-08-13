@@ -6,6 +6,17 @@ import EventCard from './EventCard.svelte';
 
 const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
 const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
+/** Three more references, to put a body over the cap a nested quote has. */
+const MORE_NOTES = [
+  'note1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqskcx45n',
+  'note1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqmwpjpm',
+  'note1qvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvps7ucghe',
+];
+const MORE_NOTES_HEX = [
+  '0101010101010101010101010101010101010101010101010101010101010101',
+  '0202020202020202020202020202020202020202020202020202020202020202',
+  '0303030303030303030303030303030303030303030303030303030303030303',
+];
 
 /**
  * Fire a `pointerenter` that carries a `pointerType`.
@@ -214,6 +225,29 @@ describe('EventCard', () => {
     // The reference is a card now, so it is no longer a chip in the text.
     expect(container.querySelector('.note > .content')).toHaveTextContent('see for context');
     expect(container.querySelector('.quote')).not.toBeNull();
+  });
+
+  it('renders more nested cards than a quote would, being a timeline card', () => {
+    // The card renders at depth 0, where the cap is MAX_EMBEDS_PER_TOP_NOTE
+    // rather than the smaller one a quote inside it gets. Four references would
+    // come back as two if this card ever started rendering itself as nested.
+    const refs = [NOTE, ...MORE_NOTES];
+    const event = makeEvent({ content: refs.map((ref) => `nostr:${ref}`).join(' ') });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        onEmbedRequest: () => {},
+        embeds: new Map(
+          [NOTE_HEX, ...MORE_NOTES_HEX].map((hex, index) => [
+            hex,
+            { status: 'ready' as const, event: makeEvent({ content: `quoted ${index}` }) },
+          ])
+        ),
+      },
+    });
+
+    expect(container.querySelectorAll('.quote')).toHaveLength(refs.length);
   });
 
   it('drops the quote chip for a reference the body already shows as a card', () => {

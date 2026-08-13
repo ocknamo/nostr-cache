@@ -99,6 +99,14 @@ describe('selectEmbeds', () => {
     expect(selected[0].raw).toBe(NOTE);
   });
 
+  // Pinned, not derived: the caps are a product decision — ten references shown
+  // on the note the reader opened, two inside each quote below it — so a change
+  // to either should fail here and be made deliberately.
+  it('caps a timeline card at ten and a quote at two', () => {
+    expect(MAX_EMBEDS_PER_TOP_NOTE).toBe(10);
+    expect(MAX_EMBEDS_PER_NOTE).toBe(2);
+  });
+
   it('stops at the larger cap on a timeline card', () => {
     const parts = parseContent([NOTE, ...OTHER_NOTES].join(' '));
     expect(parts.filter((part) => part.kind === 'entity').length).toBeGreaterThan(

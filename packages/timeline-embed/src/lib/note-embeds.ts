@@ -27,9 +27,11 @@ export const MAX_EMBEDS_PER_NOTE = 2;
 /**
  * Higher than {@link MAX_EMBEDS_PER_NOTE} because a timeline card is the note
  * the reader actually asked for, and its references are the ones worth showing
- * in full. It costs a flat ten lookups rather than compounding — the deeper
- * levels stay on the smaller cap, so the tree under each of the ten is still
- * bounded by it.
+ * in full. Raising *this* one is affordable because it is a multiplier rather
+ * than the base of the exponent — the levels under it stay on the smaller cap,
+ * so a card's whole tree is at most 10+20+40+80+160 = 310 lookups (it was 62
+ * when both caps were two). Those are one-shot REQs, issued two at a time as
+ * cards scroll into view, not concurrent subscriptions.
  */
 export const MAX_EMBEDS_PER_TOP_NOTE = 10;
 

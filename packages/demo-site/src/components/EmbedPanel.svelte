@@ -359,7 +359,8 @@
   <p class="footnote">
     本文中の <code>nostr:note1…</code> / <code>nevent</code> / <code>naddr</code> は、
     参照先の投稿を取得して<strong>入れ子のカード</strong>として表示します（深さ 5 段・
-    1 投稿あたり 2 件まで。取得できなかった参照は短縮表示に戻ります）。
+    タイムラインの投稿は 10 件、入れ子の引用の中は 2 件まで。取得できなかった参照は
+    短縮表示に戻ります）。
     追加の取得をさせたくない場合は <code>show-embeds="false"</code>
     （iframe なら <code>&amp;show-embeds=false</code>）を指定してください。
   </p>
