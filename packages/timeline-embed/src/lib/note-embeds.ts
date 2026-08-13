@@ -11,7 +11,13 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { type ContentPart, type EntityPart, embedKey } from './content-parts.ts';
+import {
+  type ContentPart,
+  type EntityPart,
+  type MediaPart,
+  embedKey,
+  mediaParts,
+} from './content-parts.ts';
 
 /** Timeline cards are depth 0, so this is how many nested cards a chain shows. */
 export const MAX_EMBED_DEPTH = 5;
@@ -126,19 +132,28 @@ export type NoteSegment =
   | { kind: 'text'; parts: ContentPart[] }
   | { kind: 'embed'; part: EntityPart };
 
+/** Whether a run has nothing in it a reader would ever see. */
+function isBlank(run: ContentPart[]): boolean {
+  return run.every((part) => part.kind === 'text' && part.text.trim().length === 0);
+}
+
 /**
  * Split a note's parts into the order a reader actually sees: a run of text,
  * then a card, then the next run of text, and so on — instead of every card
  * collapsed to the bottom of the note. Media stays inside the `text` runs, so
  * it renders wherever `NoteContent` lifts it out — the tail of whichever run
- * it fell in.
+ * it fell in. See {@link segmentMedia} for keeping that dedup working across
+ * the runs this produces.
  *
  * @param embedded Keys ({@link embedKey}) of the entities to place as cards,
  *   i.e. `embedKeys(selectEmbeds(parts, depth))`
- * @returns Segments in source order. A second reference to an event already
- *   placed as a card stays in its `text` run — `NoteContent` renders it as the
- *   chip it always was, the same "one quote, one card" rule `selectEmbeds`
- *   already enforces by key.
+ * @returns Segments in source order, with no `text` segment for a run that is
+ *   only whitespace — two references back to back produce two adjacent
+ *   `embed` segments, not an empty `text` one between them. A second
+ *   reference to an event already placed as a card stays in its `text` run,
+ *   for `NoteContent`'s own lift (by key) to remove — the same "one quote,
+ *   one card" rule `selectEmbeds` already enforces, applied to rendering: the
+ *   repeat mention disappears rather than becoming a second card or a chip.
  */
 export function noteSegments(parts: ContentPart[], embedded: ReadonlySet<string>): NoteSegment[] {
   if (embedded.size === 0) {
@@ -154,10 +169,10 @@ export function noteSegments(parts: ContentPart[], embedded: ReadonlySet<string>
       const key = embedKey(part.entity);
       if (key !== undefined && embedded.has(key) && !placed.has(key)) {
         placed.add(key);
-        if (run.length > 0) {
+        if (run.length > 0 && !isBlank(run)) {
           segments.push({ kind: 'text', parts: run });
-          run = [];
         }
+        run = [];
         segments.push({ kind: 'embed', part });
         continue;
       }
@@ -165,9 +180,24 @@ export function noteSegments(parts: ContentPart[], embedded: ReadonlySet<string>
     run.push(part);
   }
 
-  if (run.length > 0) {
+  if (run.length > 0 && !isBlank(run)) {
     segments.push({ kind: 'text', parts: run });
   }
 
   return segments;
+}
+
+/**
+ * {@link mediaParts}, threaded across every `text` segment {@link noteSegments}
+ * produced, so the dedup by URL stays a property of the whole note rather than
+ * resetting at each quote card — a photo linked once above a quote and again
+ * below it must still render (and be fetched) once.
+ *
+ * @returns One list per segment, in the same order, empty for an `embed` one.
+ */
+export function segmentMedia(segments: NoteSegment[]): MediaPart[][] {
+  const seen = new Set<string>();
+  return segments.map((segment) =>
+    segment.kind === 'text' ? mediaParts(segment.parts, seen) : []
+  );
 }

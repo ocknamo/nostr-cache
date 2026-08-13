@@ -237,7 +237,7 @@ describe('EmbeddedNote', () => {
     // picked up as one of the outer note's own text runs.
     const body = container.querySelector(':scope > .quote > .quote-body');
     const order = [...(body?.children ?? [])].map((node) =>
-      node.classList.contains('content') ? 'text' : 'embed'
+      node.classList.contains('embed') ? 'embed' : 'text'
     );
     expect(order).toEqual(['text', 'embed', 'text']);
 

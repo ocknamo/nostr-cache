@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
-  import { parseContent } from '../lib/content-parts.ts';
+  import { embedKey, parseContent } from '../lib/content-parts.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
@@ -10,6 +10,7 @@
     type EmbeddedEvent,
     embedKeys,
     noteSegments,
+    segmentMedia,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
@@ -131,6 +132,21 @@
   const embeddedKeys = $derived(embedKeys(embedded));
   /** Text and card segments, in the order the author actually wrote them. */
   const segments = $derived(noteSegments(parts, embeddedKeys));
+  /**
+   * Attachments per `text` segment, deduped by URL across the whole note —
+   * not just within whichever segment a repeated URL happens to fall in.
+   */
+  const segmentMediaLists = $derived(segmentMedia(segments));
+
+  /**
+   * Stable across a reactive update even though `segments` can grow from a
+   * single run to several (once embeds resolve to something worth fetching):
+   * an `embed` segment is keyed by the event it names, so a nested card never
+   * inherits another one's in-flight request state at the same list index.
+   */
+  function segmentKey(segment: (typeof segments)[number], index: number): string {
+    return segment.kind === 'embed' ? (embedKey(segment.part.entity) ?? `embed-${index}`) : `text-${index}`;
+  }
 
   /**
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
@@ -333,9 +349,15 @@
            scroll rather than the card, keeping the height cap. Cards render
            where the author's own `nostr:` reference sat in the text, rather
            than all collapsed to the bottom. -->
-      {#each segments as segment, index (index)}
+      {#each segments as segment, index (segmentKey(segment, index))}
         {#if segment.kind === 'text'}
-          <NoteContent parts={segment.parts} embedded={embeddedKeys} {showMedia} {profiles} />
+          <NoteContent
+            parts={segment.parts}
+            embedded={embeddedKeys}
+            {showMedia}
+            {profiles}
+            media={showMedia ? segmentMediaLists[index] : undefined}
+          />
         {:else}
           <div class="embed">
             <EmbeddedNote
@@ -675,9 +697,6 @@
    */
   .embed {
     margin: var(--nt-embed-gap, 8px) 0;
-    /* Long unbroken content inside the card must not stretch the note wider
-       than the card around it. */
-    min-width: 0;
   }
 
   .embed:first-child {

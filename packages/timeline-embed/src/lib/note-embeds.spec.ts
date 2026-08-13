@@ -7,6 +7,7 @@ import {
   embedKeys,
   embedTarget,
   noteSegments,
+  segmentMedia,
   selectEmbeds,
 } from './note-embeds.ts';
 
@@ -179,5 +180,61 @@ describe('noteSegments', () => {
       throw new Error('expected a trailing text segment');
     }
     expect(trailing.parts.some((part) => part.kind === 'entity')).toBe(true);
+  });
+
+  it('produces no text segment between two references with only whitespace between them', () => {
+    const parts = parseContent(`${NOTE}\n${OTHER_NOTES[0]}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    // Not `['embed', 'text', 'embed']`: a run that is only the newline
+    // between the two references renders nothing, so it must not become a
+    // segment at all — see `--nt-embed-gap` margin collapsing in
+    // EventCard.svelte, which only has to reason about adjacent `.embed`s.
+    expect(segments.map((segment) => segment.kind)).toEqual(['embed', 'embed']);
+  });
+
+  it('leaves references past the cap in the trailing text segment as chips', () => {
+    const parts = parseContent([NOTE, ...OTHER_NOTES].join(' '));
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.filter((segment) => segment.kind === 'embed')).toHaveLength(
+      MAX_EMBEDS_PER_TOP_NOTE
+    );
+    const trailing = segments[segments.length - 1];
+    if (trailing.kind !== 'text') {
+      throw new Error('expected a trailing text segment');
+    }
+    // OTHER_NOTES has more references than the cap leaves room for, so at
+    // least one stays an in-text chip rather than becoming a card.
+    expect(trailing.parts.some((part) => part.kind === 'entity')).toBe(true);
+  });
+});
+
+describe('segmentMedia', () => {
+  it('dedups a URL repeated across the segments a card split the body into', () => {
+    const url = 'https://cdn.example.com/a.jpg';
+    const parts = parseContent(`${url} ${NOTE} again ${url}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    const media = segmentMedia(segments);
+    // One `MediaPart` in total, not one per segment it was written in — the
+    // second mention of the same URL must not be shown, and re-fetched,
+    // again after the card.
+    expect(media.flat()).toHaveLength(1);
+    expect(media.flat()[0].url).toBe(url);
+    // It belongs to the first segment, where the URL was actually written.
+    expect(media[0]).toEqual([{ kind: 'media', media: 'image', url }]);
+  });
+
+  it('has nothing for an embed segment', () => {
+    const parts = parseContent(NOTE);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.map((segment) => segment.kind)).toEqual(['embed']);
+    expect(segmentMedia(segments)).toEqual([[]]);
   });
 });

@@ -494,13 +494,18 @@ export function mediaAsLinks(parts: ContentPart[], embedded?: ReadonlySet<string
 }
 
 /**
- * The attachments to render below the note's text.
+ * The attachments to render for this stretch of parts.
  *
  * A URL repeated in one note is shown once: rendering the same image twice is
  * never what the author meant, and it also keeps the list's keys unique.
+ *
+ * @param seen URLs already shown, mutated in place as this call adds its own.
+ *   A note split into several segments around its inline quote cards calls
+ *   this once per segment with the *same* set carried across the calls, so
+ *   the dedup still spans the whole note rather than resetting at each quote.
+ *   Omit it for a one-shot call over a whole note's parts.
  */
-export function mediaParts(parts: ContentPart[]): MediaPart[] {
-  const seen = new Set<string>();
+export function mediaParts(parts: ContentPart[], seen: Set<string> = new Set()): MediaPart[] {
   const media: MediaPart[] = [];
   for (const part of parts) {
     if (part.kind !== 'media' || seen.has(part.url)) {

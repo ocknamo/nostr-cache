@@ -22,6 +22,7 @@
     embedKeys,
     embedTarget,
     noteSegments,
+    segmentMedia,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
   import { type Profile, authorHandle, authorName } from '../lib/profile.ts';
@@ -95,6 +96,13 @@
   const nestedKeys = $derived(embedKeys(nested));
   /** Text and card segments, in the order the quoted author wrote them. */
   const segments = $derived(noteSegments(parts, nestedKeys));
+  /** See `segmentMediaLists` in `EventCard.svelte`. */
+  const segmentMediaLists = $derived(segmentMedia(segments));
+
+  /** See `segmentKey` in `EventCard.svelte`. */
+  function segmentKey(segment: (typeof segments)[number], index: number): string {
+    return segment.kind === 'embed' ? (embedKey(segment.part.entity) ?? `embed-${index}`) : `text-${index}`;
+  }
 
   let requested = $state(false);
   /**
@@ -148,9 +156,15 @@
       </time>
     </header>
     <div class="quote-body">
-      {#each segments as segment, index (index)}
+      {#each segments as segment, index (segmentKey(segment, index))}
         {#if segment.kind === 'text'}
-          <NoteContent parts={segment.parts} embedded={nestedKeys} {showMedia} {profiles} />
+          <NoteContent
+            parts={segment.parts}
+            embedded={nestedKeys}
+            {showMedia}
+            {profiles}
+            media={showMedia ? segmentMediaLists[index] : undefined}
+          />
         {:else}
           <div class="embed">
             <Self
@@ -274,8 +288,14 @@
     word-break: break-all;
   }
 
-  /* Block, not the frame's own flex column: a `.embed` inside needs its
-     margins to collapse against the text around it — see `.embed` below. */
+  /*
+   * Block, not the frame's own flex column: a `.embed` inside needs its
+   * margins to collapse against the text around it — see `.embed` below.
+   * `.quote` is the flex container, and `.quote-body` is the item that would
+   * otherwise refuse to shrink below its content's width (the default
+   * `min-width: auto` on a flex item) and stretch the frame — the same
+   * min-width:0 pattern as `.body` in EventCard.svelte.
+   */
   .quote-body {
     min-width: 0;
   }
@@ -284,7 +304,6 @@
      run of adjacent quotes ends up `--nt-embed-gap` apart either way. */
   .embed {
     margin: var(--nt-embed-gap, 8px) 0;
-    min-width: 0;
   }
 
   .embed:first-child {
