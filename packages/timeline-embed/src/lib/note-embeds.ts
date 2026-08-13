@@ -121,3 +121,53 @@ export function embedKeys(parts: EntityPart[]): Set<string> {
   }
   return keys;
 }
+
+export type NoteSegment =
+  | { kind: 'text'; parts: ContentPart[] }
+  | { kind: 'embed'; part: EntityPart };
+
+/**
+ * Split a note's parts into the order a reader actually sees: a run of text,
+ * then a card, then the next run of text, and so on — instead of every card
+ * collapsed to the bottom of the note. Media stays inside the `text` runs, so
+ * it renders wherever `NoteContent` lifts it out — the tail of whichever run
+ * it fell in.
+ *
+ * @param embedded Keys ({@link embedKey}) of the entities to place as cards,
+ *   i.e. `embedKeys(selectEmbeds(parts, depth))`
+ * @returns Segments in source order. A second reference to an event already
+ *   placed as a card stays in its `text` run — `NoteContent` renders it as the
+ *   chip it always was, the same "one quote, one card" rule `selectEmbeds`
+ *   already enforces by key.
+ */
+export function noteSegments(parts: ContentPart[], embedded: ReadonlySet<string>): NoteSegment[] {
+  if (embedded.size === 0) {
+    return [{ kind: 'text', parts }];
+  }
+
+  const segments: NoteSegment[] = [];
+  const placed = new Set<string>();
+  let run: ContentPart[] = [];
+
+  for (const part of parts) {
+    if (part.kind === 'entity') {
+      const key = embedKey(part.entity);
+      if (key !== undefined && embedded.has(key) && !placed.has(key)) {
+        placed.add(key);
+        if (run.length > 0) {
+          segments.push({ kind: 'text', parts: run });
+          run = [];
+        }
+        segments.push({ kind: 'embed', part });
+        continue;
+      }
+    }
+    run.push(part);
+  }
+
+  if (run.length > 0) {
+    segments.push({ kind: 'text', parts: run });
+  }
+
+  return segments;
+}

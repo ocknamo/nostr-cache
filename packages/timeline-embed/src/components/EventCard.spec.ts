@@ -222,9 +222,41 @@ describe('EventCard', () => {
       filter: { ids: [NOTE_HEX] },
       replaceable: false,
     });
-    // The reference is a card now, so it is no longer a chip in the text.
-    expect(container.querySelector('.note > .content')).toHaveTextContent('see for context');
+    // The reference is a card now, so it is no longer a chip in the text —
+    // and the card sits where the reference was, splitting the text in two
+    // rather than collapsing it to one run above the card.
+    const runs = container.querySelectorAll('.note > .content');
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toHaveTextContent('see');
+    expect(runs[1]).toHaveTextContent('for context');
     expect(container.querySelector('.quote')).not.toBeNull();
+  });
+
+  it('renders each card where its own reference sat in the text, in source order', () => {
+    const event = makeEvent({ content: `No1: ${NOTE}\nNo2: ${MORE_NOTES[0]}` });
+    const { container } = render(EventCard, {
+      props: {
+        event,
+        showAvatar: false,
+        onEmbedRequest: () => {},
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: 'quoted 1' }) }],
+          [
+            MORE_NOTES_HEX[0],
+            { status: 'ready' as const, event: makeEvent({ content: 'quoted 2' }) },
+          ],
+        ]),
+      },
+    });
+
+    const order = [...container.querySelectorAll('.note > *')].map((node) =>
+      node.classList.contains('content') ? 'text' : 'embed'
+    );
+    expect(order).toEqual(['text', 'embed', 'text', 'embed']);
+
+    const runs = container.querySelectorAll('.note > .content');
+    expect(runs[0]).toHaveTextContent('No1:');
+    expect(runs[1]).toHaveTextContent('No2:');
   });
 
   it('renders more nested cards than a quote would, being a timeline card', () => {

@@ -11,8 +11,12 @@
   import MediaAttachment from './MediaAttachment.svelte';
 
   interface Props {
-    /** The event's raw `content`. */
-    content: string;
+    /**
+     * The event's raw `content`. Unused when `parts` is given — a note split
+     * into segments around its inline quote cards passes each segment's slice
+     * of `parts` directly, since there is no single `content` string for one.
+     */
+    content?: string;
     /**
      * The parsed content, when the caller has it already: a card that renders
      * quoted events has to parse the body to find them. Unset, this component
@@ -41,7 +45,7 @@
     profiles?: Map<string, Profile>;
   }
 
-  const { content, parts: given, embedded, showMedia = true, profiles }: Props = $props();
+  const { content = '', parts: given, embedded, showMedia = true, profiles }: Props = $props();
 
   const parts = $derived(given ?? parseContent(content));
   const inline = $derived(

@@ -21,6 +21,7 @@
     type EmbeddedEvent,
     embedKeys,
     embedTarget,
+    noteSegments,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
   import { type Profile, authorHandle, authorName } from '../lib/profile.ts';
@@ -92,6 +93,8 @@
   const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
   const nested = $derived(resolvable ? selectEmbeds(parts, depth) : []);
   const nestedKeys = $derived(embedKeys(nested));
+  /** Text and card segments, in the order the quoted author wrote them. */
+  const segments = $derived(noteSegments(parts, nestedKeys));
 
   let requested = $state(false);
   /**
@@ -144,19 +147,14 @@
         {formatTime(createdAt)}
       </time>
     </header>
-    <NoteContent
-      content={event.content}
-      {parts}
-      embedded={nestedKeys}
-      {showMedia}
-      {profiles}
-    />
-    {#if nested.length > 0}
-      <ul class="embeds">
-        {#each nested as part (embedKey(part.entity))}
-          <li>
+    <div class="quote-body">
+      {#each segments as segment, index (index)}
+        {#if segment.kind === 'text'}
+          <NoteContent parts={segment.parts} embedded={nestedKeys} {showMedia} {profiles} />
+        {:else}
+          <div class="embed">
             <Self
-              entity={part}
+              entity={segment.part}
               depth={depth + 1}
               {embeds}
               {profiles}
@@ -166,10 +164,10 @@
               ancestorUnverified={ancestorUnverified || unverified}
               {onEmbedRequest}
             />
-          </li>
-        {/each}
-      </ul>
-    {/if}
+          </div>
+        {/if}
+      {/each}
+    </div>
   </article>
 {:else if pending}
   <p class="quote loading" part="quote" use:whenVisible={request}>読み込み中…</p>
@@ -276,13 +274,24 @@
     word-break: break-all;
   }
 
-  .embeds {
-    list-style: none;
-    margin: var(--nt-embed-gap, 8px) 0 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--nt-embed-gap, 8px);
+  /* Block, not the frame's own flex column: a `.embed` inside needs its
+     margins to collapse against the text around it — see `.embed` below. */
+  .quote-body {
     min-width: 0;
+  }
+
+  /* See `.embed` in EventCard.svelte: the same collapsing-margin trick, so a
+     run of adjacent quotes ends up `--nt-embed-gap` apart either way. */
+  .embed {
+    margin: var(--nt-embed-gap, 8px) 0;
+    min-width: 0;
+  }
+
+  .embed:first-child {
+    margin-top: 0;
+  }
+
+  .embed:last-child {
+    margin-bottom: 0;
   }
 </style>

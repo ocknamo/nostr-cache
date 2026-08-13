@@ -6,6 +6,7 @@ import {
   MAX_EMBED_DEPTH,
   embedKeys,
   embedTarget,
+  noteSegments,
   selectEmbeds,
 } from './note-embeds.ts';
 
@@ -133,5 +134,50 @@ describe('embedKeys', () => {
     expect(embedKeys(selectEmbeds(parts, 0))).toEqual(
       new Set([NOTE_HEX, `30023:${NPUB_HEX}:my-article`])
     );
+  });
+});
+
+describe('noteSegments', () => {
+  it('returns one text segment covering everything when nothing is embedded', () => {
+    const parts = parseContent(`hi nostr:${NOTE}`);
+    expect(noteSegments(parts, new Set())).toEqual([{ kind: 'text', parts }]);
+  });
+
+  it('alternates text and card segments in source order', () => {
+    const parts = parseContent(`No1: ${NOTE}\nNo2: ${OTHER_NOTES[0]}`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.map((segment) => segment.kind)).toEqual(['text', 'embed', 'text', 'embed']);
+    expect(segments[1]).toEqual({ kind: 'embed', part: entityOf(NOTE) });
+    expect(segments[3]).toEqual({ kind: 'embed', part: entityOf(OTHER_NOTES[0]) });
+  });
+
+  it('starts with a card and no leading empty text segment when the body opens with one', () => {
+    const parts = parseContent(`${NOTE} then some text`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments[0]).toEqual({ kind: 'embed', part: entityOf(NOTE) });
+    expect(segments).toHaveLength(2);
+  });
+
+  it('places one card for an event referenced twice, at its first position', () => {
+    // NOTE and NEVENT name the same event, so `selectEmbeds` keys them as one
+    // card — the second mention must not become a second card.
+    const parts = parseContent(`${NOTE} and nostr:${NEVENT} again`);
+    const embedded = embedKeys(selectEmbeds(parts, 0));
+    const segments = noteSegments(parts, embedded);
+
+    expect(segments.filter((segment) => segment.kind === 'embed')).toHaveLength(1);
+    expect(segments[0]).toEqual({ kind: 'embed', part: entityOf(NOTE) });
+    // The second mention stays in the trailing text run, for NoteContent's own
+    // lift (by key) to remove — the same disappearing-not-chip behaviour the
+    // pre-existing dedup already gave a note quoted twice.
+    const trailing = segments[1];
+    if (trailing.kind !== 'text') {
+      throw new Error('expected a trailing text segment');
+    }
+    expect(trailing.parts.some((part) => part.kind === 'entity')).toBe(true);
   });
 });

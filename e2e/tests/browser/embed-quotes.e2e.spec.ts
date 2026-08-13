@@ -125,7 +125,11 @@ describe('Nested quotes E2E', () => {
       nodes.map((node) => {
         const frame = node.getBoundingClientRect();
         const style = getComputedStyle(node);
-        const body = node.querySelector(':scope > .content')?.getBoundingClientRect();
+        // The text run sits inside `.quote-body` now, alongside any nested
+        // `.embed` cards placed where their own reference sat in the text —
+        // `:scope > .content` no longer reaches it directly.
+        const content = node.querySelector(':scope > .quote-body > .content');
+        const body = content?.getBoundingClientRect();
         return {
           frameLeft: frame.left,
           frameWidth: frame.width,
@@ -133,7 +137,7 @@ describe('Nested quotes E2E', () => {
           borderLeft: Number.parseFloat(style.borderLeftWidth),
           bodyLeft: body?.left ?? Number.NaN,
           bodyWidth: body?.width ?? Number.NaN,
-          text: node.querySelector(':scope > .content')?.textContent ?? '',
+          text: content?.textContent ?? '',
         };
       })
     );

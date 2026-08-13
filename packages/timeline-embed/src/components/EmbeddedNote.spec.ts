@@ -220,6 +220,32 @@ describe('EmbeddedNote', () => {
     expect(bodies).toEqual(['outer', 'inner']);
   });
 
+  it('places the nested card where its own reference sat in the quoted text', () => {
+    const { container } = render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: new Map([
+          ...ready(NOTE_HEX, `before ${OTHER_NOTE} after`),
+          ...ready(OTHER_NOTE_HEX, 'inner'),
+        ]),
+      },
+    });
+
+    // Scoped to the outer quote's own body, so the inner quote's `.content`
+    // (nested two levels down, inside its own `.embed` > `.quote-body`) is not
+    // picked up as one of the outer note's own text runs.
+    const body = container.querySelector(':scope > .quote > .quote-body');
+    const order = [...(body?.children ?? [])].map((node) =>
+      node.classList.contains('content') ? 'text' : 'embed'
+    );
+    expect(order).toEqual(['text', 'embed', 'text']);
+
+    const runs = body?.querySelectorAll(':scope > .content') ?? [];
+    expect(runs[0]).toHaveTextContent('before');
+    expect(runs[1]).toHaveTextContent('after');
+  });
+
   it('stops nesting at the depth cap, leaving the reference as a chip', () => {
     const { container } = render(EmbeddedNote, {
       props: {
