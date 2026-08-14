@@ -14,9 +14,9 @@ const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f
 const ALICE = 'bb0000000000000000000000000000000000000000000000000000000000000b';
 
 /**
- * Verifies `<nostr-post>`'s side of the packaging contract: importing the entry
- * point defines it, its attributes reach the relay as the right REQs, and a
- * press on an embedder's button leaves the shadow root as a DOM event.
+ * `<nostr-post>`'s packaging contract: the entry point defines it, its
+ * attributes reach the relay as the right REQs, and a press leaves the shadow
+ * root as a DOM event.
  */
 describe('<nostr-post> custom element', () => {
   beforeAll(async () => {
@@ -30,12 +30,8 @@ describe('<nostr-post> custom element', () => {
   });
 
   /**
-   * Put a post and its reactions into the cache the widget will read.
-   *
-   * Marked validated after saving, because the fixtures carry a fake `sig` and
-   * the relay runs a lazy validation pass every 5s that *deletes* whatever
-   * fails to verify. Without this the tests below pass on their own and time
-   * out whenever the suite runs slowly enough for a pass to land mid-assertion.
+   * Marked validated after saving: the fixtures carry a fake `sig`, and the
+   * relay's lazy validation pass *deletes* whatever fails to verify every 5s.
    */
   async function seed(dbName: string, events: NostrEvent[]): Promise<void> {
     const host = await acquireRelayHost({ dbName });
@@ -78,8 +74,7 @@ describe('<nostr-post> custom element', () => {
       () => element.shadowRoot?.textContent?.includes('表示する投稿が指定されていません') === true,
       'the "no post" notice'
     );
-    // There is no sensible wider query for a detail view, so the widget asks
-    // for nothing at all rather than falling back to one.
+    // No wider query to fall back to, so nothing is asked of the relay.
     expect(getRelayHostRefCount()).toBe(0);
   });
 
@@ -154,8 +149,8 @@ describe('<nostr-post> custom element', () => {
     });
     await seed(dbName, [
       article,
-      // A superseded version, so the newest is seen to win rather than the
-      // first the relay happens to deliver.
+      // Superseded, so the newest is seen to win rather than the first
+      // delivered.
       makeEvent({
         id: 'cc00000000000000000000000000000000000000000000000000000000000004',
         pubkey: ALICE,
@@ -184,8 +179,7 @@ describe('<nostr-post> custom element', () => {
       () => element.shadowRoot?.textContent?.includes('長文記事の本文') === true,
       'the article'
     );
-    // NIP-25 points at an addressable event with an `a` tag, so the reaction
-    // only lands if the element asked with `#a`.
+    // Only lands if the element asked with `#a`.
     await waitFor(
       () => element.shadowRoot?.textContent?.includes('1 件のリアクション') === true,
       'the reaction total'
@@ -195,8 +189,8 @@ describe('<nostr-post> custom element', () => {
   it('says the specification is wrong, not that none was given', async () => {
     const element = mount({ 'event-id': 'note1definitelynotarealnote' });
 
-    // The two failures are different mistakes: an element with no attributes is
-    // waiting for a page that sets one later, while this one is broken.
+    // An element with no attributes is waiting for a page that sets one later;
+    // this one is broken.
     await waitFor(
       () => element.shadowRoot?.textContent?.includes('投稿の指定が正しくありません') === true,
       'the malformed-id notice'
@@ -238,8 +232,7 @@ describe('<nostr-post> custom element', () => {
     );
     element.shadowRoot?.querySelector<HTMLButtonElement>('button[data-action="like"]')?.click();
 
-    // The same event name the timeline raises, so a page listening for one does
-    // not have to learn a second.
+    // The same event name the timeline raises.
     expect(presses).toHaveLength(1);
     expect(presses[0].actionId).toBe('like');
     expect(presses[0].event.id).toBe(POST_ID);
@@ -254,10 +247,8 @@ describe('<nostr-post> custom element', () => {
       'the "no post" notice'
     );
 
-    // The effect returns early while there is nothing to look up, and a page
-    // that sets the attribute from script later must still get a widget — so
-    // the early return has to happen *after* the target is read, or nothing
-    // would ever re-run it.
+    // The early return has to happen *after* the target is read, or nothing
+    // would re-run the effect.
     element.setAttribute('event-id', POST_ID);
 
     await waitFor(

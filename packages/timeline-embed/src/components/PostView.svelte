@@ -1,22 +1,14 @@
 <script lang="ts">
   /**
-   * One post, in full, with its reactions under it.
+   * `TimelineView`'s counterpart for `<nostr-post>`: the banners and empty
+   * states around one post.
    *
-   * The counterpart of `TimelineView` for `<nostr-post>`: it owns the banners
-   * and the empty states, and hands the post itself to the very same
-   * `EventCard` a timeline renders. That reuse is the point — the action bar
-   * under a detail post has to be the timeline's bar, down to the `part` names
-   * a page styles it through, so it is the timeline's component rather than a
-   * copy that will drift.
+   * The post itself goes through the timeline's own `EventCard` rather than a
+   * copy, so the action bar under a detail post is the timeline's bar down to
+   * the `part` names a page styles it through.
    *
-   * The one difference a detail view needs is height: a card in a list scrolls
-   * its body past `--nt-card-max-height` so one long post cannot push the rest
-   * of the feed off screen, and here there is no rest of the feed. Lifting the
-   * cap is a custom property, not a prop.
-   *
-   * Replies are deliberately not rendered. A thread is a second subscription
-   * and a set of layout questions of its own, and the post is useful without
-   * one — so this shows the post and what people reacted to it with, and stops.
+   * Replies are deliberately not rendered: a thread is a second subscription
+   * and a layout of its own, and the post reads fine without one.
    */
 
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
@@ -30,34 +22,24 @@
 
   interface Props {
     state: TimelineState;
-    /**
-     * The post being shown. `undefined` means the element was given nothing
-     * usable to look up, which is rendered as a notice rather than as a wider
-     * query — see `post-target.ts`.
-     */
+    /** `undefined` when nothing usable was named; see `post-target.ts`. */
     target?: PostTarget;
     /** Render the diagnostic cache/upstream badge on the card. */
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
     showEmbeds?: boolean;
-    /**
-     * Render the reaction bar. Off leaves the post alone and, in the element,
-     * also stops the kind 7 subscription being opened at all.
-     */
+    /** Off also stops the element opening the kind 7 subscription at all. */
     showReactions?: boolean;
     /** Open the largest reaction's reactor list on first render. */
     reactionsOpen?: boolean;
-    /** The embedder's buttons, rendered under the post exactly as on a card. */
+    /** The embedder's buttons, rendered under the post as on a card. */
     actions?: EventAction[];
     /** Called on a press, after the action's own `onSelect`. */
     onAction?: (action: EventAction, context: EventActionContext) => void;
     /** Render action icons as Material Symbols ligatures of this variant. */
     materialIcons?: MaterialVariant;
-    /**
-     * A configuration error that stops the widget before it starts. Rendered
-     * instead of everything else, unlike `state.error`.
-     */
+    /** Rendered instead of everything else, unlike `state.error`. */
     fatal?: string;
     onAuthorVisible?: (pubkey: string) => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
@@ -80,17 +62,12 @@
     onEmbedRequest,
   }: Props = $props();
 
-  /**
-   * The subscription asks for one event, but an addressable target is answered
-   * by every version the relay holds — and the timeline is ordered newest-first,
-   * so the head is the one to show.
-   */
+  // An addressable target is answered by every version the relay holds, and the
+  // timeline is ordered newest-first.
   const event = $derived(state.events[0]);
 
-  /**
-   * Derived rather than stored, so one more reaction arriving re-counts the
-   * chips without the controller knowing anything about NIP-25.
-   */
+  // Derived rather than stored, so a reaction arriving re-counts the chips
+  // without the controller knowing anything about NIP-25.
   const summary = $derived(
     target && showReactions
       ? summarizeReactionEvents(state.reactions.get(target.key) ?? [], target.match)
@@ -113,8 +90,8 @@
     {#if state.error}
       <p class="error" part="error">{state.error}</p>
     {/if}
-    <!-- Shown above the post rather than replacing it: rx-nostr keeps retrying
-         and re-issues the subscriptions, so what is on screen stays readable. -->
+    <!-- Above the post rather than replacing it: rx-nostr re-issues the
+         subscriptions, so what is on screen stays readable. -->
     {#if state.status === 'reconnecting'}
       <p class="reconnecting" part="reconnecting">リレーに再接続しています…</p>
     {/if}
@@ -171,15 +148,10 @@
 
   .post {
     display: block;
-    /*
-     * No height cap here, unlike a timeline card.
-     *
-     * `EventCard` scrolls its body past this height so that one long post in a
-     * feed cannot push the others off screen. A detail view is the post — a
-     * reader who opened it wants the whole thing, and an inner scrollbar inside
-     * an embed that is itself scrolling is the worst of both. Embeds that do
-     * want a bounded box can set the property back to a length.
-     */
+    /* A card in a feed scrolls its body past this height so one long post
+       cannot push the others off screen; a detail view is the post, and an
+       inner scrollbar inside a scrolling embed is the worst of both. Embeds
+       that want a bounded box can set the property back to a length. */
     --nt-card-max-height: none;
   }
 

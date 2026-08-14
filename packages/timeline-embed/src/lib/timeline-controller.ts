@@ -61,11 +61,9 @@ const PROFILE_REQUEST_TIMEOUT_MS = 5000;
 /** Lazy validation runs in the background, so re-poll while anything is pending. */
 const VALIDATION_POLL_INTERVAL_MS = 5000;
 /**
- * Reactions asked for in one REQ, when the caller names no limit.
- *
- * Well under {@link MAX_REACTIONS}, which is where the ones already received
- * stop accumulating. This is what a relay is asked to *backfill* with; a live
- * subscription goes on delivering past it.
+ * Backfill size for one reaction REQ. Well under {@link MAX_REACTIONS}, which
+ * is where the ones already received stop accumulating; a live subscription
+ * goes on delivering past it.
  */
 const DEFAULT_REACTION_LIMIT = 200;
 
@@ -134,13 +132,9 @@ export interface TimelineState {
   /** Events quoted by a `nostr:` reference in some body, keyed by `embedKey`. */
   embeds: Map<string, EmbeddedEvent>;
   /**
-   * Kind 7 reactions (NIP-25) for the posts {@link TimelineController.requestReactions}
-   * was called for, keyed by {@link PostTarget.key} and newest first.
-   *
-   * Raw events rather than a summary, the same way notes are stored raw and the
-   * card derives its segments: counting and grouping are pure functions in
-   * `reactions.ts`, and a view that re-derives them stays correct when one more
-   * reaction arrives.
+   * Kind 7 reactions (NIP-25), keyed by {@link PostTarget.key} and newest
+   * first. Raw events rather than a summary, so a view re-deriving through
+   * `reactions.ts` stays correct as more arrive.
    */
   reactions: Map<string, NostrEvent[]>;
   eose: boolean;
@@ -202,13 +196,9 @@ export class TimelineController {
    */
   private embedAbort = new AbortController();
   /**
-   * Live reaction subscriptions, by {@link PostTarget.key}.
-   *
-   * A subscription rather than a one-shot: a post detail is a page a reader
-   * leaves open, and a like that lands while they are reading it should show up
-   * without a reload. One REQ per post, so a detail view costs exactly one —
-   * the relay caps a client at 20 and the timeline REQ, four profile lookups
-   * and two embed lookups already share that budget.
+   * Live reaction subscriptions, by {@link PostTarget.key}. One REQ per post,
+   * which fits the relay's per-client cap of 20 alongside the timeline REQ,
+   * four profile lookups and two embed lookups.
    */
   private readonly reactionSubs = new Map<string, string>();
   /** Targets waiting for the socket to come back up. */
@@ -403,9 +393,8 @@ export class TimelineController {
     this.patch({ follows: undefined });
     this.closeProfiles();
     this.closeEmbeds();
-    // A live reaction REQ goes on reading through to the upstream and refilling
-    // the cache the caller is about to measure cold — the very thing suspend()
-    // exists to stop.
+    // A live reaction REQ would go on refilling the cache the caller is about to
+    // measure cold — the very thing suspend() exists to stop.
     this.closeReactions();
     this.clearTimers();
   }
@@ -454,11 +443,9 @@ export class TimelineController {
     // asked for them are about to go away.
     this.closeEmbeds();
     this.embedAbort = new AbortController();
-    // Reactions deliberately survive a re-subscribe, subscription and all.
-    // Unlike profiles and quoted events they are not derived from the events on
-    // screen — the caller named the post explicitly — so a new filter says
-    // nothing about whether that post's reactions are still wanted. Only
-    // suspend() and stop() end them.
+    // Reactions deliberately survive a re-subscribe. Unlike profiles and quoted
+    // events they are not derived from what is on screen — the caller named the
+    // post — so a new filter says nothing about whether they are still wanted.
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -797,16 +784,12 @@ export class TimelineController {
   /**
    * Watch one post's reactions (NIP-25 kind 7).
    *
-   * Called by `<nostr-post>` for the post it is about — never by a timeline,
-   * which would be one REQ per card. Unlike {@link requestProfile} and
-   * {@link requestEmbed} this is not viewport-triggered: the post it names is
-   * the whole reason the widget exists, so there is nothing to defer.
+   * For `<nostr-post>`, never a timeline — that would be one REQ per card.
+   * Not viewport-triggered like {@link requestProfile} and {@link requestEmbed}:
+   * the post it names is the whole reason the widget exists.
    *
-   * The subscription stays open. A reader leaves a post detail on screen, and a
-   * reaction that lands while they are reading should appear without a reload.
-   *
-   * Repeat calls for the same target are ignored, so an element that re-runs
-   * its effect does not stack subscriptions.
+   * The subscription stays open, so a reaction that lands while the reader is
+   * on the page appears without a reload.
    *
    * @param limit How many reactions to backfill; more may arrive live.
    */
@@ -823,12 +806,9 @@ export class TimelineController {
   }
 
   /**
-   * Nothing is opened while the socket is down.
-   *
-   * rx-nostr would buffer the REQ and send it on reconnect, which for a
-   * long-lived subscription would even be correct — but the queue is what the
-   * `connected` handler already pumps, and going through it keeps one rule for
-   * every lookup this class opens itself.
+   * Nothing is opened while the socket is down. rx-nostr would buffer the REQ,
+   * but going through the queue the `connected` handler already pumps keeps one
+   * rule for every lookup this class opens itself.
    */
   private pumpReactionQueue(): void {
     if (this.stopped || this.suspended || !this.connection.isConnected) {
@@ -847,8 +827,8 @@ export class TimelineController {
     const subId = `reactions-${this.reactionSeq}`;
     this.reactionSubs.set(target.key, subId);
 
-    // `#a` for an addressable post, `#e` for a plain one: NIP-25 points at the
-    // two with different tags, and asking with the wrong one matches nothing.
+    // NIP-25 points at an addressable post with `a` and a plain one with `e`;
+    // asking with the wrong tag matches nothing.
     const filter: Filter =
       target.match.address !== undefined
         ? { kinds: [7], '#a': [target.match.address], limit }
@@ -857,53 +837,41 @@ export class TimelineController {
     this.connection.subscribe(subId, [filter], {
       onEvent: (event) => this.ingestReaction(target, event),
       onEose: () => {
-        // Nothing to do: the subscription stays open on purpose, and the
-        // reaction chips are rendered from whatever has arrived so far. Handled
-        // explicitly so a reader of this file does not go looking for the close.
+        // Nothing to do — the subscription stays open on purpose. Handled
+        // explicitly so nobody goes looking for the close that is not here.
       },
       onClosed: (reason) => {
-        // Not surfaced as the widget's `error`: the post itself is still on
-        // screen and still correct, and a banner over it would say the post
-        // failed when only its reaction count stopped updating.
+        // Not the widget's `error`: the post is still on screen and still
+        // correct, and a banner over it would say the post failed when only its
+        // reaction count stopped updating.
         console.warn(`[nostr-post] reaction subscription closed${reason ? `: ${reason}` : ''}`);
         this.reactionSubs.delete(target.key);
-        // Dropped from `requestedReactions` too, so a caller can ask again.
-        // Without this the de-duplication guard in `requestReactions` would
-        // make the closure permanent — the chips would sit at whatever count
-        // they had reached until the element was rebuilt.
-        //
-        // Deliberately *not* re-queued here: a relay that refuses this REQ
-        // would refuse the replacement just as fast, and the queue is pumped
-        // synchronously, so retrying from inside the close handler is a spin
-        // loop. Asking again is the caller's decision.
+        // Released so a caller can ask again; without this the guard in
+        // `requestReactions` would make the closure permanent. Not re-queued
+        // here — a relay that refused this REQ would refuse the replacement,
+        // and the queue is pumped synchronously, so that would spin.
         this.requestedReactions.delete(target.key);
       },
     });
   }
 
   /**
-   * Store a delivered kind 7, if it is really about this post.
-   *
-   * The filtering is done here rather than left to the view because the cap is
-   * here: a relay matches `#e` against any `e` tag, so under a busy thread the
-   * reactions to *replies* would fill {@link MAX_REACTIONS} and push out the
-   * ones this post actually received. `parseReaction` is the same judgement the
-   * view applies, so nothing is stored that would not be rendered.
+   * Filtered here rather than in the view because the cap is here: a relay
+   * matches `#e` against any `e` tag, so under a busy thread the reactions to
+   * *replies* would fill {@link MAX_REACTIONS} and push out this post's own.
    */
   private ingestReaction(target: PostTarget, event: NostrEvent): void {
     if (!parseReaction(event, target.match)) {
       return;
     }
-    // Classified for the same reason profile and embed deliveries are: the
-    // cache/upstream counters must describe the same population of events the
-    // widget renders.
+    // As for profile and embed deliveries: the cache/upstream counters must
+    // describe the same population of events the widget renders.
     this.relayHost?.metrics.classifyDelivered(event.id);
     const reactions = new Map(this.state.reactions);
     const current = reactions.get(target.key) ?? [];
     const next = insertEvent(current, event, MAX_REACTIONS);
     if (next === current) {
-      // A duplicate delivery. Publishing a new Map for it would re-render every
-      // reaction chip for nothing.
+      // A duplicate delivery; a new Map would re-render every chip for nothing.
       return;
     }
     reactions.set(target.key, next);
@@ -911,12 +879,10 @@ export class TimelineController {
   }
 
   /**
-   * `requestedReactions` is dropped with the subscriptions, so a controller
-   * resumed with {@link applyFilter} can be asked again — by the same caller
-   * that asked the first time, since nothing here re-issues it.
-   *
-   * What has already arrived stays in state: it is what the chips are rendering,
-   * and blanking them on a suspend would look like the reactions went away.
+   * `requestedReactions` goes with the subscriptions so a resumed controller can
+   * be asked again — by the original caller, since nothing here re-issues it.
+   * What arrived stays in state: blanking the chips would look like the
+   * reactions went away.
    */
   private closeReactions(): void {
     this.pendingReactions = [];

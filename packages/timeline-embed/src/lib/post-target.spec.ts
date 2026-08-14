@@ -47,9 +47,8 @@ describe('parsePostTarget', () => {
   });
 
   it('reads an nevent as the id alone, ignoring its kind and author hints', () => {
-    // The TLVs are written by whoever encoded the entity, and a wrong one would
-    // turn a fetchable event into a permanent "not found" — the same reasoning
-    // `embedTarget` uses for a quoted event.
+    // The TLVs are written by whoever encoded the entity; a wrong one would
+    // turn a fetchable event into a permanent "not found".
     expect(parsePostTarget({ eventId: NEVENT })?.filter).toEqual({ ids: [NOTE_HEX] });
   });
 
@@ -108,15 +107,12 @@ describe('parsePostTarget', () => {
 
   it('refuses hex of the wrong length rather than asking for it', () => {
     silenceWarnings();
-    // Would otherwise reach `decodeNip19` and be rejected there anyway, but the
-    // point is that a truncated id never becomes a filter.
     expect(parsePostTarget({ eventId: NOTE_HEX.slice(0, 63) })).toBeUndefined();
   });
 
   it('refuses an empty kind rather than reading it as kind 0', () => {
     silenceWarnings();
-    // `Number('')` is 0, so a lax parse would build `{kinds:[0],…}` and render
-    // the author's *profile* as the post.
+    // `Number('')` is 0, which would render the author's *profile* as the post.
     expect(parsePostTarget({ author: NPUB_HEX, kind: '' })).toBeUndefined();
     expect(parsePostTarget({ author: NPUB_HEX, kind: '  ' })).toBeUndefined();
     expect(parsePostTarget({ author: NPUB_HEX })).toBeUndefined();
@@ -138,8 +134,6 @@ describe('parsePostTarget', () => {
   });
 
   it('returns nothing when the element was given nothing', () => {
-    // Rendered as a notice rather than as a wider query: there is no sensible
-    // fallback filter for a detail view.
     expect(parsePostTarget({})).toBeUndefined();
     expect(parsePostTarget({ eventId: '   ' })).toBeUndefined();
     expect(parsePostTarget({ kind: '30023', identifier: 'my-article' })).toBeUndefined();

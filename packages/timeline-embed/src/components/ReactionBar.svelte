@@ -1,18 +1,15 @@
 <script lang="ts">
   /**
-   * The reactions a post received (NIP-25), as one chip per distinct reaction
-   * plus the list of who sent them.
+   * The reactions a post received (NIP-25): one chip per distinct reaction,
+   * opening to the list of who sent it.
    *
    * Deliberately *outside* the card rather than mixed into its action row. The
-   * buttons in that row are the embedding page's, declared by id and label, so
-   * the widget cannot know which of them — if any — is the like button, and
-   * hanging a count off a guess would put "12" next to whatever happened to be
-   * called `like`. This bar is the widget's own read-only view of the relay's
-   * data, and stands on its own.
+   * buttons there are the embedding page's, declared by id and label, so the
+   * widget cannot know which — if any — is the like button, and a count hung
+   * off a guess would land next to whatever happened to be called `like`.
    *
-   * Read-only in the strong sense: pressing a chip opens the list of reactors
-   * and nothing else. The widget holds no key and never publishes — see
-   * `lib/event-actions.ts`.
+   * Pressing a chip opens the list and nothing else: the widget holds no key
+   * and never publishes (`lib/event-actions.ts`).
    */
 
   import type { Profile } from '../lib/profile.ts';
@@ -25,10 +22,9 @@
     profiles?: Map<string, Profile>;
     showAvatars?: boolean;
     /**
-     * Open the largest chip's reactor list on first render.
-     *
-     * Off by default: the list costs a profile lookup per visible row, and a
-     * page that embeds a post for its text should not pay for them unasked.
+     * Open the largest chip on first render. Off by default: each visible row
+     * costs a profile lookup, and a page embedding a post for its text should
+     * not pay for them unasked.
      */
     defaultOpen?: boolean;
     onReactorVisible?: (pubkey: string) => void;
@@ -45,11 +41,8 @@
   /** Which chip's reactors are shown; only one opens at a time. */
   let openKey = $state<string | undefined>();
 
-  /**
-   * Seeded once rather than derived, because it is state the reader then owns:
-   * deriving it would reopen the chip every time a new reaction arrived and
-   * changed `summary`.
-   */
+  // Seeded once rather than derived: the reader owns it afterwards, and
+  // deriving would reopen the chip every time a new reaction changed `summary`.
   let seeded = false;
   $effect(() => {
     if (seeded || !defaultOpen) {
@@ -69,22 +62,17 @@
   }
 
   /**
-   * The chip's `part` names, with the per-reaction one only when the key can
-   * safely be a token.
-   *
-   * `part` is a space-separated list, and a reaction's key is a stranger's
-   * `content` — an emoji almost always, but `👍 いいね` is a legal kind 7 body.
-   * Interpolating that would publish `いいね` as a part name of its own, which
-   * an embedding page's `::part()` could match by accident. The generic
-   * `reaction-chip` is always there, so nothing loses its styling hook.
+   * `part` is a space-separated list and the key is a stranger's `content` —
+   * `👍 いいね` is a legal kind 7 body, and interpolating it would publish
+   * `いいね` as a part name an embedding page could match by accident.
    */
   function chipParts(key: string): string {
     return /\s/.test(key) ? 'reaction-chip' : `reaction-chip reaction-chip-${key}`;
   }
 </script>
 
-<!-- Nothing at all until a reaction arrives: an empty bar under every post would
-     be a row of furniture saying "0", on a widget whose reader cannot react. -->
+<!-- Nothing until a reaction arrives: an empty bar would be a row of furniture
+     saying "0", on a widget whose reader cannot react. -->
 {#if summary.total > 0}
   <section class="reactions" part="reactions">
     <div class="chips">
@@ -109,16 +97,15 @@
               referrerpolicy="no-referrer"
             />
           {:else}
-            <!-- aria-hidden: the button's own label already names the glyph and
-                 the count. translate="no" because a glyph is not prose. -->
+            <!-- The button's own label already names the glyph and the count;
+                 translate="no" because a glyph is not prose. -->
             <span class="glyph" translate="no" aria-hidden="true">{group.label}</span>
           {/if}
           <span class="count" aria-hidden="true">{group.count}</span>
         </button>
       {/each}
       {#if summary.hiddenGroups > 0}
-        <!-- The chips are capped, the total is not, so this is what keeps the
-             two from looking like they disagree. -->
+        <!-- The chips are capped, the total is not. -->
         <span class="more" part="reaction-more">他 {summary.hiddenGroups} 種類</span>
       {/if}
     </div>
@@ -167,8 +154,7 @@
     background: var(--nt-reaction-chip-hover-bg, rgb(0 0 0 / 4%));
   }
 
-  /* The open chip is the heading of the list below it, so it has to be findable
-     without reading the list — several posts' worth of chips look alike. */
+  /* The open chip is the heading of the list below it. */
   .chip.open {
     border-color: var(--nt-reaction-chip-open-border, #8899a6);
     color: var(--nt-fg, #0f1419);

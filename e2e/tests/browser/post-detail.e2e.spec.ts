@@ -1,20 +1,13 @@
 /**
  * Post detail E2E.
  *
- * `<nostr-post>` is the first widget whose subject is one event rather than a
- * filter, and the first to read kind 7 (NIP-25). Two things can only be checked
- * in a real browser:
+ * What only a real browser can check: the reactor list's profile lookups hang
+ * off a real `IntersectionObserver`, so "a collapsed chip costs nothing" is
+ * untestable in jsdom, where `whenVisible` reports immediately.
  *
- * - the reactor list's profile lookups hang off a real `IntersectionObserver`.
- *   In jsdom `whenVisible` falls back to reporting immediately, so the "only
- *   what the reader can see" behaviour is untested there by construction;
- *   here a collapsed chip really does cost nothing.
- * - the reaction bar sits under the card in the shadow root, and a page styles
- *   it through `part=` names — which only exist once the element is real.
- *
- * Everything else the widget renders (the card, the action bar) is the
- * timeline's own components, already covered by `timeline-embed.e2e.spec.ts`;
- * what is asserted below is that this element hands them the same things.
+ * The card and the action bar are the timeline's own components, already
+ * covered by `timeline-embed.e2e.spec.ts`; what is asserted here is that this
+ * element hands them the same things.
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
@@ -56,7 +49,7 @@ describe('Post detail E2E', () => {
       content: 'a reply to it',
     });
 
-    /** One reaction from a fresh key, so every reactor is a different person. */
+    /** A fresh key each time, so every reactor is a different person. */
     const reactTo = async (target: NostrEvent, content: string, extra: string[][] = []) =>
       createTestEvent(getRandomSecret(), {
         kind: 7,
@@ -65,9 +58,8 @@ describe('Post detail E2E', () => {
         content,
       });
 
-    // One reactor whose profile is also published, so the list can be seen to
-    // put a name on the people it renders — and, for the others, to fall back
-    // to a shortened pubkey rather than dropping the row.
+    // One reactor whose profile is published too, so the list can be seen both
+    // to resolve a name and to fall back to a shortened pubkey.
     const namedSeckey = getRandomSecret();
     const namedReaction = await createTestEvent(namedSeckey, {
       kind: 7,
@@ -102,9 +94,8 @@ describe('Post detail E2E', () => {
       await reactTo(post, '❤️'),
       await reactTo(post, '🔥'),
       ...twice,
-      // A reaction to the *reply*, carrying the post's id first the way NIP-10
-      // threading does. The relay's `#e` filter delivers it; NIP-25 says the
-      // last `e` tag is the target, so it belongs to the reply and not here.
+      // A reaction to the *reply*, carrying the post's id first as NIP-10
+      // threading does: delivered by `#e`, but its last `e` tag is the reply.
       await reactTo(reply, '🔥', [['e', post.id]]),
     ];
 
@@ -129,8 +120,7 @@ describe('Post detail E2E', () => {
     const search = new URLSearchParams({
       'db-name': `e2e-post-${dbCounter}`,
       relays: upstream.url,
-      // The bech32 spelling rather than the hex, so the attribute's decode path
-      // is exercised end to end.
+      // bech32 rather than hex, so the decode path is exercised end to end.
       'event-id': noteBech32(post.id),
       ...params,
     });
@@ -162,8 +152,7 @@ describe('Post detail E2E', () => {
       expect(await page.$eval('nostr-post .content', (node) => node.textContent)).toContain(
         'the post being read'
       );
-      // Exactly one card: the reply is in the cache too, and a detail view that
-      // rendered a thread would show it.
+      // The reply is in the cache too, and a thread view would show it.
       expect(await page.$$('nostr-post .event-card')).toHaveLength(1);
 
       await page.waitForSelector('nostr-post .chip', { timeout: TIMEOUT });
@@ -175,8 +164,8 @@ describe('Post detail E2E', () => {
         { timeout: TIMEOUT }
       );
 
-      // `+` and a literal ❤️ share a chip; the person who reacted twice counts
-      // once; the reaction to the reply counts nowhere.
+      // `+` and a literal ❤️ share a chip; the double reactor counts once; the
+      // reaction to the reply counts nowhere.
       expect(await chips(page)).toEqual([
         ['❤️', '3'],
         ['🔥', '1'],
@@ -196,10 +185,8 @@ describe('Post detail E2E', () => {
       await waitForPost(page);
       await page.waitForSelector('nostr-post .chip', { timeout: TIMEOUT });
 
-      // Nothing is rendered for a reactor, so nothing has asked the relay for
-      // one. This is the assertion jsdom cannot make: there `whenVisible`
-      // reports immediately, and every row would be "visible" the moment it
-      // existed.
+      // The assertion jsdom cannot make: there every row would be "visible" the
+      // moment it existed.
       expect(await page.$$('nostr-post .reactor')).toHaveLength(0);
 
       await page.click('nostr-post .chip');
@@ -208,8 +195,8 @@ describe('Post detail E2E', () => {
         timeout: TIMEOUT,
       });
       expect(await reactor.textContent()).toBeTruthy();
-      // The profile that was published resolves to a name; the reactors without
-      // one stay shortened pubkeys, which is still a row.
+      // The published profile resolves to a name; the others stay shortened
+      // pubkeys, which is still a row.
       await page.waitForFunction(
         (name) =>
           [
@@ -264,8 +251,7 @@ describe('Post detail E2E', () => {
       await waitForPost(page);
 
       // The host page is the top-level document here, so its own `parent` is
-      // itself: the message it would post to an embedding page lands back on
-      // this window.
+      // itself and the message lands back on this window.
       await page.evaluate(() => {
         (window as unknown as { pressed: unknown[] }).pressed = [];
         window.addEventListener('message', (message) => {
@@ -276,14 +262,13 @@ describe('Post detail E2E', () => {
       });
 
       const buttons = await page.$$('nostr-post .action');
-      // One card, so one bar — in the order they were declared.
+      // One card, so one bar, in the order they were declared.
       expect(buttons).toHaveLength(2);
       expect(await buttons[0].getAttribute('aria-label')).toBe('返信');
 
       await buttons[1].click();
 
-      // `postMessage` delivers on a later task, so wait for it rather than
-      // assuming the click round trip outran it.
+      // `postMessage` delivers on a later task.
       await page.waitForFunction(
         () => (window as unknown as { pressed: unknown[] }).pressed.length > 0,
         undefined,
@@ -308,9 +293,8 @@ describe('Post detail E2E', () => {
       await page.goto(postUrl());
       await waitForPost(page);
 
-      // A timeline card caps its height at --nt-card-max-height and scrolls the
-      // body; a detail view lifts the cap, because there is no feed underneath
-      // for a long post to push away.
+      // A timeline card caps its height and scrolls the body; a detail view has
+      // no feed underneath for a long post to push away.
       const card = await page.$eval('nostr-post .event-card', (node) => ({
         maxHeight: getComputedStyle(node).maxHeight,
         scrolls: node.scrollHeight > node.clientHeight + 1,

@@ -81,8 +81,7 @@ describe('parseReaction', () => {
         ['emoji', 'x', 'data:image/png;base64,AAAA'],
       ],
     });
-    // The reaction still counts; only the image is dropped. A `data:` URL is an
-    // easy way to push a large payload into the embedding page's DOM.
+    // The reaction still counts; only the image is dropped.
     expect(parseReaction(event, BY_ID)?.url).toBeUndefined();
   });
 
@@ -92,9 +91,8 @@ describe('parseReaction', () => {
   });
 
   it('ignores a reaction whose last `e` tag names another event', () => {
-    // What a reaction to a *reply* looks like: NIP-10 puts the thread root in
-    // the tags too, so the relay's `#e` filter delivers it to us. NIP-25 says
-    // the last `e` tag is the one being reacted to.
+    // A reaction to a *reply*: NIP-10 puts the thread root in the tags too, so
+    // the relay's `#e` filter delivers it here.
     const toReply = reaction('+', {
       tags: [
         ['e', TARGET],
@@ -125,8 +123,7 @@ describe('parseReaction', () => {
   });
 
   it('strips control and bidi characters out of the glyph', () => {
-    // A bidi override in a chip would reorder the text around it, which is the
-    // same attack `profile.ts` strips them for.
+    // A bidi override in a chip would reorder the text around it.
     expect(parseReaction(reaction('🔥‮'), BY_ID)).toMatchObject({ label: '🔥' });
   });
 
@@ -135,10 +132,9 @@ describe('parseReaction', () => {
   });
 
   it('drops content that is only unrenderable characters', () => {
-    // Not read as a like: an empty `content` means `+` per NIP-25, but this
-    // author sent something and what they sent was invisible. There is no
-    // glyph to put in a chip, and counting it as a heart would credit them
-    // with a reaction they did not make.
+    // Not read as a like: NIP-25's `+` is for an empty `content`, and this
+    // author sent something — counting it as a heart would credit them with a
+    // reaction they did not make.
     expect(parseReaction(reaction('‮‎'), BY_ID)).toBeUndefined();
   });
 
@@ -181,8 +177,7 @@ describe('summarizeReactions', () => {
       made({ id: 'new', pubkey: 'p1', createdAt: 20 }),
     ]);
 
-    // NIP-25 has no retraction and the relay keeps every copy, so counting
-    // events would let one person press twice and inflate the number.
+    // NIP-25 has no retraction and the relay keeps every copy.
     expect(summary.groups[0].count).toBe(1);
     expect(summary.groups[0].reactors[0].id).toBe('new');
   });
@@ -213,7 +208,7 @@ describe('summarizeReactions', () => {
       made({ id: 'd', pubkey: 'p4', key: '👀', label: '👀' }),
     ]);
 
-    // ❤️ leads on count; 🔥 and 👀 tie at one and keep first-seen order.
+    // 🔥 and 👀 tie at one and keep first-seen order.
     expect(summary.groups.map((group) => group.key)).toEqual(['❤️', '🔥', '👀']);
   });
 
@@ -235,8 +230,7 @@ describe('summarizeReactions', () => {
 
     expect(summary.groups).toHaveLength(MAX_REACTION_GROUPS);
     expect(summary.hiddenGroups).toBe(3);
-    // The count the reader sees has to be the truth about the post, not the
-    // sum of the chips that happened to fit.
+    // Not the sum of the chips that happened to fit.
     expect(summary.total).toBe(MAX_REACTION_GROUPS + 3);
   });
 
@@ -261,7 +255,7 @@ describe('summarizeReactionEvents', () => {
     const summary = summarizeReactionEvents(
       [
         reaction('+', { id: 'r1', pubkey: 'p1' }),
-        // A reaction to a reply, delivered because the relay matches any `e` tag.
+        // Delivered because the relay matches any `e` tag.
         reaction('+', {
           id: 'r2',
           pubkey: 'p2',

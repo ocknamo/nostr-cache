@@ -109,18 +109,12 @@ export function parseFreshness(
 }
 
 /**
- * Parse an opt-in boolean attribute — one that is off unless asked for.
+ * An opt-in boolean attribute: bare (empty string, as HTML boolean attributes
+ * arrive), `"true"` or `"1"` turns it on, anything else leaves it off. Booleans
+ * are accepted too, because a Svelte parent sets the property rather than the
+ * attribute.
  *
- * A bare attribute (no value, or `?flag` in an iframe URL) arrives as an empty
- * string and counts as "on", matching how HTML boolean attributes read.
- * Anything else — including `false` and `0` — leaves it off.
- *
- * Booleans are accepted as well as strings: a Svelte parent writing
- * `<nostr-timeline debug>` sets the custom element's property rather than an
- * attribute, so what arrives is `true`, not `""`.
- *
- * The mirror of {@link parseEnabled}, which is for the attributes that are on
- * unless spelled `"false"`.
+ * The mirror of {@link parseEnabled}, for the ones on unless spelled `"false"`.
  */
 export function parseFlag(value: string | boolean | null | undefined): boolean {
   if (value === null || value === undefined) {
@@ -317,14 +311,11 @@ export function parseEnabled(value: string | boolean | null | undefined): boolea
 }
 
 /**
- * Parse `reactions-limit`, how many kind 7 events a post detail backfills with.
- *
  * Clamped rather than rejected at the top end: an embed asking for more than
- * the widget can hold has said "as many as you can", and refusing the whole
- * attribute over it would silently drop them back to the default instead.
+ * the widget can hold has said "as many as you can", and refusing the attribute
+ * would drop it back to the smaller default instead.
  *
- * @returns A positive count, or `undefined` when nothing usable was given —
- *   leaving the controller's own default in place
+ * @returns A positive count, or `undefined` to leave the controller's default
  */
 export function parseReactionsLimit(value: string | null | undefined): number | undefined {
   if (value === null || value === undefined || value.trim() === '') {

@@ -64,8 +64,7 @@ describe('PostView', () => {
       props: { state: state({ events: [POST], status: 'reconnecting' }), target: TARGET },
     });
 
-    // Shown above the post rather than replacing it: rx-nostr re-issues the
-    // subscriptions, so what is on screen stays readable and resumes updating.
+    // Above the post rather than replacing it, so it stays readable.
     expect(screen.getByText('リレーに再接続しています…')).toBeInTheDocument();
     expect(screen.getByText('the post')).toBeInTheDocument();
   });

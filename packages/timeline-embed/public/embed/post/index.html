@@ -20,15 +20,12 @@
   </head>
   <body>
     <!--
-      iframe host page for the post detail.
+      iframe host page for the post detail. A page of its own for the same
+      reason the follow timeline has one: a query string carries no element
+      type, so `?event-id=…&filters=…` on a shared page would land on an
+      element with no `filters` attribute and be dropped without a word.
 
-      A page of its own, for the same reason the follow timeline has one: a
-      query string carries no element type, so `?event-id=…&filters=…` on a
-      shared page would land on an element with no `filters` attribute and be
-      dropped without a word.
-
-      Configured through the query string, e.g.
-        embed/post/?event-id=note1...&relays=wss://nos.lol
+      e.g. embed/post/?event-id=note1...&relays=wss://nos.lol
     -->
     <script src="../../nostr-timeline.js"></script>
     <script src="../embed-host.js"></script>
@@ -47,8 +44,7 @@
         'show-avatars',
         'show-media',
         'show-embeds',
-        // Reactions (NIP-25): whether to show them, how many to backfill, and
-        // whether the reactor list starts open.
+        // Reactions (NIP-25).
         'show-reactions',
         'reactions-limit',
         'reactions-open',

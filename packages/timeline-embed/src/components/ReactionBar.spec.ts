@@ -45,8 +45,7 @@ describe('ReactionBar', () => {
   it('renders nothing at all for a post nobody reacted to', () => {
     const { container } = render(ReactionBar, { props: { summary: summary([]) } });
 
-    // Not an empty bar reading "0": the reader of an embedding page cannot
-    // react from here, so a row of furniture would say nothing.
+    // Not an empty bar reading "0" — the reader cannot react from here.
     expect(container.querySelector('.reactions')).toBeNull();
   });
 
@@ -107,8 +106,7 @@ describe('ReactionBar', () => {
   });
 
   it('keeps a reaction with a space in it out of the part list', () => {
-    // `part` is a space-separated list and the key is a stranger's `content`,
-    // so interpolating one would publish `way` as a part name of its own.
+    // Interpolating the key would publish `way` as a part name of its own.
     const { container } = render(ReactionBar, {
       props: { summary: summary([{ pubkey: ALICE, key: 'no way' }]) },
     });

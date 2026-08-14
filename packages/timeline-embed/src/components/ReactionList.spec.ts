@@ -49,9 +49,7 @@ describe('ReactionList', () => {
   });
 
   it('asks for a reactor profile when their row appears', () => {
-    // jsdom has no IntersectionObserver, so `whenVisible` reports immediately —
-    // which is the fallback the action documents, and is what makes this
-    // testable at all.
+    // jsdom has no IntersectionObserver, so `whenVisible` reports immediately.
     const onReactorVisible = vi.fn();
 
     render(ReactionList, {
