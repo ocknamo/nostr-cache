@@ -190,6 +190,11 @@ describe('summarizeReactions', () => {
 
     expect(summary.total).toBe(2);
     expect(summary.groups).toHaveLength(2);
+    // And gets a row per glyph in the list, because the row says which one.
+    expect(summary.reactors.map((reactor) => [reactor.pubkey, reactor.key])).toEqual([
+      ['p1', '❤️'],
+      ['p1', '🔥'],
+    ]);
   });
 
   it('does not depend on the order the reactions arrived in', () => {

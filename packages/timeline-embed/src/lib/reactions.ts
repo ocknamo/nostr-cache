@@ -77,8 +77,10 @@ export interface ReactionSummary {
    * Everyone the chips count, in one list rather than one per chip: any chip
    * opens all of it. Newest first, capped at {@link MAX_LISTED_REACTORS}.
    *
-   * Groups the chip cap left out are in here too, for the same reason they are
-   * in {@link total}.
+   * Not filtered to the chips that fit — a glyph {@link MAX_REACTION_GROUPS}
+   * left out is listed here like any other, if it is recent enough to survive
+   * the cap above. Someone who sent two glyphs is one row per glyph, which is
+   * how {@link total} counts them and what their two rows say.
    */
   reactors: Reaction[];
   /**
@@ -223,8 +225,8 @@ export function summarizeReactions(reactions: readonly Reaction[]): ReactionSumm
     return group;
   });
 
-  // Before the cap, so the total never contradicts the chips by less than they
-  // show.
+  // Before the cap: what decides whether there is a bar at all is every
+  // reaction, not the twelve glyphs that fit.
   const total = groups.reduce((sum, group) => sum + group.count, 0);
 
   const order = new Map([...buckets.values()].map((bucket) => [bucket.key, bucket.seq]));

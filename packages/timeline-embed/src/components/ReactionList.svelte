@@ -13,6 +13,8 @@
   import Avatar from './Avatar.svelte';
 
   interface Props {
+    /** What the chips point their `aria-controls` at. */
+    id?: string;
     /** Newest first, already capped — see `MAX_LISTED_REACTORS`. */
     reactors: Reaction[];
     /** Every profile the widget has, keyed by pubkey. */
@@ -27,10 +29,16 @@
     onReactorVisible?: (pubkey: string) => void;
   }
 
-  const { reactors, profiles = new Map(), showAvatars = true, onReactorVisible }: Props = $props();
+  const {
+    id,
+    reactors,
+    profiles = new Map(),
+    showAvatars = true,
+    onReactorVisible,
+  }: Props = $props();
 </script>
 
-<ul class="reactors" part="reactors">
+<ul {id} class="reactors" part="reactors">
   {#each reactors as reactor (reactor.id)}
     <li
       class="reactor"

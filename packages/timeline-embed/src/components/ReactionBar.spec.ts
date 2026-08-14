@@ -81,14 +81,17 @@ describe('ReactionBar', () => {
       },
     });
 
-    await fireEvent.click(screen.getByRole('button', { name: /🔥/ }));
+    const fire = screen.getByRole('button', { name: /🔥/ });
+    await fireEvent.click(fire);
 
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
-    // The chips move together: they open one list between them.
-    expect(screen.getByRole('button', { name: /❤️/ })).toHaveAttribute('aria-expanded', 'true');
+    // The chips move together: they open one list between them, and say so.
+    const heart = screen.getByRole('button', { name: /❤️/ });
+    expect(heart).toHaveAttribute('aria-expanded', 'true');
+    expect(heart.getAttribute('aria-controls')).toBe(fire.getAttribute('aria-controls'));
 
-    await fireEvent.click(screen.getByRole('button', { name: /❤️/ }));
+    await fireEvent.click(heart);
     expect(screen.queryByText('Alice')).not.toBeInTheDocument();
   });
 

@@ -8,6 +8,10 @@
    * widget cannot know which — if any — is the like button, and a count hung
    * off a guess would land next to whatever happened to be called `like`.
    *
+   * The chips are one control drawn several times, not several controls: they
+   * open and close together, so whichever one is pressed next closes the list
+   * it opened. Splitting the list per glyph is the thing they are not for.
+   *
    * Pressing a chip opens the list and nothing else: the widget holds no key
    * and never publishes (`lib/event-actions.ts`).
    */
@@ -38,9 +42,14 @@
     onReactorVisible,
   }: Props = $props();
 
-  // Seeded from the prop rather than derived: the reader owns it afterwards.
+  // Seeded from the prop rather than derived: the reader owns it afterwards, so
+  // a `reactions-open` set after mount is deliberately not followed — it would
+  // reopen a list the reader had closed.
   // svelte-ignore state_referenced_locally
   let open = $state(defaultOpen);
+
+  /** Ties every chip to the one list they share. */
+  const listId = $props.id();
 
   /**
    * `part` is a space-separated list and the key is a stranger's `content` —
@@ -65,7 +74,10 @@
           part={chipParts(group.key)}
           data-reaction={group.key}
           aria-expanded={open}
-          aria-label="{group.label} {group.count} 件。リアクションしたユーザを表示"
+          aria-controls={listId}
+          aria-label="{group.label} {group.count} 件。リアクションしたユーザを{open
+            ? '閉じる'
+            : '全て表示'}"
           onclick={() => {
             open = !open;
           }}
@@ -88,12 +100,18 @@
         </button>
       {/each}
       {#if summary.hiddenGroups > 0}
-        <!-- Only the chips are capped: those reactors are in the list below. -->
+        <!-- Only the chips are capped; the list below is not filtered to them. -->
         <span class="more" part="reaction-more">他 {summary.hiddenGroups} 種類</span>
       {/if}
     </div>
     {#if open}
-      <ReactionList reactors={summary.reactors} {profiles} {showAvatars} {onReactorVisible} />
+      <ReactionList
+        id={listId}
+        reactors={summary.reactors}
+        {profiles}
+        {showAvatars}
+        {onReactorVisible}
+      />
     {/if}
   </section>
 {/if}
