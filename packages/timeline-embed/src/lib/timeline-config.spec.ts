@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MAX_REACTIONS } from './reactions.ts';
 import {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
@@ -8,11 +9,13 @@ import {
   parseEnabled,
   parseFilter,
   parseFilters,
+  parseFlag,
   parseFreshness,
   parseKinds,
   parseLimit,
   parseMaxFollows,
   parsePubkey,
+  parseReactionsLimit,
   parseRelays,
   parseShowOriginAlias,
   parseSinceDays,
@@ -150,6 +153,60 @@ describe('parseDebug', () => {
     expect(parseDebug('false')).toBe(false);
     expect(parseDebug('0')).toBe(false);
     expect(parseDebug('no')).toBe(false);
+  });
+});
+
+describe('parseFlag', () => {
+  it('is the general form the debug switch is built on', () => {
+    // `parseDebug` delegates to it, so the two must agree on every spelling —
+    // `reactions-open` reads exactly like `debug` does.
+    for (const value of ['', 'true', 'TRUE', '1', 'false', '0', 'no', null, undefined]) {
+      expect(parseFlag(value)).toBe(parseDebug(value));
+    }
+  });
+
+  it('is off unless asked for', () => {
+    expect(parseFlag(undefined)).toBe(false);
+    expect(parseFlag('false')).toBe(false);
+    // A bare `reactions-open` arrives as an empty string, as HTML boolean
+    // attributes do.
+    expect(parseFlag('')).toBe(true);
+    // …and as a real boolean from a Svelte parent, which sets the property.
+    expect(parseFlag(true)).toBe(true);
+    expect(parseFlag(false)).toBe(false);
+  });
+});
+
+describe('parseReactionsLimit', () => {
+  it('reads a positive whole number', () => {
+    expect(parseReactionsLimit('25')).toBe(25);
+    expect(parseReactionsLimit(' 25 ')).toBe(25);
+  });
+
+  it('clamps rather than rejects an over-large request', () => {
+    // An embed asking for more than the widget can hold has said "as many as
+    // you can"; refusing the attribute would silently drop it to the default
+    // instead, which is the smaller number.
+    expect(parseReactionsLimit('99999')).toBe(MAX_REACTIONS);
+    expect(parseReactionsLimit(String(MAX_REACTIONS))).toBe(MAX_REACTIONS);
+  });
+
+  it('leaves the default in place when nothing usable was given', () => {
+    expect(parseReactionsLimit(undefined)).toBeUndefined();
+    expect(parseReactionsLimit(null)).toBeUndefined();
+    expect(parseReactionsLimit('')).toBeUndefined();
+    expect(parseReactionsLimit('   ')).toBeUndefined();
+  });
+
+  it('refuses a limit that is not a count', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Zero would ask the relay for nothing at all, which is what
+    // `show-reactions="false"` is for.
+    expect(parseReactionsLimit('0')).toBeUndefined();
+    expect(parseReactionsLimit('-5')).toBeUndefined();
+    expect(parseReactionsLimit('1.5')).toBeUndefined();
+    expect(parseReactionsLimit('lots')).toBeUndefined();
   });
 });
 

@@ -109,6 +109,7 @@ describe('Embed bundle relay API E2E', () => {
         // cost: a page loading this script gets the elements either way.
         timeline: Boolean(customElements.get('nostr-timeline')),
         followTimeline: Boolean(customElements.get('nostr-follow-timeline')),
+        post: Boolean(customElements.get('nostr-post')),
       };
     });
 
@@ -123,6 +124,7 @@ describe('Embed bundle relay API E2E', () => {
       component: 'function',
       timeline: true,
       followTimeline: true,
+      post: true,
     });
   });
 

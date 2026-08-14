@@ -48,6 +48,11 @@ describe('iframe host pages', () => {
       page: '../public/embed/follow/index.html',
       component: './nostr-follow-timeline.svelte',
     },
+    {
+      what: 'embed/post/',
+      page: '../public/embed/post/index.html',
+      component: './nostr-post.svelte',
+    },
   ];
 
   for (const { what, page, component } of pages) {
@@ -75,6 +80,7 @@ describe('iframe host pages', () => {
     expect(read('../public/embed/follow/index.html')).toContain(
       "mountNostrEmbed('nostr-follow-timeline'"
     );
+    expect(read('../public/embed/post/index.html')).toContain("mountNostrEmbed('nostr-post'");
   });
 
   /**
@@ -84,6 +90,10 @@ describe('iframe host pages', () => {
    * by the JS entry point that `packages/web-client` and the demo use.
    */
   it('reads every attribute in the query-string config readers too', () => {
+    // Only the two timeline elements have one. `<nostr-post>` is configured
+    // through its attributes alone — `packages/web-client` and the demo build
+    // no post embed from a query string, so a third reader would be a copy of
+    // an attribute list with nothing reading it.
     const config = read('./lib/timeline-config.ts');
     const readers = {
       configFromSearchParams: declaredAttributes('./nostr-timeline.svelte'),

@@ -1,8 +1,8 @@
 /**
  * Demo site action-bar E2E.
  *
- * The embed panel declares one list of buttons and hands it to six places: the
- * iframe's query string, the two live custom elements, and the three copyable
+ * The embed panel declares one list of buttons and hands it to eight places: the
+ * iframe's query string, the three live custom elements, and the four copyable
  * snippets. Nothing in the type system ties those together, so the failure this
  * guards against is drift — a list that reaches the live widgets while the
  * snippet a reader copies still produces a card with no buttons (or the other
@@ -25,6 +25,8 @@ const TIMEOUT = 15000;
 
 /** Any 64 hex characters: enough for the panel to mount the follow widget. */
 const FOLLOW_PUBKEY = 'a'.repeat(64);
+/** Likewise for the post detail: any 64 hex characters is a shaped event id. */
+const POST_EVENT_ID = 'b'.repeat(64);
 
 describe('Demo site action bar E2E', () => {
   let browser: Browser;
@@ -80,6 +82,20 @@ describe('Demo site action bar E2E', () => {
     });
   }
 
+  /**
+   * Fill both boxes, so every live widget on the panel is mounted.
+   *
+   * Neither renders until its input holds something of the right shape — which
+   * is deliberate (there is no person or post worth defaulting to), and means a
+   * test that skips this asserts against elements that are not on the page.
+   */
+  async function mountLiveWidgets(target: Page): Promise<void> {
+    await target.fill('.text-input.follow-pubkey input', FOLLOW_PUBKEY);
+    await target.waitForSelector('nostr-follow-timeline', { timeout: TIMEOUT });
+    await target.fill('.text-input.post-event-id input', POST_EVENT_ID);
+    await target.waitForSelector('nostr-post', { timeout: TIMEOUT });
+  }
+
   it('gives the live widgets and the iframe the same buttons', async () => {
     page = await open();
 
@@ -100,16 +116,16 @@ describe('Demo site action bar E2E', () => {
     expect(variant).toBeTruthy();
     expect(iframeParams.get('material-icons')).toBe(variant);
 
-    // The follow timeline renders only once the box holds a usable pubkey.
-    await page.fill('.follow-input input', FOLLOW_PUBKEY);
-    await page.waitForSelector('nostr-follow-timeline', { timeout: TIMEOUT });
+    // The follow timeline and the post detail render only once their boxes hold
+    // something usable.
+    await mountLiveWidgets(page);
     expect(await widgetActions(page, 'nostr-follow-timeline')).toEqual(fromElement);
+    expect(await widgetActions(page, 'nostr-post')).toEqual(fromElement);
   });
 
   it('declares the same buttons in every copyable snippet', async () => {
     page = await open();
-    await page.fill('.follow-input input', FOLLOW_PUBKEY);
-    await page.waitForSelector('nostr-follow-timeline', { timeout: TIMEOUT });
+    await mountLiveWidgets(page);
 
     const actions = (await widgetActions(page, 'nostr-timeline')) as { id: string; icon: string }[];
     const variant = await materialVariant(page);
@@ -117,9 +133,9 @@ describe('Demo site action bar E2E', () => {
       blocks.map((block) => block.textContent ?? '')
     );
 
-    // iframe, Web Component and follow timeline: a missing one would let a
-    // silently emptied snippet pass.
-    expect(snippets.length).toBe(3);
+    // iframe, Web Component, follow timeline and post detail: a missing one
+    // would let a silently emptied snippet pass.
+    expect(snippets.length).toBe(4);
     for (const snippet of snippets) {
       // The iframe snippet carries the list URL-encoded inside its `src`, the
       // other two write it inline as an HTML attribute. Decoding just that

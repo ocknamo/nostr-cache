@@ -12,7 +12,9 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { CacheMetrics, EventOrigin } from './cache-metrics.ts';
 import type { EmbedTarget, EmbeddedEvent } from './note-embeds.ts';
 import { fetchLatestReplaceable } from './one-shot-request.ts';
+import type { PostTarget } from './post-target.ts';
 import { type Profile, parseProfileContent } from './profile.ts';
+import { MAX_REACTIONS, parseReaction } from './reactions.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
@@ -58,6 +60,12 @@ const PROFILE_EOSE_GRACE_MS = 0;
 const PROFILE_REQUEST_TIMEOUT_MS = 5000;
 /** Lazy validation runs in the background, so re-poll while anything is pending. */
 const VALIDATION_POLL_INTERVAL_MS = 5000;
+/**
+ * Backfill size for one reaction REQ. Well under {@link MAX_REACTIONS}, which
+ * is where the ones already received stop accumulating; a live subscription
+ * goes on delivering past it.
+ */
+const DEFAULT_REACTION_LIMIT = 200;
 
 /**
  * How many polls a watch waits for the event to appear in storage before
@@ -123,6 +131,12 @@ export interface TimelineState {
   profiles: Map<string, Profile>;
   /** Events quoted by a `nostr:` reference in some body, keyed by `embedKey`. */
   embeds: Map<string, EmbeddedEvent>;
+  /**
+   * Kind 7 reactions (NIP-25), keyed by {@link PostTarget.key} and newest
+   * first. Raw events rather than a summary, so a view re-deriving through
+   * `reactions.ts` stays correct as more arrive.
+   */
+  reactions: Map<string, NostrEvent[]>;
   eose: boolean;
   error?: string;
   /** Set only by a {@link FilterSource} that reports one; see {@link FollowsState}. */
@@ -181,6 +195,17 @@ export class TimelineController {
    * them, and a later `applyFilter()` must be able to start new ones.
    */
   private embedAbort = new AbortController();
+  /**
+   * Live reaction subscriptions, by {@link PostTarget.key}. One REQ per post,
+   * which fits the relay's per-client cap of 20 alongside the timeline REQ,
+   * four profile lookups and two embed lookups.
+   */
+  private readonly reactionSubs = new Map<string, string>();
+  /** Targets waiting for the socket to come back up. */
+  private pendingReactions: Array<{ target: PostTarget; limit: number }> = [];
+  /** Targets a subscription has been opened for, so a repeat costs nothing. */
+  private requestedReactions = new Set<string>();
+  private reactionSeq = 0;
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -190,6 +215,7 @@ export class TimelineController {
     validationStatuses: new Map(),
     profiles: new Map(),
     embeds: new Map(),
+    reactions: new Map(),
     eose: false,
   };
   private currentSubId: string | null = null;
@@ -240,6 +266,7 @@ export class TimelineController {
           this.patch({ error: undefined });
           this.pumpProfileQueue();
           this.pumpEmbedQueue();
+          this.pumpReactionQueue();
         } else if (status === 'error' && this.connectedOnce) {
           // Reconnection gave up. Say so, or the widget goes on showing a
           // timeline that stopped updating some minutes ago with nothing to
@@ -366,6 +393,9 @@ export class TimelineController {
     this.patch({ follows: undefined });
     this.closeProfiles();
     this.closeEmbeds();
+    // A live reaction REQ would go on refilling the cache the caller is about to
+    // measure cold — the very thing suspend() exists to stop.
+    this.closeReactions();
     this.clearTimers();
   }
 
@@ -380,6 +410,7 @@ export class TimelineController {
     this.clearTimers();
     this.closeProfiles();
     this.closeEmbeds();
+    this.closeReactions();
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -412,6 +443,9 @@ export class TimelineController {
     // asked for them are about to go away.
     this.closeEmbeds();
     this.embedAbort = new AbortController();
+    // Reactions deliberately survive a re-subscribe. Unlike profiles and quoted
+    // events they are not derived from what is on screen — the caller named the
+    // post — so a new filter says nothing about whether they are still wanted.
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -745,6 +779,118 @@ export class TimelineController {
     this.pendingEmbeds = [];
     this.requestedEmbeds = new Set();
     this.embedAbort.abort();
+  }
+
+  /**
+   * Watch one post's reactions (NIP-25 kind 7).
+   *
+   * For `<nostr-post>`, never a timeline — that would be one REQ per card.
+   * Not viewport-triggered like {@link requestProfile} and {@link requestEmbed}:
+   * the post it names is the whole reason the widget exists.
+   *
+   * The subscription stays open, so a reaction that lands while the reader is
+   * on the page appears without a reload.
+   *
+   * @param limit How many reactions to backfill; more may arrive live.
+   */
+  requestReactions(target: PostTarget, limit = DEFAULT_REACTION_LIMIT): void {
+    if (this.stopped || this.suspended) {
+      return;
+    }
+    if (this.requestedReactions.has(target.key)) {
+      return;
+    }
+    this.requestedReactions.add(target.key);
+    this.pendingReactions.push({ target, limit });
+    this.pumpReactionQueue();
+  }
+
+  /**
+   * Nothing is opened while the socket is down. rx-nostr would buffer the REQ,
+   * but going through the queue the `connected` handler already pumps keeps one
+   * rule for every lookup this class opens itself.
+   */
+  private pumpReactionQueue(): void {
+    if (this.stopped || this.suspended || !this.connection.isConnected) {
+      return;
+    }
+    while (this.pendingReactions.length > 0) {
+      const next = this.pendingReactions.shift();
+      if (next !== undefined) {
+        this.openReactionRequest(next.target, next.limit);
+      }
+    }
+  }
+
+  private openReactionRequest(target: PostTarget, limit: number): void {
+    this.reactionSeq += 1;
+    const subId = `reactions-${this.reactionSeq}`;
+    this.reactionSubs.set(target.key, subId);
+
+    // NIP-25 points at an addressable post with `a` and a plain one with `e`;
+    // asking with the wrong tag matches nothing.
+    const filter: Filter =
+      target.match.address !== undefined
+        ? { kinds: [7], '#a': [target.match.address], limit }
+        : { kinds: [7], '#e': [target.match.id ?? target.key], limit };
+
+    this.connection.subscribe(subId, [filter], {
+      onEvent: (event) => this.ingestReaction(target, event),
+      onEose: () => {
+        // Nothing to do — the subscription stays open on purpose. Handled
+        // explicitly so nobody goes looking for the close that is not here.
+      },
+      onClosed: (reason) => {
+        // Not the widget's `error`: the post is still on screen and still
+        // correct, and a banner over it would say the post failed when only its
+        // reaction count stopped updating.
+        console.warn(`[nostr-post] reaction subscription closed${reason ? `: ${reason}` : ''}`);
+        this.reactionSubs.delete(target.key);
+        // Released so a caller can ask again; without this the guard in
+        // `requestReactions` would make the closure permanent. Not re-queued
+        // here — a relay that refused this REQ would refuse the replacement,
+        // and the queue is pumped synchronously, so that would spin.
+        this.requestedReactions.delete(target.key);
+      },
+    });
+  }
+
+  /**
+   * Filtered here rather than in the view because the cap is here: a relay
+   * matches `#e` against any `e` tag, so under a busy thread the reactions to
+   * *replies* would fill {@link MAX_REACTIONS} and push out this post's own.
+   */
+  private ingestReaction(target: PostTarget, event: NostrEvent): void {
+    if (!parseReaction(event, target.match)) {
+      return;
+    }
+    // As for profile and embed deliveries: the cache/upstream counters must
+    // describe the same population of events the widget renders.
+    this.relayHost?.metrics.classifyDelivered(event.id);
+    const reactions = new Map(this.state.reactions);
+    const current = reactions.get(target.key) ?? [];
+    const next = insertEvent(current, event, MAX_REACTIONS);
+    if (next === current) {
+      // A duplicate delivery; a new Map would re-render every chip for nothing.
+      return;
+    }
+    reactions.set(target.key, next);
+    this.patch({ reactions });
+  }
+
+  /**
+   * `requestedReactions` goes with the subscriptions so a resumed controller can
+   * be asked again — by the original caller, since nothing here re-issues it.
+   * What arrived stays in state: blanking the chips would look like the
+   * reactions went away.
+   */
+  private closeReactions(): void {
+    this.pendingReactions = [];
+    this.requestedReactions = new Set();
+    for (const [key, subId] of [...this.reactionSubs]) {
+      this.reactionSubs.delete(key);
+      this.connection.unsubscribe(subId);
+    }
   }
 
   /**

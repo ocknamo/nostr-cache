@@ -1,2 +1,3 @@
 - タスク完了時に skeptical-reviewer を呼び出す
 - PR作成後に pr-finalizer を呼び出す
+- コメントにはコードを読めば分かることを書かない

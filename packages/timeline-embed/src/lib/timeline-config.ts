@@ -12,6 +12,7 @@ import type { Filter } from '@nostr-cache/shared';
 import { type EventAction, normalizeActions } from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 import { type MaterialVariant, parseMaterialVariant } from './material-symbols.ts';
+import { MAX_REACTIONS } from './reactions.ts';
 
 export const DEFAULT_LIMIT = 50;
 export const DEFAULT_KINDS = [1];
@@ -108,21 +109,14 @@ export function parseFreshness(
 }
 
 /**
- * Parse the `debug` switch that turns the widget's diagnostic UI on.
+ * An opt-in boolean attribute: bare (empty string, as HTML boolean attributes
+ * arrive), `"true"` or `"1"` turns it on, anything else leaves it off. Booleans
+ * are accepted too, because a Svelte parent sets the property rather than the
+ * attribute.
  *
- * Off unless asked for: the `cache` / `upstream` badges exist to show that the
- * cache is working, which is a thing the *embedder* wants to verify — a reader
- * of the embedding site has no use for them.
- *
- * A bare `debug` (attribute with no value, or `?debug` in an iframe URL) arrives
- * as an empty string and counts as "on", matching how HTML boolean attributes
- * read. Anything else — including `false` and `0` — leaves it off.
- *
- * Booleans are accepted as well as strings: a Svelte parent writing
- * `<nostr-timeline debug>` sets the custom element's property rather than an
- * attribute, so what arrives is `true`, not `""`.
+ * The mirror of {@link parseEnabled}, for the ones on unless spelled `"false"`.
  */
-export function parseDebug(value: string | boolean | null | undefined): boolean {
+export function parseFlag(value: string | boolean | null | undefined): boolean {
   if (value === null || value === undefined) {
     return false;
   }
@@ -131,6 +125,17 @@ export function parseDebug(value: string | boolean | null | undefined): boolean 
   }
   const normalized = value.trim().toLowerCase();
   return normalized === '' || normalized === 'true' || normalized === '1';
+}
+
+/**
+ * Parse the `debug` switch that turns the widget's diagnostic UI on.
+ *
+ * Off unless asked for: the `cache` / `upstream` badges exist to show that the
+ * cache is working, which is a thing the *embedder* wants to verify — a reader
+ * of the embedding site has no use for them.
+ */
+export function parseDebug(value: string | boolean | null | undefined): boolean {
+  return parseFlag(value);
 }
 
 /** Keeps the `show-origin` deprecation notice to one line per page. */
@@ -303,6 +308,27 @@ export function parseEnabled(value: string | boolean | null | undefined): boolea
     return value;
   }
   return value !== 'false';
+}
+
+/**
+ * Clamped rather than rejected at the top end: an embed asking for more than
+ * the widget can hold has said "as many as you can", and refusing the attribute
+ * would drop it back to the smaller default instead.
+ *
+ * @returns A positive count, or `undefined` to leave the controller's default
+ */
+export function parseReactionsLimit(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[nostr-post] Ignoring invalid reactions-limit (expected a positive whole number): ${value}`
+    );
+    return undefined;
+  }
+  return Math.min(parsed, MAX_REACTIONS);
 }
 
 /**

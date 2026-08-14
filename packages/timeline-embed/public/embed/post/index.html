@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Nostr Post (embed)</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+      }
+      body {
+        padding: 8px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      iframe host page for the post detail. A page of its own for the same
+      reason the follow timeline has one: a query string carries no element
+      type, so `?event-id=…&filters=…` on a shared page would land on an
+      element with no `filters` attribute and be dropped without a word.
+
+      e.g. embed/post/?event-id=note1...&relays=wss://nos.lol
+    -->
+    <script src="../../nostr-timeline.js"></script>
+    <script src="../embed-host.js"></script>
+    <script>
+      mountNostrEmbed('nostr-post', [
+        'event-id',
+        // The addressable coordinate, for a page that never encoded an naddr.
+        'author',
+        'kind',
+        'identifier',
+        'relays',
+        'db-name',
+        'profile-freshness',
+        'follows-freshness',
+        'debug',
+        'show-avatars',
+        'show-media',
+        'show-embeds',
+        // Reactions (NIP-25).
+        'show-reactions',
+        'reactions-limit',
+        'reactions-open',
+        // JSON array of buttons; embed-host.js reports a press to the parent.
+        'actions',
+        // Material Symbols icons for those buttons, and where the font comes from.
+        'material-icons',
+        'material-icons-font',
+      ]);
+    </script>
+  </body>
+</html>

@@ -45,8 +45,13 @@ export interface Profile {
  * Control characters are stripped rather than rejected: a name is rendered on
  * one line, and a newline or a bidi override in it would let an author reshape
  * the card around their own text.
+ *
+ * Exported because `reactions.ts` reads strings out of an event the same way
+ * and for the same reason — a reaction's content is rendered inline in a chip,
+ * where a bidi override would reorder the text around it. Sharing the one
+ * implementation is what keeps the two from drifting apart.
  */
-function readString(value: unknown, maxLength: number): string | undefined {
+export function safeText(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
@@ -63,9 +68,13 @@ function readString(value: unknown, maxLength: number): string | undefined {
  * `javascript:` is the obvious attack, but `data:` is excluded too: an
  * embedding page's CSP is not ours to assume, and a data URL is an easy way to
  * push a multi-megabyte payload into the DOM.
+ *
+ * Exported for `reactions.ts`: a NIP-30 custom emoji is an author-supplied
+ * image URL that ends up in an `<img src>` exactly like an avatar does, so it
+ * has to clear the same bar.
  */
-function readImageUrl(value: unknown): string | undefined {
-  const raw = readString(value, MAX_URL_LENGTH);
+export function safeImageUrl(value: unknown): string | undefined {
+  const raw = safeText(value, MAX_URL_LENGTH);
   if (!raw) {
     return undefined;
   }
@@ -97,12 +106,11 @@ export function parseProfileContent(content: string): Profile | undefined {
 
   const record = parsed as Record<string, unknown>;
   const profile: Profile = {};
-  const name = readString(record.name, MAX_NAME_LENGTH);
+  const name = safeText(record.name, MAX_NAME_LENGTH);
   const displayName =
-    readString(record.display_name, MAX_NAME_LENGTH) ??
-    readString(record.displayName, MAX_NAME_LENGTH);
-  const picture = readImageUrl(record.picture);
-  const nip05 = readString(record.nip05, MAX_NAME_LENGTH);
+    safeText(record.display_name, MAX_NAME_LENGTH) ?? safeText(record.displayName, MAX_NAME_LENGTH);
+  const picture = safeImageUrl(record.picture);
+  const nip05 = safeText(record.nip05, MAX_NAME_LENGTH);
 
   if (name) {
     profile.name = name;
