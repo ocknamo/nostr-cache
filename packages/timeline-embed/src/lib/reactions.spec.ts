@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import type { PostTargetMatch } from './post-target.ts';
 import {
+  MAX_LISTED_REACTORS,
   MAX_REACTION_GROUPS,
-  MAX_REACTORS_PER_GROUP,
   type Reaction,
   parseReaction,
   summarizeReactionEvents,
@@ -179,7 +179,7 @@ describe('summarizeReactions', () => {
 
     // NIP-25 has no retraction and the relay keeps every copy.
     expect(summary.groups[0].count).toBe(1);
-    expect(summary.groups[0].reactors[0].id).toBe('new');
+    expect(summary.reactors.map((reactor) => reactor.id)).toEqual(['new']);
   });
 
   it('counts a person in each glyph they used', () => {
@@ -190,14 +190,19 @@ describe('summarizeReactions', () => {
 
     expect(summary.total).toBe(2);
     expect(summary.groups).toHaveLength(2);
+    // And gets a row per glyph in the list, because the row says which one.
+    expect(summary.reactors.map((reactor) => [reactor.pubkey, reactor.key])).toEqual([
+      ['p1', '❤️'],
+      ['p1', '🔥'],
+    ]);
   });
 
   it('does not depend on the order the reactions arrived in', () => {
     const older = made({ id: 'old', pubkey: 'p1', createdAt: 10 });
     const newer = made({ id: 'new', pubkey: 'p1', createdAt: 20 });
 
-    expect(summarizeReactions([older, newer]).groups[0].reactors[0].id).toBe('new');
-    expect(summarizeReactions([newer, older]).groups[0].reactors[0].id).toBe('new');
+    expect(summarizeReactions([older, newer]).reactors[0].id).toBe('new');
+    expect(summarizeReactions([newer, older]).reactors[0].id).toBe('new');
   });
 
   it('orders groups by count, then by the order they first appeared', () => {
@@ -234,19 +239,46 @@ describe('summarizeReactions', () => {
     expect(summary.total).toBe(MAX_REACTION_GROUPS + 3);
   });
 
-  it('caps the reactors listed under a chip without capping its count', () => {
-    const reactions = Array.from({ length: MAX_REACTORS_PER_GROUP + 5 }, (_, index) =>
+  it('lists every glyph in one list, newest first', () => {
+    const summary = summarizeReactions([
+      made({ id: 'a', pubkey: 'p1', createdAt: 10, key: '🔥', label: '🔥' }),
+      made({ id: 'b', pubkey: 'p2', createdAt: 30, key: '❤️', label: '❤️' }),
+      made({ id: 'c', pubkey: 'p3', createdAt: 20, key: '🔥', label: '🔥' }),
+    ]);
+
+    // Any chip opens this, so it is not grouped by glyph.
+    expect(summary.reactors.map((reactor) => reactor.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('lists the reactors of a glyph the chip cap left out', () => {
+    const reactions = Array.from({ length: MAX_REACTION_GROUPS + 1 }, (_, index) =>
+      made({ id: `r${index}`, pubkey: `p${index}`, key: `k${index}`, label: `k${index}` })
+    );
+
+    const summary = summarizeReactions(reactions);
+
+    expect(summary.groups).toHaveLength(MAX_REACTION_GROUPS);
+    expect(summary.reactors).toHaveLength(MAX_REACTION_GROUPS + 1);
+  });
+
+  it('caps the reactors listed without capping the counts', () => {
+    const reactions = Array.from({ length: MAX_LISTED_REACTORS + 5 }, (_, index) =>
       made({ id: `r${index}`, pubkey: `p${index}` })
     );
 
     const summary = summarizeReactions(reactions);
 
-    expect(summary.groups[0].count).toBe(MAX_REACTORS_PER_GROUP + 5);
-    expect(summary.groups[0].reactors).toHaveLength(MAX_REACTORS_PER_GROUP);
+    expect(summary.groups[0].count).toBe(MAX_LISTED_REACTORS + 5);
+    expect(summary.reactors).toHaveLength(MAX_LISTED_REACTORS);
   });
 
   it('has nothing to say about a post nobody reacted to', () => {
-    expect(summarizeReactions([])).toEqual({ groups: [], total: 0, hiddenGroups: 0 });
+    expect(summarizeReactions([])).toEqual({
+      groups: [],
+      reactors: [],
+      total: 0,
+      hiddenGroups: 0,
+    });
   });
 });
 

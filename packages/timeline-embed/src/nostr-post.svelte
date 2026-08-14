@@ -108,8 +108,8 @@
     /** Backfill size. Defaults to 200, capped at 500; more may arrive live. */
     reactionsLimit?: string;
     /**
-     * Opens the largest reaction's reactor list straight away. Off by default:
-     * each visible row costs a profile lookup.
+     * Opens the reactor list straight away. Off by default: each visible row
+     * costs a profile lookup.
      */
     reactionsOpen?: string | boolean;
     /**

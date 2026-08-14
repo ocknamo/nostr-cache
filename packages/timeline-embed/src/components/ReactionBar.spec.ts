@@ -26,8 +26,8 @@ function summary(
 }
 
 describe('ReactionBar', () => {
-  it('shows a chip per reaction with its count, and the total', () => {
-    render(ReactionBar, {
+  it('shows a chip per reaction with its count', () => {
+    const { container } = render(ReactionBar, {
       props: {
         summary: summary([
           { pubkey: ALICE, key: '🔥' },
@@ -39,7 +39,8 @@ describe('ReactionBar', () => {
 
     expect(screen.getByRole('button', { name: /🔥 2 件/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /❤️ 1 件/ })).toBeInTheDocument();
-    expect(screen.getByText('3 件のリアクション')).toBeInTheDocument();
+    // The chips say it; a sentence repeating them would not.
+    expect(container.textContent).not.toContain('件のリアクション');
   });
 
   it('renders nothing at all for a post nobody reacted to', () => {
@@ -65,7 +66,7 @@ describe('ReactionBar', () => {
     expect(screen.queryByText('Alice')).not.toBeInTheDocument();
   });
 
-  it('opens only one chip at a time', async () => {
+  it('opens every reaction whichever chip is pressed', async () => {
     const profiles = new Map<string, Profile>([
       [ALICE, { displayName: 'Alice' }],
       [BOB, { displayName: 'Bob' }],
@@ -80,28 +81,38 @@ describe('ReactionBar', () => {
       },
     });
 
-    await fireEvent.click(screen.getByRole('button', { name: /🔥/ }));
-    await fireEvent.click(screen.getByRole('button', { name: /❤️/ }));
+    const fire = screen.getByRole('button', { name: /🔥/ });
+    await fireEvent.click(fire);
 
+    expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
+    // The chips move together: they open one list between them, and say so.
+    const heart = screen.getByRole('button', { name: /❤️/ });
+    expect(heart).toHaveAttribute('aria-expanded', 'true');
+    expect(heart.getAttribute('aria-controls')).toBe(fire.getAttribute('aria-controls'));
+
+    await fireEvent.click(heart);
     expect(screen.queryByText('Alice')).not.toBeInTheDocument();
   });
 
-  it('opens the largest reaction on its own when asked to', () => {
-    const profiles = new Map<string, Profile>([[BOB, { displayName: 'Bob' }]]);
+  it('opens the list on its own when asked to', () => {
+    const profiles = new Map<string, Profile>([
+      [ALICE, { displayName: 'Alice' }],
+      [BOB, { displayName: 'Bob' }],
+    ]);
     render(ReactionBar, {
       props: {
         summary: summary([
           { pubkey: ALICE, key: '🔥' },
           { pubkey: BOB, key: '❤️' },
-          { pubkey: ALICE, key: '❤️' },
         ]),
         profiles,
         defaultOpen: true,
       },
     });
 
-    expect(screen.getByRole('button', { name: /❤️ 2 件/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /🔥/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
   });
 

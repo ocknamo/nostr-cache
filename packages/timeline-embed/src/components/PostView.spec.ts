@@ -116,7 +116,6 @@ describe('PostView', () => {
 
     expect(screen.getByRole('button', { name: /❤️ 2 件/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /🔥 1 件/ })).toBeInTheDocument();
-    expect(screen.getByText('3 件のリアクション')).toBeInTheDocument();
   });
 
   it('hides the reaction bar when the element turned reactions off', () => {
@@ -131,7 +130,7 @@ describe('PostView', () => {
       },
     });
 
-    expect(screen.queryByText('1 件のリアクション')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /❤️/ })).not.toBeInTheDocument();
   });
 
   it('asks for the author profile when the post appears', () => {

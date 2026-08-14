@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Who reacted, and with what. Opened from a chip in `ReactionBar`.
+   * Who reacted, and with what. Opened by any chip in `ReactionBar`.
    *
    * Profiles are fetched the way a card's author is — the row asks when it
    * appears — so a post with two hundred reactors does not open two hundred
@@ -13,7 +13,9 @@
   import Avatar from './Avatar.svelte';
 
   interface Props {
-    /** Newest first, already capped — see `MAX_REACTORS_PER_GROUP`. */
+    /** What the chips point their `aria-controls` at. */
+    id?: string;
+    /** Newest first, already capped — see `MAX_LISTED_REACTORS`. */
     reactors: Reaction[];
     /** Every profile the widget has, keyed by pubkey. */
     profiles?: Map<string, Profile>;
@@ -27,10 +29,16 @@
     onReactorVisible?: (pubkey: string) => void;
   }
 
-  const { reactors, profiles = new Map(), showAvatars = true, onReactorVisible }: Props = $props();
+  const {
+    id,
+    reactors,
+    profiles = new Map(),
+    showAvatars = true,
+    onReactorVisible,
+  }: Props = $props();
 </script>
 
-<ul class="reactors" part="reactors">
+<ul {id} class="reactors" part="reactors">
   {#each reactors as reactor (reactor.id)}
     <li
       class="reactor"

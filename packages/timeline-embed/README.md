@@ -326,8 +326,8 @@ iframe は**別のページ**（`embed/post/`）です:
 - 投稿本文（メディア・`nostr:` 参照の入れ子カードもタイムラインと同じ）
 - 著者のアバター・表示名・`@handle`・検証済みの ✓
 - 埋め込む側が指定したアクションボタン
-- **リアクション（NIP-25 / kind 7）** — 絵文字ごとの集計チップと総数。チップを押すと
-  **リアクションしたユーザのアイコン・名前・リアクション内容**が開きます
+- **リアクション（NIP-25 / kind 7）** — 絵文字ごとの集計チップ。どのチップを押しても
+  **リアクションしたユーザのアイコン・名前・リアクション内容**が絵文字によらず全件開きます
 
 **リプライ（スレッド）は表示しません。** 別の購読と別のレイアウトが要る話で、投稿単体は
 それが無くても読めるため、今回は入れていません。
@@ -380,8 +380,11 @@ iframe は**別のページ**（`embed/post/`）です:
 - **最後の `e` タグがこの投稿を指すものだけ**を数えます。リレーの `#e` は任意位置の `e` タグに
   マッチするため、この投稿への**返信**に付いたリアクションまで届きますが、NIP-25 は
   「最後の `e` タグが対象」と定めています
-- チップは 12 種類まで、1 チップの一覧は 50 人まで、保持は 500 件まで。あふれた分も**総数には
-  入ります**（チップの合計と総数が食い違って見えないように）
+- **一覧は絵文字で分けません。** チップは種類ごとに出ますが、開く一覧はどのチップからでも
+  同じ「全リアクション（新しい順）」です
+- チップは 12 種類まで、一覧は 50 行まで、保持は 500 件まで。一覧はチップの内訳では無いので、
+  チップからあふれた 13 種類目も 50 行の枠に入れば出ます。逆に、2 種類送った人は
+  一覧に 2 行出ます（チップの数え方と同じ）
 
 **リアクターのプロフィールは行が画面に現れてから取得します。** 一覧を開かなければ 1 件も
 引きません。開いた場合も 4 並列（`timeline-controller.ts` の予算）で、鮮度ウィンドウ
@@ -409,7 +412,7 @@ iframe は**別のページ**（`embed/post/`）です:
 | `show-embeds` | `"false"` で `nostr:` 参照を入れ子カードにしない | オン |
 | `show-reactions` | `"false"` でリアクション欄ごと出さない（kind 7 の購読も張らない） | オン |
 | `reactions-limit` | リアクションの初回取得件数（上限 500） | `200` |
-| `reactions-open` | 付けると最大のリアクションの一覧を最初から開く | オフ |
+| `reactions-open` | 付けるとリアクションしたユーザの一覧を最初から開く | オフ |
 | `actions` | ボタン定義の JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし |
 | `material-icons` | アイコンを Material Symbols で描画（`outlined` / `rounded` / `sharp`） | オフ |
 | `material-icons-font` | `none` でフォントを読み込まない | `google` |
@@ -426,7 +429,7 @@ iframe は**別のページ**（`embed/post/`）です:
 | `--nt-reaction-chip-padding` | `2px 8px` | チップの内側の余白 |
 | `--nt-reaction-chip-radius` | `999px` | チップの角丸 |
 | `--nt-reaction-chip-bg` / `--nt-reaction-chip-hover-bg` / `--nt-reaction-chip-open-border` | — | チップの配色 |
-| `--nt-reaction-chip-font-size` | `0.8rem` | チップと総数の文字サイズ |
+| `--nt-reaction-chip-font-size` | `0.8rem` | チップの文字サイズ |
 | `--nt-reaction-glyph-size` | `1rem` | 絵文字（画像含む）の大きさ |
 | `--nt-reactors-max-height` | `240px` | リアクター一覧の高さ上限。`none` で内容なり |
 | `--nt-reactor-avatar-size` | `24px` | リアクターのアイコンの大きさ |
@@ -434,7 +437,7 @@ iframe は**別のページ**（`embed/post/`）です:
 
 part は `::part(widget)` / `::part(error)` / `::part(reconnecting)` / `::part(empty)` /
 `::part(post)` / `::part(reactions)` / `::part(reaction-chip)` /
-`::part(reaction-chip-<key>)` / `::part(reaction-total)` / `::part(reaction-more)` /
+`::part(reaction-chip-<key>)` / `::part(reaction-more)` /
 `::part(reactors)` / `::part(reactor)` を公開しています。`reaction-chip-<key>` の
 `<key>` は絵文字そのもの（`+` は `❤️` に寄せられます）で、空白を含むリアクションでは
 `part` が壊れるため付きません（`reaction-chip` は常に付きます）。カード内部の

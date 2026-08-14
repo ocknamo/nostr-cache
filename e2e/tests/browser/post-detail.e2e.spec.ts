@@ -170,9 +170,8 @@ describe('Post detail E2E', () => {
         ['❤️', '3'],
         ['🔥', '1'],
       ]);
-      expect(await page.$eval('nostr-post .total', (node) => node.textContent?.trim())).toBe(
-        '4 件のリアクション'
-      );
+      // The chips carry the counts; nothing repeats them in prose.
+      expect(await page.$$('nostr-post .total')).toHaveLength(0);
     },
     TIMEOUT
   );
@@ -216,9 +215,15 @@ describe('Post detail E2E', () => {
       await page.goto(postUrl({ 'reactions-open': 'true' }));
       await waitForPost(page);
 
-      // The largest chip, without a press.
+      // Every reactor, whatever they sent, without a press.
       await page.waitForSelector('nostr-post .reactor', { timeout: TIMEOUT });
-      expect((await page.$$('nostr-post .reactor')).length).toBe(3);
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('nostr-post')?.shadowRoot?.querySelectorAll('.reactor').length ??
+            0) === 4,
+        undefined,
+        { timeout: TIMEOUT }
+      );
     },
     TIMEOUT
   );

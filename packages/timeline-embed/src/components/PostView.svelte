@@ -31,7 +31,7 @@
     showEmbeds?: boolean;
     /** Off also stops the element opening the kind 7 subscription at all. */
     showReactions?: boolean;
-    /** Open the largest reaction's reactor list on first render. */
+    /** Open the reactor list on first render. */
     reactionsOpen?: boolean;
     /** The embedder's buttons, rendered under the post as on a card. */
     actions?: EventAction[];

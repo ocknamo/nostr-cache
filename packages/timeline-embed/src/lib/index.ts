@@ -83,9 +83,9 @@ export {
 } from './profile.ts';
 export type { Profile } from './profile.ts';
 export {
+  MAX_LISTED_REACTORS,
   MAX_REACTIONS,
   MAX_REACTION_GROUPS,
-  MAX_REACTORS_PER_GROUP,
   parseReaction,
   summarizeReactionEvents,
   summarizeReactions,

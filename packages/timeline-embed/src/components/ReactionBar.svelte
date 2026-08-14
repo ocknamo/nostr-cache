@@ -1,12 +1,16 @@
 <script lang="ts">
   /**
    * The reactions a post received (NIP-25): one chip per distinct reaction,
-   * opening to the list of who sent it.
+   * any of them opening the one list of everyone who reacted.
    *
    * Deliberately *outside* the card rather than mixed into its action row. The
    * buttons there are the embedding page's, declared by id and label, so the
    * widget cannot know which — if any — is the like button, and a count hung
    * off a guess would land next to whatever happened to be called `like`.
+   *
+   * The chips are one control drawn several times, not several controls: they
+   * open and close together, so whichever one is pressed next closes the list
+   * it opened. Splitting the list per glyph is the thing they are not for.
    *
    * Pressing a chip opens the list and nothing else: the widget holds no key
    * and never publishes (`lib/event-actions.ts`).
@@ -22,9 +26,9 @@
     profiles?: Map<string, Profile>;
     showAvatars?: boolean;
     /**
-     * Open the largest chip on first render. Off by default: each visible row
-     * costs a profile lookup, and a page embedding a post for its text should
-     * not pay for them unasked.
+     * Open the list on first render. Off by default: each visible row costs a
+     * profile lookup, and a page embedding a post for its text should not pay
+     * for them unasked.
      */
     defaultOpen?: boolean;
     onReactorVisible?: (pubkey: string) => void;
@@ -38,28 +42,14 @@
     onReactorVisible,
   }: Props = $props();
 
-  /** Which chip's reactors are shown; only one opens at a time. */
-  let openKey = $state<string | undefined>();
+  // Seeded from the prop rather than derived: the reader owns it afterwards, so
+  // a `reactions-open` set after mount is deliberately not followed — it would
+  // reopen a list the reader had closed.
+  // svelte-ignore state_referenced_locally
+  let open = $state(defaultOpen);
 
-  // Seeded once rather than derived: the reader owns it afterwards, and
-  // deriving would reopen the chip every time a new reaction changed `summary`.
-  let seeded = false;
-  $effect(() => {
-    if (seeded || !defaultOpen) {
-      return;
-    }
-    const first = summary.groups[0];
-    if (first) {
-      seeded = true;
-      openKey = first.key;
-    }
-  });
-
-  const openGroup = $derived(summary.groups.find((group) => group.key === openKey));
-
-  function toggle(key: string): void {
-    openKey = openKey === key ? undefined : key;
-  }
+  /** Ties every chip to the one list they share. */
+  const listId = $props.id();
 
   /**
    * `part` is a space-separated list and the key is a stranger's `content` —
@@ -80,12 +70,17 @@
         <button
           type="button"
           class="chip"
-          class:open={openKey === group.key}
+          class:open
           part={chipParts(group.key)}
           data-reaction={group.key}
-          aria-expanded={openKey === group.key}
-          aria-label="{group.label} {group.count} 件。リアクションしたユーザを表示"
-          onclick={() => toggle(group.key)}
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-label="{group.label} {group.count} 件。リアクションしたユーザを{open
+            ? '閉じる'
+            : '全て表示'}"
+          onclick={() => {
+            open = !open;
+          }}
         >
           {#if group.url}
             <img
@@ -105,14 +100,14 @@
         </button>
       {/each}
       {#if summary.hiddenGroups > 0}
-        <!-- The chips are capped, the total is not. -->
+        <!-- Only the chips are capped; the list below is not filtered to them. -->
         <span class="more" part="reaction-more">他 {summary.hiddenGroups} 種類</span>
       {/if}
     </div>
-    <p class="total" part="reaction-total">{summary.total} 件のリアクション</p>
-    {#if openGroup}
+    {#if open}
       <ReactionList
-        reactors={openGroup.reactors}
+        id={listId}
+        reactors={summary.reactors}
         {profiles}
         {showAvatars}
         {onReactorVisible}
@@ -154,7 +149,7 @@
     background: var(--nt-reaction-chip-hover-bg, rgb(0 0 0 / 4%));
   }
 
-  /* The open chip is the heading of the list below it. */
+  /* The chips are the heading of the list below them. */
   .chip.open {
     border-color: var(--nt-reaction-chip-open-border, #8899a6);
     color: var(--nt-fg, #0f1419);
@@ -180,13 +175,8 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .more,
-  .total {
+  .more {
     color: var(--nt-muted, #657786);
     font-size: var(--nt-reaction-chip-font-size, 0.8rem);
-  }
-
-  .total {
-    margin: var(--nt-reaction-total-margin, 6px 0 0);
   }
 </style>

@@ -24,12 +24,12 @@ export const MAX_REACTIONS = 500;
 export const MAX_REACTION_GROUPS = 12;
 
 /**
- * Reactors listed when a chip is expanded.
+ * Reactors listed when the list is expanded.
  *
  * Each row costs a profile lookup, and those are issued four at a time — an
  * uncapped list would queue hundreds of REQs behind the visible ones.
  */
-export const MAX_REACTORS_PER_GROUP = 50;
+export const MAX_LISTED_REACTORS = 50;
 
 /**
  * Longest `content` still treated as a glyph. NIP-25 content is `+`, `-`, an
@@ -68,13 +68,21 @@ export interface ReactionGroup {
   url?: string;
   /** Distinct reactors — not the number of events. See {@link summarizeReactions}. */
   count: number;
-  /** Newest first, capped at {@link MAX_REACTORS_PER_GROUP}. */
-  reactors: Reaction[];
 }
 
 export interface ReactionSummary {
   /** Ordered by count, capped at {@link MAX_REACTION_GROUPS}. */
   groups: ReactionGroup[];
+  /**
+   * Everyone the chips count, in one list rather than one per chip: any chip
+   * opens all of it. Newest first, capped at {@link MAX_LISTED_REACTORS}.
+   *
+   * Not filtered to the chips that fit — a glyph {@link MAX_REACTION_GROUPS}
+   * left out is listed here like any other, if it is recent enough to survive
+   * the cap above. Someone who sent two glyphs is one row per glyph, which is
+   * how {@link total} counts them and what their two rows say.
+   */
+  reactors: Reaction[];
   /**
    * The counts of **all** groups added up, including any the cap left out.
    *
@@ -202,9 +210,7 @@ export function summarizeReactions(reactions: readonly Reaction[]): ReactionSumm
   }
 
   const groups: ReactionGroup[] = [...buckets.values()].map((bucket) => {
-    const reactors = [...bucket.byPubkey.values()].sort((a, b) =>
-      isNewer(a, b) ? -1 : isNewer(b, a) ? 1 : 0
-    );
+    const reactors = [...bucket.byPubkey.values()];
     // Two people can send the same shortcode with different `emoji` tags, and a
     // chip has room for one picture.
     const url = reactors.find((reactor) => reactor.url !== undefined)?.url;
@@ -212,7 +218,6 @@ export function summarizeReactions(reactions: readonly Reaction[]): ReactionSumm
       key: bucket.key,
       label: bucket.label,
       count: reactors.length,
-      reactors: reactors.slice(0, MAX_REACTORS_PER_GROUP),
     };
     if (url !== undefined) {
       group.url = url;
@@ -220,15 +225,21 @@ export function summarizeReactions(reactions: readonly Reaction[]): ReactionSumm
     return group;
   });
 
-  // Before the cap, so the total never contradicts the chips by less than they
-  // show.
+  // Before the cap: what decides whether there is a bar at all is every
+  // reaction, not the twelve glyphs that fit.
   const total = groups.reduce((sum, group) => sum + group.count, 0);
 
   const order = new Map([...buckets.values()].map((bucket) => [bucket.key, bucket.seq]));
   groups.sort((a, b) => b.count - a.count || (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0));
 
+  const reactors = [...buckets.values()]
+    .flatMap((bucket) => [...bucket.byPubkey.values()])
+    .sort((a, b) => (isNewer(a, b) ? -1 : isNewer(b, a) ? 1 : 0))
+    .slice(0, MAX_LISTED_REACTORS);
+
   return {
     groups: groups.slice(0, MAX_REACTION_GROUPS),
+    reactors,
     total,
     hiddenGroups: Math.max(0, groups.length - MAX_REACTION_GROUPS),
   };

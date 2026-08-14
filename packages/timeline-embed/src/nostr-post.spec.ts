@@ -89,8 +89,8 @@ describe('<nostr-post> custom element', () => {
       'the post'
     );
     await waitFor(
-      () => element.shadowRoot?.textContent?.includes('2 件のリアクション') === true,
-      'the reaction total'
+      () => element.shadowRoot?.querySelectorAll('.chip').length === 2,
+      'the reaction chips'
     );
   });
 
@@ -181,8 +181,8 @@ describe('<nostr-post> custom element', () => {
     );
     // Only lands if the element asked with `#a`.
     await waitFor(
-      () => element.shadowRoot?.textContent?.includes('1 件のリアクション') === true,
-      'the reaction total'
+      () => element.shadowRoot?.querySelectorAll('.chip').length === 1,
+      'the reaction chip'
     );
   });
 
