@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Who reacted, and with what. Opened from a chip in `ReactionBar`.
+   * Who reacted, and with what. Opened by any chip in `ReactionBar`.
    *
    * Profiles are fetched the way a card's author is — the row asks when it
    * appears — so a post with two hundred reactors does not open two hundred
@@ -13,7 +13,7 @@
   import Avatar from './Avatar.svelte';
 
   interface Props {
-    /** Newest first, already capped — see `MAX_REACTORS_PER_GROUP`. */
+    /** Newest first, already capped — see `MAX_LISTED_REACTORS`. */
     reactors: Reaction[];
     /** Every profile the widget has, keyed by pubkey. */
     profiles?: Map<string, Profile>;
