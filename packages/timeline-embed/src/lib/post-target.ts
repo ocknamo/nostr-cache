@@ -22,6 +22,16 @@ import { embedTarget } from './note-embeds.ts';
 const HEX_ID = /^[0-9a-f]{64}$/;
 
 /**
+ * A `kind` attribute, spelled in decimal and nothing else.
+ *
+ * Stricter than `Number()` on purpose. `Number('')` is `0`, so an empty or
+ * missing `kind` beside an `author` would build a filter for kind 0 — and quietly
+ * render the author's *profile* as the post. `Number('0x1e')` is 30 for the same
+ * class of reason.
+ */
+const KIND = /^\d+$/;
+
+/**
  * How a reaction says it is about this post.
  *
  * NIP-25 points a reaction at a plain event with an `e` tag and at an
@@ -76,9 +86,14 @@ function coordinateTarget(input: PostTargetInput): PostTarget | undefined {
     console.warn(`[nostr-post] Invalid author (expected hex, npub or nprofile): ${author}`);
     return undefined;
   }
-  const kindNumber = Number(kind);
-  if (!Number.isInteger(kindNumber) || kindNumber < 0) {
+  const kindText = kind?.trim() ?? '';
+  if (!KIND.test(kindText)) {
     console.warn(`[nostr-post] Invalid kind for an addressable post: ${kind}`);
+    return undefined;
+  }
+  const kindNumber = Number(kindText);
+  if (!Number.isSafeInteger(kindNumber)) {
+    console.warn(`[nostr-post] kind is out of range: ${kind}`);
     return undefined;
   }
   // An empty `d` is legal NIP-01 — an addressable event may have no identifier

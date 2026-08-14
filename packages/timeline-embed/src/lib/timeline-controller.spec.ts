@@ -1,9 +1,10 @@
 // fake-indexeddb provides an in-memory IndexedDB so DexieStorage works in Node.
 import 'fake-indexeddb/auto';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import { parsePostTarget } from './post-target.ts';
+import type { RelayConnection } from './relay-connection.ts';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
 import {
   type FollowsState,
@@ -1077,6 +1078,36 @@ describe('TimelineController', () => {
       controller.applyFilter([{ ids: [POST_ID] }]);
       controller.requestReactions(target);
       await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+    });
+
+    it('lets the caller ask again after the relay closes the subscription', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReactions(target);
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+      const firstSubId = reactionSubscriptions(controller)[0].id;
+
+      // Driven through the connection's own handler rather than the relay: the
+      // in-page relay only sends CLOSED in reply to a CLOSE we sent ourselves,
+      // by which point `RelayConnection.unsubscribe` has already dropped the
+      // handlers. This path exists for a relay that ends a REQ on its own.
+      const connection = (controller as unknown as { connection: RelayConnection }).connection;
+      const entry = (
+        connection as unknown as {
+          subscriptions: Map<string, { handlers: { onClosed?: (reason: string) => void } }>;
+        }
+      ).subscriptions.get(firstSubId);
+      expect(entry).toBeDefined();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      entry?.handlers.onClosed?.('closed by the relay');
+
+      // Without the de-duplication guard being released, the chips would sit at
+      // whatever count they had reached until the element was rebuilt.
+      controller.requestReactions(target);
+      await waitFor(
+        () => reactionSubscriptions(controller).some((sub) => sub.id !== firstSubId),
+        'a replacement reaction REQ'
+      );
     });
 
     it('ends the subscription on stop', async () => {

@@ -142,6 +142,68 @@ describe('<nostr-post> custom element', () => {
     await waitFor(() => element.shadowRoot?.textContent?.includes('bech32') === true, 'the post');
   });
 
+  it('renders an addressable post from author / kind / identifier', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    const article = makeEvent({
+      id: 'cc00000000000000000000000000000000000000000000000000000000000003',
+      pubkey: ALICE,
+      kind: 30023,
+      created_at: 1_700_000_100,
+      tags: [['d', 'my-article']],
+      content: '長文記事の本文',
+    });
+    await seed(dbName, [
+      article,
+      // A superseded version, so the newest is seen to win rather than the
+      // first the relay happens to deliver.
+      makeEvent({
+        id: 'cc00000000000000000000000000000000000000000000000000000000000004',
+        pubkey: ALICE,
+        kind: 30023,
+        created_at: 1_700_000_000,
+        tags: [['d', 'my-article']],
+        content: '古い版',
+      }),
+      makeEvent({
+        id: 'r9',
+        pubkey: 'p9',
+        kind: 7,
+        content: '+',
+        tags: [['a', `30023:${ALICE}:my-article`]],
+      }),
+    ]);
+
+    const element = mount({
+      author: ALICE,
+      kind: '30023',
+      identifier: 'my-article',
+      'db-name': dbName,
+    });
+
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('長文記事の本文') === true,
+      'the article'
+    );
+    // NIP-25 points at an addressable event with an `a` tag, so the reaction
+    // only lands if the element asked with `#a`.
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('1 件のリアクション') === true,
+      'the reaction total'
+    );
+  });
+
+  it('says the specification is wrong, not that none was given', async () => {
+    const element = mount({ 'event-id': 'note1definitelynotarealnote' });
+
+    // The two failures are different mistakes: an element with no attributes is
+    // waiting for a page that sets one later, while this one is broken.
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('投稿の指定が正しくありません') === true,
+      'the malformed-id notice'
+    );
+    expect(getRelayHostRefCount()).toBe(0);
+  });
+
   it('reports a post the relay does not have', async () => {
     const element = mount({
       'event-id': POST_ID,

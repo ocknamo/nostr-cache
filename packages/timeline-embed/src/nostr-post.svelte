@@ -234,6 +234,22 @@
   const target = $derived(parsePostTarget({ eventId, author, kind, identifier }));
   const wantsReactions = $derived(parseEnabled(showReactions));
 
+  /**
+   * Whether the page named a post at all, however badly.
+   *
+   * Separates the two ways `target` comes back undefined, which are not the
+   * same mistake: an element with no attributes yet is simply waiting (a page
+   * that sets `event-id` from script is normal), while an element carrying a
+   * mistyped `note1…` is broken and the reader would otherwise be shown
+   * "no post specified" about a post that was, in fact, specified.
+   */
+  const named = $derived(
+    Boolean(eventId?.trim()) || Boolean(author?.trim()) || Boolean(kind?.trim())
+  );
+  const fatal = $derived(
+    !target && named ? '投稿の指定が正しくありません（event-id を確認してください）' : undefined
+  );
+
   let state = $state<TimelineState>({
     status: 'disconnected',
     events: [],
@@ -299,6 +315,7 @@
 <PostView
   {state}
   {target}
+  {fatal}
   showOrigin={parseDebug(debug)}
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}

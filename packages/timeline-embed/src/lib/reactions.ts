@@ -99,7 +99,15 @@ export interface ReactionGroup {
 export interface ReactionSummary {
   /** Ordered by count, capped at {@link MAX_REACTION_GROUPS}. */
   groups: ReactionGroup[];
-  /** Distinct reactors across **all** groups, including any not rendered. */
+  /**
+   * The groups' counts added up, across **all** of them — including any the
+   * cap left out of {@link groups}, so the number never disagrees with the
+   * chips by less than they show.
+   *
+   * Not the number of distinct people: someone who sent both a ❤️ and a 🔥
+   * counts in each of those chips, and so counts twice here. That is what a
+   * reader compares against the chips they can see.
+   */
   total: number;
   /** Groups dropped by the cap, so the view can say there are more. */
   hiddenGroups: number;

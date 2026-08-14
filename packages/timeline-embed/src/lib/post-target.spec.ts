@@ -113,6 +113,23 @@ describe('parsePostTarget', () => {
     expect(parsePostTarget({ eventId: NOTE_HEX.slice(0, 63) })).toBeUndefined();
   });
 
+  it('refuses an empty kind rather than reading it as kind 0', () => {
+    silenceWarnings();
+    // `Number('')` is 0, so a lax parse would build `{kinds:[0],…}` and render
+    // the author's *profile* as the post.
+    expect(parsePostTarget({ author: NPUB_HEX, kind: '' })).toBeUndefined();
+    expect(parsePostTarget({ author: NPUB_HEX, kind: '  ' })).toBeUndefined();
+    expect(parsePostTarget({ author: NPUB_HEX })).toBeUndefined();
+    // …and the same for the other spellings `Number()` accepts.
+    expect(parsePostTarget({ author: NPUB_HEX, kind: '0x1e' })).toBeUndefined();
+    expect(parsePostTarget({ author: NPUB_HEX, kind: '3e1' })).toBeUndefined();
+    expect(parsePostTarget({ author: NPUB_HEX, kind: ' 30023 ' })?.filter).toEqual({
+      kinds: [30023],
+      authors: [NPUB_HEX],
+      '#d': [''],
+    });
+  });
+
   it('refuses a coordinate with an unusable author or kind', () => {
     silenceWarnings();
     expect(parsePostTarget({ author: 'not-a-pubkey', kind: '30023' })).toBeUndefined();

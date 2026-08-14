@@ -865,8 +865,18 @@ export class TimelineController {
         // Not surfaced as the widget's `error`: the post itself is still on
         // screen and still correct, and a banner over it would say the post
         // failed when only its reaction count stopped updating.
-        console.warn(`[nostr-timeline] reaction subscription closed${reason ? `: ${reason}` : ''}`);
+        console.warn(`[nostr-post] reaction subscription closed${reason ? `: ${reason}` : ''}`);
         this.reactionSubs.delete(target.key);
+        // Dropped from `requestedReactions` too, so a caller can ask again.
+        // Without this the de-duplication guard in `requestReactions` would
+        // make the closure permanent — the chips would sit at whatever count
+        // they had reached until the element was rebuilt.
+        //
+        // Deliberately *not* re-queued here: a relay that refuses this REQ
+        // would refuse the replacement just as fast, and the queue is pumped
+        // synchronously, so retrying from inside the close handler is a spin
+        // loop. Asking again is the caller's decision.
+        this.requestedReactions.delete(target.key);
       },
     });
   }
