@@ -71,8 +71,26 @@ export {
 } from './note-embeds.ts';
 export type { EmbedStatus, EmbedTarget, EmbeddedEvent, NoteSegment } from './note-embeds.ts';
 export { fetchLatestReplaceable, latestReplaceable } from './one-shot-request.ts';
-export { authorHandle, authorName, parseProfileContent, shortPubkey } from './profile.ts';
+export { parsePostTarget } from './post-target.ts';
+export type { PostTarget, PostTargetInput, PostTargetMatch } from './post-target.ts';
+export {
+  authorHandle,
+  authorName,
+  parseProfileContent,
+  safeImageUrl,
+  safeText,
+  shortPubkey,
+} from './profile.ts';
 export type { Profile } from './profile.ts';
+export {
+  MAX_REACTIONS,
+  MAX_REACTION_GROUPS,
+  MAX_REACTORS_PER_GROUP,
+  parseReaction,
+  summarizeReactionEvents,
+  summarizeReactions,
+} from './reactions.ts';
+export type { Reaction, ReactionGroup, ReactionKind, ReactionSummary } from './reactions.ts';
 export { ONE_SHOT_TIMEOUT_MS, RelayConnection } from './relay-connection.ts';
 export type {
   ConnectionStatus,
@@ -100,11 +118,13 @@ export {
   parseEnabled,
   parseFilter,
   parseFilters,
+  parseFlag,
   parseFreshness,
   parseKinds,
   parseLimit,
   parseMaxFollows,
   parsePubkey,
+  parseReactionsLimit,
   parseRelays,
   parseShowOriginAlias,
   parseSinceDays,

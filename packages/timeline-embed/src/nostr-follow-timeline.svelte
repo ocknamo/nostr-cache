@@ -173,6 +173,7 @@
     validationStatuses: new Map(),
     profiles: new Map(),
     embeds: new Map(),
+    reactions: new Map(),
     eose: false,
   });
 

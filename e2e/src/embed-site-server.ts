@@ -112,6 +112,8 @@ export interface EmbedSiteServer {
   scriptOnlyUrl: string;
   /** URL of the follow-timeline iframe host page. */
   followEmbedUrl: string;
+  /** URL of the post-detail iframe host page. */
+  postEmbedUrl: string;
   /** URL of a real image, for use as a profile's `picture`. */
   avatarUrl: string;
   /** URL of a tall image, for a note whose body is a photo. */
@@ -141,11 +143,13 @@ export async function startEmbedSiteServer(
   let bundle: string;
   let embedPage: string;
   let followEmbedPage: string;
+  let postEmbedPage: string;
   let embedHost: string;
   try {
     bundle = await readFile(resolve(EMBED_DIST, 'nostr-timeline.js'), 'utf8');
     embedPage = await readFile(resolve(EMBED_DIST, 'embed/index.html'), 'utf8');
     followEmbedPage = await readFile(resolve(EMBED_DIST, 'embed/follow/index.html'), 'utf8');
+    postEmbedPage = await readFile(resolve(EMBED_DIST, 'embed/post/index.html'), 'utf8');
     embedHost = await readFile(resolve(EMBED_DIST, 'embed/embed-host.js'), 'utf8');
   } catch (error) {
     throw new Error(
@@ -177,8 +181,13 @@ export async function startEmbedSiteServer(
       res.end(followEmbedPage);
       return;
     }
-    // Both pages load this for the query-string forwarding and the height
-    // protocol, so a 404 here means neither of them mounts anything.
+    if (path === '/embed/post/' || path === '/embed/post/index.html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(postEmbedPage);
+      return;
+    }
+    // Every page loads this for the query-string forwarding and the height
+    // protocol, so a 404 here means none of them mounts anything.
     if (path === '/embed/embed-host.js') {
       res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8' });
       res.end(embedHost);
@@ -218,6 +227,7 @@ export async function startEmbedSiteServer(
     embedUrl: `${baseUrl}/embed/`,
     scriptOnlyUrl: `${baseUrl}${SCRIPT_ONLY_PATH}`,
     followEmbedUrl: `${baseUrl}/embed/follow/`,
+    postEmbedUrl: `${baseUrl}/embed/post/`,
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     photoUrl: `${baseUrl}${PHOTO_PATH}`,
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),

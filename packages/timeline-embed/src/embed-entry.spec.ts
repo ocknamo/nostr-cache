@@ -25,7 +25,7 @@ import * as relayHost from './lib/relay-host.ts';
 describe('embed entry point', () => {
   const originalWebSocket = globalThis.WebSocket;
   let entry: typeof import('./embed-entry.ts');
-  let registered: { timeline: boolean; followTimeline: boolean };
+  let registered: { timeline: boolean; followTimeline: boolean; post: boolean };
 
   beforeAll(async () => {
     // Importing for the side effect is exactly how the embed bundle registers.
@@ -35,6 +35,7 @@ describe('embed entry point', () => {
     registered = {
       timeline: Boolean(customElements.get('nostr-timeline')),
       followTimeline: Boolean(customElements.get('nostr-follow-timeline')),
+      post: Boolean(customElements.get('nostr-post')),
     };
   });
 
@@ -44,8 +45,8 @@ describe('embed entry point', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it('registers both custom elements', () => {
-    expect(registered).toEqual({ timeline: true, followTimeline: true });
+  it('registers every custom element', () => {
+    expect(registered).toEqual({ timeline: true, followTimeline: true, post: true });
   });
 
   it('keeps the timeline component as the default export', async () => {

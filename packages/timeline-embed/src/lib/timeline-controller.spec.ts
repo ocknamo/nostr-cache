@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
+import { parsePostTarget } from './post-target.ts';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
 import {
   type FollowsState,
@@ -105,11 +106,23 @@ describe('TimelineController', () => {
    * Acquiring the host up front means the controller (configured with the same
    * db name) joins the very same relay instead of starting a second one.
    */
-  async function seedCache(dbName: string, events: NostrEvent[]): Promise<void> {
+  async function seedCache(
+    dbName: string,
+    events: NostrEvent[],
+    options: { validated?: boolean } = {}
+  ): Promise<void> {
     const host = await acquireRelayHost({ dbName });
     seeded.push(host);
     for (const event of events) {
       await host.storage.saveEvent(event);
+    }
+    if (options.validated) {
+      // The fixtures carry a fake `sig`, and the relay runs a lazy validation
+      // pass every 5s that *deletes* what fails to verify. A test whose events
+      // have to survive longer than one tick has to opt out of it — otherwise
+      // it passes alone and times out whenever the suite runs slowly enough for
+      // the pass to land mid-assertion.
+      await host.storage.markValidated(events.map((event) => event.id));
     }
   }
 
@@ -905,6 +918,183 @@ describe('TimelineController', () => {
         () => states.at(-1)?.embeds.get(QUOTED_ID)?.status === 'ready',
         'the quoted event after resuming'
       );
+    });
+  });
+
+  /**
+   * The reaction subscription is the one thing the controller opens and never
+   * closes on its own, so what is worth pinning down is the opposite of the
+   * embed tests above: that exactly one is opened per post, that it outlives a
+   * filter change, and that the two paths which *must* end it still do.
+   */
+  describe('reactions', () => {
+    const POST_ID = 'aa00000000000000000000000000000000000000000000000000000000000001';
+    const OTHER_ID = 'bb00000000000000000000000000000000000000000000000000000000000002';
+    const target = parsePostTarget({ eventId: POST_ID });
+    if (!target) {
+      throw new Error('fixture post id should parse');
+    }
+
+    /** The reaction lookups currently open on the relay. */
+    function reactionSubscriptions(
+      controller: TimelineController
+    ): { id: string; filters: Filter[] }[] {
+      return openSubscriptions(controller).filter((sub) => sub.id.startsWith('reactions-'));
+    }
+
+    /** A kind 7 on the fixture post. */
+    function reactionEvent(id: string, pubkey: string, content = '+'): NostrEvent {
+      return makeEvent({ id, pubkey, kind: 7, content, tags: [['e', POST_ID]] });
+    }
+
+    it('asks the relay for the post kind 7 events that point at it', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReactions(target, 50);
+
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+      expect(reactionSubscriptions(controller)[0].filters).toEqual([
+        { kinds: [7], '#e': [POST_ID], limit: 50 },
+      ]);
+    });
+
+    it('asks with an `a` filter for an addressable post', async () => {
+      const address = `30023:${'cc'.repeat(32)}:my-article`;
+      const addressable = parsePostTarget({
+        author: 'cc'.repeat(32),
+        kind: '30023',
+        identifier: 'my-article',
+      });
+      if (!addressable) {
+        throw new Error('fixture coordinate should parse');
+      }
+      const { controller } = createController();
+      await controller.start([addressable.filter]);
+
+      controller.requestReactions(addressable, 10);
+
+      // NIP-25 points at an addressable event with an `a` tag; asking with `#e`
+      // would match nothing at all.
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+      expect(reactionSubscriptions(controller)[0].filters).toEqual([
+        { kinds: [7], '#a': [address], limit: 10 },
+      ]);
+    });
+
+    it('opens one subscription however many times it is asked', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReactions(target);
+      controller.requestReactions(target);
+      controller.requestReactions(target);
+
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+      expect(reactionSubscriptions(controller)).toHaveLength(1);
+    });
+
+    it('collects the reactions the relay holds, and only those on this post', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(
+        dbName,
+        [
+          reactionEvent('r1', 'p1'),
+          reactionEvent('r2', 'p2', '🔥'),
+          // A reaction to a reply: NIP-10 keeps the root in the tags, so the
+          // relay's `#e` filter delivers it — and NIP-25 says the last `e` tag is
+          // the target, which is not us.
+          makeEvent({
+            id: 'r3',
+            pubkey: 'p3',
+            kind: 7,
+            content: '+',
+            tags: [
+              ['e', POST_ID],
+              ['e', OTHER_ID],
+            ],
+          }),
+        ],
+        { validated: true }
+      );
+      const { controller, states } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReactions(target);
+
+      await waitFor(
+        () => (states.at(-1)?.reactions.get(POST_ID)?.length ?? 0) >= 2,
+        'the post reactions'
+      );
+      // Filtered here rather than in the view because the cap is here: under a
+      // busy thread the reactions to replies would push out the real ones.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(
+        states
+          .at(-1)
+          ?.reactions.get(POST_ID)
+          ?.map((event) => event.id)
+          .sort()
+      ).toEqual(['r1', 'r2']);
+    });
+
+    it('keeps watching across a filter change', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReactions(target);
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+
+      controller.applyFilter([{ kinds: [1], limit: 5 }]);
+
+      // Unlike profiles and quoted events, reactions are not derived from what
+      // is on screen — the caller named the post — so a new filter says nothing
+      // about whether they are still wanted.
+      expect(reactionSubscriptions(controller)).toHaveLength(1);
+    });
+
+    it('ends the subscription on suspend, so a cold benchmark stays cold', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReactions(target);
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+
+      controller.suspend();
+
+      await waitFor(
+        () => reactionSubscriptions(controller).length === 0,
+        'the reaction REQ to close'
+      );
+    });
+
+    it('refuses to open one while suspended, and lets a resumed one ask again', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.suspend();
+      controller.requestReactions(target);
+      expect(reactionSubscriptions(controller)).toHaveLength(0);
+
+      controller.applyFilter([{ ids: [POST_ID] }]);
+      controller.requestReactions(target);
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+    });
+
+    it('ends the subscription on stop', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReactions(target);
+      await waitFor(() => reactionSubscriptions(controller).length === 1, 'the reaction REQ');
+
+      const relay = controller.host;
+      await controller.stop();
+
+      // Read off the relay directly: `controller.host` is cleared by stop().
+      const subscriptions = (
+        relay?.relay as unknown as {
+          subscriptionManager: { getAllSubscriptions(): { id: string }[] };
+        }
+      ).subscriptionManager.getAllSubscriptions();
+      expect(subscriptions.filter((sub) => sub.id.startsWith('reactions-'))).toHaveLength(0);
     });
   });
 });

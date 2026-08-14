@@ -4,12 +4,13 @@
 `@nostr-cache/cache-relay` を上流リレーの手前に**透過キャッシュ**として挟み、
 イベントを IndexedDB に貯めながら表示します。
 
-要素は 2 つあります。
+要素は 3 つあります。
 
 | 要素 | 内容 |
 |---|---|
 | `<nostr-timeline>` | フィルタを直接書く。kind / 著者 / `filters` JSON を指定する |
 | `<nostr-follow-timeline>` | **人を 1 人指定すると、その人のホームタイムラインが出る**（[下記](#フォロータイムライン)） |
+| `<nostr-post>` | **投稿を 1 つ指定すると、その投稿詳細が出る**。リアクション付き（[下記](#投稿詳細)） |
 
 - 初回は上流リレーから取得、2 回目以降はローカルキャッシュから即座に表示
 - `debug` を付けると各イベントに `cache` / `upstream` バッジを表示（キャッシュが効いているのを
@@ -148,7 +149,8 @@ npm パッケージを入れられない構成のための入口です。
 
 ## 属性 / クエリパラメータ（`<nostr-timeline>`）
 
-`<nostr-follow-timeline>` の属性は[フォロータイムライン](#フォロータイムライン)を参照してください。
+`<nostr-follow-timeline>` の属性は[フォロータイムライン](#フォロータイムライン)を、
+`<nostr-post>` の属性は[投稿詳細](#投稿詳細)を参照してください。
 
 | 名前 | 内容 | 既定値 |
 |---|---|---|
@@ -288,6 +290,163 @@ iframe は**別のページ**（`embed/follow/`）です:
   対象にもなりません
 - `storageMaxSize` を設定した構成では kind 3 が退避されると毎回上流へ戻ります
   （`cachePriority: { kinds: [3] }` で守れます。現状 embed は `storageMaxSize` を設定していません）
+
+## 投稿詳細
+
+`<nostr-post>` は **投稿を 1 つだけ**、主役として表示します。`<nostr-timeline>` が
+「フィルタを書いて当たったものを並べる」ものなのに対し、こちらは「イベントを 1 つ指定して
+それを出す」ものです。
+
+```html
+<script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
+
+<nostr-post event-id="note1..." relays="wss://nos.lol"></nostr-post>
+```
+
+iframe は**別のページ**（`embed/post/`）です:
+
+```html
+<iframe
+  src="https://ocknamo.github.io/nostr-cache/embed/post/?event-id=note1...&relays=wss://nos.lol"
+  style="width: 100%; height: 480px; border: 0"
+  title="Nostr post"
+></iframe>
+```
+
+要素を分けているのはフォロータイムラインと同じ理由です。この要素には `filters` も
+`authors` も `kinds`（フィルタとしての）も**ありません** — `event-id` と意味が衝突し、
+どちらが勝つかの優先順位を決める羽目になるためです。
+
+投稿の下のアクションボタンは**タイムラインのカードとまったく同じ実装**です。同じ `actions`
+の書き方、同じ描画、同じ `nostr-timeline:action` イベントなので、すでにタイムラインの
+押下を拾っているページは何も足さずにそのまま動きます（[下記](#投稿ごとのアクションボタン仕組みのみ)）。
+
+### 表示されるもの
+
+- 投稿本文（メディア・`nostr:` 参照の入れ子カードもタイムラインと同じ）
+- 著者のアバター・表示名・`@handle`・検証済みの ✓
+- 埋め込む側が指定したアクションボタン
+- **リアクション（NIP-25 / kind 7）** — 絵文字ごとの集計チップと総数。チップを押すと
+  **リアクションしたユーザのアイコン・名前・リアクション内容**が開きます
+
+**リプライ（スレッド）は表示しません。** 別の購読と別のレイアウトが要る話で、投稿単体は
+それが無くても読めるため、今回は入れていません。
+
+### 投稿の指定
+
+`event-id` に次のいずれかを書きます。
+
+| 書き方 | 例 |
+|---|---|
+| 64 桁 hex のイベント id | `event-id="5c04292b…"` |
+| NIP-19 `note1…` | `event-id="note1tszzj2c…"` |
+| NIP-19 `nevent1…` | `event-id="nevent1qqs9cp…"` |
+| NIP-19 `naddr1…`（addressable イベント） | `event-id="naddr1qq9x6…"` |
+
+`nevent` に入っている **kind / author / relay のヒントは使いません**（エンコードした側が
+書いた値でしかなく、間違っていると取得できるはずの投稿が永久に「見つかりません」になるため）。
+
+`naddr` を持っていない場合は座標を 3 属性でそのまま書けます:
+
+```html
+<nostr-post author="npub1..." kind="30023" identifier="my-article"></nostr-post>
+```
+
+`event-id` が指定されているときは、こちらは無視されます。どちらも無い（または壊れている）
+場合は「表示する投稿が指定されていません」を表示し、**リレーには何も問い合わせません** —
+詳細表示に「適当なイベント 1 件」というフォールバックは存在しないためです。
+
+### リアクション
+
+`{"kinds":[7],"#e":["<id>"],"limit":200}`（addressable なら `#a`）を**開いている間ずっと
+購読し続ける**ので、読んでいる最中に付いたリアクションもリロード無しで増えます。
+
+集計の規則:
+
+- `+` と空文字は「いいね」として ❤️、`-` は 👎（NIP-25）。**リテラルの ❤️ と `+` は
+  同じチップにまとめます** — 読者には区別が付かず、同じ絵文字のチップが 2 つ並ぶだけなので
+- `:shortcode:` は NIP-30 の `emoji` タグから画像を引きます。画像が無ければ文字のまま出します
+- **同じ人は 1 チップにつき 1 回だけ数えます**（最新のものを採用）。NIP-25 に取り消しの概念が
+  無く、リレーは同じ人の同じリアクションを何通でも保持しうるため、素直に数えると水増しになります。
+  別の絵文字を押した場合は別チップなので両方に 1 ずつ入ります
+- **最後の `e` タグがこの投稿を指すものだけ**を数えます。リレーの `#e` は任意位置の `e` タグに
+  マッチするため、この投稿への**返信**に付いたリアクションまで届きますが、NIP-25 は
+  「最後の `e` タグが対象」と定めています
+- チップは 12 種類まで、1 チップの一覧は 50 人まで、保持は 500 件まで。あふれた分も**総数には
+  入ります**（チップの合計と総数が食い違って見えないように）
+
+**リアクターのプロフィールは行が画面に現れてから取得します。** 一覧を開かなければ 1 件も
+引きません。開いた場合も 4 並列（`timeline-controller.ts` の予算）で、鮮度ウィンドウ
+（`profile-freshness`・既定 24 時間）が効くので 2 回目以降はキャッシュから即座に出ます。
+
+**リアクションを送ることはできません。** このウィジェットは鍵を持たない読み取り専用の
+表示器なので、kind 7 の発行は埋め込む側（＝署名者を持つ側）の仕事です。`actions` に
+「いいね」ボタンを置いて `nostr-timeline:action` を拾ってください。
+
+### 属性 / クエリパラメータ
+
+| 名前 | 内容 | 既定値 |
+|---|---|---|
+| `event-id` | 表示する投稿。hex / `note1` / `nevent1` / `naddr1` | **必須**（座標指定を使わない場合） |
+| `author` | 座標指定の著者。hex / `npub` / `nprofile` | なし |
+| `kind` | 座標指定の kind | なし |
+| `identifier` | 座標指定の `d` タグ（空文字も可） | `""` |
+| `relays` | 上流リレー URL（カンマ区切り） | なし |
+| `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
+| `profile-freshness` | プロフィールの鮮度ウィンドウ（秒） | `86400` |
+| `follows-freshness` | フォローリストの鮮度ウィンドウ（秒・この要素は取得しないが、同一ページの他ウィジェットと設定を揃えるため） | `600` |
+| `debug` | `cache` / `upstream` バッジを表示 | オフ |
+| `show-avatars` | `"false"` でアバターを出さない（著者・リアクター両方） | オン |
+| `show-media` | `"false"` で本文中のメディアを描画しない | オン |
+| `show-embeds` | `"false"` で `nostr:` 参照を入れ子カードにしない | オン |
+| `show-reactions` | `"false"` でリアクション欄ごと出さない（kind 7 の購読も張らない） | オン |
+| `reactions-limit` | リアクションの初回取得件数（上限 500） | `200` |
+| `reactions-open` | 付けると最大のリアクションの一覧を最初から開く | オフ |
+| `actions` | ボタン定義の JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし |
+| `material-icons` | アイコンを Material Symbols で描画（`outlined` / `rounded` / `sharp`） | オフ |
+| `material-icons-font` | `none` でフォントを読み込まない | `google` |
+
+### 見た目
+
+タイムラインのカードと同じ `--nt-*` 変数がそのまま効きます。詳細固有のものは次のとおりです。
+
+| 変数 | 既定値 | 何が変わるか |
+|---|---|---|
+| `--nt-card-max-height` | `none`（詳細では解除） | 詳細では本文をスクロールさせず全文出します。長さを指定すると戻ります |
+| `--nt-reactions-padding` | `4px 12px 10px` | リアクション欄の余白 |
+| `--nt-reaction-chip-gap` | `6px` | チップ同士の間隔 |
+| `--nt-reaction-chip-padding` | `2px 8px` | チップの内側の余白 |
+| `--nt-reaction-chip-radius` | `999px` | チップの角丸 |
+| `--nt-reaction-chip-bg` / `--nt-reaction-chip-hover-bg` / `--nt-reaction-chip-open-border` | — | チップの配色 |
+| `--nt-reaction-chip-font-size` | `0.8rem` | チップと総数の文字サイズ |
+| `--nt-reaction-glyph-size` | `1rem` | 絵文字（画像含む）の大きさ |
+| `--nt-reactors-max-height` | `240px` | リアクター一覧の高さ上限。`none` で内容なり |
+| `--nt-reactor-avatar-size` | `24px` | リアクターのアイコンの大きさ |
+| `--nt-reactor-font-size` | `0.85rem` | リアクター名の文字サイズ |
+
+part は `::part(widget)` / `::part(error)` / `::part(reconnecting)` / `::part(empty)` /
+`::part(post)` / `::part(reactions)` / `::part(reaction-chip)` /
+`::part(reaction-chip-<key>)` / `::part(reaction-total)` / `::part(reaction-more)` /
+`::part(reactors)` / `::part(reactor)` を公開しています。`reaction-chip-<key>` の
+`<key>` は絵文字そのもの（`+` は `❤️` に寄せられます）で、空白を含むリアクションでは
+`part` が壊れるため付きません（`reaction-chip` は常に付きます）。カード内部の
+`::part(note)` / `::part(actions)` / `::part(action)` / `::part(avatar)` はタイムラインと共通です。
+
+### 制約（投稿詳細固有）
+
+- **リプライは表示しません**（上記のとおり）
+- **リアクションの署名は未検証のまま数えます。** リレーは遅延検証で動くため、数字が一瞬
+  多めに出て、検証で落ちた分があとから減ることがあります。投稿本文と同じく、リレーが
+  保証していない情報である点は変わりません
+- **リアクションの `content` は他人が書いた任意の文字列です。** 制御文字と双方向制御文字を
+  除去し、32 文字を超えるものは「絵文字ではない」として捨てます。カスタム絵文字の画像 URL は
+  `http:` / `https:` のみ受け付けます（アバターと同じ扱い）。それでも**画像は投稿者が指定した
+  任意のホストから読み込まれます**（閲覧者の IP がそのホストに渡ります）。止めたい場合は
+  `show-reactions="false"` を指定してください
+- **`naddr` / 座標指定で複数バージョンが返った場合は `created_at` が最新のものを出します。**
+  どれが正なのかはリレーの判断で、こちらでは検証しません
+- **リアクションの削除（NIP-09）には追随しません。** 購読は開きっぱなしですが、消えたことは
+  イベントとして届かないため、数字が減るのはリロード後です
 
 ## `filters` で細かく絞り込む
 
@@ -544,6 +703,11 @@ nostr-timeline {
 
 `actions` を指定しなければ行そのものが描画されないので、既存の埋め込みの見た目は変わりません。
 
+**3 要素すべてで同じものです。** `<nostr-timeline>` / `<nostr-follow-timeline>` /
+`<nostr-post>` は同じ `EventCard` を描画するので、書き方も見た目も、押されたときに飛ぶ
+`nostr-timeline:action` も共通です（イベント名も 3 つとも同じで、要素ごとに分かれてはいません）。
+以下の例はどの要素にもそのまま置き換えられます。
+
 ### HTML から（Web Component）
 
 ```html
@@ -724,8 +888,8 @@ window.addEventListener('message', (event) => {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **354 KB（gzip 約 118 KB）** の自己完結した IIFE です
-（`<nostr-timeline>` と `<nostr-follow-timeline>` の両方を含みます）。
+`dist/nostr-timeline.js` は約 **379 KB（gzip 約 124 KB）** の自己完結した IIFE です
+（`<nostr-timeline>` / `<nostr-follow-timeline>` / `<nostr-post>` の 3 つすべてを含みます）。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、
 署名検証用の `@rx-nostr/crypto`、そしてリレー接続管理の `rx-nostr`（+ RxJS）で、
@@ -795,13 +959,19 @@ npm run typecheck -w packages/timeline-embed
   フレームワーク非依存に保っています（単体テスト容易性のため）
 - `customElement: true` は**カスタム要素サポートを有効にするだけ**で、実際に
   カスタム要素になるのは `<svelte:options customElement="..." />` を持つ
-  `nostr-timeline.svelte` と `nostr-follow-timeline.svelte` のみです。
+  `nostr-timeline.svelte` / `nostr-follow-timeline.svelte` / `nostr-post.svelte` のみです。
   他のコンポーネントは通常の Svelte コンポーネントとしてライブラリ利用できます
-- 2 つのカスタム要素が重複して持つのは**props 宣言と `$host()` の受け取り 1 行だけ**です。Svelte のカスタム要素は
+- カスタム要素が重複して持つのは**props 宣言と `$host()` の受け取り 1 行だけ**です。Svelte のカスタム要素は
   `<svelte:options customElement>` で props を静的に宣言する必要があるためで、
-  中身（エラー表示・再接続表示・`Timeline` の描画・スタイル）は
-  `components/TimelineView.svelte` に切り出して共有しています。バンドルも 1 本のままです
-- iframe ページも 2 枚（`public/embed/` と `public/embed/follow/`）ありますが、
+  中身（エラー表示・再接続表示・カードの描画・スタイル）は
+  `components/TimelineView.svelte`（タイムライン 2 つ）と `components/PostView.svelte`
+  （投稿詳細）に切り出しています。**投稿カード自体は 3 要素とも同じ
+  `components/EventCard.svelte`** で、アクションボタンの実装が 1 つで済んでいるのは
+  そのためです。バンドルも 1 本のままです
+- リアクション（NIP-25）の解釈は `lib/reactions.ts` に純粋関数として置き、コントローラは
+  REQ を張って生イベントを溜めるだけにしています（NIP-02 が `lib/follow-list.ts`、
+  NIP-27 が `lib/note-embeds.ts` にあるのと同じ分担です）
+- iframe ページも 3 枚（`public/embed/` と `public/embed/follow/` と `public/embed/post/`）ありますが、
   クエリパラメータの転送と高さの `postMessage` は `public/embed/embed-host.js` に
   1 つだけあります。各ページが持つのは「どの要素にどの属性を渡すか」の一覧だけで、
   その一覧が要素の宣言と食い違っていないことは `embed-page.spec.ts` が検査します

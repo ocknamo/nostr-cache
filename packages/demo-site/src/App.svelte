@@ -58,6 +58,7 @@
     validationStatuses: new Map(),
     profiles: new Map(),
     embeds: new Map(),
+    reactions: new Map(),
     eose: false,
   });
   let metrics = $state<MetricsSnapshot>({ cacheHits: 0, upstreamEvents: 0, delivered: 0 });

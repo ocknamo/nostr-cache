@@ -62,7 +62,7 @@
    * An embedder loading the font itself passes `material-icons-font="none"`.
    *
    * Typed, because a typo here costs more than it looks: the widget warns once
-   * and leaves every icon as the ligature name it is, in all six places at once.
+   * and leaves every icon as the ligature name it is, in every example at once.
    */
   const MATERIAL_VARIANT: MaterialVariant = 'rounded';
   /**
@@ -127,6 +127,27 @@
   );
   const followSnippet = $derived(
     `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-follow-timeline\n  pubkey="${followPubkey || 'npub1...'}"\n  relays="${relays}"\n  limit="${limit}"\n  material-icons="${MATERIAL_VARIANT}"\n  actions='${actionsSnippet}'\n></nostr-follow-timeline>`
+  );
+
+  /**
+   * Subject for the live post detail below.
+   *
+   * Empty for the same reason `followPubkey` is: there is no post worth
+   * defaulting to, and the element renders "no post specified" rather than
+   * asking the relay for an arbitrary one.
+   */
+  let postEventId = $state('');
+  /**
+   * Shape check only — `parsePostTarget` does the real decode. It is here so a
+   * half-pasted note1 is not handed over on every keystroke, which would put
+   * one warning per character into the console.
+   */
+  const postEventIdReady = $derived(
+    /^[0-9a-fA-F]{64}$/.test(postEventId.trim()) ||
+      /^n(ote|event|addr)1\w{20,}$/.test(postEventId.trim())
+  );
+  const postSnippet = $derived(
+    `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-post\n  event-id="${postEventId || 'note1...'}"\n  relays="${relays}"\n  material-icons="${MATERIAL_VARIANT}"\n  actions='${actionsSnippet}'\n></nostr-post>`
   );
 
   /** Bounds on the height the embed page may ask for. */
@@ -253,7 +274,7 @@
     </div>
   </div>
 
-  <h3 class="follow-heading">フォロータイムライン</h3>
+  <h3 class="section-heading">フォロータイムライン</h3>
   <p class="mode-note">
     <code>&lt;nostr-follow-timeline&gt;</code> は、指定した人が NIP-02（kind 3）でフォローしている
     人たちの投稿を並べます。フィルタを書くのではなく<strong>人を 1 人指定する</strong>ので、
@@ -262,7 +283,7 @@
     上流に問い合わせずに即座に出ます。
   </p>
 
-  <label class="follow-input">
+  <label class="text-input follow-pubkey">
     <span>pubkey（npub / nprofile / hex）</span>
     <input
       type="text"
@@ -303,6 +324,59 @@
     入口を分けているのは、この要素に <code>authors</code> も <code>filters</code> も
     無いからです — 1 ページで両方を受けると、<code>?pubkey=…&amp;filters=…</code>
     のような URL が「<code>filters</code> が黙って無視される」形で通ってしまいます。
+  </p>
+
+  <h3 class="section-heading">投稿詳細</h3>
+  <p class="mode-note">
+    <code>&lt;nostr-post&gt;</code> は投稿を 1 つだけ主役として表示します。本文とアクションボタンは
+    タイムラインのカードと<strong>まったく同じ実装</strong>で、そこに
+    <strong>リアクション（NIP-25 / kind 7）</strong>が付きます。絵文字ごとの集計チップを押すと、
+    リアクションしたユーザのアイコンと内容が開きます。リアクションの購読は開いている間ずっと
+    張られたままなので、読んでいる最中に付いたものも増えていきます。
+    <strong>リプライの表示はまだありません。</strong>
+  </p>
+
+  <label class="text-input post-event-id">
+    <span>イベント ID（note1 / nevent1 / naddr1 / hex）</span>
+    <input
+      type="text"
+      bind:value={postEventId}
+      placeholder="note1..."
+      spellcheck="false"
+      autocomplete="off"
+    />
+  </label>
+
+  {#if postEventIdReady}
+    <div class="live">
+      <nostr-post
+        event-id={postEventId.trim()}
+        {relays}
+        db-name={dbName}
+        profile-freshness={profileFreshness}
+        actions={actionsJson}
+        material-icons={MATERIAL_VARIANT}
+        debug={debug ? 'true' : 'false'}
+      ></nostr-post>
+    </div>
+  {:else}
+    <p class="footnote">
+      イベント ID を入れると、ここに実際の投稿詳細が出ます（hex / note1 / nevent1 / naddr1）。
+    </p>
+  {/if}
+
+  <div class="snippet">
+    <pre><code>{postSnippet}</code></pre>
+    <button class="secondary" onclick={() => copy(postSnippet)}>コピー</button>
+  </div>
+
+  <p class="footnote">
+    iframe で使う場合はこれも<strong>別のページ</strong>です:
+    <code>{embedOrigin}embed/post/?event-id=note1...&amp;relays=…</code>。
+    リアクションを取得も表示もさせたくない場合は <code>show-reactions="false"</code> を
+    指定してください（kind 7 の購読自体を張らなくなります）。
+    <strong>このデモでもリアクションは送れません</strong> — 鍵を持たない読み取り専用の表示器なので、
+    kind 7 の発行は埋め込む側の仕事です。
   </p>
 
   <p class="footnote">
@@ -406,25 +480,26 @@
     overflow-y: auto;
   }
 
-  .follow-heading {
+  /* Section headings inside the panel, each opening with a rule. */
+  .section-heading {
     margin-top: 24px;
     padding-top: 18px;
     border-top: 1px solid var(--border);
   }
 
-  .follow-input {
+  .text-input {
     display: block;
     margin-bottom: 10px;
   }
 
-  .follow-input span {
+  .text-input span {
     display: block;
     color: var(--muted);
     font-size: 0.78rem;
     margin-bottom: 4px;
   }
 
-  .follow-input input {
+  .text-input input {
     width: 100%;
     box-sizing: border-box;
     padding: 6px 10px;
