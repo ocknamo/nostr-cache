@@ -12,6 +12,10 @@ const POST_ID = 'aa0000000000000000000000000000000000000000000000000000000000000
 const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
 const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
 const ALICE = 'bb0000000000000000000000000000000000000000000000000000000000000b';
+const BOB = 'cc0000000000000000000000000000000000000000000000000000000000000c';
+const PARENT_ID = 'aa00000000000000000000000000000000000000000000000000000000000002';
+const REPLY_ID = 'aa00000000000000000000000000000000000000000000000000000000000003';
+const GRANDCHILD_ID = 'aa00000000000000000000000000000000000000000000000000000000000004';
 
 /**
  * `<nostr-post>`'s packaging contract: the entry point defines it, its
@@ -257,6 +261,160 @@ describe('<nostr-post> custom element', () => {
     );
   });
 
+  it('opens exactly one thread REQ, filtered on the post', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    mount({ 'event-id': POST_ID, 'db-name': dbName, 'replies-limit': '25' });
+
+    await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+    const host = await acquireRelayHost({ dbName });
+    try {
+      await waitFor(() => replySubscriptions(host).length === 1, 'the level 1 REQ');
+      expect(replySubscriptions(host)[0].filters).toEqual([
+        { kinds: [1], '#e': [POST_ID], limit: 25 },
+      ]);
+    } finally {
+      await host.release();
+    }
+  });
+
+  it('opens no thread REQ when replies are turned off', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName, 'show-replies': 'false' });
+
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('詳細に出る投稿') === true,
+      'the post'
+    );
+    const host = await acquireRelayHost({ dbName });
+    try {
+      expect(replySubscriptions(host)).toHaveLength(0);
+    } finally {
+      await host.release();
+    }
+  });
+
+  it('closes the thread REQ when replies are turned off after mount', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName });
+    await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+    const host = await acquireRelayHost({ dbName });
+    try {
+      await waitFor(() => replySubscriptions(host).length === 1, 'the level 1 REQ');
+
+      // Documented as not opening the subscription at all, so switching it off
+      // has to close a REQ rather than merely stop rendering what it delivers.
+      element.setAttribute('show-replies', 'false');
+
+      await waitFor(() => replySubscriptions(host).length === 0, 'the level 1 REQ to close');
+    } finally {
+      await host.release();
+    }
+  });
+
+  it('renders the thread the cache holds', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, [
+      makeEvent({ id: POST_ID, pubkey: ALICE, content: '詳細に出る投稿' }),
+      makeEvent({
+        id: REPLY_ID,
+        pubkey: BOB,
+        content: '返信です',
+        tags: [['e', POST_ID, '', 'root']],
+      }),
+      // Names only its parent besides the root, so nothing but the second level
+      // of REQs can reach it.
+      makeEvent({
+        id: GRANDCHILD_ID,
+        pubkey: BOB,
+        content: '返信への返信です',
+        tags: [
+          ['e', POST_ID, '', 'root'],
+          ['e', REPLY_ID, '', 'reply'],
+        ],
+      }),
+    ]);
+
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName });
+
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('返信への返信です') === true,
+      'the grandchild'
+    );
+    expect(element.shadowRoot?.textContent).toContain('返信 2 件');
+  });
+
+  it('walks up to the parent without restarting the relay, and back again', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, [
+      makeEvent({ id: PARENT_ID, pubkey: ALICE, content: '親の投稿' }),
+      makeEvent({
+        id: POST_ID,
+        pubkey: BOB,
+        content: '詳細に出る投稿',
+        tags: [['e', PARENT_ID, '', 'reply']],
+      }),
+    ]);
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName });
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('詳細に出る投稿') === true,
+      'the post'
+    );
+
+    const chip = element.shadowRoot?.querySelector<HTMLButtonElement>('.ref-nav');
+    expect(chip).toBeTruthy();
+    chip?.click();
+
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('親の投稿') === true,
+      'the parent'
+    );
+    // The whole reason navigation goes through `showPost` rather than a new
+    // controller: dropping the last reference stops the in-page relay and
+    // starts it again between two posts of one conversation.
+    expect(getRelayHostRefCount()).toBe(1);
+
+    const back = element.shadowRoot?.querySelector<HTMLButtonElement>('.back');
+    expect(back).toBeTruthy();
+    back?.click();
+
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('詳細に出る投稿') === true,
+      'the post again'
+    );
+    expect(element.shadowRoot?.querySelector('.back')).toBeNull();
+  });
+
+  it('drops the way back when the page names a different post', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, [
+      makeEvent({ id: PARENT_ID, pubkey: ALICE, content: '親の投稿' }),
+      makeEvent({
+        id: POST_ID,
+        pubkey: BOB,
+        content: '詳細に出る投稿',
+        tags: [['e', PARENT_ID, '', 'reply']],
+      }),
+      makeEvent({ id: NOTE_HEX, pubkey: ALICE, content: 'bech32' }),
+    ]);
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName });
+    await waitFor(
+      () => element.shadowRoot?.textContent?.includes('詳細に出る投稿') === true,
+      'the post'
+    );
+    element.shadowRoot?.querySelector<HTMLButtonElement>('.ref-nav')?.click();
+    await waitFor(() => element.shadowRoot?.querySelector('.back') !== null, 'the way back');
+
+    // A different post is a different conversation, so the walk into the old
+    // one goes with it.
+    element.setAttribute('event-id', NOTE);
+
+    await waitFor(() => element.shadowRoot?.textContent?.includes('bech32') === true, 'the note');
+    expect(element.shadowRoot?.querySelector('.back')).toBeNull();
+  });
+
   it('releases the shared relay when removed', async () => {
     const dbName = `post-${crypto.randomUUID()}`;
     await seed(dbName, postWithReactions());
@@ -268,15 +426,24 @@ describe('<nostr-post> custom element', () => {
   });
 });
 
-function reactionSubscriptions(host: {
-  relay: unknown;
-}): { id: string; filters: unknown[] }[] {
+function subscriptionsNamed(
+  host: { relay: unknown },
+  prefix: string
+): { id: string; filters: unknown[] }[] {
   const relay = host.relay as {
     subscriptionManager: { getAllSubscriptions(): { id: string; filters: unknown[] }[] };
   };
   return relay.subscriptionManager
     .getAllSubscriptions()
-    .filter((subscription) => subscription.id.startsWith('reactions-'));
+    .filter((subscription) => subscription.id.startsWith(prefix));
+}
+
+function reactionSubscriptions(host: { relay: unknown }): { id: string; filters: unknown[] }[] {
+  return subscriptionsNamed(host, 'reactions-');
+}
+
+function replySubscriptions(host: { relay: unknown }): { id: string; filters: unknown[] }[] {
+  return subscriptionsNamed(host, 'replies-');
 }
 
 function waitFor(predicate: () => boolean, label: string, timeoutMs = 5000): Promise<void> {

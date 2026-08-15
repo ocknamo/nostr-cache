@@ -110,9 +110,9 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
 
 - [ ] **リアクション（kind 7）を検証ポーリングの対象に含める**
   - 現状: `TimelineController.refreshValidationStatuses()` が照合する id は
-    `state.events` と `state.embeds` からしか集めておらず、`state.reactions` は
-    含まれない。リレー側の遅延検証は kind を問わず走る（`LazyValidator` は
-    `getUnvalidatedEvents` で全種別を取り、不正なら `deleteEvent`）ので、
+    `state.events` / `state.embeds` / `state.replies` からしか集めておらず、
+    `state.reactions` は含まれない。リレー側の遅延検証は kind を問わず走る
+    （`LazyValidator` は `getUnvalidatedEvents` で全種別を取り、不正なら `deleteEvent`）ので、
     **検証しているのはリレーだけで、ウィジェットが追随していない**状態
   - **kind 7 は誰でも偽造できる。** 署名が通らないものはリレーが削除するが、
     それまでの間は表示に乗るため、**リレーが保証していない数字を読者に見せている**
@@ -133,6 +133,18 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
     一周するまで数字が 0 から増えていくように見える点に注意
   - 現状の挙動（一度数えた分は減らない）は `packages/timeline-embed/README.md` の
     「制約（投稿詳細固有）」に明記済み。直したらその記述も対で更新すること
+
+- [ ] **読んでいる最中に届いた返信の、さらにその返信を取りに行く**
+  - 現状: `TimelineController` は階層 N の REQ を、階層 N-1 の **EOSE のときにだけ**開く。
+    EOSE 後に live で届いた返信は表示されるが、その id を次の階層の `#e` に足す機会が
+    もう無いので、**その返信への返信はリロードするまで出ない**
+  - EOSE ごとに 1 本という設計は、返信 1 件ごとに REQ を開く（際限なく増える）案と
+    同じ sub id で filter を張り替える（全件再配信 + 上流再取得が走る）案を避けたもの。
+    直すなら「新しい親が増えたら数百 ms のデバウンスでその階層を張り替える」が素直だが、
+    **張り替えのたびに上流が再取得される点を測ってから**にすること
+  - 直接の返信（階層 1）は購読が開いたままなのでその場で増える。影響は階層 2 以降だけ
+  - 現状の挙動は `packages/timeline-embed/README.md` の「制約（投稿詳細固有）」に
+    明記済み。直したらその記述も対で更新すること
 
 ## 優先度: 中（ストレージ / テスト基盤）
 

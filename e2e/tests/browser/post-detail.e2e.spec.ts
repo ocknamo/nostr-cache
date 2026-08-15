@@ -31,6 +31,13 @@ describe('Post detail E2E', () => {
   let post: NostrEvent;
   /** A reply to it, so a reaction on the reply can be seen not to count. */
   let reply: NostrEvent;
+  /**
+   * A reply to the *reply*, naming nothing but its own parent.
+   *
+   * The point of the fixture: nothing except a second level of REQs can reach
+   * it, because the post's own `#e` subscription has no tag here to match.
+   */
+  let grandchild: NostrEvent;
   /** Display name of the reactor whose profile is published. */
   const REACTOR_NAME = 'reacting alice';
 
@@ -47,6 +54,14 @@ describe('Post detail E2E', () => {
       created_at: 1_700_000_100,
       tags: [['e', post.id]],
       content: 'a reply to it',
+    });
+    grandchild = await createTestEvent(author, {
+      created_at: 1_700_000_150,
+      // Deliberately without the thread root: the post's own `#e` subscription
+      // then cannot match it at all, so it is on screen only if the second
+      // level of REQs went out.
+      tags: [['e', reply.id]],
+      content: 'a reply to the reply',
     });
 
     /** A fresh key each time, so every reactor is a different person. */
@@ -99,7 +114,7 @@ describe('Post detail E2E', () => {
       await reactTo(reply, '🔥', [['e', post.id]]),
     ];
 
-    upstream = await startMockUpstreamRelay([post, reply, ...reactions, namedProfile]);
+    upstream = await startMockUpstreamRelay([post, reply, grandchild, ...reactions, namedProfile]);
     browser = await launchBrowser();
   });
 
@@ -152,8 +167,10 @@ describe('Post detail E2E', () => {
       expect(await page.$eval('nostr-post .content', (node) => node.textContent)).toContain(
         'the post being read'
       );
-      // The reply is in the cache too, and a thread view would show it.
-      expect(await page.$$('nostr-post .event-card')).toHaveLength(1);
+      // The post is the first card; the thread below is its own assertion.
+      expect(await page.$eval('nostr-post .event-card', (node) => node.textContent)).toContain(
+        'the post being read'
+      );
 
       await page.waitForSelector('nostr-post .chip', { timeout: TIMEOUT });
       await page.waitForFunction(
@@ -306,6 +323,96 @@ describe('Post detail E2E', () => {
       }));
       expect(card.maxHeight).toBe('none');
       expect(card.scrolls).toBe(false);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'builds the thread a level at a time, reaching a reply the post cannot match',
+    async () => {
+      page = await browser.newPage();
+      await page.goto(postUrl());
+      await waitForPost(page);
+
+      await page.waitForSelector('nostr-post .replies', { timeout: TIMEOUT });
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('nostr-post')
+            ?.shadowRoot?.textContent?.includes('a reply to the reply') === true,
+        undefined,
+        { timeout: TIMEOUT }
+      );
+
+      expect(await page.$eval('nostr-post .replies', (node) => node.textContent)).toContain(
+        'a reply to it'
+      );
+      // The grandchild names only its parent, so it is here only because the
+      // level 1 EOSE opened a level 2 asking about the reply's id.
+      const nesting = await page.$eval('nostr-post .replies', (node) => {
+        const branches = node.querySelectorAll('.branch');
+        return {
+          levels: branches.length,
+          nested: branches[0]?.contains(branches[1] ?? null) ?? false,
+          inner: branches[1]?.textContent ?? '',
+        };
+      });
+      expect(nesting.levels).toBe(2);
+      expect(nesting.nested).toBe(true);
+      expect(nesting.inner).toContain('a reply to the reply');
+      expect(nesting.inner).not.toContain('a reply to it');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'opens no thread at all with show-replies=false',
+    async () => {
+      page = await browser.newPage();
+      await page.goto(postUrl({ 'show-replies': 'false' }));
+      await waitForPost(page);
+
+      // Waited on something that does arrive, so this is not just "too early".
+      await page.waitForSelector('nostr-post .chip', { timeout: TIMEOUT });
+      expect(await page.$$('nostr-post .replies')).toHaveLength(0);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'walks up to the parent from a reply, and back again',
+    async () => {
+      page = await browser.newPage();
+      await page.goto(postUrl({ 'event-id': noteBech32(reply.id) }));
+      await waitForPost(page);
+
+      await page.waitForSelector('nostr-post .ref-nav', { timeout: TIMEOUT });
+      await page.click('nostr-post .ref-nav');
+
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('nostr-post')
+            ?.shadowRoot?.querySelector('.content')
+            ?.textContent?.includes('the post being read') === true,
+        undefined,
+        { timeout: TIMEOUT }
+      );
+      // The parent's own reactions are subscribed to afresh, so arriving here
+      // is not merely a re-render of what was already on screen.
+      await page.waitForSelector('nostr-post .chip', { timeout: TIMEOUT });
+
+      await page.click('nostr-post .back');
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('nostr-post')
+            ?.shadowRoot?.querySelector('.content')
+            ?.textContent?.includes('a reply to it') === true,
+        undefined,
+        { timeout: TIMEOUT }
+      );
+      expect(await page.$$('nostr-post .back')).toHaveLength(0);
     },
     TIMEOUT
   );

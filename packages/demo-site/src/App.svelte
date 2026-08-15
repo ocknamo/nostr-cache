@@ -59,6 +59,7 @@
     profiles: new Map(),
     embeds: new Map(),
     reactions: new Map(),
+    replies: new Map(),
     eose: false,
   });
   let metrics = $state<MetricsSnapshot>({ cacheHits: 0, upstreamEvents: 0, delivered: 0 });

@@ -35,7 +35,7 @@ export {
   normalizeActions,
 } from './event-actions.ts';
 export type { EventAction, EventActionContext, EventActionDetail } from './event-actions.ts';
-export { parseRefs } from './event-refs.ts';
+export { parseRefs, replyParentAddress, replyParentId } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';
 export { MAX_FILTERS, parseFilterList, toPubkeyHex } from './filter-json.ts';
 export {
@@ -91,6 +91,16 @@ export {
   summarizeReactions,
 } from './reactions.ts';
 export type { Reaction, ReactionGroup, ReactionKind, ReactionSummary } from './reactions.ts';
+export {
+  DEFAULT_REPLIES_LIMIT,
+  DEFAULT_REPLY_DEPTH,
+  MAX_REPLIES,
+  MAX_REPLY_DEPTH,
+  MAX_REPLY_NODES,
+  acceptsReply,
+  buildReplyTree,
+} from './reply-tree.ts';
+export type { BuildReplyTreeOptions, ReplyNode, ReplyTree } from './reply-tree.ts';
 export { ONE_SHOT_TIMEOUT_MS, RelayConnection } from './relay-connection.ts';
 export type {
   ConnectionStatus,
@@ -126,6 +136,8 @@ export {
   parsePubkey,
   parseReactionsLimit,
   parseRelays,
+  parseRepliesDepth,
+  parseRepliesLimit,
   parseShowOriginAlias,
   parseSinceDays,
 } from './timeline-config.ts';
@@ -135,6 +147,8 @@ export type {
   FilterSource,
   FilterSourceContext,
   FollowsState,
+  PostWatches,
+  ReplyRequestOptions,
   TimelineControllerOptions,
   TimelineState,
 } from './timeline-controller.ts';

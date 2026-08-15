@@ -18,6 +18,8 @@ export { default as NoteContent } from './components/NoteContent.svelte';
 export { default as PostView } from './components/PostView.svelte';
 export { default as ReactionBar } from './components/ReactionBar.svelte';
 export { default as ReactionList } from './components/ReactionList.svelte';
+export { default as ReplyBranch } from './components/ReplyBranch.svelte';
+export { default as ReplyTree } from './components/ReplyTree.svelte';
 export { default as Timeline } from './components/Timeline.svelte';
 export { default as TimelineView } from './components/TimelineView.svelte';
 export { default as NostrFollowTimeline } from './nostr-follow-timeline.svelte';

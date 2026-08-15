@@ -7,8 +7,10 @@
    * copy, so the action bar under a detail post is the timeline's bar down to
    * the `part` names a page styles it through.
    *
-   * Replies are deliberately not rendered: a thread is a second subscription
-   * and a layout of its own, and the post reads fine without one.
+   * The thread below is descendants only. What sits above the post is reached
+   * by pressing the card's 「返信先」 chip, which re-points the widget at the
+   * parent — one post is the frame this component is built around, and the way
+   * back is `onBack` rather than a second post on screen.
    */
 
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
@@ -16,9 +18,11 @@
   import type { EmbedTarget } from '../lib/note-embeds.ts';
   import type { PostTarget } from '../lib/post-target.ts';
   import { summarizeReactionEvents } from '../lib/reactions.ts';
+  import { buildReplyTree } from '../lib/reply-tree.ts';
   import type { TimelineState } from '../lib/timeline-controller.ts';
   import EventCard from './EventCard.svelte';
   import ReactionBar from './ReactionBar.svelte';
+  import ReplyTree from './ReplyTree.svelte';
 
   interface Props {
     state: TimelineState;
@@ -33,6 +37,17 @@
     showReactions?: boolean;
     /** Open the reactor list on first render. */
     reactionsOpen?: boolean;
+    /** Off also stops the element opening any thread subscription at all. */
+    showReplies?: boolean;
+    /** Levels of the thread to render; matches what was subscribed to. */
+    repliesDepth?: number;
+    /**
+     * Called with the parent's id when the 「返信先」 chip is pressed. Absent
+     * leaves the chip the plain text it is on a timeline card.
+     */
+    onNavigate?: (id: string) => void;
+    /** Rendered when there is somewhere to go back to; see `onNavigate`. */
+    onBack?: () => void;
     /** The embedder's buttons, rendered under the post as on a card. */
     actions?: EventAction[];
     /** Called on a press, after the action's own `onSelect`. */
@@ -54,6 +69,10 @@
     showEmbeds = true,
     showReactions = true,
     reactionsOpen = false,
+    showReplies = true,
+    repliesDepth,
+    onNavigate,
+    onBack,
     actions = [],
     onAction,
     materialIcons,
@@ -71,6 +90,20 @@
   const summary = $derived(
     target && showReactions
       ? summarizeReactionEvents(state.reactions.get(target.key) ?? [], target.match)
+      : undefined
+  );
+
+  // Derived for the same reason the reaction summary is: a reply landing
+  // re-grows the thread without the controller knowing anything about NIP-10.
+  const tree = $derived(
+    target && showReplies
+      ? buildReplyTree(state.replies.get(target.key) ?? [], target.match, {
+          maxDepth: repliesDepth,
+          // A reply to an article names the coordinate and the version its
+          // author was reading; without the second, that `e` tag points at an
+          // event the thread does not contain.
+          ...(event ? { rootId: event.id } : {}),
+        })
       : undefined
   );
 
@@ -95,6 +128,14 @@
     {#if state.status === 'reconnecting'}
       <p class="reconnecting" part="reconnecting">リレーに再接続しています…</p>
     {/if}
+    <!-- Outside the `{#if event}` on purpose: an ancestor the relay turns out
+         not to hold is exactly the case where the reader most needs the way
+         back, and there is no card to hang it off. -->
+    {#if onBack}
+      <button type="button" class="back" part="back" onclick={onBack}>
+        ← 元の投稿に戻る
+      </button>
+    {/if}
     {#if event}
       <article class="post" part="post">
         <EventCard
@@ -112,6 +153,7 @@
           {onAction}
           {materialIcons}
           {onEmbedRequest}
+          {onNavigate}
           onVisible={onAuthorVisible && (() => onAuthorVisible(event.pubkey))}
         />
         {#if summary}
@@ -121,6 +163,21 @@
             {showAvatars}
             defaultOpen={reactionsOpen}
             onReactorVisible={onAuthorVisible}
+          />
+        {/if}
+        {#if tree}
+          <ReplyTree
+            {tree}
+            profiles={state.profiles}
+            validationStatuses={state.validationStatuses}
+            embeds={state.embeds}
+            origins={state.origins}
+            {showOrigin}
+            {showAvatars}
+            {showMedia}
+            {showEmbeds}
+            {onAuthorVisible}
+            {onEmbedRequest}
           />
         {/if}
       </article>
@@ -178,5 +235,28 @@
     padding: 16px;
     text-align: center;
     color: var(--nt-muted, #657786);
+  }
+
+  .back {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 0 8px;
+    padding: var(--nt-back-padding, 4px 10px);
+    border: 1px solid var(--nt-border, #e1e8ed);
+    border-radius: var(--nt-radius, 10px);
+    background: var(--nt-back-bg, transparent);
+    color: var(--nt-back-fg, var(--nt-muted, #657786));
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+
+  .back:hover {
+    background: var(--nt-back-hover-bg, rgb(0 0 0 / 4%));
+  }
+
+  .back:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: 2px;
   }
 </style>

@@ -333,7 +333,9 @@
     <strong>リアクション（NIP-25 / kind 7）</strong>が付きます。絵文字ごとの集計チップを押すと、
     リアクションしたユーザのアイコンと内容が絵文字によらず全件開きます。リアクションの購読は開いている間ずっと
     張られたままなので、読んでいる最中に付いたものも増えていきます。
-    <strong>リプライの表示はまだありません。</strong>
+    さらに <strong>リプライツリー（NIP-10 / kind 1）</strong>が下に並びます。階層ごとに 1 本の
+    <code>#e</code> 購読を張って既定で 3 階層まで辿り、<strong>「返信先」チップを押すと
+    その投稿へ表示が切り替わります</strong>（「戻る」で元に戻ります）。
   </p>
 
   <label class="text-input post-event-id">
@@ -373,10 +375,11 @@
   <p class="footnote">
     iframe で使う場合はこれも<strong>別のページ</strong>です:
     <code>{embedOrigin}embed/post/?event-id=note1...&amp;relays=…</code>。
-    リアクションを取得も表示もさせたくない場合は <code>show-reactions="false"</code> を
-    指定してください（kind 7 の購読自体を張らなくなります）。
-    <strong>このデモでもリアクションは送れません</strong> — 鍵を持たない読み取り専用の表示器なので、
-    kind 7 の発行は埋め込む側の仕事です。
+    リアクションを取得も表示もさせたくない場合は <code>show-reactions="false"</code>、
+    リプライツリーなら <code>show-replies="false"</code> を指定してください
+    （どちらも購読自体を張らなくなります）。階層の数は <code>replies-depth</code>（既定 3・最大 5）。
+    <strong>このデモでもリアクションや返信は送れません</strong> — 鍵を持たない読み取り専用の表示器なので、
+    kind 7 や返信の発行は埋め込む側の仕事です。
   </p>
 
   <p class="footnote">

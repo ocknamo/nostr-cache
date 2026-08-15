@@ -81,6 +81,23 @@
      */
     onVisible?: () => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
+    /**
+     * Called with the parent's id when the 「返信先」 chip is pressed.
+     *
+     * Without it the chip stays the plain text it has always been: a card in a
+     * timeline has nowhere to navigate to, and sending a reader out to some
+     * stranger's client is not what this widget does. Only the reply chip gets
+     * this — a quote is usually already open as a nested card, and pressing one
+     * would replace the post a page deliberately embedded.
+     */
+    onNavigate?: (id: string) => void;
+    /**
+     * Off inside a thread, where the parent is the card this one is nested
+     * under: repeating it as an abbreviated id says nothing the layout has not
+     * already said, on every card. Quote chips are unaffected — the note a
+     * reply quotes is not on screen.
+     */
+    showReplyRef?: boolean;
   }
 
   const {
@@ -100,6 +117,8 @@
     materialIcons,
     onVisible,
     onEmbedRequest,
+    onNavigate,
+    showReplyRef = true,
   }: Props = $props();
 
   /** Whether this button's `icon` is a ligature name rather than literal text. */
@@ -147,7 +166,9 @@
    * did not choose to quote, and "返信先" says something the quote card does not.
    */
   const refs = $derived(
-    parseRefs(event).filter((ref) => ref.kind !== 'quote' || !embeddedKeys.has(ref.id))
+    parseRefs(event).filter((ref) =>
+      ref.kind === 'quote' ? !embeddedKeys.has(ref.id) : showReplyRef
+    )
   );
 
   const REF_LABELS: Record<'reply' | 'quote', string> = {
@@ -322,7 +343,20 @@
             <span class="ref-label">{REF_LABELS[ref.kind]}</span>
             <!-- Only the reference itself: the widget never fetches the target,
                  so there is no body to preview here. -->
-            <span class="ref-id" title={ref.id}>{shortPubkey(ref.id)}</span>
+            {#if onNavigate && ref.kind === 'reply'}
+              <!-- A real button, so Enter, Space, the tab order and the role a
+                   screen reader announces all come for free. -->
+              <button
+                type="button"
+                class="ref-id ref-nav"
+                part="ref-nav"
+                title={ref.id}
+                aria-label="返信先の投稿を開く"
+                onclick={() => onNavigate(ref.id)}>{shortPubkey(ref.id)}</button
+              >
+            {:else}
+              <span class="ref-id" title={ref.id}>{shortPubkey(ref.id)}</span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -728,6 +762,28 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .ref-nav {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font-size: inherit;
+    /* Dotted rather than solid: this navigates inside the widget, and drawing
+       it as a web link promises a page the reader is not going to get. */
+    text-decoration: underline dotted;
+    cursor: pointer;
+  }
+
+  .ref-nav:hover {
+    color: var(--nt-fg, #0f1419);
+  }
+
+  .ref-nav:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: 2px;
   }
 
   /* Spans the avatar gutter too, so the row runs the full width of the card the

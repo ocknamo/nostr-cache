@@ -17,6 +17,13 @@ import { type Profile, parseProfileContent } from './profile.ts';
 import { MAX_REACTIONS, parseReaction } from './reactions.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
+import {
+  DEFAULT_REPLIES_LIMIT,
+  DEFAULT_REPLY_DEPTH,
+  MAX_REPLIES,
+  MAX_REPLY_DEPTH,
+  acceptsReply,
+} from './reply-tree.ts';
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
 import { insertEvent } from './timeline-utils.ts';
 import { type ValidationStatus, fetchValidationStatuses, hasPending } from './validation-status.ts';
@@ -35,9 +42,11 @@ const MAX_CONCURRENT_PROFILE_REQUESTS = 4;
  * Lookups for quoted events allowed in flight at once.
  *
  * Shares the relay's per-client `maxSubscriptions` (20) with the timeline's own
- * REQ and the four profile lookups above, so the widget's ceiling is seven —
- * with plenty of headroom, because a nested card that fails for want of a
- * subscription slot is indistinguishable from one whose event does not exist.
+ * REQ, the four profile lookups above, and — on a post detail — one reaction
+ * subscription plus one per thread level (`MAX_REPLY_DEPTH`), so the widget's
+ * ceiling is thirteen. Headroom matters here because a nested card that fails
+ * for want of a subscription slot is indistinguishable from one whose event
+ * does not exist.
  */
 const MAX_CONCURRENT_EMBED_REQUESTS = 2;
 /**
@@ -66,6 +75,16 @@ const VALIDATION_POLL_INTERVAL_MS = 5000;
  * goes on delivering past it.
  */
 const DEFAULT_REACTION_LIMIT = 200;
+
+/**
+ * Ids carried by one level's REQ.
+ *
+ * A wide thread would otherwise put every reply of the level above into a
+ * single filter, and the relay matches `#e` against each of them. What does not
+ * fit is not retried later — a level is asked once — so a very wide thread is
+ * read narrower rather than slower.
+ */
+const MAX_REPLY_IDS_PER_LEVEL = 100;
 
 /**
  * How many polls a watch waits for the event to appear in storage before
@@ -122,6 +141,43 @@ export interface FilterSourceContext {
  */
 export type FilterSource = (context: FilterSourceContext) => Promise<Filter[]>;
 
+/** The watches a post detail keeps open, as {@link TimelineController.watchPost} reads them. */
+export interface PostWatches {
+  reactions?: { limit?: number };
+  replies?: ReplyRequestOptions;
+}
+
+export interface ReplyRequestOptions {
+  /** Backfill size for one level's REQ. */
+  limit?: number;
+  /** Levels of the thread to open, counting the direct replies as one. */
+  maxDepth?: number;
+}
+
+interface ReplyRequest {
+  target: PostTarget;
+  limit: number;
+  maxDepth: number;
+}
+
+interface ReplyWatch extends ReplyRequest {
+  /** Subscription ids still open. A relay that closes one removes it. */
+  subs: string[];
+  /**
+   * Levels opened, which only ever grows.
+   *
+   * Not `subs.length`: a relay closing a level would shrink that, and the depth
+   * test reading it would then let the thread open past `maxDepth`.
+   */
+  opened: number;
+  /** Ids already put on a level's filter, so none is asked about twice. */
+  asked: Set<string>;
+  /** Ids delivered since the last level opened — the next level's question. */
+  frontier: string[];
+  /** Pending {@link TimelineController.advanceReplyLevel}, if a level has ended. */
+  advance?: ReturnType<typeof setTimeout>;
+}
+
 export interface TimelineState {
   status: ConnectionStatus;
   events: NostrEvent[];
@@ -137,6 +193,13 @@ export interface TimelineState {
    * `reactions.ts` stays correct as more arrive.
    */
   reactions: Map<string, NostrEvent[]>;
+  /**
+   * Kind 1 replies collected for a post, keyed by {@link PostTarget.key} and
+   * newest first. Raw events rather than a tree, for the same reason
+   * {@link TimelineState.reactions} holds raw events: a view re-deriving
+   * through `reply-tree.ts` stays correct as more arrive.
+   */
+  replies: Map<string, NostrEvent[]>;
   eose: boolean;
   error?: string;
   /** Set only by a {@link FilterSource} that reports one; see {@link FollowsState}. */
@@ -206,6 +269,16 @@ export class TimelineController {
   /** Targets a subscription has been opened for, so a repeat costs nothing. */
   private requestedReactions = new Set<string>();
   private reactionSeq = 0;
+  /**
+   * Thread subscriptions, by {@link PostTarget.key}. One REQ per level rather
+   * than one per reply: NIP-10 lets a grandchild name only its own parent and
+   * the thread root, so a single `#e` on the post cannot reach past the first
+   * level, but the level above always knows the ids the next one answers.
+   */
+  private readonly replyWatches = new Map<string, ReplyWatch>();
+  private pendingReplies: ReplyRequest[] = [];
+  private requestedReplies = new Set<string>();
+  private replySeq = 0;
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -216,6 +289,7 @@ export class TimelineController {
     profiles: new Map(),
     embeds: new Map(),
     reactions: new Map(),
+    replies: new Map(),
     eose: false,
   };
   private currentSubId: string | null = null;
@@ -267,6 +341,7 @@ export class TimelineController {
           this.pumpProfileQueue();
           this.pumpEmbedQueue();
           this.pumpReactionQueue();
+          this.pumpReplyQueue();
         } else if (status === 'error' && this.connectedOnce) {
           // Reconnection gave up. Say so, or the widget goes on showing a
           // timeline that stopped updating some minutes ago with nothing to
@@ -393,9 +468,10 @@ export class TimelineController {
     this.patch({ follows: undefined });
     this.closeProfiles();
     this.closeEmbeds();
-    // A live reaction REQ would go on refilling the cache the caller is about to
-    // measure cold — the very thing suspend() exists to stop.
+    // A live reaction or reply REQ would go on refilling the cache the caller is
+    // about to measure cold — the very thing suspend() exists to stop.
     this.closeReactions();
+    this.closeReplies();
     this.clearTimers();
   }
 
@@ -411,6 +487,7 @@ export class TimelineController {
     this.closeProfiles();
     this.closeEmbeds();
     this.closeReactions();
+    this.closeReplies();
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -443,9 +520,10 @@ export class TimelineController {
     // asked for them are about to go away.
     this.closeEmbeds();
     this.embedAbort = new AbortController();
-    // Reactions deliberately survive a re-subscribe. Unlike profiles and quoted
-    // events they are not derived from what is on screen — the caller named the
-    // post — so a new filter says nothing about whether they are still wanted.
+    // Reactions and replies deliberately survive a re-subscribe. Unlike profiles
+    // and quoted events they are not derived from what is on screen — the caller
+    // named the post — so a new filter says nothing about whether they are still
+    // wanted. {@link showPost} is the caller that does know, and clears them.
     // Timings are per subscription id and never revisited once replaced.
     this.timer.clear();
     this.patch({
@@ -793,7 +871,7 @@ export class TimelineController {
    *
    * @param limit How many reactions to backfill; more may arrive live.
    */
-  requestReactions(target: PostTarget, limit = DEFAULT_REACTION_LIMIT): void {
+  requestReactions(target: PostTarget, limit: number = DEFAULT_REACTION_LIMIT): void {
     if (this.stopped || this.suspended) {
       return;
     }
@@ -890,6 +968,213 @@ export class TimelineController {
     for (const [key, subId] of [...this.reactionSubs]) {
       this.reactionSubs.delete(key);
       this.connection.unsubscribe(subId);
+    }
+  }
+
+  /**
+   * Watch the thread under one post (kind 1 replies, NIP-10).
+   *
+   * Like {@link requestReactions} and unlike {@link requestProfile}, this is
+   * not viewport-triggered: the post it names is the whole reason the widget
+   * exists. The levels open as the one above them reaches EOSE, so a thread
+   * that is only one deep costs one REQ.
+   */
+  requestReplies(target: PostTarget, options: ReplyRequestOptions = {}): void {
+    if (this.stopped || this.suspended || this.requestedReplies.has(target.key)) {
+      return;
+    }
+    this.requestedReplies.add(target.key);
+    this.pendingReplies.push({
+      target,
+      limit: options.limit ?? DEFAULT_REPLIES_LIMIT,
+      maxDepth: Math.min(Math.max(1, options.maxDepth ?? DEFAULT_REPLY_DEPTH), MAX_REPLY_DEPTH),
+    });
+    this.pumpReplyQueue();
+  }
+
+  /** Held until the socket is up, as every lookup this class opens itself is. */
+  private pumpReplyQueue(): void {
+    if (this.stopped || this.suspended || !this.connection.isConnected) {
+      return;
+    }
+    while (this.pendingReplies.length > 0) {
+      const next = this.pendingReplies.shift();
+      if (next !== undefined) {
+        const watch: ReplyWatch = {
+          ...next,
+          subs: [],
+          opened: 0,
+          asked: new Set(),
+          frontier: [],
+        };
+        this.replyWatches.set(next.target.key, watch);
+        this.openReplyLevel(watch);
+      }
+    }
+  }
+
+  /**
+   * @param ids The events this level answers. Absent for the first level, which
+   *   asks about the post itself — by `a` when it is addressable, because that
+   *   is what a reply to an article names.
+   */
+  private openReplyLevel(watch: ReplyWatch, ids?: string[]): void {
+    const { target, limit } = watch;
+    this.replySeq += 1;
+    const subId = `replies-${this.replySeq}`;
+    watch.subs.push(subId);
+    watch.opened += 1;
+
+    const filter: Filter =
+      ids !== undefined
+        ? { kinds: [1], '#e': ids, limit }
+        : target.match.address !== undefined
+          ? { kinds: [1], '#a': [target.match.address], limit }
+          : { kinds: [1], '#e': [target.match.id ?? target.key], limit };
+
+    this.connection.subscribe(subId, [filter], {
+      onEvent: (event) => this.ingestReply(watch, event),
+      // Deferred by a turn rather than run here: events and EOSE reach this
+      // class down two different rx-nostr observables, so the last deliveries
+      // of a level can still be queued when its EOSE lands. Reading the
+      // frontier now would ask the next level about a short list — or, for a
+      // level whose replies all arrived that way, about nothing at all. The
+      // profile lookups defer their close for the same reason
+      // ({@link finishAfterEose}).
+      onEose: () => {
+        clearTimeout(watch.advance);
+        watch.advance = setTimeout(() => this.advanceReplyLevel(watch), 0);
+      },
+      onClosed: (reason) => {
+        // Not the widget's `error`, for the reason `openReactionRequest` gives:
+        // the post is still on screen and still correct.
+        console.warn(`[nostr-post] reply subscription closed${reason ? `: ${reason}` : ''}`);
+        watch.subs = watch.subs.filter((id) => id !== subId);
+        // `requestedReplies` deliberately keeps its entry, unlike the reaction
+        // path which releases so the caller can ask again: a thread is several
+        // subscriptions, and re-requesting it would re-open the levels that are
+        // still perfectly alive. What a closed level costs is that one level's
+        // live updates.
+      },
+    });
+  }
+
+  /**
+   * Open the next level with what this one delivered.
+   *
+   * Driven by EOSE rather than by each arrival, because the alternative is a
+   * REQ per reply. It is only correct because this relay orders EOSE after the
+   * events it has accepted — the same property {@link PROFILE_EOSE_GRACE_MS}
+   * rests on.
+   *
+   * Replies that arrive *after* their level's EOSE are kept and rendered, but
+   * do not open a level of their own: a live thread would otherwise re-open a
+   * subscription every time someone answered.
+   */
+  private advanceReplyLevel(watch: ReplyWatch): void {
+    watch.advance = undefined;
+    // Cleared before the guards: past the last level `ingestReply` goes on
+    // adding to it, and nothing would ever drain it again.
+    const arrived = watch.frontier.filter((id) => !watch.asked.has(id));
+    watch.frontier = [];
+    if (this.stopped || this.suspended || watch.opened >= watch.maxDepth) {
+      return;
+    }
+    const ids = arrived.slice(0, MAX_REPLY_IDS_PER_LEVEL);
+    if (ids.length === 0) {
+      return;
+    }
+    for (const id of ids) {
+      watch.asked.add(id);
+    }
+    this.openReplyLevel(watch, ids);
+  }
+
+  /**
+   * Filtered here rather than in the view, as reactions are and for the same
+   * reason — the cap is here. A relay matches `#e` against any `e` tag, so
+   * anyone at all can write `["e", <this post>, "", "root"]` and reach this
+   * subscription; without the gate, {@link MAX_REPLIES} of those would push the
+   * post's real replies out of the store, and `insertEvent` drops the oldest,
+   * so a stranger with fresh timestamps decides what survives.
+   *
+   * The gate needs what is already held, which is why it lives here rather than
+   * in the pure module: `acceptsReply` can only answer for a set.
+   */
+  private ingestReply(watch: ReplyWatch, event: NostrEvent): void {
+    const current = this.state.replies.get(watch.target.key) ?? [];
+    const held = new Set(current.map((reply) => reply.id));
+    const accepted = acceptsReply(event, watch.target.match, {
+      known: held,
+      // The addressable post itself, which its direct replies name alongside
+      // the coordinate. Undefined until the post has arrived, which is also
+      // when the thread subscription has nothing to be about yet.
+      ...(this.state.events[0] ? { rootId: this.state.events[0].id } : {}),
+    });
+    if (!accepted) {
+      return;
+    }
+    this.relayHost?.metrics.classifyDelivered(event.id);
+    const next = insertEvent(current, event, MAX_REPLIES);
+    if (next === current) {
+      return;
+    }
+    const replies = new Map(this.state.replies);
+    replies.set(watch.target.key, next);
+    watch.frontier.push(event.id);
+    this.patch({ replies });
+    // Replies are cards like any other, and the relay verifies signatures in
+    // the background; without this they would stay dimmed for good.
+    this.scheduleValidationRefresh();
+  }
+
+  /**
+   * The subscriptions go; what arrived stays in state, as with reactions —
+   * blanking the thread would look like the replies had been deleted.
+   */
+  private closeReplies(): void {
+    this.pendingReplies = [];
+    this.requestedReplies = new Set();
+    for (const [key, watch] of [...this.replyWatches]) {
+      this.replyWatches.delete(key);
+      clearTimeout(watch.advance);
+      for (const subId of watch.subs) {
+        this.connection.unsubscribe(subId);
+      }
+    }
+  }
+
+  /**
+   * Point the widget at a different post, keeping the relay and the connection.
+   *
+   * Not {@link applyFilter}: the reactions and the thread belong to the post
+   * rather than to the timeline, so leaving them open would leak up to
+   * `MAX_REPLY_DEPTH + 1` subscriptions per hop — a few steps up a thread and
+   * the reader is over the relay's per-client cap. Their collected events go
+   * with them, because the alternative is a map that grows with every post
+   * visited and the cache answers the way back from IndexedDB anyway.
+   */
+  showPost(target: PostTarget, wants: PostWatches = {}): void {
+    this.closeReactions();
+    this.closeReplies();
+    this.applyFilter([target.filter]);
+    this.patch({ reactions: new Map(), replies: new Map() });
+    this.watchPost(target, wants);
+  }
+
+  /**
+   * Open whichever of the two post-scoped watches the caller asked for.
+   *
+   * The presence of the key is the request and the value is only its settings,
+   * so "watch the reactions, at whatever the default backfill is" is sayable —
+   * an absent limit must not read as an absent request.
+   */
+  watchPost(target: PostTarget, wants: PostWatches): void {
+    if (wants.reactions !== undefined) {
+      this.requestReactions(target, wants.reactions.limit);
+    }
+    if (wants.replies !== undefined) {
+      this.requestReplies(target, wants.replies);
     }
   }
 
@@ -1011,6 +1296,13 @@ export class TimelineController {
     for (const embed of this.state.embeds.values()) {
       if (embed.event) {
         ids.add(embed.event.id);
+      }
+    }
+    // So does a reply: the thread is rendered with the same cards as the post,
+    // and without this every one of them would stay dimmed for good.
+    for (const replies of this.state.replies.values()) {
+      for (const reply of replies) {
+        ids.add(reply.id);
       }
     }
     if (!host || ids.size === 0) {
