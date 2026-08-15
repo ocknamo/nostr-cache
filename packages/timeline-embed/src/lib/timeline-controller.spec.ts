@@ -1281,6 +1281,37 @@ describe('TimelineController', () => {
       expect(repliesOf(states)).toEqual([REPLY_ID]);
     });
 
+    it('refuses an answer to something else that claims this post as its root', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(
+        dbName,
+        [
+          replyEvent(REPLY_ID, POST_ID),
+          // Anyone can write this, and the relay's `#e` delivers it. Ungated,
+          // enough of them push the real replies out of MAX_REPLIES — and
+          // `insertEvent` drops the oldest, so fresh timestamps decide.
+          makeEvent({
+            id: ELSEWHERE_ID,
+            pubkey: 'spam',
+            created_at: 1_900_000_000,
+            tags: [
+              ['e', POST_ID, '', 'root'],
+              ['e', GRANDCHILD_ID, '', 'reply'],
+            ],
+          }),
+        ],
+        { validated: true }
+      );
+      const { controller, states } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target, { maxDepth: 1 });
+
+      await waitFor(() => repliesOf(states).length >= 1, 'the reply');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(repliesOf(states)).toEqual([REPLY_ID]);
+    });
+
     it('asks the relay to vouch for the replies, not only the post', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
       await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
@@ -1363,6 +1394,52 @@ describe('TimelineController', () => {
       expect(
         openSubscriptions(controller).find((sub) => sub.id.startsWith('replies-'))?.filters
       ).toEqual([{ kinds: [1], '#e': [PARENT_ID], limit: 100 }]);
+    });
+
+    it('stays inside the relay budget however far a reader walks up a thread', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      // A chain of replies, each the parent of the next, so every hop opens a
+      // level 2 as well as its own level 1.
+      const chain = Array.from(
+        { length: 8 },
+        (_, index) => `ee${String(index).padStart(2, '0')}${'0'.repeat(60)}`
+      );
+      await seedCache(
+        dbName,
+        chain.flatMap((id, index) => [
+          makeEvent({ id, pubkey: 'p1', content: `post ${index}` }),
+          // A reply to it, so the thread has a second level to open.
+          makeEvent({
+            id: `ff${String(index).padStart(2, '0')}${'0'.repeat(60)}`,
+            pubkey: 'p2',
+            tags: [['e', id, '', 'root']],
+          }),
+        ]),
+        { validated: true }
+      );
+      const { controller } = createController(dbName);
+      const first = parsePostTarget({ eventId: chain[0] });
+      if (!first) {
+        throw new Error('fixture post id should parse');
+      }
+      await controller.start([first.filter]);
+      controller.requestReactions(first);
+      controller.requestReplies(first);
+
+      for (const id of chain.slice(1)) {
+        const next = parsePostTarget({ eventId: id });
+        if (!next) {
+          throw new Error('fixture post id should parse');
+        }
+        controller.showPost(next, { reactions: { limit: 50 }, replies: { maxDepth: 3 } });
+        await waitFor(() => postSubscriptions(controller).length >= 2, `the watches for ${id}`);
+      }
+
+      // The relay allows one client 20. Eight hops leaking two apiece would be
+      // well past it, and the failure mode is a REQ the relay simply refuses.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(openSubscriptionIds(controller).length).toBeLessThanOrEqual(20);
+      expect(postSubscriptions(controller).length).toBeLessThanOrEqual(4);
     });
 
     it('drops what the old post had collected', async () => {

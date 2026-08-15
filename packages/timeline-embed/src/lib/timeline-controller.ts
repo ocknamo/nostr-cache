@@ -80,7 +80,9 @@ const DEFAULT_REACTION_LIMIT = 200;
  * Ids carried by one level's REQ.
  *
  * A wide thread would otherwise put every reply of the level above into a
- * single filter, and the relay matches `#e` against each of them.
+ * single filter, and the relay matches `#e` against each of them. What does not
+ * fit is not retried later — a level is asked once — so a very wide thread is
+ * read narrower rather than slower.
  */
 const MAX_REPLY_IDS_PER_LEVEL = 100;
 
@@ -159,8 +161,15 @@ interface ReplyRequest {
 }
 
 interface ReplyWatch extends ReplyRequest {
-  /** Subscription ids, one per level opened so far. */
+  /** Subscription ids still open. A relay that closes one removes it. */
   subs: string[];
+  /**
+   * Levels opened, which only ever grows.
+   *
+   * Not `subs.length`: a relay closing a level would shrink that, and the depth
+   * test reading it would then let the thread open past `maxDepth`.
+   */
+  opened: number;
   /** Ids already put on a level's filter, so none is asked about twice. */
   asked: Set<string>;
   /** Ids delivered since the last level opened — the next level's question. */
@@ -991,7 +1000,13 @@ export class TimelineController {
     while (this.pendingReplies.length > 0) {
       const next = this.pendingReplies.shift();
       if (next !== undefined) {
-        const watch: ReplyWatch = { ...next, subs: [], asked: new Set(), frontier: [] };
+        const watch: ReplyWatch = {
+          ...next,
+          subs: [],
+          opened: 0,
+          asked: new Set(),
+          frontier: [],
+        };
         this.replyWatches.set(next.target.key, watch);
         this.openReplyLevel(watch);
       }
@@ -1008,6 +1023,7 @@ export class TimelineController {
     this.replySeq += 1;
     const subId = `replies-${this.replySeq}`;
     watch.subs.push(subId);
+    watch.opened += 1;
 
     const filter: Filter =
       ids !== undefined
@@ -1034,6 +1050,11 @@ export class TimelineController {
         // the post is still on screen and still correct.
         console.warn(`[nostr-post] reply subscription closed${reason ? `: ${reason}` : ''}`);
         watch.subs = watch.subs.filter((id) => id !== subId);
+        // `requestedReplies` deliberately keeps its entry, unlike the reaction
+        // path which releases so the caller can ask again: a thread is several
+        // subscriptions, and re-requesting it would re-open the levels that are
+        // still perfectly alive. What a closed level costs is that one level's
+        // live updates.
       },
     });
   }
@@ -1052,13 +1073,14 @@ export class TimelineController {
    */
   private advanceReplyLevel(watch: ReplyWatch): void {
     watch.advance = undefined;
-    if (this.stopped || this.suspended || watch.subs.length >= watch.maxDepth) {
+    // Cleared before the guards: past the last level `ingestReply` goes on
+    // adding to it, and nothing would ever drain it again.
+    const arrived = watch.frontier.filter((id) => !watch.asked.has(id));
+    watch.frontier = [];
+    if (this.stopped || this.suspended || watch.opened >= watch.maxDepth) {
       return;
     }
-    const ids = watch.frontier
-      .filter((id) => !watch.asked.has(id))
-      .slice(0, MAX_REPLY_IDS_PER_LEVEL);
-    watch.frontier = [];
+    const ids = arrived.slice(0, MAX_REPLY_IDS_PER_LEVEL);
     if (ids.length === 0) {
       return;
     }
@@ -1070,22 +1092,34 @@ export class TimelineController {
 
   /**
    * Filtered here rather than in the view, as reactions are and for the same
-   * reason: a relay matches `#e` against any `e` tag, so a busy thread's other
-   * branches would fill {@link MAX_REPLIES} and push out this post's own.
-   * Whether a reply *connects* to the post is not decidable one event at a
-   * time — `buildReplyTree` answers that with the whole set.
+   * reason — the cap is here. A relay matches `#e` against any `e` tag, so
+   * anyone at all can write `["e", <this post>, "", "root"]` and reach this
+   * subscription; without the gate, {@link MAX_REPLIES} of those would push the
+   * post's real replies out of the store, and `insertEvent` drops the oldest,
+   * so a stranger with fresh timestamps decides what survives.
+   *
+   * The gate needs what is already held, which is why it lives here rather than
+   * in the pure module: `acceptsReply` can only answer for a set.
    */
   private ingestReply(watch: ReplyWatch, event: NostrEvent): void {
-    if (!acceptsReply(event, watch.target.match)) {
+    const current = this.state.replies.get(watch.target.key) ?? [];
+    const held = new Set(current.map((reply) => reply.id));
+    const accepted = acceptsReply(event, watch.target.match, {
+      known: held,
+      // The addressable post itself, which its direct replies name alongside
+      // the coordinate. Undefined until the post has arrived, which is also
+      // when the thread subscription has nothing to be about yet.
+      ...(this.state.events[0] ? { rootId: this.state.events[0].id } : {}),
+    });
+    if (!accepted) {
       return;
     }
     this.relayHost?.metrics.classifyDelivered(event.id);
-    const replies = new Map(this.state.replies);
-    const current = replies.get(watch.target.key) ?? [];
     const next = insertEvent(current, event, MAX_REPLIES);
     if (next === current) {
       return;
     }
+    const replies = new Map(this.state.replies);
     replies.set(watch.target.key, next);
     watch.frontier.push(event.id);
     this.patch({ replies });

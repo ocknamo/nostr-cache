@@ -27,8 +27,8 @@ function reply(id: string, parent: string, content: string): NostrEvent {
 }
 
 /** Built through the real builder, so the view and the rules cannot drift. */
-function tree(events: NostrEvent[], maxDepth?: number) {
-  return buildReplyTree(events, { id: POST_ID }, maxDepth ? { maxDepth } : {});
+function tree(events: NostrEvent[], options: { maxDepth?: number; maxNodes?: number } = {}) {
+  return buildReplyTree(events, { id: POST_ID }, options);
 }
 
 describe('ReplyTree', () => {
@@ -71,10 +71,9 @@ describe('ReplyTree', () => {
   it('marks a reply whose own replies were left out by the depth cap', () => {
     render(ReplyTree, {
       props: {
-        tree: tree(
-          [reply(REPLY_ID, POST_ID, 'first'), reply(GRANDCHILD_ID, REPLY_ID, 'nested')],
-          1
-        ),
+        tree: tree([reply(REPLY_ID, POST_ID, 'first'), reply(GRANDCHILD_ID, REPLY_ID, 'nested')], {
+          maxDepth: 1,
+        }),
       },
     });
 
@@ -90,6 +89,20 @@ describe('ReplyTree', () => {
     });
 
     expect(container.querySelector('.ref')).toBeNull();
+  });
+
+  it('says so when the node cap left direct replies out', () => {
+    render(ReplyTree, {
+      props: {
+        tree: tree([reply(REPLY_ID, POST_ID, 'first'), reply(SIBLING_ID, POST_ID, 'second')], {
+          maxNodes: 1,
+        }),
+      },
+    });
+
+    // There is no card at the top level to hang 「さらに N 件」 off, so without
+    // this the cap removes replies with nothing on screen to say it happened.
+    expect(screen.getByText(/他に 1 件の返信がありますが、表示していません/)).toBeInTheDocument();
   });
 
   it('renders no action buttons under a reply', () => {

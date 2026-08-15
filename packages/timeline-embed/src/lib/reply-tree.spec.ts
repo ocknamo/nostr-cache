@@ -52,8 +52,32 @@ function paths(nodes: readonly ReplyNode[], prefix = ''): string[] {
 }
 
 describe('acceptsReply', () => {
-  it('takes a kind 1 that names a parent', () => {
+  it('takes a direct reply to the post', () => {
     expect(acceptsReply(reply('r1', POST), AT_POST)).toBe(true);
+  });
+
+  it('takes a reply to a reply already held', () => {
+    const nested = reply('r2', id('r1'));
+
+    expect(acceptsReply(nested, AT_POST, { known: new Set([id('r1')]) })).toBe(true);
+  });
+
+  it('rejects an answer to something else that claims this post as its root', () => {
+    // Anyone can write this and the relay's `#e` will deliver it. Ungated, 500
+    // of them push the post's real replies out of the store — and `insertEvent`
+    // drops the oldest, so fresh timestamps decide what survives.
+    const elsewhere = reply('spam', OTHER);
+
+    expect(acceptsReply(elsewhere, AT_POST)).toBe(false);
+  });
+
+  it('rejects a grandchild until the level that asks about its parent', () => {
+    const grandchild = reply('r2', id('r1'));
+
+    // Delivered by level 1, which it reaches through the root tag, before its
+    // parent — it is newer. Level 2 asks about `r1` and it comes back.
+    expect(acceptsReply(grandchild, AT_POST)).toBe(false);
+    expect(acceptsReply(grandchild, AT_POST, { known: new Set([id('r1')]) })).toBe(true);
   });
 
   it('rejects a reaction delivered by the same #e filter', () => {
@@ -228,11 +252,64 @@ describe('buildReplyTree', () => {
     expect(tree.orphans).toBe(1);
   });
 
+  it('says how many direct replies the node cap left out', () => {
+    const events = [
+      reply('r1', POST, { created_at: 1_700_000_100 }),
+      reply('r2', POST, { created_at: 1_700_000_200 }),
+      reply('r3', POST, { created_at: 1_700_000_300 }),
+    ];
+
+    // The top level has no node to mark, so without this the cap removes
+    // replies with nothing on screen to say it happened.
+    const tree = buildReplyTree(events, AT_POST, { maxNodes: 1 });
+
+    expect(tree.total).toBe(1);
+    expect(tree.hiddenRoots).toBe(2);
+    expect(tree.hidden).toBe(2);
+  });
+
+  it('keeps a grandchild off the root when its own parent never arrived', () => {
+    const article = 'ab'.repeat(32);
+    // What a client writes replying to a reply to an article: the coordinate,
+    // the article's id, and the parent it is actually answering.
+    const stranded = makeEvent({
+      id: id('r2'),
+      content: 'r2',
+      tags: [
+        ['a', ADDRESS, '', 'root'],
+        ['e', article, '', 'root'],
+        ['e', id('r1'), '', 'reply'],
+      ],
+    });
+
+    const tree = buildReplyTree([stranded], AT_ADDRESS, { rootId: article });
+
+    // Reading it as a direct reply would show an answer to something else as an
+    // answer to the article.
+    expect(tree.roots).toEqual([]);
+    expect(tree.orphans).toBe(1);
+  });
+
+  it('hangs a direct reply that also names the article version under the article', () => {
+    const article = 'ab'.repeat(32);
+    const direct = makeEvent({
+      id: id('r1'),
+      content: 'r1',
+      tags: [
+        ['a', ADDRESS, '', 'root'],
+        ['e', article, '', 'root'],
+      ],
+    });
+
+    expect(paths(buildReplyTree([direct], AT_ADDRESS, { rootId: article }).roots)).toEqual(['r1']);
+  });
+
   it('has nothing to build without a target', () => {
     expect(buildReplyTree([reply('r1', POST)], {})).toEqual({
       roots: [],
       total: 0,
       hidden: 0,
+      hiddenRoots: 0,
       orphans: 0,
     });
   });

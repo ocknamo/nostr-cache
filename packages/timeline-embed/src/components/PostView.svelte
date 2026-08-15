@@ -99,6 +99,10 @@
     target && showReplies
       ? buildReplyTree(state.replies.get(target.key) ?? [], target.match, {
           maxDepth: repliesDepth,
+          // A reply to an article names the coordinate and the version its
+          // author was reading; without the second, that `e` tag points at an
+          // event the thread does not contain.
+          ...(event ? { rootId: event.id } : {}),
         })
       : undefined
   );

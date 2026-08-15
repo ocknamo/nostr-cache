@@ -68,6 +68,13 @@
         {onEmbedRequest}
       />
     {/if}
+    {#if tree.hiddenRoots > 0}
+      <!-- The top level has no card to hang "さらに N 件" off, so the cap would
+           otherwise remove replies with nothing on screen to say it happened. -->
+      <p class="note" part="reply-more">
+        他に {tree.hiddenRoots} 件の返信がありますが、表示していません
+      </p>
+    {/if}
     {#if tree.orphans > 0}
       <!-- Said out loud rather than swallowed. These are replies the relay
            delivered whose own parent never arrived — because it was deleted, or

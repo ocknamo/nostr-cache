@@ -256,10 +256,10 @@
   let startedFor: TimelineController | undefined;
 
   /** What the post on screen is watched with, given the current attributes. */
-  function watches(): PostWatches {
+  function watches(opening: { reactions: boolean; replies: boolean }): PostWatches {
     return {
-      ...(wantsReactions ? { reactions: { limit: parseReactionsLimit(reactionsLimit) } } : {}),
-      ...(wantsReplies
+      ...(opening.reactions ? { reactions: { limit: parseReactionsLimit(reactionsLimit) } } : {}),
+      ...(opening.replies
         ? {
             replies: {
               limit: parseRepliesLimit(repliesLimit),
@@ -321,17 +321,25 @@
     });
   });
 
-  // Point the controller at whichever post is on screen. Depends on exactly
-  // these two things — reading the attributes directly would re-subscribe when
-  // an unrelated one changed.
+  // Point the controller at whichever post is on screen, and open the watches
+  // the attributes ask for.
+  //
+  // The dependencies are exactly the four read here. The two switches are among
+  // them because they are documented as not opening the subscription at all, so
+  // turning one off after mount has to close a REQ rather than merely hide what
+  // it delivers. The sizes (`reactions-limit`, `replies-limit`, `replies-depth`)
+  // are read under `untrack`: they describe a subscription already open, and
+  // re-issuing every REQ because a number changed would re-read from upstream
+  // for nothing.
   $effect(() => {
     const active = controller;
     const shown = target;
+    const opening = { reactions: wantsReactions, replies: wantsReplies };
     if (!active || !shown) {
       return;
     }
     untrack(() => {
-      const wants = watches();
+      const wants = watches(opening);
       if (startedFor !== active) {
         // `start()` opens the timeline REQ itself, so `showPost` here as well
         // would issue it twice.

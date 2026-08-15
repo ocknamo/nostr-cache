@@ -295,6 +295,25 @@ describe('<nostr-post> custom element', () => {
     }
   });
 
+  it('closes the thread REQ when replies are turned off after mount', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName });
+    await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+    const host = await acquireRelayHost({ dbName });
+    try {
+      await waitFor(() => replySubscriptions(host).length === 1, 'the level 1 REQ');
+
+      // Documented as not opening the subscription at all, so switching it off
+      // has to close a REQ rather than merely stop rendering what it delivers.
+      element.setAttribute('show-replies', 'false');
+
+      await waitFor(() => replySubscriptions(host).length === 0, 'the level 1 REQ to close');
+    } finally {
+      await host.release();
+    }
+  });
+
   it('renders the thread the cache holds', async () => {
     const dbName = `post-${crypto.randomUUID()}`;
     await seed(dbName, [
