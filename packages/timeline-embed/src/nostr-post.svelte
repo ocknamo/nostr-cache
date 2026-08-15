@@ -17,6 +17,9 @@
       showReactions: { attribute: 'show-reactions' },
       reactionsLimit: { attribute: 'reactions-limit' },
       reactionsOpen: { attribute: 'reactions-open' },
+      showReplies: { attribute: 'show-replies' },
+      repliesLimit: { attribute: 'replies-limit' },
+      repliesDepth: { attribute: 'replies-depth' },
       actions: { attribute: 'actions' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
@@ -27,18 +30,21 @@
 <script lang="ts">
   /**
    * `<nostr-post event-id="note1…">` — one post, with the reactions (NIP-25
-   * kind 7) it received.
+   * kind 7) and the thread (NIP-10 kind 1) it received.
    *
    * A third element rather than a mode on `<nostr-timeline>`: folding them
    * together would need a precedence rule between `filters` and `event-id`,
    * with the failure mode that someone writes both and one is silently
    * ignored. Same reasoning that split `<nostr-follow-timeline>` off.
    *
-   * Replies are not shown. Reactions are counted, never published — a page
-   * that wants a working like button declares it in `actions` and acts on the
-   * `nostr-timeline:action` event, exactly as under a timeline card.
+   * The thread is descendants only; the post's own ancestors are reached by
+   * pressing its 「返信先」 chip, which re-points this element at the parent
+   * without tearing the relay down. Nothing is ever published — a page that
+   * wants a working like or reply button declares it in `actions` and acts on
+   * the `nostr-timeline:action` event, exactly as under a timeline card.
    */
 
+  import { untrack } from 'svelte';
   import PostView from './components/PostView.svelte';
   import {
     type EventAction,
@@ -46,8 +52,12 @@
     normalizeActions,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
-  import { parsePostTarget } from './lib/post-target.ts';
-  import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
+  import { type PostTarget, parsePostTarget } from './lib/post-target.ts';
+  import {
+    type PostWatches,
+    TimelineController,
+    type TimelineState,
+  } from './lib/timeline-controller.ts';
   import {
     parseDebug,
     parseEnabled,
@@ -55,6 +65,8 @@
     parseFreshness,
     parseReactionsLimit,
     parseRelays,
+    parseRepliesDepth,
+    parseRepliesLimit,
   } from './lib/timeline-config.ts';
 
   interface Props {
@@ -112,6 +124,19 @@
      * costs a profile lookup.
      */
     reactionsOpen?: string | boolean;
+    /** `"false"` also stops any thread subscription being opened at all. */
+    showReplies?: string | boolean;
+    /**
+     * Backfill size for **one level** of the thread; every level asks for its
+     * own. Defaults to 100, capped at 500.
+     */
+    repliesLimit?: string;
+    /**
+     * Levels of the thread to fetch and render, direct replies being the
+     * first. Defaults to 3, capped at 5 — each level is a live subscription
+     * and the relay allows one client 20.
+     */
+    repliesDepth?: string;
     /**
      * Buttons under the post, as a JSON array of `{"id","label","icon"}` — or,
      * set as a property from JS, the array itself, whose entries may carry an
@@ -149,6 +174,9 @@
     showReactions,
     reactionsLimit,
     reactionsOpen,
+    showReplies,
+    repliesLimit,
+    repliesDepth,
     actions,
     materialIcons,
     materialIconsFont,
@@ -168,8 +196,10 @@
     }
   });
 
-  const target = $derived(parsePostTarget({ eventId, author, kind, identifier }));
+  /** The post the attributes name — the root of any walk up the thread. */
+  const attributeTarget = $derived(parsePostTarget({ eventId, author, kind, identifier }));
   const wantsReactions = $derived(parseEnabled(showReactions));
+  const wantsReplies = $derived(parseEnabled(showReplies));
 
   // Separates the two ways `target` comes back undefined: an element with no
   // attributes yet is waiting (a page may set `event-id` from script), while
@@ -179,10 +209,31 @@
     Boolean(eventId?.trim()) || Boolean(author?.trim()) || Boolean(kind?.trim())
   );
   const fatal = $derived(
-    !target && named ? '投稿の指定が正しくありません（event-id を確認してください）' : undefined
+    !attributeTarget && named
+      ? '投稿の指定が正しくありません（event-id を確認してください）'
+      : undefined
   );
 
-  let state = $state<TimelineState>({
+  /**
+   * Ancestors walked up to, oldest first; the last one is what is on screen.
+   * Empty means the post the attributes name.
+   */
+  let trail = $state.raw<PostTarget[]>([]);
+  const target = $derived(trail.at(-1) ?? attributeTarget);
+
+  /**
+   * Ancestors one reader can walk through before the way back stops being a
+   * way back. Trimmed from the front, so the most recent hops survive.
+   */
+  const MAX_TRAIL = 20;
+
+  /**
+   * Not called `state`: this element needs `$state` in more than one place, and
+   * a local of that name is what `$state` reads as inside a Svelte component
+   * (the auto-subscription of a store called `state`), which takes the rune away
+   * from everything after the first use.
+   */
+  let snapshot = $state<TimelineState>({
     status: 'disconnected',
     events: [],
     origins: new Map(),
@@ -190,20 +241,45 @@
     profiles: new Map(),
     embeds: new Map(),
     reactions: new Map(),
+    replies: new Map(),
     eose: false,
   });
 
-  // Deliberately not `$state`: nothing renders from it, and Svelte would read
-  // `$state` here as a store subscription to the variable above.
-  let controller: TimelineController | undefined;
+  // Reactive so the effect below re-points a controller that has just been
+  // rebuilt — `.raw` because nothing renders from it and a class instance is
+  // not something to wrap in a deep proxy.
+  let controller = $state.raw<TimelineController | undefined>(undefined);
+  /**
+   * The controller `start()` has run for. A plain `let`, because the effect
+   * that writes it also reads it and must not re-run on the write.
+   */
+  let startedFor: TimelineController | undefined;
 
-  // Attributes are reactive: changing one rebuilds the controller, which
-  // restarts the relay, so prefer setting them before the element is connected.
+  /** What the post on screen is watched with, given the current attributes. */
+  function watches(): PostWatches {
+    return {
+      ...(wantsReactions ? { reactions: { limit: parseReactionsLimit(reactionsLimit) } } : {}),
+      ...(wantsReplies
+        ? {
+            replies: {
+              limit: parseRepliesLimit(repliesLimit),
+              maxDepth: parseRepliesDepth(repliesDepth),
+            },
+          }
+        : {}),
+    };
+  }
+
+  // The relay's lifetime. Deliberately keyed on *whether* a post was named
+  // rather than on which one: walking up a thread must not drop the last
+  // reference to the shared relay, which would stop it and boot it again
+  // between two posts of the same conversation. Attributes other than the post
+  // are still reactive here — changing one rebuilds the controller — so prefer
+  // setting them before the element is connected.
   $effect(() => {
     // Read before the early return, or a page setting `event-id` later would
     // never re-run this. The relay is not booted for a post that was not named.
-    const current = target;
-    if (!current) {
+    if (!attributeTarget) {
       return;
     }
 
@@ -217,27 +293,74 @@
         followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
       },
       onChange: (next) => {
-        state = next;
+        snapshot = next;
       },
     });
 
     controller = active;
-    void active.start([current.filter]);
-    if (wantsReactions) {
-      // No need to await `start`: the request queues until the socket is up and
-      // the `connected` handler pumps it.
-      active.requestReactions(current, parseReactionsLimit(reactionsLimit));
-    }
 
     return () => {
       controller = undefined;
+      startedFor = undefined;
       void active.stop();
     };
   });
+
+  /** The attributes' post the current trail was walked from. */
+  let trailRoot: string | undefined;
+
+  // A page re-pointing `event-id` is naming a different conversation, so the
+  // way back into the old one goes with it.
+  $effect(() => {
+    const root = attributeTarget?.key;
+    untrack(() => {
+      if (trailRoot !== root) {
+        trailRoot = root;
+        trail = [];
+      }
+    });
+  });
+
+  // Point the controller at whichever post is on screen. Depends on exactly
+  // these two things — reading the attributes directly would re-subscribe when
+  // an unrelated one changed.
+  $effect(() => {
+    const active = controller;
+    const shown = target;
+    if (!active || !shown) {
+      return;
+    }
+    untrack(() => {
+      const wants = watches();
+      if (startedFor !== active) {
+        // `start()` opens the timeline REQ itself, so `showPost` here as well
+        // would issue it twice.
+        startedFor = active;
+        void active.start([shown.filter]);
+        // No need to await it: the watches queue until the socket is up and the
+        // `connected` handler pumps them.
+        active.watchPost(shown, wants);
+        return;
+      }
+      active.showPost(shown, wants);
+    });
+  });
+
+  function navigate(id: string): void {
+    const next = parsePostTarget({ eventId: id });
+    if (!next || next.key === target?.key) {
+      return;
+    }
+    trail = [...trail, next].slice(-MAX_TRAIL);
+  }
+
+  function back(): void {
+    trail = trail.slice(0, -1);
+  }
 </script>
 
 <PostView
-  {state}
+  state={snapshot}
   {target}
   {fatal}
   showOrigin={parseDebug(debug)}
@@ -246,9 +369,13 @@
   showEmbeds={showEmbeds !== 'false'}
   showReactions={wantsReactions}
   reactionsOpen={parseFlag(reactionsOpen)}
+  showReplies={wantsReplies}
+  repliesDepth={parseRepliesDepth(repliesDepth)}
   actions={normalizeActions(actions)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   onEmbedRequest={(embed) => controller?.requestEmbed(embed)}
+  onNavigate={navigate}
+  onBack={trail.length > 0 ? back : undefined}
 />

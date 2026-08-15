@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_REACTIONS } from './reactions.ts';
+import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 import {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
@@ -17,6 +18,8 @@ import {
   parsePubkey,
   parseReactionsLimit,
   parseRelays,
+  parseRepliesDepth,
+  parseRepliesLimit,
   parseShowOriginAlias,
   parseSinceDays,
 } from './timeline-config.ts';
@@ -207,6 +210,58 @@ describe('parseReactionsLimit', () => {
     expect(parseReactionsLimit('-5')).toBeUndefined();
     expect(parseReactionsLimit('1.5')).toBeUndefined();
     expect(parseReactionsLimit('lots')).toBeUndefined();
+  });
+});
+
+describe('parseRepliesLimit', () => {
+  it('reads a positive whole number', () => {
+    expect(parseRepliesLimit('25')).toBe(25);
+    expect(parseRepliesLimit(' 25 ')).toBe(25);
+  });
+
+  it('clamps rather than rejects an over-large request', () => {
+    expect(parseRepliesLimit('99999')).toBe(MAX_REPLIES);
+  });
+
+  it('leaves the default in place when nothing usable was given', () => {
+    expect(parseRepliesLimit(undefined)).toBeUndefined();
+    expect(parseRepliesLimit('')).toBeUndefined();
+    expect(parseRepliesLimit('   ')).toBeUndefined();
+  });
+
+  it('refuses a limit that is not a count', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Zero would ask the relay for nothing at all, which is what
+    // `show-replies="false"` is for.
+    expect(parseRepliesLimit('0')).toBeUndefined();
+    expect(parseRepliesLimit('-5')).toBeUndefined();
+    expect(parseRepliesLimit('1.5')).toBeUndefined();
+    expect(parseRepliesLimit('lots')).toBeUndefined();
+  });
+});
+
+describe('parseRepliesDepth', () => {
+  it('reads a positive whole number', () => {
+    expect(parseRepliesDepth('2')).toBe(2);
+  });
+
+  it('clamps at the depth the subscription budget allows', () => {
+    // Each level is a live subscription and the relay caps a client at 20.
+    expect(parseRepliesDepth('50')).toBe(MAX_REPLY_DEPTH);
+  });
+
+  it('leaves the default in place when nothing usable was given', () => {
+    expect(parseRepliesDepth(undefined)).toBeUndefined();
+    expect(parseRepliesDepth('')).toBeUndefined();
+  });
+
+  it('refuses a depth that is not a count', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseRepliesDepth('0')).toBeUndefined();
+    expect(parseRepliesDepth('-1')).toBeUndefined();
+    expect(parseRepliesDepth('deep')).toBeUndefined();
   });
 });
 

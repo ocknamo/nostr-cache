@@ -22,6 +22,7 @@ function state(overrides: Partial<TimelineState> = {}): TimelineState {
     profiles: new Map(),
     embeds: new Map(),
     reactions: new Map(),
+    replies: new Map(),
     eose: false,
     ...overrides,
   };
@@ -30,6 +31,26 @@ function state(overrides: Partial<TimelineState> = {}): TimelineState {
 /** A kind 7 on the post, from `pubkey`, carrying `content`. */
 function reaction(pubkey: string, content: string, id: string): NostrEvent {
   return makeEvent({ id, pubkey, kind: 7, content, tags: [['e', POST_ID]] });
+}
+
+const PARENT_ID = 'cc0000000000000000000000000000000000000000000000000000000000000c';
+const REPLY_ID = 'dd00000000000000000000000000000000000000000000000000000000000001';
+const GRANDCHILD_ID = 'dd00000000000000000000000000000000000000000000000000000000000002';
+
+/** A NIP-10 reply in the marked form. */
+function reply(id: string, parent: string, content: string): NostrEvent {
+  return makeEvent({
+    id,
+    pubkey: `pk${id}`,
+    content,
+    tags:
+      parent === POST_ID
+        ? [['e', POST_ID, '', 'root']]
+        : [
+            ['e', POST_ID, '', 'root'],
+            ['e', parent, '', 'reply'],
+          ],
+  });
 }
 
 const POST = makeEvent({ id: POST_ID, pubkey: ALICE, content: 'the post' });
@@ -141,5 +162,119 @@ describe('PostView', () => {
     });
 
     expect(onAuthorVisible).toHaveBeenCalledWith(ALICE);
+  });
+
+  describe('the thread', () => {
+    const THREAD = new Map([
+      [
+        POST_ID,
+        [
+          reply(REPLY_ID, POST_ID, 'a reply'),
+          reply(GRANDCHILD_ID, REPLY_ID, 'a reply to the reply'),
+        ],
+      ],
+    ]);
+
+    it('renders the replies nested under the post', () => {
+      render(PostView, {
+        props: { state: state({ events: [POST], replies: THREAD }), target: TARGET },
+      });
+
+      expect(screen.getByText('返信 2 件')).toBeInTheDocument();
+      expect(screen.getByText('a reply')).toBeInTheDocument();
+      expect(screen.getByText('a reply to the reply')).toBeInTheDocument();
+    });
+
+    it('renders nothing at all for a post with no replies', () => {
+      render(PostView, {
+        props: { state: state({ events: [POST] }), target: TARGET },
+      });
+
+      // A heading over an empty list is furniture on a post nobody answered.
+      expect(screen.queryByText(/^返信 /)).not.toBeInTheDocument();
+    });
+
+    it('hides the thread when the element turned replies off', () => {
+      render(PostView, {
+        props: {
+          state: state({ events: [POST], replies: THREAD }),
+          target: TARGET,
+          showReplies: false,
+        },
+      });
+
+      expect(screen.queryByText('a reply')).not.toBeInTheDocument();
+    });
+
+    it('renders only as deep as the element subscribed', () => {
+      render(PostView, {
+        props: {
+          state: state({ events: [POST], replies: THREAD }),
+          target: TARGET,
+          repliesDepth: 1,
+        },
+      });
+
+      expect(screen.getByText('a reply')).toBeInTheDocument();
+      expect(screen.queryByText('a reply to the reply')).not.toBeInTheDocument();
+      expect(screen.getByText(/さらに 1 件の返信があります/)).toBeInTheDocument();
+    });
+
+    it('says how many replies never connected to the post', () => {
+      const orphan = reply(
+        'ee00000000000000000000000000000000000000000000000000000000000001',
+        PARENT_ID,
+        'another branch'
+      );
+
+      render(PostView, {
+        props: {
+          state: state({ events: [POST], replies: new Map([[POST_ID, [orphan]]]) }),
+          target: TARGET,
+        },
+      });
+
+      expect(screen.getByText(/返信先が取得できなかった投稿が 1 件あります/)).toBeInTheDocument();
+    });
+  });
+
+  describe('walking up to an ancestor', () => {
+    const CHILD = makeEvent({
+      id: POST_ID,
+      pubkey: ALICE,
+      content: 'the post',
+      tags: [['e', PARENT_ID, '', 'reply']],
+    });
+
+    it('makes the 返信先 chip a button when there is somewhere to go', async () => {
+      const onNavigate = vi.fn();
+
+      render(PostView, {
+        props: { state: state({ events: [CHILD] }), target: TARGET, onNavigate },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: '返信先の投稿を開く' }));
+
+      expect(onNavigate).toHaveBeenCalledWith(PARENT_ID);
+    });
+
+    it('leaves the chip as plain text without a handler', () => {
+      render(PostView, { props: { state: state({ events: [CHILD] }), target: TARGET } });
+
+      expect(screen.queryByRole('button', { name: '返信先の投稿を開く' })).not.toBeInTheDocument();
+    });
+
+    it('offers the way back even when the ancestor turns out not to exist', () => {
+      const onBack = vi.fn();
+
+      render(PostView, {
+        props: { state: state({ eose: true }), target: TARGET, onBack },
+      });
+
+      // Exactly the case where the reader most needs it, and there is no card
+      // to hang it off.
+      expect(screen.getByText('投稿が見つかりませんでした')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '← 元の投稿に戻る' })).toBeInTheDocument();
+    });
   });
 });

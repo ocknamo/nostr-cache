@@ -1128,4 +1128,259 @@ describe('TimelineController', () => {
       expect(subscriptions.filter((sub) => sub.id.startsWith('reactions-'))).toHaveLength(0);
     });
   });
+
+  describe('replies', () => {
+    const POST_ID = 'aa00000000000000000000000000000000000000000000000000000000000001';
+    const REPLY_ID = 'bb00000000000000000000000000000000000000000000000000000000000002';
+    const GRANDCHILD_ID = 'cc00000000000000000000000000000000000000000000000000000000000003';
+    const ELSEWHERE_ID = 'dd00000000000000000000000000000000000000000000000000000000000004';
+    const target = parsePostTarget({ eventId: POST_ID });
+    if (!target) {
+      throw new Error('fixture post id should parse');
+    }
+
+    /** The thread lookups currently open on the relay, oldest level first. */
+    function replySubscriptions(
+      controller: TimelineController
+    ): { id: string; filters: Filter[] }[] {
+      return openSubscriptions(controller).filter((sub) => sub.id.startsWith('replies-'));
+    }
+
+    function repliesOf(states: TimelineState[]): string[] {
+      return (states.at(-1)?.replies.get(POST_ID) ?? []).map((event) => event.id).sort();
+    }
+
+    /** A NIP-10 reply in the marked form. */
+    function replyEvent(id: string, parent: string): NostrEvent {
+      return makeEvent({
+        id,
+        pubkey: `p${id}`,
+        tags:
+          parent === POST_ID
+            ? [['e', POST_ID, '', 'root']]
+            : [
+                ['e', POST_ID, '', 'root'],
+                ['e', parent, '', 'reply'],
+              ],
+      });
+    }
+
+    it('asks the relay for the kind 1 events replying to the post', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target, { limit: 50 });
+
+      await waitFor(() => replySubscriptions(controller).length === 1, 'the level 1 REQ');
+      expect(replySubscriptions(controller)[0].filters).toEqual([
+        { kinds: [1], '#e': [POST_ID], limit: 50 },
+      ]);
+    });
+
+    it('asks with an `a` filter for an addressable post', async () => {
+      const address = `30023:${'cc'.repeat(32)}:my-article`;
+      const addressable = parsePostTarget({
+        author: 'cc'.repeat(32),
+        kind: '30023',
+        identifier: 'my-article',
+      });
+      if (!addressable) {
+        throw new Error('fixture coordinate should parse');
+      }
+      const { controller } = createController();
+      await controller.start([addressable.filter]);
+
+      controller.requestReplies(addressable, { limit: 10 });
+
+      await waitFor(() => replySubscriptions(controller).length === 1, 'the level 1 REQ');
+      expect(replySubscriptions(controller)[0].filters).toEqual([
+        { kinds: [1], '#a': [address], limit: 10 },
+      ]);
+    });
+
+    it('opens the next level with the ids the level above delivered', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
+      const { controller } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target, { limit: 20, maxDepth: 3 });
+
+      // NIP-10 lets a grandchild name only its own parent and the thread root,
+      // so this second REQ is the only thing that can reach one.
+      await waitFor(() => replySubscriptions(controller).length === 2, 'the level 2 REQ');
+      expect(replySubscriptions(controller)[1].filters).toEqual([
+        { kinds: [1], '#e': [REPLY_ID], limit: 20 },
+      ]);
+    });
+
+    it('stops opening levels at maxDepth', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(
+        dbName,
+        [replyEvent(REPLY_ID, POST_ID), replyEvent(GRANDCHILD_ID, REPLY_ID)],
+        { validated: true }
+      );
+      const { controller, states } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target, { maxDepth: 2 });
+
+      await waitFor(() => repliesOf(states).length === 2, 'both replies');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(replySubscriptions(controller)).toHaveLength(2);
+    });
+
+    it('opens no further level when one comes back empty', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target, { maxDepth: 3 });
+
+      await waitFor(() => replySubscriptions(controller).length === 1, 'the level 1 REQ');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(replySubscriptions(controller)).toHaveLength(1);
+    });
+
+    it('opens one thread however many times it is asked', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target);
+      controller.requestReplies(target);
+
+      await waitFor(() => replySubscriptions(controller).length === 1, 'the level 1 REQ');
+      expect(replySubscriptions(controller)).toHaveLength(1);
+    });
+
+    it('keeps the replies to this post and drops what the #e match dragged in', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(
+        dbName,
+        [
+          replyEvent(REPLY_ID, POST_ID),
+          // A reaction and a mention, both delivered by the same `#e` filter.
+          makeEvent({ id: 'r1', pubkey: 'p1', kind: 7, content: '+', tags: [['e', POST_ID]] }),
+          makeEvent({
+            id: ELSEWHERE_ID,
+            pubkey: 'p2',
+            tags: [['e', POST_ID, '', 'mention']],
+          }),
+        ],
+        { validated: true }
+      );
+      const { controller, states } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target);
+
+      await waitFor(() => repliesOf(states).length >= 1, 'the reply');
+      // Filtered on delivery rather than in the view because the cap is here:
+      // under a busy thread the other branches would push out the real replies.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(repliesOf(states)).toEqual([REPLY_ID]);
+    });
+
+    it('asks the relay to vouch for the replies, not only the post', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
+      const { controller, states } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+
+      controller.requestReplies(target);
+
+      // Without the reply ids in the poll, every card in the thread would stay
+      // dimmed for as long as the widget was open.
+      await waitFor(
+        () => states.at(-1)?.validationStatuses.get(REPLY_ID) === 'validated',
+        'the reply verdict'
+      );
+    });
+
+    it('ends every level on suspend, so a cold benchmark stays cold', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
+      const { controller } = createController(dbName);
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReplies(target);
+      await waitFor(() => replySubscriptions(controller).length === 2, 'both levels');
+
+      controller.suspend();
+
+      await waitFor(() => replySubscriptions(controller).length === 0, 'the levels to close');
+    });
+
+    it('ends every level on stop', async () => {
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReplies(target);
+      await waitFor(() => replySubscriptions(controller).length === 1, 'the level 1 REQ');
+
+      const relay = controller.host;
+      await controller.stop();
+
+      const subscriptions = (
+        relay?.relay as unknown as {
+          subscriptionManager: { getAllSubscriptions(): { id: string }[] };
+        }
+      ).subscriptionManager.getAllSubscriptions();
+      expect(subscriptions.filter((sub) => sub.id.startsWith('replies-'))).toHaveLength(0);
+    });
+  });
+
+  describe('showPost', () => {
+    const POST_ID = 'aa00000000000000000000000000000000000000000000000000000000000001';
+    const PARENT_ID = 'bb00000000000000000000000000000000000000000000000000000000000002';
+    const post = parsePostTarget({ eventId: POST_ID });
+    const parent = parsePostTarget({ eventId: PARENT_ID });
+    if (!post || !parent) {
+      throw new Error('fixture post ids should parse');
+    }
+
+    function postSubscriptions(controller: TimelineController): string[] {
+      return openSubscriptionIds(controller).filter(
+        (id) => id.startsWith('replies-') || id.startsWith('reactions-')
+      );
+    }
+
+    it('moves the watches to the new post rather than adding to them', async () => {
+      const { controller } = createController();
+      await controller.start([post.filter]);
+      controller.requestReactions(post);
+      controller.requestReplies(post);
+      await waitFor(() => postSubscriptions(controller).length === 2, 'the first post watches');
+      const before = postSubscriptions(controller);
+
+      controller.showPost(parent, { reactions: { limit: 50 }, replies: { maxDepth: 2 } });
+
+      // Left open, these would accumulate two per hop and put a reader a few
+      // steps up a thread over the relay's per-client cap of 20.
+      await waitFor(
+        () => postSubscriptions(controller).every((id) => !before.includes(id)),
+        'the old watches to close'
+      );
+      await waitFor(() => postSubscriptions(controller).length === 2, 'the new post watches');
+      expect(
+        openSubscriptions(controller).find((sub) => sub.id.startsWith('replies-'))?.filters
+      ).toEqual([{ kinds: [1], '#e': [PARENT_ID], limit: 100 }]);
+    });
+
+    it('drops what the old post had collected', async () => {
+      const dbName = `controller-${crypto.randomUUID()}`;
+      await seedCache(
+        dbName,
+        [makeEvent({ id: 'r1', pubkey: 'p1', kind: 7, content: '+', tags: [['e', POST_ID]] })],
+        { validated: true }
+      );
+      const { controller, states } = createController(dbName);
+      await controller.start([post.filter]);
+      controller.requestReactions(post);
+      await waitFor(() => (states.at(-1)?.reactions.get(POST_ID)?.length ?? 0) === 1, 'a reaction');
+
+      controller.showPost(parent, { reactions: { limit: 50 } });
+
+      // Kept per post rather than blanked, the map would grow with every hop.
+      expect(states.at(-1)?.reactions.has(POST_ID)).toBe(false);
+    });
+  });
 });

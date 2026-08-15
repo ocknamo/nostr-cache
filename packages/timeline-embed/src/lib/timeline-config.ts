@@ -13,6 +13,7 @@ import { type EventAction, normalizeActions } from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 import { type MaterialVariant, parseMaterialVariant } from './material-symbols.ts';
 import { MAX_REACTIONS } from './reactions.ts';
+import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 
 export const DEFAULT_LIMIT = 50;
 export const DEFAULT_KINDS = [1];
@@ -329,6 +330,51 @@ export function parseReactionsLimit(value: string | null | undefined): number | 
     return undefined;
   }
   return Math.min(parsed, MAX_REACTIONS);
+}
+
+/**
+ * Backfill size for **one level** of a thread, not for the thread as a whole:
+ * every level asks for its own, so a deep thread is allowed more than this.
+ *
+ * Clamped at the top like {@link parseReactionsLimit}, for the same reason.
+ *
+ * @returns A positive count, or `undefined` to leave the controller's default
+ */
+export function parseRepliesLimit(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[nostr-post] Ignoring invalid replies-limit (expected a positive whole number): ${value}`
+    );
+    return undefined;
+  }
+  return Math.min(parsed, MAX_REPLIES);
+}
+
+/**
+ * Levels of the thread to open, counting the direct replies as one.
+ *
+ * The ceiling is not politeness: each level is a live subscription, and the
+ * relay caps a client at 20 while the widget is already spending eight
+ * elsewhere.
+ *
+ * @returns A depth within range, or `undefined` to leave the controller's default
+ */
+export function parseRepliesDepth(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[nostr-post] Ignoring invalid replies-depth (expected a positive whole number): ${value}`
+    );
+    return undefined;
+  }
+  return Math.min(parsed, MAX_REPLY_DEPTH);
 }
 
 /**

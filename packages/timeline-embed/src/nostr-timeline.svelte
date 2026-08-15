@@ -191,6 +191,7 @@
     profiles: new Map(),
     embeds: new Map(),
     reactions: new Map(),
+    replies: new Map(),
     eose: false,
   });
 
