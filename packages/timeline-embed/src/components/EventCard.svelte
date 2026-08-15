@@ -91,6 +91,13 @@
      * would replace the post a page deliberately embedded.
      */
     onNavigate?: (id: string) => void;
+    /**
+     * Off inside a thread, where the parent is the card this one is nested
+     * under: repeating it as an abbreviated id says nothing the layout has not
+     * already said, on every card. Quote chips are unaffected — the note a
+     * reply quotes is not on screen.
+     */
+    showReplyRef?: boolean;
   }
 
   const {
@@ -111,6 +118,7 @@
     onVisible,
     onEmbedRequest,
     onNavigate,
+    showReplyRef = true,
   }: Props = $props();
 
   /** Whether this button's `icon` is a ligature name rather than literal text. */
@@ -158,7 +166,9 @@
    * did not choose to quote, and "返信先" says something the quote card does not.
    */
   const refs = $derived(
-    parseRefs(event).filter((ref) => ref.kind !== 'quote' || !embeddedKeys.has(ref.id))
+    parseRefs(event).filter((ref) =>
+      ref.kind === 'quote' ? !embeddedKeys.has(ref.id) : showReplyRef
+    )
   );
 
   const REF_LABELS: Record<'reply' | 'quote', string> = {

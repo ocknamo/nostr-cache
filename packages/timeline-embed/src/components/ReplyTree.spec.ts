@@ -82,6 +82,16 @@ describe('ReplyTree', () => {
     expect(screen.getByText(/さらに 1 件の返信があります/)).toBeInTheDocument();
   });
 
+  it('drops the 返信先 chip, which the nesting already says', () => {
+    const { container } = render(ReplyTree, {
+      props: {
+        tree: tree([reply(REPLY_ID, POST_ID, 'first'), reply(GRANDCHILD_ID, REPLY_ID, 'nested')]),
+      },
+    });
+
+    expect(container.querySelector('.ref')).toBeNull();
+  });
+
   it('renders no action buttons under a reply', () => {
     const { container } = render(ReplyTree, {
       props: { tree: tree([reply(REPLY_ID, POST_ID, 'first')]) },

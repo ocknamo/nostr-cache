@@ -6,9 +6,10 @@
    * indent is one rule that composes — the same shape `EmbeddedNote` uses for
    * quoted notes.
    *
-   * The cards here get no `onNavigate`: a reply's 「返信先」 is the card
-   * directly above it, and a chip that jumped to something already on screen
-   * would only lose the reader their place.
+   * The cards here carry no 「返信先」 chip at all: a reply's parent is the card
+   * it is nested under, so the chip would repeat on every row what the indent
+   * already says — and pressing one would navigate to something the reader can
+   * see, losing their place for nothing.
    */
 
   import type { EventOrigin } from '../lib/cache-metrics.ts';
@@ -62,6 +63,7 @@
         showAvatar={showAvatars}
         {showMedia}
         {showEmbeds}
+        showReplyRef={false}
         onVisible={onAuthorVisible && (() => onAuthorVisible(node.event.pubkey))}
         {onEmbedRequest}
       />
