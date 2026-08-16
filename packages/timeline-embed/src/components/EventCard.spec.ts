@@ -176,6 +176,166 @@ describe('EventCard', () => {
     expect(screen.getByTitle(parent)).toHaveTextContent('bbbbbbbb…bbbbbbbb');
   });
 
+  it('asks for the reply target once the chip is on screen', () => {
+    const parent = 'b'.repeat(64);
+    const onEmbedRequest = vi.fn();
+    render(EventCard, {
+      props: { event: makeEvent({ tags: [['e', parent, '', 'reply']] }), onEmbedRequest },
+    });
+
+    expect(onEmbedRequest).toHaveBeenCalledWith({
+      key: parent,
+      filter: { ids: [parent] },
+      replaceable: false,
+    });
+  });
+
+  it('previews the reply target once it has been fetched', () => {
+    const parent = 'b'.repeat(64);
+    const { container } = render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([
+          [parent, { status: 'ready' as const, event: makeEvent({ content: '親の\n本文' }) }],
+        ]),
+        onEmbedRequest: () => {},
+      },
+    });
+
+    expect(screen.getByText('親の 本文')).toBeInTheDocument();
+    expect(container.querySelector('.ref .avatar')).not.toBeNull();
+    expect(screen.queryByText('bbbbbbbb…bbbbbbbb')).not.toBeInTheDocument();
+  });
+
+  it('names the reply target author for a screen reader', () => {
+    const parent = 'b'.repeat(64);
+    const target = makeEvent({ pubkey: 'a'.repeat(64), content: '親の本文' });
+    const props = {
+      event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+      embeds: new Map([[parent, { status: 'ready' as const, event: target }]]),
+      // No `picture`, so the avatar falls back to the aria-hidden block.
+      profiles: new Map([[target.pubkey, { displayName: 'アリス' }]]),
+      onEmbedRequest: () => {},
+    };
+    const { container, unmount } = render(EventCard, { props });
+
+    expect(container.querySelector('.ref-author')).toHaveTextContent('アリス');
+    unmount();
+
+    render(EventCard, { props: { ...props, onNavigate: () => {} } });
+
+    expect(
+      screen.getByRole('button', { name: '返信先の投稿を開く: アリス「親の本文」' })
+    ).toBeInTheDocument();
+  });
+
+  it('navigates from the previewed chip', async () => {
+    const parent = 'b'.repeat(64);
+    const onNavigate = vi.fn();
+    render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([
+          [parent, { status: 'ready' as const, event: makeEvent({ content: '親の本文' }) }],
+        ]),
+        onEmbedRequest: () => {},
+        onNavigate,
+      },
+    });
+
+    await fireEvent.click(screen.getByText('親の本文'));
+
+    expect(onNavigate).toHaveBeenCalledWith(parent);
+  });
+
+  it('keeps the abbreviated id while the reply target is still loading', () => {
+    const parent = 'b'.repeat(64);
+    render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([[parent, { status: 'loading' as const }]]),
+        onEmbedRequest: () => {},
+      },
+    });
+
+    expect(screen.getByTitle(parent)).toHaveTextContent('bbbbbbbb…bbbbbbbb');
+  });
+
+  it('keeps the abbreviated id when the reply target cannot be found', () => {
+    const parent = 'b'.repeat(64);
+    render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([[parent, { status: 'missing' as const }]]),
+        onEmbedRequest: () => {},
+      },
+    });
+
+    expect(screen.getByTitle(parent)).toHaveTextContent('bbbbbbbb…bbbbbbbb');
+  });
+
+  it('falls back to the abbreviated id when the target has nothing to preview', () => {
+    const parent = 'b'.repeat(64);
+    render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([
+          [parent, { status: 'ready' as const, event: makeEvent({ content: '   ' }) }],
+        ]),
+        onEmbedRequest: () => {},
+      },
+    });
+
+    expect(screen.getByTitle(parent)).toHaveTextContent('bbbbbbbb…bbbbbbbb');
+  });
+
+  it('drops the chip avatar with avatars off, keeping the preview', () => {
+    const parent = 'b'.repeat(64);
+    const { container } = render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([
+          [parent, { status: 'ready' as const, event: makeEvent({ content: '親の本文' }) }],
+        ]),
+        showAvatar: false,
+        onEmbedRequest: () => {},
+      },
+    });
+
+    expect(container.querySelector('.ref .avatar')).toBeNull();
+    expect(screen.getByText('親の本文')).toBeInTheDocument();
+  });
+
+  it('fetches no reply target with embeds switched off', () => {
+    const onEmbedRequest = vi.fn();
+    render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', 'b'.repeat(64), '', 'reply']] }),
+        showEmbeds: false,
+        onEmbedRequest,
+      },
+    });
+
+    expect(onEmbedRequest).not.toHaveBeenCalled();
+  });
+
+  it('leaves a quote chip as the reference it always was', () => {
+    const onEmbedRequest = vi.fn();
+    render(EventCard, {
+      props: {
+        event: makeEvent({ content: 'no references here', tags: [['q', NOTE_HEX]] }),
+        embeds: new Map([
+          [NOTE_HEX, { status: 'ready' as const, event: makeEvent({ content: '引用元の本文' }) }],
+        ]),
+        onEmbedRequest,
+      },
+    });
+
+    expect(screen.getByTitle(NOTE_HEX)).toHaveTextContent('5c04292b…1b6a7f11');
+    expect(screen.queryByText('引用元の本文')).not.toBeInTheDocument();
+    expect(onEmbedRequest).not.toHaveBeenCalled();
+  });
+
   it('marks a quote', () => {
     render(EventCard, {
       props: { event: makeEvent({ tags: [['q', 'c'.repeat(64)]] }) },

@@ -363,14 +363,22 @@ describe('<nostr-post> custom element', () => {
       'the post'
     );
 
+    // The one place the preview is checked against a real relay rather than a
+    // seeded `embeds` map.
+    await waitFor(
+      () =>
+        element.shadowRoot?.querySelector('.ref-nav')?.textContent?.includes('親の投稿') === true,
+      'the reply target preview'
+    );
+
     const chip = element.shadowRoot?.querySelector<HTMLButtonElement>('.ref-nav');
     expect(chip).toBeTruthy();
     chip?.click();
 
-    await waitFor(
-      () => element.shadowRoot?.textContent?.includes('親の投稿') === true,
-      'the parent'
-    );
+    // The body of the card on show, not the whole widget: the chip previews the
+    // parent, so its text is on screen before anything is clicked. The first
+    // `.note` in the tree is the shown post's — a chip sits outside it.
+    await waitFor(() => shownNote(element)?.includes('親の投稿') === true, 'the parent');
     // The whole reason navigation goes through `showPost` rather than a new
     // controller: dropping the last reference stops the in-page relay and
     // starts it again between two posts of one conversation.
@@ -380,10 +388,7 @@ describe('<nostr-post> custom element', () => {
     expect(back).toBeTruthy();
     back?.click();
 
-    await waitFor(
-      () => element.shadowRoot?.textContent?.includes('詳細に出る投稿') === true,
-      'the post again'
-    );
+    await waitFor(() => shownNote(element)?.includes('詳細に出る投稿') === true, 'the post again');
     expect(element.shadowRoot?.querySelector('.back')).toBeNull();
   });
 
@@ -425,6 +430,11 @@ describe('<nostr-post> custom element', () => {
     await waitFor(() => getRelayHostRefCount() === 0, 'the relay host to be released');
   });
 });
+
+/** The body of the post the widget is showing, ignoring its replies. */
+function shownNote(element: HTMLElement): string | undefined {
+  return element.shadowRoot?.querySelector('.post .note')?.textContent ?? undefined;
+}
 
 function subscriptionsNamed(
   host: { relay: unknown },

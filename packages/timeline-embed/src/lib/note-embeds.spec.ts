@@ -6,6 +6,7 @@ import {
   MAX_EMBED_DEPTH,
   embedKeys,
   embedTarget,
+  eventIdTarget,
   noteSegments,
   segmentKey,
   segmentMedia,
@@ -49,6 +50,12 @@ function entityOf(content: string): EntityPart {
   }
   return part;
 }
+
+describe('eventIdTarget', () => {
+  it('keys a bare id the way the entity for the same event is keyed', () => {
+    expect(eventIdTarget(NOTE_HEX)).toEqual(embedTarget(entityOf(NOTE).entity));
+  });
+});
 
 describe('embedTarget', () => {
   it('asks for a note by its id', () => {

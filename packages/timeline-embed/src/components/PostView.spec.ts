@@ -264,6 +264,23 @@ describe('PostView', () => {
       expect(screen.queryByRole('button', { name: '返信先の投稿を開く' })).not.toBeInTheDocument();
     });
 
+    it('previews the ancestor on the chip once it has been fetched', () => {
+      const parent = makeEvent({ id: PARENT_ID, pubkey: ALICE, content: '親の投稿' });
+
+      render(PostView, {
+        props: {
+          state: state({
+            events: [CHILD],
+            embeds: new Map([[PARENT_ID, { status: 'ready', event: parent }]]),
+          }),
+          target: TARGET,
+          onEmbedRequest: () => {},
+        },
+      });
+
+      expect(screen.getByText('親の投稿')).toBeInTheDocument();
+    });
+
     it('offers the way back even when the ancestor turns out not to exist', () => {
       const onBack = vi.fn();
 

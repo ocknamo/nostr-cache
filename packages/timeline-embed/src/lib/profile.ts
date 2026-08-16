@@ -40,6 +40,20 @@ export interface Profile {
 }
 
 /**
+ * Drop everything from {@link UNRENDERABLE}.
+ *
+ * Exported for `content-preview.ts`, which needs this wide set — the same one a
+ * name needs — rather than the narrower one `content-parts.ts` applies to a
+ * body. It cannot reuse {@link safeText} instead: that one *rejects* text over
+ * its limit where a preview truncates, and it strips before anything has had a
+ * chance to collapse the whitespace, which would glue the lines of a note
+ * together into one word.
+ */
+export function stripUnrenderable(value: string): string {
+  return value.replace(UNRENDERABLE, '');
+}
+
+/**
  * Read a string field, rejecting non-strings and anything implausibly long.
  *
  * Control characters are stripped rather than rejected: a name is rendered on
@@ -55,7 +69,7 @@ export function safeText(value: unknown, maxLength: number): string | undefined 
   if (typeof value !== 'string') {
     return undefined;
   }
-  const trimmed = value.replace(UNRENDERABLE, '').trim();
+  const trimmed = stripUnrenderable(value).trim();
   if (trimmed.length === 0 || trimmed.length > maxLength) {
     return undefined;
   }

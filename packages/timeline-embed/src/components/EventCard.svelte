@@ -2,6 +2,7 @@
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
   import { parseContent } from '../lib/content-parts.ts';
+  import { eventPreview } from '../lib/content-preview.ts';
   import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
@@ -9,6 +10,7 @@
     type EmbedTarget,
     type EmbeddedEvent,
     embedKeys,
+    eventIdTarget,
     noteSegments,
     segmentKey,
     segmentMedia,
@@ -176,6 +178,36 @@
     quote: '引用',
   };
 
+  /**
+   * Whether the reply chip may fetch what it points at.
+   *
+   * `showEmbeds` and not just "is there an `onEmbedRequest`": the attribute is
+   * documented as the switch that stops the card costing extra requests at all,
+   * and a preview costs both a lookup and — through the parent author's avatar —
+   * bytes from a host the embedding page never named.
+   */
+  const previewable = $derived(showEmbeds && Boolean(onEmbedRequest));
+
+  /**
+   * The parent, once anything has resolved it. Read whether or not this card is
+   * allowed to fetch: an event the body already quotes is in `embeds` for free,
+   * and refusing to show it would only make the chip worse.
+   */
+  const replyRef = $derived(refs.find((ref) => ref.kind === 'reply'));
+  const replyResolved = $derived(replyRef && embeds?.get(replyRef.id));
+  const replyEvent = $derived(replyResolved?.status === 'ready' ? replyResolved.event : undefined);
+  const replyProfile = $derived(replyEvent && profiles?.get(replyEvent.pubkey));
+  const replyName = $derived(replyEvent ? authorName(replyEvent.pubkey, replyProfile) : '');
+  /** Empty until the parent resolves, which is what keeps the chip as it was. */
+  const replyPreview = $derived(replyEvent ? eventPreview(replyEvent, { profiles }) : '');
+
+  function requestReply(): void {
+    if (!replyRef || !previewable) {
+      return;
+    }
+    onEmbedRequest?.(eventIdTarget(replyRef.id));
+  }
+
   const createdAt = $derived(new Date(event.created_at * 1000));
 
   /** Held open by a tap or a keyboard press, until the next one. */
@@ -339,13 +371,42 @@
     {#if refs.length > 0}
       <ul class="refs">
         {#each refs as ref (ref.id)}
-          <li class="ref">
+          <!-- The preview is fetched from here rather than with the card's own
+               profile lookup: a reader who never scrolls to a reply should not
+               pay for its parent. -->
+          <li class="ref" part="ref" use:whenVisible={ref.kind === 'reply' ? requestReply : undefined}>
             <span class="ref-label">{REF_LABELS[ref.kind]}</span>
-            <!-- Only the reference itself: the widget never fetches the target,
-                 so there is no body to preview here. -->
-            {#if onNavigate && ref.kind === 'reply'}
-              <!-- A real button, so Enter, Space, the tab order and the role a
-                   screen reader announces all come for free. -->
+            {#if ref.kind === 'reply' && replyEvent && replyPreview}
+              {#if onNavigate}
+                <!-- A real button, so Enter, Space, the tab order and the role a
+                     screen reader announces all come for free. The avatar is
+                     inside it: the whole chip is one press target, and the
+                     `aria-label` then covers the image with it. -->
+                <button
+                  type="button"
+                  class="ref-nav"
+                  part="ref-nav"
+                  title="{replyName}: {replyPreview}"
+                  aria-label="返信先の投稿を開く: {replyName}「{replyPreview}」"
+                  onclick={() => onNavigate(ref.id)}
+                >
+                  {#if showAvatar}
+                    <Avatar pubkey={replyEvent.pubkey} profile={replyProfile} name="" />
+                  {/if}
+                  <span class="ref-text">{replyPreview}</span>
+                </button>
+              {:else}
+                {#if showAvatar}
+                  <!-- name="" on purpose: the generated fallback block is
+                       aria-hidden, so an `alt` here would announce the author
+                       only for the ones who published a picture. The span
+                       below says it for all of them. -->
+                  <Avatar pubkey={replyEvent.pubkey} profile={replyProfile} name="" />
+                {/if}
+                <span class="ref-author">{replyName}</span>
+                <span class="ref-text" title="{replyName}: {replyPreview}">{replyPreview}</span>
+              {/if}
+            {:else if onNavigate && ref.kind === 'reply'}
               <button
                 type="button"
                 class="ref-id ref-nav"
@@ -743,13 +804,19 @@
 
   .ref {
     display: flex;
-    align-items: baseline;
+    /* Not `baseline`: an avatar has none of its own, so it would hang below the
+       row it sits in. */
+    align-items: center;
     gap: 6px;
     min-width: 0;
     padding-left: 8px;
     border-left: 3px solid var(--nt-quote-bar, #4a7dff);
     font-size: 0.8rem;
     color: var(--nt-muted, #657786);
+    /* Avatar.svelte reads these, so nothing about it has to know it is in a
+       chip — the same handoff `.quote-header` makes in EmbeddedNote. */
+    --nt-avatar-size: var(--nt-ref-avatar-size, 16px);
+    --nt-avatar-radius: var(--nt-ref-avatar-radius, 999px);
   }
 
   .ref-label {
@@ -757,6 +824,7 @@
     flex: none;
   }
 
+  /* Only what is still an id. A body set in the monospace face reads as code. */
   .ref-id {
     font-family: var(--nt-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
     overflow: hidden;
@@ -764,17 +832,53 @@
     white-space: nowrap;
   }
 
+  /* The parent's body, always on one line: the chip is context for the note
+     under it, and a wrapping one would push the note itself down the card.
+     `block` because `text-overflow` does nothing to an inline box. */
+  .ref-text {
+    display: block;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The parent's author, for assistive tech only. The avatar beside it is
+     decorative (see `name=""` above), so without this the row would say what
+     was replied to but never to whom. */
+  .ref-author {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   .ref-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
     margin: 0;
     padding: 0;
     border: 0;
     background: none;
     color: inherit;
     font-size: inherit;
-    /* Dotted rather than solid: this navigates inside the widget, and drawing
-       it as a web link promises a page the reader is not going to get. */
-    text-decoration: underline dotted;
+    /* A button centres its contents; this row is text. */
+    text-align: start;
     cursor: pointer;
+  }
+
+  /* Dotted rather than solid: this navigates inside the widget, and drawing it
+     as a web link promises a page the reader is not going to get. It goes on
+     the text rather than the button so it does not run under the avatar. */
+  .ref-nav.ref-id,
+  .ref-nav .ref-text {
+    text-decoration: underline dotted;
   }
 
   .ref-nav:hover {

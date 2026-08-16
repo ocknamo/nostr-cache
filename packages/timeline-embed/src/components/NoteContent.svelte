@@ -1,13 +1,13 @@
 <script lang="ts">
   import {
     type ContentPart,
-    type EntityPart,
     type MediaPart,
     inlineParts,
     mediaAsLinks,
     mediaParts,
     parseContent,
   } from '../lib/content-parts.ts';
+  import { mentionLabel } from '../lib/content-preview.ts';
   import type { Profile } from '../lib/profile.ts';
   import MediaAttachment from './MediaAttachment.svelte';
 
@@ -79,25 +79,6 @@
     showMedia ? inlineParts(parts, embedded) : mediaAsLinks(parts, embedded)
   );
   const media = $derived(showMedia ? (givenMedia ?? mediaParts(parts)) : []);
-
-  /**
-   * What to show for a mention.
-   *
-   * `@name` when the author is already known to this timeline, the abbreviated
-   * bech32 otherwise. Event and address references have no name to resolve, so
-   * they always read as the abbreviated entity.
-   */
-  function mentionLabel(part: EntityPart): string {
-    const { entity } = part;
-    if (entity.type === 'npub' || entity.type === 'nprofile') {
-      const profile = profiles?.get(entity.pubkey);
-      const name = profile?.displayName ?? profile?.name;
-      if (name) {
-        return `@${name}`;
-      }
-    }
-    return part.label;
-  }
 </script>
 
 <!-- The markup below is deliberately packed onto as few lines as it can be:
@@ -109,7 +90,7 @@
           target="_blank"
           rel="noopener noreferrer nofollow">{part.label}</a>{:else if part.kind === 'entity'}<span
           class="mention"
-          title={part.raw}>{mentionLabel(part)}</span>{/if}{/each}</p>
+          title={part.raw}>{mentionLabel(part, profiles)}</span>{/if}{/each}</p>
 {/if}
 
 {#if media.length > 0}
