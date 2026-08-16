@@ -179,22 +179,18 @@
   };
 
   /**
-   * Whether the reply chip may fetch what it points at.
+   * The parent, once something has resolved it — the chip's own lookup, or the
+   * body quoting the same event, which lands under the same key.
    *
-   * `showEmbeds` and not just "is there an `onEmbedRequest`": the attribute is
-   * documented as the switch that stops the card costing extra requests at all,
-   * and a preview costs both a lookup and — through the parent author's avatar —
-   * bytes from a host the embedding page never named.
-   */
-  const previewable = $derived(showEmbeds && Boolean(onEmbedRequest));
-
-  /**
-   * The parent, once anything has resolved it. Read whether or not this card is
-   * allowed to fetch: an event the body already quotes is in `embeds` for free,
-   * and refusing to show it would only make the chip worse.
+   * Gated on `showEmbeds` like the body's quote cards are, and for the stronger
+   * of the two reasons that switch exists: it is documented as stopping the
+   * card from costing extra requests at all, and a rendered preview pulls the
+   * parent author's avatar from a host the embedding page never named. Reading
+   * an `embeds` entry that is already there would be free, but drawing it is
+   * not.
    */
   const replyRef = $derived(refs.find((ref) => ref.kind === 'reply'));
-  const replyResolved = $derived(replyRef && embeds?.get(replyRef.id));
+  const replyResolved = $derived(showEmbeds && replyRef ? embeds?.get(replyRef.id) : undefined);
   const replyEvent = $derived(replyResolved?.status === 'ready' ? replyResolved.event : undefined);
   const replyProfile = $derived(replyEvent && profiles?.get(replyEvent.pubkey));
   const replyName = $derived(replyEvent ? authorName(replyEvent.pubkey, replyProfile) : '');
@@ -202,7 +198,7 @@
   const replyPreview = $derived(replyEvent ? eventPreview(replyEvent, { profiles }) : '');
 
   function requestReply(): void {
-    if (!replyRef || !previewable) {
+    if (!replyRef || !showEmbeds) {
       return;
     }
     onEmbedRequest?.(eventIdTarget(replyRef.id));
@@ -824,6 +820,11 @@
     flex: none;
   }
 
+  /* The icon keeps its width in a narrow card; the body gives up its own. */
+  .ref :global(.avatar) {
+    flex: none;
+  }
+
   /* Only what is still an id. A body set in the monospace face reads as code. */
   .ref-id {
     font-family: var(--nt-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
@@ -871,6 +872,12 @@
     /* A button centres its contents; this row is text. */
     text-align: start;
     cursor: pointer;
+  }
+
+  /* Back to a block box while the chip is still an id: `text-overflow` is
+     ignored on a flex container, and `.ref-id` above is what elides. */
+  .ref-nav.ref-id {
+    display: block;
   }
 
   /* Dotted rather than solid: this navigates inside the widget, and drawing it

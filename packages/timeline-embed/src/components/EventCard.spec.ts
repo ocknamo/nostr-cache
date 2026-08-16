@@ -306,17 +306,41 @@ describe('EventCard', () => {
     expect(screen.getByText('親の本文')).toBeInTheDocument();
   });
 
-  it('fetches no reply target with embeds switched off', () => {
+  it('neither fetches nor previews the reply target with embeds switched off', () => {
+    const parent = 'b'.repeat(64);
     const onEmbedRequest = vi.fn();
-    render(EventCard, {
+    const { container } = render(EventCard, {
       props: {
-        event: makeEvent({ tags: [['e', 'b'.repeat(64), '', 'reply']] }),
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        // Already resolved, which is the case `show-embeds="false"` has to keep
+        // off the screen: drawing it would load the parent author's avatar from
+        // a third-party host the page never named.
+        embeds: new Map([
+          [parent, { status: 'ready' as const, event: makeEvent({ content: '親の本文' }) }],
+        ]),
         showEmbeds: false,
         onEmbedRequest,
       },
     });
 
     expect(onEmbedRequest).not.toHaveBeenCalled();
+    expect(screen.queryByText('親の本文')).not.toBeInTheDocument();
+    expect(container.querySelector('.ref .avatar')).toBeNull();
+    expect(screen.getByTitle(parent)).toHaveTextContent('bbbbbbbb…bbbbbbbb');
+  });
+
+  it('previews an embed resolved by something else, with no way to fetch', () => {
+    const parent = 'b'.repeat(64);
+    render(EventCard, {
+      props: {
+        event: makeEvent({ tags: [['e', parent, '', 'reply']] }),
+        embeds: new Map([
+          [parent, { status: 'ready' as const, event: makeEvent({ content: '親の本文' }) }],
+        ]),
+      },
+    });
+
+    expect(screen.getByText('親の本文')).toBeInTheDocument();
   });
 
   it('leaves a quote chip as the reference it always was', () => {

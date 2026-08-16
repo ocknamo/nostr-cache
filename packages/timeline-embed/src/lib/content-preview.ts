@@ -36,8 +36,11 @@ const MEDIA_LABELS: Record<MediaKind, string> = {
   audio: '[音声]',
 };
 
-/** Kinds whose `content` is a serialized event rather than prose (NIP-18). */
-const OPAQUE_KINDS = new Set([6, 16]);
+/**
+ * Kinds whose `content` is not prose: a serialized event (NIP-18 reposts) or
+ * ciphertext (NIP-04), both of which flatten to a line of noise.
+ */
+const OPAQUE_KINDS = new Set([4, 6, 16]);
 
 export interface PreviewOptions {
   /** Profiles the widget has already fetched, to name a mention's author. */
@@ -68,13 +71,25 @@ export function mentionLabel(part: EntityPart, profiles?: ReadonlyMap<string, Pr
 }
 
 /**
+ * Cut a string at a UTF-16 index without splitting a surrogate pair.
+ *
+ * The pair's low half would be dropped and the high half left behind, which is
+ * a lone surrogate: `�` on screen, and an ill-formed string in the `title` and
+ * `aria-label` built from it.
+ */
+function sliceWhole(value: string, end: number): string {
+  const cut = value.slice(0, end);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/**
  * Keep the first `max` code points, marking the cut.
  *
- * Code points rather than UTF-16 units, so the cut cannot land between the
- * halves of a surrogate pair and leave a replacement character on screen. Not
- * grapheme clusters (`Intl.Segmenter`): the worst that costs is a ZWJ sequence
- * coming apart into the emoji it was built from, which is a far smaller price
- * than the cut being wrong for every non-BMP character.
+ * Code points rather than UTF-16 units, for the reason {@link sliceWhole}
+ * gives. Not grapheme clusters (`Intl.Segmenter`): the worst that costs is a
+ * ZWJ sequence coming apart into the emoji it was built from, which is a far
+ * smaller price than the cut being wrong for every non-BMP character.
  */
 function truncate(line: string, max: number): string {
   if (line.length <= max) {
@@ -95,7 +110,7 @@ function truncate(line: string, max: number): string {
  */
 export function notePreview(content: string, options: PreviewOptions = {}): string {
   const { profiles, maxLength = PREVIEW_MAX_LENGTH } = options;
-  const parts = parseContent(content.slice(0, PREVIEW_SOURCE_LIMIT));
+  const parts = parseContent(sliceWhole(content, PREVIEW_SOURCE_LIMIT));
   const line = parts
     .map((part) => {
       switch (part.kind) {
@@ -120,7 +135,7 @@ export function notePreview(content: string, options: PreviewOptions = {}): stri
 }
 
 /**
- * {@link notePreview} of an event, skipping the kinds it would misread.
+ * {@link notePreview} of an event, skipping {@link OPAQUE_KINDS}.
  *
  * A repost carries the reposted event's JSON in `content`, which flattens to a
  * line of punctuation and field names. Better to show nothing and let the
