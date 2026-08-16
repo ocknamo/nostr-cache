@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import {
   ACTION_EVENT,
+  DEFAULT_AUTHOR_LABEL,
   type EventAction,
   type EventActionDetail,
   MAX_ACTIONS,
   dispatchActionEvent,
   normalizeActions,
+  normalizeAuthorAction,
 } from './event-actions.ts';
 
 describe('normalizeActions', () => {
@@ -120,6 +122,61 @@ describe('normalizeActions', () => {
   });
 });
 
+describe('normalizeAuthorAction', () => {
+  it('takes the id the embedder chose', () => {
+    expect(normalizeAuthorAction('open-profile', 'プロフィール')).toEqual({
+      id: 'open-profile',
+      label: 'プロフィール',
+    });
+  });
+
+  it('names the press when the embedder did not', () => {
+    // A target with no accessible name is unusable by a screen reader, and the
+    // widget cannot leave it out the way it leaves out a button nobody declared.
+    expect(normalizeAuthorAction('open-profile')).toEqual({
+      id: 'open-profile',
+      label: DEFAULT_AUTHOR_LABEL,
+    });
+    expect(normalizeAuthorAction('open-profile', '   ')).toEqual({
+      id: 'open-profile',
+      label: DEFAULT_AUTHOR_LABEL,
+    });
+  });
+
+  it('trims what an attribute picked up', () => {
+    expect(normalizeAuthorAction(' open-profile ', ' 開く ')).toEqual({
+      id: 'open-profile',
+      label: '開く',
+    });
+  });
+
+  it('asks for nothing without an id, which is the default', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // An absent attribute is not a mistake, it is every embed that existed
+    // before this feature — so it passes without a word.
+    for (const id of [undefined, null, '', '  ']) {
+      expect(normalizeAuthorAction(id, 'プロフィール')).toBeUndefined();
+    }
+    expect(warn).not.toHaveBeenCalled();
+
+    warn.mockRestore();
+  });
+
+  it('says so when the id is not a string, rather than going quiet', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // A property set from JS with the wrong type. Silence here would look
+    // exactly like the feature not existing.
+    for (const id of [42, {}, true]) {
+      expect(normalizeAuthorAction(id, 'プロフィール')).toBeUndefined();
+    }
+    expect(warn).toHaveBeenCalledTimes(3);
+
+    warn.mockRestore();
+  });
+});
+
 describe('dispatchActionEvent', () => {
   it('announces the press on the element, escaping the shadow root', () => {
     const host = document.createElement('div');
@@ -147,5 +204,26 @@ describe('dispatchActionEvent', () => {
       event,
       status: 'pending',
     });
+    // No key at all rather than one holding undefined: structured cloning keeps
+    // the key, and the iframe path clones this object.
+    expect('pubkey' in heard[0]).toBe(false);
+  });
+
+  it('carries the person an author press was on', () => {
+    const host = document.createElement('div');
+    const event = makeEvent({ id: 'note-1', pubkey: 'pk' });
+    const heard: EventActionDetail[] = [];
+
+    host.addEventListener(ACTION_EVENT, (received) => {
+      heard.push((received as CustomEvent<EventActionDetail>).detail);
+    });
+
+    dispatchActionEvent(
+      host,
+      { id: 'open-profile' },
+      { event, status: 'validated', pubkey: event.pubkey }
+    );
+
+    expect(heard).toEqual([{ actionId: 'open-profile', event, status: 'validated', pubkey: 'pk' }]);
   });
 });

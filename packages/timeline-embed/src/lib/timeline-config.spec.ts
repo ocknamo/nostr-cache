@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AUTHOR_LABEL } from './event-actions.ts';
 import { MAX_REACTIONS } from './reactions.ts';
 import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 import {
@@ -385,6 +386,16 @@ describe('configFromSearchParams', () => {
     expect(config.actions).toEqual([{ id: 'reply', label: '返信', icon: '💬' }]);
   });
 
+  it('reads the author press out of the query string', () => {
+    expect(
+      configFromSearchParams(
+        new URLSearchParams({ 'author-action': 'open-profile', 'author-action-label': '開く' })
+      ).authorAction
+    ).toEqual({ id: 'open-profile', label: '開く' });
+    // Absent leaves the avatar and the name as they were.
+    expect(configFromSearchParams(new URLSearchParams()).authorAction).toBeUndefined();
+  });
+
   it('reads the filters JSON out of the query string', () => {
     const config = configFromSearchParams(
       new URLSearchParams({ filters: '[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]' })
@@ -568,6 +579,14 @@ describe('followConfigFromSearchParams', () => {
     expect(config.sinceSeconds).toBeUndefined();
     expect(config.followsFreshness).toBeUndefined();
     expect(config.debug).toBe(false);
+    expect(config.authorAction).toBeUndefined();
+  });
+
+  it('reads the author press, as the timeline reader does', () => {
+    expect(
+      followConfigFromSearchParams(new URLSearchParams({ 'author-action': 'open-profile' }))
+        .authorAction
+    ).toEqual({ id: 'open-profile', label: DEFAULT_AUTHOR_LABEL });
   });
 
   it('does not accept the deprecated show-origin alias', () => {

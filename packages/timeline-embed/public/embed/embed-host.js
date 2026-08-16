@@ -35,17 +35,20 @@
     // The payload is the event the card is already showing, so nothing crosses
     // the boundary that the reader was not being shown anyway.
     widget.addEventListener('nostr-timeline:action', function (pressed) {
-      parent.postMessage(
-        {
-          type: 'nostr-timeline:action',
-          actionId: pressed.detail.actionId,
-          event: pressed.detail.event,
-          // The relay's signature verdict, so a page acting on the press can
-          // tell a vouched-for event from one still waiting to be checked.
-          status: pressed.detail.status,
-        },
-        '*'
-      );
+      var message = {
+        type: 'nostr-timeline:action',
+        actionId: pressed.detail.actionId,
+        event: pressed.detail.event,
+        // The relay's signature verdict, so a page acting on the press can
+        // tell a vouched-for event from one still waiting to be checked.
+        status: pressed.detail.status,
+      };
+      // Added rather than always present: a press on a button has no person
+      // attached, and structured cloning keeps a key whose value is undefined.
+      if (pressed.detail.pubkey) {
+        message.pubkey = pressed.detail.pubkey;
+      }
+      parent.postMessage(message, '*');
     });
 
     document.body.appendChild(widget);

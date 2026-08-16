@@ -17,6 +17,8 @@
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
       actions: { attribute: 'actions' },
+      authorAction: { attribute: 'author-action' },
+      authorActionLabel: { attribute: 'author-action-label' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
     },
@@ -40,6 +42,7 @@
     type EventAction,
     dispatchActionEvent,
     normalizeActions,
+    normalizeAuthorAction,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { DEFAULT_MAX_FOLLOWS, followFilterSource } from './lib/follow-list.ts';
@@ -107,6 +110,16 @@
      */
     actions?: string | EventAction[];
     /**
+     * Makes the author's avatar and display name on every card pressable,
+     * reported as the same `nostr-timeline:action` event under this id, with
+     * the author's `pubkey` in the detail. Exactly as on `<nostr-timeline>`.
+     */
+    authorAction?: string;
+    /**
+     * The accessible name of that press. Defaults to 「プロフィールを開く」.
+     */
+    authorActionLabel?: string;
+    /**
      * Render the action icons as Material Symbols
      * (<https://fonts.google.com/icons>): each `icon` is then a ligature name
      * such as `favorite`, not literal text. Values: `outlined` (the default for
@@ -142,6 +155,8 @@
     showMedia,
     showEmbeds,
     actions,
+    authorAction,
+    authorActionLabel,
     materialIcons,
     materialIconsFont,
   }: Props = $props();
@@ -239,6 +254,7 @@
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
   actions={normalizeActions(actions)}
+  authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(key) => controller?.requestProfile(key)}

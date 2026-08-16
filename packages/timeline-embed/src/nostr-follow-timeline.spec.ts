@@ -3,6 +3,7 @@
 import 'fake-indexeddb/auto';
 import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { EventActionDetail } from './lib/event-actions.ts';
 import {
   DEFAULT_FOLLOWS_FRESHNESS,
   type RelayHost,
@@ -203,6 +204,37 @@ describe('<nostr-follow-timeline> custom element', () => {
     expect(await timelineFilters(dbName)).toEqual([
       { kinds: [1, 30023], authors: [FRIEND, hex(2)], limit: 5 },
     ]);
+  });
+
+  it('raises nostr-timeline:action for an author press, with the pubkey', async () => {
+    // This element declares and forwards its attributes separately from
+    // `<nostr-timeline>`, so the wiring is its own to get wrong.
+    const dbName = `follow-${crypto.randomUUID()}`;
+    await seedCache(dbName, [
+      followList([FRIEND]),
+      makeEvent({ id: `post-${crypto.randomUUID()}`, pubkey: FRIEND, content: 'フォロー先の投稿' }),
+    ]);
+    const element = mount({
+      pubkey: SUBJECT,
+      'db-name': dbName,
+      'author-action': 'open-profile',
+      'author-action-label': 'プロフィールへ',
+    });
+
+    const presses: EventActionDetail[] = [];
+    element.addEventListener('nostr-timeline:action', (press) => {
+      presses.push((press as CustomEvent<EventActionDetail>).detail);
+    });
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('button[part="author"]')),
+      'the author press target'
+    );
+    element.shadowRoot?.querySelector<HTMLButtonElement>('button[part="author"]')?.click();
+
+    expect(presses).toHaveLength(1);
+    expect(presses[0].actionId).toBe('open-profile');
+    expect(presses[0].pubkey).toBe(FRIEND);
   });
 
   it('reports the truncation only under debug', async () => {

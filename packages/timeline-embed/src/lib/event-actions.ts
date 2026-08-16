@@ -26,6 +26,19 @@ export interface EventActionContext {
   /** The event whose card the pressed button sits under. */
   event: NostrEvent;
   /**
+   * Who was pressed, when the press was on a person rather than on a button:
+   * the author's avatar or display name (see {@link AuthorAction}). Absent for
+   * a button in the action bar.
+   *
+   * Redundant with `event.pubkey` on a card — and deliberately so. The same
+   * affordance belongs on a reactor's row, on a quoted note's header and on a
+   * `nostr:` mention in a body, where the person pressed is *not* the author of
+   * the event that came with them. A listener that reads this field keeps
+   * working when it lands there; one that reads `event.pubkey` would quietly
+   * navigate to the wrong person.
+   */
+  pubkey?: string;
+  /**
    * The relay's signature verdict for that event, as of the press.
    *
    * The widget renders unverified events (faded, and without the ✓), so a
@@ -81,6 +94,42 @@ export interface EventAction {
 }
 
 /**
+ * The author's avatar and display name as a press target.
+ *
+ * Same `id` + `label` contract as a button, and the same `nostr-timeline:action`
+ * event, because it is the same mechanism: a card in a timeline still has
+ * nowhere of its own to navigate to, and the page that knows where its profile
+ * screen lives is the one holding the router.
+ *
+ * The id is the embedder's rather than one this module reserves. A fixed
+ * `"author"` would be indistinguishable from a button an embedder had already
+ * declared under that id — {@link normalizeActions} dedupes within the declared
+ * list, and cannot see an id the widget injects afterwards.
+ *
+ * Its presence is also what makes the avatar and the name pressable at all:
+ * without it they stay the plain image and text they have always been, so an
+ * embed that wires no listener never shows a target that does nothing.
+ */
+export interface AuthorAction {
+  /** Travels as `actionId`, exactly as a button's does. */
+  id: string;
+  /**
+   * What pressing does, as the accessible name of the target — the widget
+   * cannot know where the embedder's id leads, so it cannot write this itself.
+   * The author's name is appended for a screen reader moving through a list of
+   * cards.
+   */
+  label: string;
+}
+
+/**
+ * Shown when `author-action-label` is not set. Names the overwhelmingly likely
+ * destination; an embedder sending the press somewhere else has to say so, the
+ * same way a button's `label` is required rather than guessed.
+ */
+export const DEFAULT_AUTHOR_LABEL = 'プロフィールを開く';
+
+/**
  * Cap on buttons per card. Not a tuning knob — the bar is one row that has to
  * survive a narrow embed, and a list long enough to wrap is a mistake rather
  * than a design.
@@ -103,6 +152,12 @@ export interface EventActionDetail {
   event: NostrEvent;
   /** The relay's verdict for it — see {@link EventActionContext.status}. */
   status?: ValidationStatus;
+  /**
+   * Who was pressed, on an author press — see {@link EventActionContext.pubkey}
+   * for why this is here rather than left to `event.pubkey`. Absent for a
+   * button in the action bar.
+   */
+  pubkey?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -210,21 +265,57 @@ export function normalizeActions(value: unknown): EventAction[] {
 }
 
 /**
+ * Read the author press out of the two attributes that declare it.
+ *
+ * Only the id is required: it is what a listener switches on, and without it
+ * there is nothing to report. The label has a default because a press target
+ * cannot go unnamed — see {@link DEFAULT_AUTHOR_LABEL}.
+ */
+export function normalizeAuthorAction(id: unknown, label?: unknown): AuthorAction | undefined {
+  if (id === undefined || id === null || (typeof id === 'string' && id.trim() === '')) {
+    // Silently: an absent attribute is the default, not a mistake — it is every
+    // embed written before this existed.
+    return undefined;
+  }
+  if (typeof id !== 'string') {
+    // Anything else is a property set from JS with the wrong type, which would
+    // otherwise take the press away without saying so.
+    console.warn(
+      `[nostr-timeline] Ignoring author-action: expected a string id, got ${typeof id}.`
+    );
+    return undefined;
+  }
+  const name = typeof label === 'string' && label.trim() !== '' ? label.trim() : undefined;
+  return { id: id.trim(), label: name ?? DEFAULT_AUTHOR_LABEL };
+}
+
+/**
  * Announce a press on the custom element, so a page that could not pass an
  * `onSelect` (an HTML embed, or an iframe) still hears about it.
  *
  * Shared by both elements rather than written twice — they are meant to differ
  * only in how their filters are decided.
+ *
+ * Takes only the id of what was pressed, so an author press travels the same
+ * path as a button one: to a listener the two differ by the `actionId` the
+ * embedder chose for each, plus the `pubkey` an author press carries.
  */
 export function dispatchActionEvent(
   host: EventTarget,
-  action: EventAction,
+  action: Pick<EventAction, 'id'>,
   context: EventActionContext
 ): void {
   const detail: EventActionDetail = {
     actionId: action.id,
     event: context.event,
     status: context.status,
+    // Spread rather than assigned, so a button press carries no `pubkey` key at
+    // all: `'pubkey' in detail` is then the check for which kind of press this
+    // was, on both sides of the iframe boundary (structured cloning keeps a key
+    // whose value is undefined). `status` is assigned unconditionally because
+    // it means something either way — an absent verdict is a verdict that has
+    // not arrived.
+    ...(context.pubkey ? { pubkey: context.pubkey } : {}),
   };
   host.dispatchEvent(
     new CustomEvent<EventActionDetail>(ACTION_EVENT, {

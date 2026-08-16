@@ -9,7 +9,12 @@
  */
 
 import type { Filter } from '@nostr-cache/shared';
-import { type EventAction, normalizeActions } from './event-actions.ts';
+import {
+  type AuthorAction,
+  type EventAction,
+  normalizeActions,
+  normalizeAuthorAction,
+} from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 import { type MaterialVariant, parseMaterialVariant } from './material-symbols.ts';
 import { MAX_REACTIONS } from './reactions.ts';
@@ -404,6 +409,11 @@ export function configFromSearchParams(params: URLSearchParams): {
    * functions, so these are declarative only — a press is reported by event.
    */
   actions: EventAction[];
+  /**
+   * Makes each card's author pressable, reported under the embedder's own id.
+   * `undefined` leaves the avatar and the name plain.
+   */
+  authorAction: AuthorAction | undefined;
   /** Material Symbols variant for the action icons, if asked for. */
   materialIcons: MaterialVariant | undefined;
   /** `none` when the embedding page loads the icon font itself. */
@@ -425,6 +435,10 @@ export function configFromSearchParams(params: URLSearchParams): {
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
     actions: normalizeActions(params.get('actions')),
+    authorAction: normalizeAuthorAction(
+      params.get('author-action'),
+      params.get('author-action-label')
+    ),
     materialIcons: parseMaterialVariant(params.get('material-icons')),
     materialIconsFont: params.get('material-icons-font') ?? undefined,
   };
@@ -452,6 +466,8 @@ export interface FollowTimelineConfig {
   showEmbeds: boolean;
   /** Declarative action buttons; see {@link configFromSearchParams}. */
   actions: EventAction[];
+  /** The author press; see {@link configFromSearchParams}. */
+  authorAction: AuthorAction | undefined;
   /** Material Symbols variant for the action icons, if asked for. */
   materialIcons: MaterialVariant | undefined;
   /** `none` when the embedding page loads the icon font itself. */
@@ -483,6 +499,10 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
     actions: normalizeActions(params.get('actions')),
+    authorAction: normalizeAuthorAction(
+      params.get('author-action'),
+      params.get('author-action-label')
+    ),
     materialIcons: parseMaterialVariant(params.get('material-icons')),
     materialIconsFont: params.get('material-icons-font') ?? undefined,
   };

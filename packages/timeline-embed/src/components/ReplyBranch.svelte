@@ -13,6 +13,7 @@
    */
 
   import type { EventOrigin } from '../lib/cache-metrics.ts';
+  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ReplyNode } from '../lib/reply-tree.ts';
@@ -30,6 +31,8 @@
     showAvatars?: boolean;
     showMedia?: boolean;
     showEmbeds?: boolean;
+    authorAction?: AuthorAction;
+    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
     onAuthorVisible?: (pubkey: string) => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
   }
@@ -44,6 +47,8 @@
     showAvatars = true,
     showMedia = true,
     showEmbeds = true,
+    authorAction,
+    onAction,
     onAuthorVisible,
     onEmbedRequest,
   }: Props = $props();
@@ -64,6 +69,8 @@
         {showMedia}
         {showEmbeds}
         showReplyRef={false}
+        {authorAction}
+        {onAction}
         onVisible={onAuthorVisible && (() => onAuthorVisible(node.event.pubkey))}
         {onEmbedRequest}
       />
@@ -78,6 +85,8 @@
           {showAvatars}
           {showMedia}
           {showEmbeds}
+          {authorAction}
+          {onAction}
           {onAuthorVisible}
           {onEmbedRequest}
         />

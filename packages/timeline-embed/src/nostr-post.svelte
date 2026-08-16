@@ -21,6 +21,8 @@
       repliesLimit: { attribute: 'replies-limit' },
       repliesDepth: { attribute: 'replies-depth' },
       actions: { attribute: 'actions' },
+      authorAction: { attribute: 'author-action' },
+      authorActionLabel: { attribute: 'author-action-label' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
     },
@@ -50,6 +52,7 @@
     type EventAction,
     dispatchActionEvent,
     normalizeActions,
+    normalizeAuthorAction,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { type PostTarget, parsePostTarget } from './lib/post-target.ts';
@@ -145,6 +148,19 @@
      */
     actions?: string | EventAction[];
     /**
+     * Makes the author's avatar and display name pressable, reported as the
+     * same `nostr-timeline:action` event under this id, with the `pubkey` of
+     * whoever was pressed in the detail.
+     *
+     * Unlike `actions`, this reaches the replies as well as the post: it adds
+     * no row to a card, and a thread is mostly other people.
+     */
+    authorAction?: string;
+    /**
+     * The accessible name of that press. Defaults to 「プロフィールを開く」.
+     */
+    authorActionLabel?: string;
+    /**
      * Render action icons as Material Symbols ligature names
      * (<https://fonts.google.com/icons>): `outlined` (the default for a bare
      * attribute), `rounded`, `sharp`. Also loads the font from Google Fonts,
@@ -178,6 +194,8 @@
     repliesLimit,
     repliesDepth,
     actions,
+    authorAction,
+    authorActionLabel,
     materialIcons,
     materialIconsFont,
   }: Props = $props();
@@ -380,6 +398,7 @@
   showReplies={wantsReplies}
   repliesDepth={parseRepliesDepth(repliesDepth)}
   actions={normalizeActions(actions)}
+  authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}

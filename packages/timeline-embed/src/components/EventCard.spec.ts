@@ -825,6 +825,119 @@ describe('EventCard', () => {
     });
   });
 
+  describe('author press', () => {
+    const AUTHOR = { id: 'open-profile', label: 'プロフィールを開く' };
+
+    it('leaves the author plain until an embedder asks for the press', () => {
+      const { container } = render(EventCard, {
+        props: { event: makeEvent(), profile: { name: 'takeshi' } },
+      });
+
+      expect(container.querySelector('.identity')?.tagName).toBe('SPAN');
+      expect(container.querySelector('.author-avatar')).toBeNull();
+    });
+
+    it('names the press before whose it is, and keeps the name on screen', () => {
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          profile: { displayName: 'たけし', name: 'takeshi' },
+          authorAction: AUTHOR,
+        },
+      });
+
+      // The handle is in the label too: an `aria-label` replaces the text
+      // inside the button, so leaving it out would take the @handle away from a
+      // screen reader while everyone else keeps seeing it.
+      const author = screen.getByRole('button', { name: 'プロフィールを開く: たけし @takeshi' });
+      expect(author).toHaveTextContent('たけし');
+      expect(author).toHaveTextContent('@takeshi');
+    });
+
+    it('names the press with the display name alone when there is no handle', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), profile: { displayName: 'たけし' }, authorAction: AUTHOR },
+      });
+
+      expect(
+        screen.getByRole('button', { name: 'プロフィールを開く: たけし' })
+      ).toBeInTheDocument();
+    });
+
+    it('reports the press with the author it was on', async () => {
+      const event = makeEvent({ id: 'note-1' });
+      const onAction = vi.fn();
+      render(EventCard, { props: { event, status: 'validated', authorAction: AUTHOR, onAction } });
+
+      await fireEvent.click(screen.getByRole('button', { name: /プロフィールを開く/ }));
+
+      // `pubkey` rather than only `event.pubkey`: the same press belongs on a
+      // reactor's row and on a mention, where the two differ.
+      expect(onAction).toHaveBeenCalledWith(AUTHOR, {
+        event,
+        status: 'validated',
+        pubkey: event.pubkey,
+      });
+    });
+
+    it('carries no pubkey on a button press, which is about no one', async () => {
+      const onAction = vi.fn();
+      render(EventCard, {
+        props: {
+          event: makeEvent(),
+          actions: [{ id: 'zap', label: 'Zap' }],
+          authorAction: AUTHOR,
+          onAction,
+        },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Zap' }));
+
+      expect(onAction.mock.calls[0][1]).not.toHaveProperty('pubkey');
+    });
+
+    it('presses from the avatar too, without a second stop for a screen reader', async () => {
+      const event = makeEvent();
+      const onAction = vi.fn();
+      const { container } = render(EventCard, {
+        props: {
+          event,
+          profile: { name: 'takeshi', picture: 'https://example.com/a.png' },
+          authorAction: AUTHOR,
+          onAction,
+        },
+      });
+
+      const avatar = container.querySelector<HTMLElement>('.author-avatar');
+      expect(avatar).toHaveAttribute('tabindex', '-1');
+      expect(avatar).toHaveAttribute('aria-hidden', 'true');
+      // `tabindex="-1"` only covers the keyboard: a pointer press focuses a
+      // button by itself, and focus must not land on something hidden from the
+      // accessibility tree. Cancelling the press is what withholds it.
+      const press = new Event('pointerdown', { bubbles: true, cancelable: true });
+      avatar?.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+      // Both targets exist, but only the identity is in the accessibility tree.
+      expect(screen.getAllByRole('button', { name: /プロフィールを開く/ })).toHaveLength(1);
+
+      await fireEvent.click(avatar as HTMLElement);
+      expect(onAction).toHaveBeenCalledTimes(1);
+    });
+
+    it('exposes both targets as parts, for styling from outside', () => {
+      const { container } = render(EventCard, {
+        props: {
+          event: makeEvent(),
+          profile: { name: 'takeshi', picture: 'https://example.com/a.png' },
+          authorAction: AUTHOR,
+        },
+      });
+
+      expect(container.querySelector('.identity')).toHaveAttribute('part', 'author');
+      expect(container.querySelector('.author-avatar')).toHaveAttribute('part', 'author-avatar');
+    });
+  });
+
   describe('height cap', () => {
     function note(container: HTMLElement): HTMLElement {
       const found = container.querySelector<HTMLElement>('.note');
