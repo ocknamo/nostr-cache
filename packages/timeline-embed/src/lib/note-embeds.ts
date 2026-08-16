@@ -62,6 +62,17 @@ export interface EmbedTarget {
 }
 
 /**
+ * The lookup for an event named by its id alone — a NIP-10 `e` tag, which
+ * carries no bech32 entity to decode.
+ *
+ * Shares {@link embedTarget}'s key, so a reply whose parent the body also
+ * quotes is fetched once and shown in both places.
+ */
+export function eventIdTarget(id: string): EmbedTarget {
+  return { key: id, filter: { ids: [id] }, replaceable: false };
+}
+
+/**
  * @returns undefined for an entity that names a person (`npub`, `nprofile`)
  *   rather than an event — those stay `@name` mentions in the text
  */
@@ -80,7 +91,7 @@ export function embedTarget(entity: EntityPart['entity']): EmbedTarget | undefin
   // Deliberately the id alone, even when an `nevent` carried a kind TLV: the
   // TLV is a hint written by whoever encoded the entity, and a wrong one would
   // turn a fetchable event into a permanent "missing".
-  return { key, filter: { ids: [key] }, replaceable: false };
+  return eventIdTarget(key);
 }
 
 /**

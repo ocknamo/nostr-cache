@@ -24,7 +24,8 @@
 - アバター・表示名・`@handle` を kind 0（プロフィール）から表示。kind 0 は replaceable として
   同じキャッシュに載り、`upstreamFreshness` の鮮度ウィンドウ（既定 24 時間・
   `profile-freshness` で変更可）が効くため、リロード後は上流に問い合わせず即座に出ます
-- 返信・引用（`e` / `q` タグ）がある投稿には参照チップを表示（タグだけが根拠の参照は本文を取得しません）。
+- 返信・引用（`e` / `q` タグ）がある投稿には参照チップを表示。「返信先」チップは返信先の投稿を
+  取得して、**投稿者のアイコンと本文一行のプレビュー**に変わります（[下記](#返信先のプレビュー)）。
   `<nostr-post>` では「返信先」チップが**押せるボタン**になり、その投稿へ表示が切り替わります
 - 本文中の `nostr:` 参照（NIP-21 / NIP-27）は参照先を取得し、**入れ子のカード**として表示
   （5 段まで・[下記](#入れ子の投稿引用)）
@@ -444,6 +445,8 @@ level 3  …
 
 主役のカードの「返信先」チップを押すと、**ウィジェット内で表示対象がその投稿に切り替わります**。
 上に「← 元の投稿に戻る」が出て、押せば元の投稿に戻ります。外部サイトへは飛ばしません。
+チップ自体も祖先を取得して**アイコンと本文一行**を出すので、押す前に何に返信したのかが読めます
+（[返信先のプレビュー](#返信先のプレビュー)）。
 
 **ツリーの中の返信カードには「返信先」チップを出しません。** 親はそのカードが入れ子になっている
 1 つ上のカードそのもので、インデントが既に言っていることを行ごとに繰り返すだけになるためです
@@ -507,11 +510,12 @@ part は `::part(widget)` / `::part(error)` / `::part(reconnecting)` / `::part(e
 `::part(reaction-chip-<key>)` / `::part(reaction-more)` /
 `::part(reactors)` / `::part(reactor)` /
 `::part(replies)` / `::part(replies-heading)` / `::part(reply)` / `::part(reply-more)` /
-`::part(replies-note)` / `::part(ref-nav)` を公開しています。`reply-more` は
+`::part(replies-note)` / `::part(ref)` / `::part(ref-nav)` を公開しています。`reply-more` は
 「返信の下が切られた」ときと「直接の返信が切られた」ときの両方に付きます。`reaction-chip-<key>` の
 `<key>` は絵文字そのもの（`+` は `❤️` に寄せられます）で、空白を含むリアクションでは
 `part` が壊れるため付きません（`reaction-chip` は常に付きます）。カード内部の
-`::part(note)` / `::part(actions)` / `::part(action)` / `::part(avatar)` はタイムラインと共通です。
+`::part(note)` / `::part(actions)` / `::part(action)` / `::part(avatar)` はタイムラインと共通です
+（`avatar` は「返信先」プレビューのアイコンにも当たります）。
 
 ### 制約（投稿詳細固有）
 
@@ -633,6 +637,8 @@ nostr-timeline {
   --nt-name-fg: #e6edf3;        /* 表示名 */
   --nt-handle-fg: #8b949e;      /* @handle。既定は --nt-muted */
   --nt-quote-bar: #4a7dff;      /* 返信 / 引用チップの縦線 */
+  --nt-ref-avatar-size: 16px;   /* 「返信先」プレビューのアイコン */
+  --nt-ref-avatar-radius: 999px;
   --nt-tip-bg: #0f1419;         /* 日付ツールチップの背景 */
   --nt-tip-fg: #ffffff;         /* 日付ツールチップの文字色 */
   --nt-list-padding-top: 16px;  /* リスト先頭の余白 */
@@ -789,7 +795,8 @@ nostr-timeline {
 - 引用は `q` タグ（NIP-18）にも書かれるのが通例なので、**本文でカードとして展開した id は
   「引用」チップから省きます**（同じイベントを 2 か所で指さないため）。「返信先」チップは
   そのままです。
-- 追加の取得を一切させたくない場合は `show-embeds="false"` を指定してください。
+- 追加の取得を一切させたくない場合は `show-embeds="false"` を指定してください
+  （[返信先のプレビュー](#返信先のプレビュー)も止まります）。
 - 入れ子カードは `::part(quote)` で公開しています（取得中のプレースホルダも同じ part です）。
 
 **引用先は埋め込む側が選んでいない第三者の投稿です。** `filters` / `authors` で絞り込んでいても、
@@ -797,6 +804,34 @@ nostr-timeline {
 **その投稿者が指定した任意のホスト**から読み込まれます（閲覧者の IP がそのホストに渡る点は
 アバターや本文の添付と同じです）。取得も表示もさせたくない場合は `show-embeds="false"`、
 メディアだけ止めたい場合は `show-media="false"` を指定してください。
+
+### 返信先のプレビュー
+
+「返信先」チップは、返信先の投稿を取得できると
+**投稿者のアイコン＋本文一行**（`返信先 [icon] おはようございます…`）に変わります。
+返信が単体では意味の通らない断片になるのを防ぐためで、誰への返信かはアイコンで示します。
+
+- **取得前・取得できなかったとき・本文の無い投稿（リポスト・暗号化 DM）は短縮 ID のまま**です。
+  「読み込み中…」は出しません（チップには既に出せるものがあり、スクロール中にそれが
+  毎カード点滅するのは ID より悪いため）。
+- 取得は入れ子カードと**同じ経路**です。カードが画面に入ってから・同時 2 本まで・一発の REQ で、
+  同じイベントは何枚のカードから参照されても 1 回しか取りに行きません。本文でも引用されている
+  返信先は**同じキーになる**ので追加コストは 0 です。
+- 本文は**一行に畳んで**表示します。改行や連続する空白は空白 1 個に、添付は `[画像]` /
+  `[動画]` / `[音声]` に、URL はホスト名に、`nostr:` の言及は（プロフィールが手元にあれば）
+  `@名前` になります。長い本文は 140 文字で切ってから、カード幅で `…` に丸めます。
+- `show-embeds="false"` では**取得も表示も止まります**（本文の引用カードと同じ扱いです。既に
+  手元にある返信先も描きません。アイコンが第三者ホストからの画像読み込みになるためです）。
+  `show-avatars="false"` ではアイコンだけ消え、本文一行は残ります。
+- アイコンは装飾扱い（`alt=""`）で、投稿者名はスクリーンリーダー向けのテキストとして読まれます。
+- **署名検証待ちでも薄くしません。** カードや入れ子カードの半透明表示（`--nt-unverified-opacity`）は
+  チップには掛けません（`0.8rem` の淡色に更に 0.6 を掛けると読めなくなるため）。返信先の本文は
+  リレーが検証を終える前に出ることがあります。
+- `show-embeds` を後から `true` に戻しても、**既に画面にあるカードは取りに行きません**
+  （取得のトリガは「初めて画面に入ったとき」の 1 回だけのため）。新しく流れてくるカードには効きます。
+- 「引用」チップは対象外です（本文で引用されていればカードとして展開済みのため）。
+- 行は `::part(ref)`、押せるチップは `::part(ref-nav)` で公開しています。
+  アイコンの大きさは `--nt-ref-avatar-size` / `--nt-ref-avatar-radius` で変えられます。
 
 ## 投稿ごとのアクションボタン（仕組みのみ）
 
@@ -1024,13 +1059,14 @@ import {
 | `InstrumentedUpstreamPool` | `UpstreamPool` デコレータ。cache-relay 無改変で上流トラフィックを計測 |
 | `RequestTimer` | REQ → 初回イベント → EOSE の計測 |
 | `RelayConnection` | rx-nostr を使った NIP-01 クライアント。切断時の自動再接続と REQ の再送を担う |
-| `parseProfileContent` / `authorName` / `authorHandle` | kind 0 の防御的パースと表示名の決定 |
+| `parseProfileContent` / `authorName` / `authorHandle` / `stripUnrenderable` | kind 0 の防御的パースと表示名の決定。`stripUnrenderable` は 1 行に描くテキストから制御文字・bidi 上書きを落とす |
 | `parseRefs` / `replyParentId` / `replyParentAddress` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方）。後ろ 2 つは「この投稿の親はどれか」だけを返す |
 | `buildReplyTree` / `acceptsReply` / `MAX_REPLY_DEPTH` / `MAX_REPLIES` | 生の kind 1 からリプライツリーを組む純粋関数。ルートから降りるので循環は到達不能になり、`#e` の任意位置マッチで届く別の枝は繋がらないものとして落ちる |
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
-| `selectEmbeds` / `embedTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで |
+| `notePreview` / `eventPreview` / `mentionLabel` / `PREVIEW_MAX_LENGTH` | 本文を 1 行の文字列へ畳む（チップのプレビュー用。添付は `[画像]`、URL はホスト名、言及は `@名前`）。`eventPreview` は本文を持たない kind を空文字で返す |
+| `selectEmbeds` / `embedTarget` / `eventIdTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで。`eventIdTarget` は生の id（`e` タグ）から同じキーの取得を作る |
 | `noteSegments` / `segmentMedia` / `segmentKey` | 本文をテキスト区間と入れ子カードの並びに分割し(引用の展開位置を決める本体)、添付の重複排除をその区間をまたいで通す。`segmentKey` は描画時のキー |
-| `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィールと引用の取得トリガ） |
+| `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィール・引用・返信先プレビューの取得トリガ） |
 | `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `Avatar` / `PostView` / `ReactionBar` / `ReplyTree` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 | `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { NostrEvent } from '@nostr-cache/shared';
 import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildReplyTree } from '../lib/reply-tree.ts';
 import { makeEvent } from '../test-fixtures.ts';
 import ReplyTree from './ReplyTree.svelte';
@@ -82,13 +82,18 @@ describe('ReplyTree', () => {
   });
 
   it('drops the 返信先 chip, which the nesting already says', () => {
+    const onEmbedRequest = vi.fn();
     const { container } = render(ReplyTree, {
       props: {
         tree: tree([reply(REPLY_ID, POST_ID, 'first'), reply(GRANDCHILD_ID, REPLY_ID, 'nested')]),
+        onEmbedRequest,
       },
     });
 
     expect(container.querySelector('.ref')).toBeNull();
+    // No chip is also no lookup: a thread of 50 replies must not ask the relay
+    // for 50 parents it is already showing.
+    expect(onEmbedRequest).not.toHaveBeenCalled();
   });
 
   it('says so when the node cap left direct replies out', () => {
