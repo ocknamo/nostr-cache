@@ -242,6 +242,46 @@ describe('<nostr-post> custom element', () => {
     expect(presses[0].event.id).toBe(POST_ID);
   });
 
+  it('raises the same event for an author press, naming who was pressed', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    const element = mount({
+      'event-id': POST_ID,
+      'db-name': dbName,
+      'author-action': 'open-profile',
+      'author-action-label': 'プロフィールへ',
+    });
+
+    const presses: EventActionDetail[] = [];
+    element.addEventListener('nostr-timeline:action', (event) => {
+      presses.push((event as CustomEvent<EventActionDetail>).detail);
+    });
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('button[part="author"]')),
+      'the author press target'
+    );
+    const author = element.shadowRoot?.querySelector<HTMLButtonElement>('button[part="author"]');
+    expect(author?.getAttribute('aria-label')).toContain('プロフィールへ');
+    author?.click();
+
+    // One event name for both kinds of press; the id is what tells them apart,
+    // and `pubkey` is who to look up.
+    expect(presses).toHaveLength(1);
+    expect(presses[0].actionId).toBe('open-profile');
+    expect(presses[0].pubkey).toBe(ALICE);
+    expect(presses[0].event.id).toBe(POST_ID);
+  });
+
+  it('leaves the author unpressable without the attribute', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    const element = mount({ 'event-id': POST_ID, 'db-name': dbName });
+
+    await waitFor(() => Boolean(element.shadowRoot?.querySelector('.identity')), 'the author line');
+    expect(element.shadowRoot?.querySelector('button[part="author"]')).toBeNull();
+  });
+
   it('starts up when the post is named after it is already on the page', async () => {
     const dbName = `post-${crypto.randomUUID()}`;
     await seed(dbName, postWithReactions());

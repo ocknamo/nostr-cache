@@ -3,7 +3,7 @@
   import type { EventOrigin } from '../lib/cache-metrics.ts';
   import { parseContent } from '../lib/content-parts.ts';
   import { eventPreview } from '../lib/content-preview.ts';
-  import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
   import {
@@ -67,10 +67,16 @@
      */
     actions?: EventAction[];
     /**
+     * Makes the author's avatar and display name pressable, reporting the press
+     * under this id. Undefined leaves both the plain image and text they are —
+     * see `lib/event-actions.ts`.
+     */
+    authorAction?: AuthorAction;
+    /**
      * Called on a press, after the action's own `onSelect`. The widget uses it
      * to raise the `nostr-timeline:action` DOM event on the custom element.
      */
-    onAction?: (action: EventAction, context: EventActionContext) => void;
+    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
     /**
      * Render action icons as Material Symbols ligatures of this variant.
      * Undefined leaves every `icon` as the literal text it is. An action's own
@@ -115,6 +121,7 @@
     showEmbeds = true,
     datePlacement = 'above',
     actions = [],
+    authorAction,
     onAction,
     materialIcons,
     onVisible,
@@ -266,7 +273,11 @@
    */
   const unverified = $derived(status !== 'validated');
 
-  function select(action: EventAction): void {
+  /**
+   * @param pubkey Who was pressed, for a press on a person rather than on a
+   *   button. Left off by the action bar.
+   */
+  function select(action: EventAction | AuthorAction, pubkey?: string): void {
     // A snapshot, not the event itself: what the timeline holds is a Svelte
     // state proxy, and handing that out leaks the widget's own reactive state
     // to the embedder — who could mutate the card from under it, and cannot
@@ -277,12 +288,19 @@
     // to tell what the relay has actually vouched for. Nothing else on this
     // path carries it — the DOM event and the iframe's `postMessage` are all
     // the embedder gets.
-    const context: EventActionContext = { event: $state.snapshot(event), status };
+    const context: EventActionContext = {
+      event: $state.snapshot(event),
+      status,
+      ...(pubkey ? { pubkey } : {}),
+    };
+    // Only a declared button can carry one: the author press is declared by two
+    // attributes, and an attribute cannot hold a function.
+    const handler = 'onSelect' in action ? action.onSelect : undefined;
     // The embedder's own handler runs first, but must not be able to swallow
     // the press: without this, one throwing `onSelect` would also stop the DOM
     // event every other listener on the page is waiting for.
     try {
-      action.onSelect?.(context);
+      handler?.(context);
     } catch (error) {
       console.error(`[nostr-timeline] action "${action.id}" threw`, error);
     }
@@ -298,19 +316,59 @@
   use:whenVisible={onVisible}
 >
   {#if showAvatar}
-    <Avatar pubkey={event.pubkey} {profile} {name} />
+    {#if authorAction}
+      <!-- Out of the tab order and out of the accessibility tree: the identity
+           below is the same press with the same destination, and a screen
+           reader announcing it twice per card — or 50 extra tab stops in a
+           timeline — is what a second target would cost. `aria-hidden` is safe
+           here only because `tabindex="-1"` takes the focus away with it. -->
+      <button
+        type="button"
+        class="author-avatar"
+        part="author-avatar"
+        tabindex="-1"
+        aria-hidden="true"
+        onclick={() => select(authorAction, event.pubkey)}
+      >
+        <Avatar pubkey={event.pubkey} {profile} {name} />
+      </button>
+    {:else}
+      <Avatar pubkey={event.pubkey} {profile} {name} />
+    {/if}
   {/if}
   <div class="body">
     <!-- The tooltip hangs off this wrapper rather than off the header, which
          clips its own overflow to stay on one line. -->
     <div class="header-row">
       <header>
-        <span class="identity" class:with-handle={handle} title={event.pubkey}>
+        <!-- The two spellings share their contents, so the name and the handle
+             keep one set of rules for how they give up width to the row. -->
+        {#snippet identity()}
           <span class="name">{name}</span>
           {#if handle}
             <span class="handle">@{handle}</span>
           {/if}
-        </span>
+        {/snippet}
+        {#if authorAction}
+          <!-- The label first, then whose it is: the same order the 「返信先」
+               chip announces itself in, and the part a reader moving through a
+               list of cards needs before the name. -->
+          <button
+            type="button"
+            class="identity author"
+            class:with-handle={handle}
+            part="author"
+            title={event.pubkey}
+            aria-label="{authorAction.label}: {name}"
+            onclick={() => select(authorAction, event.pubkey)}
+          >
+            {@render identity()}
+          </button>
+        {:else}
+          <span class="identity" class:with-handle={handle} title={event.pubkey}>
+            {@render identity()}
+          </span>
+        {/if}
         <span class="meta">
           <!-- The ✓ lives here rather than beside the name on purpose: the name
                is upstream-controlled text, and an author whose display_name ends
@@ -624,6 +682,53 @@
     min-width: 0;
     flex: 0 1 auto;
     overflow: hidden;
+  }
+
+  /* Reads as the identity it replaces: no button chrome, the header's own
+     colour and metrics. It keeps `.identity`'s flex box, so the name and the
+     handle give up width exactly as they do without the press. */
+  .identity.author {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    /* A button centres its contents; this is the start of a text row. */
+    text-align: start;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* On the name only, so the underline stops where the name does rather than
+     running under the handle beside it. Solid, unlike the 「返信先」 chip's
+     dotted rule: that one moves within the widget, this one hands the press to
+     the embedding page, which usually navigates. */
+  .identity.author:hover .name,
+  .identity.author:focus-visible .name {
+    text-decoration: underline;
+  }
+
+  .identity.author:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* The avatar's own box, nothing more: the grid sizes this column from the
+     image, so any padding here would widen the gutter on cards that are
+     pressable and not on the ones that are not. */
+  .author-avatar {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .name {

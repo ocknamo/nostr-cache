@@ -9,9 +9,15 @@
    * No action buttons under a reply. `actions` is what the embedding page
    * declared for the post it named, and repeating that row under every reply
    * would turn one deliberate control into a column of them.
+   *
+   * The author press (`authorAction`) does come down here, for the reason that
+   * argument does not reach: it adds nothing to the card, it makes the name
+   * that is already there pressable — and in a thread, the people a reader
+   * wants to look up are mostly the ones replying.
    */
 
   import type { EventOrigin } from '../lib/cache-metrics.ts';
+  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ReplyTree } from '../lib/reply-tree.ts';
@@ -29,6 +35,10 @@
     showAvatars?: boolean;
     showMedia?: boolean;
     showEmbeds?: boolean;
+    /** Makes each reply's author pressable, under this id. */
+    authorAction?: AuthorAction;
+    /** Called on an author press; there are no buttons under a reply. */
+    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
     onAuthorVisible?: (pubkey: string) => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
   }
@@ -43,6 +53,8 @@
     showAvatars = true,
     showMedia = true,
     showEmbeds = true,
+    authorAction,
+    onAction,
     onAuthorVisible,
     onEmbedRequest,
   }: Props = $props();
@@ -64,6 +76,8 @@
         {showAvatars}
         {showMedia}
         {showEmbeds}
+        {authorAction}
+        {onAction}
         {onAuthorVisible}
         {onEmbedRequest}
       />

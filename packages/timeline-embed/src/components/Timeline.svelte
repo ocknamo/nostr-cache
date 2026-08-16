@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { NostrEvent } from '@nostr-cache/shared';
   import type { EventOrigin } from '../lib/cache-metrics.ts';
-  import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
@@ -43,8 +43,13 @@
      * no actions of its own, only the mechanism (`lib/event-actions.ts`).
      */
     actions?: EventAction[];
+    /**
+     * Makes the author's avatar and name on every card pressable, under this
+     * id. Undefined leaves both as they are.
+     */
+    authorAction?: AuthorAction;
     /** Called on a press, after the action's own `onSelect`. */
-    onAction?: (action: EventAction, context: EventActionContext) => void;
+    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
     /** Render action icons as Material Symbols ligatures of this variant. */
     materialIcons?: MaterialVariant;
     /**
@@ -71,6 +76,7 @@
     showMedia = true,
     showEmbeds = true,
     actions = [],
+    authorAction,
     onAction,
     materialIcons,
     onAuthorVisible,
@@ -97,6 +103,7 @@
             {showMedia}
             {showEmbeds}
             {actions}
+            {authorAction}
             {onAction}
             {materialIcons}
             datePlacement={index === 0 ? 'below' : 'above'}

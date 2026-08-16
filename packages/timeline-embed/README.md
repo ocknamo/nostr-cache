@@ -29,6 +29,9 @@
   `<nostr-post>` では「返信先」チップが**押せるボタン**になり、その投稿へ表示が切り替わります
 - 本文中の `nostr:` 参照（NIP-21 / NIP-27）は参照先を取得し、**入れ子のカード**として表示
   （5 段まで・[下記](#入れ子の投稿引用)）
+- `author-action` を指定すると**アイコンと表示名が押せるようになり**、押された著者の
+  `pubkey` が `nostr-timeline:action` で通知されます（プロフィール画面への導線用・
+  [下記](#著者アイコン表示名の押下)）
 - フォローリスト（kind 3）も replaceable として同じキャッシュに載り、鮮度ウィンドウ
   （既定 10 分・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
   2 回目以降のロードは**上流に問い合わせずフォローリストがキャッシュから即座に出ます**
@@ -170,6 +173,8 @@ npm パッケージを入れられない構成のための入口です。
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
 | `show-embeds` | `false` で本文中の `nostr:` 参照の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
+| `author-action` | 指定するとアイコン・表示名が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する（[下記](#著者アイコン表示名の押下)） | なし（押せない・従来どおり） |
+| `author-action-label` | その押下の説明（アクセシブル名）。`author-action` が無いときは効きません | `プロフィールを開く` |
 | `material-icons` | ボタンのアイコンを [Material Symbols](https://fonts.google.com/icons) で描画する。`outlined` / `rounded` / `sharp`（値なしは `outlined`） | なし（`icon` は文字そのまま） |
 | `material-icons-font` | `none` で Google Fonts の読み込みを止める（埋め込み先ページが自前で読み込む場合） | `google`（Google Fonts から読み込む） |
 
@@ -248,7 +253,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
-| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `author-action` / `author-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -479,6 +484,8 @@ level 3  …
 | `replies-limit` | **1 階層あたり**の取得件数（上限 500） | `100` |
 | `replies-depth` | 取得・表示する階層の数（1〜5） | `3` |
 | `actions` | ボタン定義の JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし |
+| `author-action` | アイコン・表示名を押せるようにし、押下をこの ID で通知する。**投稿本体だけでなく返信ツリーの各返信にも効きます**（[下記](#著者アイコン表示名の押下)） | なし |
+| `author-action-label` | その押下の説明（アクセシブル名） | `プロフィールを開く` |
 | `material-icons` | アイコンを Material Symbols で描画（`outlined` / `rounded` / `sharp`） | オフ |
 | `material-icons-font` | `none` でフォントを読み込まない | `google` |
 
@@ -639,6 +646,7 @@ nostr-timeline {
   --nt-quote-bar: #4a7dff;      /* 返信 / 引用チップの縦線 */
   --nt-ref-avatar-size: 16px;   /* 「返信先」プレビューのアイコン */
   --nt-ref-avatar-radius: 999px;
+  --nt-focus: #1d9bf0;          /* フォーカスリング（返信先チップ・著者の押下など） */
   --nt-tip-bg: #0f1419;         /* 日付ツールチップの背景 */
   --nt-tip-fg: #ffffff;         /* 日付ツールチップの文字色 */
   --nt-list-padding-top: 16px;  /* リスト先頭の余白 */
@@ -958,6 +966,64 @@ window.addEventListener('message', (event) => {
 - Shadow parts: 行全体が `::part(actions)`、ボタンが `::part(action)`、
   **個別のボタンが `::part(action-<id>)`**（例: `nostr-timeline::part(action-like) { color: crimson }`）
 
+## 著者（アイコン・表示名）の押下
+
+投稿カードの**アイコンと表示名を押せるように**できます。押下はボタンと同じ
+`nostr-timeline:action` で通知され、`detail.pubkey` に**押された人**が載ります。
+著者のプロフィール画面へ遷移する導線を、埋め込み先の画面側で作るためのものです。
+
+**ウィジェットは自分では遷移しません。** リンク（`<a href>`）にしていないのは、
+遷移先を知っているのが埋め込み先ページだけだからです。`href` を渡す方式にすると、
+埋め込み先がそのパスを実装していなければ 404 になり、SPA ルータでもフルリロードに
+なります（Shadow DOM 内のリンクは、外側から見ると `event.target` が
+`<nostr-timeline>` に付け替えられるため、`closest('a')` 方式のルータが拾えません）。
+押下を通知するだけにして、`router.push()` を呼ぶかどうかは埋め込み先に委ねています。
+
+```html
+<nostr-timeline
+  relays="wss://nos.lol"
+  author-action="open-profile"
+  author-action-label="プロフィールを開く"
+></nostr-timeline>
+
+<script>
+  document.querySelector('nostr-timeline').addEventListener('nostr-timeline:action', (e) => {
+    if (e.detail.actionId !== 'open-profile') return;
+    // e.detail = { actionId, event, status, pubkey }
+    location.hash = `#/user/${e.detail.pubkey}`;
+  });
+</script>
+```
+
+- **ID は埋め込み側が決めます**（`author-action` の値）。ウィジェットが `author` のような
+  ID を予約すると、`actions` に同じ ID のボタンを宣言している埋め込みと区別できなくなるためです。
+- **`detail.pubkey` を読んでください。** カードでは `detail.event.pubkey` と同じ値ですが、
+  この導線を今後リアクター一覧・引用ヘッダ・本文中のメンションへ広げると、
+  そこでは「押された人」と「イベントの著者」が別人になります。
+- `author-action` を指定しない限り、アイコンも表示名も**従来どおりただの画像と文字**です
+  （押せそうな見た目にはなりません）。
+- `author-action-label` は**押すと何が起きるかの説明**で、そのまま押下対象の
+  アクセシブル名になります（実際には `プロフィールを開く: たけし` のように著者名が続きます）。
+  遷移先がプロフィール以外なら必ず指定してください。
+- **`onSelect` は呼ばれません。** 属性は関数を持てないので、JS から受けたい場合も
+  `nostr-timeline:action` を購読してください。
+- `<nostr-post>` では**投稿本体と返信ツリーの各返信の両方**に効きます（`actions` と違い、
+  カードに行が増えるわけではないため）。引用カード（`nostr:` 参照の入れ子）と
+  リアクター一覧はまだ対象外です。
+- iframe 埋め込みでも同じで、クエリパラメータ（`&author-action=open-profile`）で宣言し、
+  押下は `postMessage` で戻ります（`{ type, actionId, event, status, pubkey }`）。
+
+### アクセシビリティと見た目
+
+- 押下対象は**アイコンと表示名の 2 つ**ですが、**アイコン側はタブ順とスクリーンリーダーから
+  外しています**（`tabindex="-1"` + `aria-hidden="true"`）。同じ行き先が 1 枚のカードに
+  2 回読み上げられるのと、50 枚のタイムラインでタブストップが 100 個増えるのを避けるためです。
+  マウス・タッチではアイコンも押せます。
+- Shadow parts: 表示名が `::part(author)`、アイコンが `::part(author-avatar)`
+  （例: `nostr-timeline::part(author):hover { color: #1d9bf0 }`）。
+- 既定では下線を出さず、ホバー・フォーカス時に表示名だけに下線を引きます
+  （フォーカスリングは `--nt-focus`）。
+
 ## 制約
 
 - **署名未検証のイベントも表示されます。** ウィジェットはリレーを遅延検証
@@ -1027,7 +1093,7 @@ window.addEventListener('message', (event) => {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **379 KB（gzip 約 124 KB）** の自己完結した IIFE です
+`dist/nostr-timeline.js` は約 **412 KB（gzip 約 133 KB）** の自己完結した IIFE です
 （`<nostr-timeline>` / `<nostr-follow-timeline>` / `<nostr-post>` の 3 つすべてを含みます）。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、

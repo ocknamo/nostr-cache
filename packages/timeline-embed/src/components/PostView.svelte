@@ -13,7 +13,7 @@
    * back is `onBack` rather than a second post on screen.
    */
 
-  import type { EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
   import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { EmbedTarget } from '../lib/note-embeds.ts';
   import type { PostTarget } from '../lib/post-target.ts';
@@ -50,8 +50,14 @@
     onBack?: () => void;
     /** The embedder's buttons, rendered under the post as on a card. */
     actions?: EventAction[];
+    /**
+     * Makes the author's avatar and name pressable — on the post and on every
+     * reply under it, unlike `actions`: this adds no row of its own, and the
+     * author of a reply is exactly the person a reader would want to look up.
+     */
+    authorAction?: AuthorAction;
     /** Called on a press, after the action's own `onSelect`. */
-    onAction?: (action: EventAction, context: EventActionContext) => void;
+    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
     /** Render action icons as Material Symbols ligatures of this variant. */
     materialIcons?: MaterialVariant;
     /** Rendered instead of everything else, unlike `state.error`. */
@@ -74,6 +80,7 @@
     onNavigate,
     onBack,
     actions = [],
+    authorAction,
     onAction,
     materialIcons,
     fatal,
@@ -150,6 +157,7 @@
           {showMedia}
           {showEmbeds}
           {actions}
+          {authorAction}
           {onAction}
           {materialIcons}
           {onEmbedRequest}
@@ -176,6 +184,8 @@
             {showAvatars}
             {showMedia}
             {showEmbeds}
+            {authorAction}
+            {onAction}
             {onAuthorVisible}
             {onEmbedRequest}
           />

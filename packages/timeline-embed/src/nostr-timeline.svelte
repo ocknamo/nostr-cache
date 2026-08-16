@@ -16,6 +16,8 @@
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
       actions: { attribute: 'actions' },
+      authorAction: { attribute: 'author-action' },
+      authorActionLabel: { attribute: 'author-action-label' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
     },
@@ -28,6 +30,7 @@
     type EventAction,
     dispatchActionEvent,
     normalizeActions,
+    normalizeAuthorAction,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
@@ -124,6 +127,23 @@
      */
     actions?: string | EventAction[];
     /**
+     * Makes the author's avatar and display name on every card pressable,
+     * reporting the press as the same `nostr-timeline:action` event under this
+     * id — with the author's `pubkey` in the detail.
+     *
+     * The widget navigates nowhere itself: an embed's profile screen is the
+     * embedding page's, and only that page holds the router. Without this
+     * attribute the avatar and the name stay the plain image and text they have
+     * always been.
+     */
+    authorAction?: string;
+    /**
+     * What pressing the author does, as the accessible name of that target.
+     * Defaults to 「プロフィールを開く」 — set it when the press leads
+     * somewhere else.
+     */
+    authorActionLabel?: string;
+    /**
      * Render the action icons as Material Symbols
      * (<https://fonts.google.com/icons>): each `icon` is then a ligature name
      * such as `favorite`, not literal text. Values: `outlined` (the default for
@@ -158,6 +178,8 @@
     showMedia,
     showEmbeds,
     actions,
+    authorAction,
+    authorActionLabel,
     materialIcons,
     materialIconsFont,
   }: Props = $props();
@@ -240,6 +262,7 @@
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
   actions={normalizeActions(actions)}
+  authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
