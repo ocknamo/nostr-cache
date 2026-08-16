@@ -151,11 +151,29 @@ describe('normalizeAuthorAction', () => {
   });
 
   it('asks for nothing without an id, which is the default', () => {
-    // Silently: an absent attribute is not a mistake, it is every embed that
-    // existed before this feature.
-    for (const id of [undefined, '', '  ', 42, {}]) {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // An absent attribute is not a mistake, it is every embed that existed
+    // before this feature — so it passes without a word.
+    for (const id of [undefined, null, '', '  ']) {
       expect(normalizeAuthorAction(id, 'プロフィール')).toBeUndefined();
     }
+    expect(warn).not.toHaveBeenCalled();
+
+    warn.mockRestore();
+  });
+
+  it('says so when the id is not a string, rather than going quiet', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // A property set from JS with the wrong type. Silence here would look
+    // exactly like the feature not existing.
+    for (const id of [42, {}, true]) {
+      expect(normalizeAuthorAction(id, 'プロフィール')).toBeUndefined();
+    }
+    expect(warn).toHaveBeenCalledTimes(3);
+
+    warn.mockRestore();
   });
 });
 

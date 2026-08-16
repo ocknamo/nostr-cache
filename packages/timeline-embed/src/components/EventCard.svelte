@@ -320,14 +320,19 @@
       <!-- Out of the tab order and out of the accessibility tree: the identity
            below is the same press with the same destination, and a screen
            reader announcing it twice per card — or 50 extra tab stops in a
-           timeline — is what a second target would cost. `aria-hidden` is safe
-           here only because `tabindex="-1"` takes the focus away with it. -->
+           timeline — is what a second target would cost.
+           `aria-hidden` on a button holds only while nothing can focus it, and
+           `tabindex="-1"` covers the keyboard alone: a pointer press focuses a
+           button by itself, which would drop focus onto an element no longer
+           in the accessibility tree. `preventDefault` on the press is what
+           withholds that — the click still fires. -->
       <button
         type="button"
         class="author-avatar"
         part="author-avatar"
         tabindex="-1"
         aria-hidden="true"
+        onpointerdown={(pointer) => pointer.preventDefault()}
         onclick={() => select(authorAction, event.pubkey)}
       >
         <Avatar pubkey={event.pubkey} {profile} {name} />
@@ -352,14 +357,18 @@
         {#if authorAction}
           <!-- The label first, then whose it is: the same order the 「返信先」
                chip announces itself in, and the part a reader moving through a
-               list of cards needs before the name. -->
+               list of cards needs before the name. The handle is repeated into
+               the label because an `aria-label` replaces the text inside the
+               button — without it, turning the press on would take the @handle
+               away from a screen reader and leave it on screen for everyone
+               else. -->
           <button
             type="button"
             class="identity author"
             class:with-handle={handle}
             part="author"
             title={event.pubkey}
-            aria-label="{authorAction.label}: {name}"
+            aria-label={`${authorAction.label}: ${name}${handle ? ` @${handle}` : ''}`}
             onclick={() => select(authorAction, event.pubkey)}
           >
             {@render identity()}
@@ -684,9 +693,18 @@
     overflow: hidden;
   }
 
-  /* Reads as the identity it replaces: no button chrome, the header's own
-     colour and metrics. It keeps `.identity`'s flex box, so the name and the
-     handle give up width exactly as they do without the press. */
+  /*
+   * Reads as the identity it replaces: no button chrome, the header's own
+   * colour and metrics. It keeps `.identity`'s flex box, so the name and the
+   * handle give up width exactly as they do without the press.
+   *
+   * No height floor, unlike `.action` (which spells out WCAG 2.2 §2.5.8): this
+   * target is a run of text on a line it shares with the timestamp, so its
+   * height is the line's — the "inline" exception §2.5.8 makes for exactly
+   * that. Padding it out to 24px would push the note down on every card, and
+   * `header` clips its overflow, so the extra height could not hang outside
+   * either. The avatar beside it is a 40px target for the same press.
+   */
   .identity.author {
     appearance: none;
     margin: 0;
@@ -710,23 +728,40 @@
     text-decoration: underline;
   }
 
+  /*
+   * Drawn inside the box (a negative offset), not around it: `header` clips its
+   * own overflow to stay on one line, so a ring outside the button is clipped
+   * away on every edge that touches the header — which here is all four. The
+   * timestamp beside it settles for an underline for the same reason.
+   */
   .identity.author:focus-visible {
     outline: 2px solid var(--nt-focus, #1d9bf0);
-    outline-offset: 2px;
+    outline-offset: -2px;
     border-radius: 4px;
   }
 
-  /* The avatar's own box, nothing more: the grid sizes this column from the
-     image, so any padding here would widen the gutter on cards that are
-     pressable and not on the ones that are not. */
+  /*
+   * The avatar's own box, nothing more.
+   *
+   * `align-self` because this is a grid item: the column is sized from the
+   * image, but a button has no height of its own, so the default `stretch`
+   * would take the full height of the card — a press target running the length
+   * of the gutter, with the image floating in the middle of it (a button
+   * centres its content). The `<img>` this replaces has a fixed height and so
+   * was never stretched.
+   */
   .author-avatar {
     display: block;
+    align-self: start;
     margin: 0;
     padding: 0;
     border: 0;
     background: none;
     font: inherit;
     color: inherit;
+    /* No line box of its own: without this the button is a few pixels taller
+       than the image, from the strut its (empty) text would sit on. */
+    line-height: 0;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }

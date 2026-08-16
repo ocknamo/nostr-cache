@@ -2,6 +2,7 @@
 // fake-indexeddb backs the DexieStorage the widget boots on mount.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { EventActionDetail } from './lib/event-actions.ts';
 import {
   DEFAULT_PROFILE_FRESHNESS,
   acquireRelayHost,
@@ -149,6 +150,47 @@ describe('<nostr-timeline> custom element', () => {
     } finally {
       await host.release();
     }
+  });
+
+  it('raises nostr-timeline:action for an author press, with the pubkey', async () => {
+    // Each element declares and forwards its own attributes, so this path is
+    // per-element plumbing rather than something the card's own tests cover.
+    const dbName = `timeline-${crypto.randomUUID()}`;
+    const author = 'ee0000000000000000000000000000000000000000000000000000000000000e';
+    const seeding = await acquireRelayHost({ dbName });
+    try {
+      await seeding.storage.saveEvent({
+        id: 'ff00000000000000000000000000000000000000000000000000000000000001',
+        pubkey: author,
+        created_at: 1_700_000_000,
+        kind: 1,
+        tags: [],
+        content: 'カードが 1 枚あればよい',
+        sig: 'sig',
+      });
+    } finally {
+      await seeding.release();
+    }
+
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('db-name', dbName);
+    element.setAttribute('author-action', 'open-profile');
+    document.body.appendChild(element);
+
+    const presses: EventActionDetail[] = [];
+    element.addEventListener('nostr-timeline:action', (press) => {
+      presses.push((press as CustomEvent<EventActionDetail>).detail);
+    });
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('button[part="author"]')),
+      'the author press target'
+    );
+    element.shadowRoot?.querySelector<HTMLButtonElement>('button[part="author"]')?.click();
+
+    expect(presses).toHaveLength(1);
+    expect(presses[0].actionId).toBe('open-profile');
+    expect(presses[0].pubkey).toBe(author);
   });
 });
 

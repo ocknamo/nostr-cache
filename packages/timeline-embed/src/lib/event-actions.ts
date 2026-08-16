@@ -272,9 +272,17 @@ export function normalizeActions(value: unknown): EventAction[] {
  * cannot go unnamed — see {@link DEFAULT_AUTHOR_LABEL}.
  */
 export function normalizeAuthorAction(id: unknown, label?: unknown): AuthorAction | undefined {
-  if (typeof id !== 'string' || id.trim() === '') {
-    // Not a warning: an absent attribute is the default, and the widget is
-    // meant to render exactly what it always did.
+  if (id === undefined || id === null || (typeof id === 'string' && id.trim() === '')) {
+    // Silently: an absent attribute is the default, not a mistake — it is every
+    // embed written before this existed.
+    return undefined;
+  }
+  if (typeof id !== 'string') {
+    // Anything else is a property set from JS with the wrong type, which would
+    // otherwise take the press away without saying so.
+    console.warn(
+      `[nostr-timeline] Ignoring author-action: expected a string id, got ${typeof id}.`
+    );
     return undefined;
   }
   const name = typeof label === 'string' && label.trim() !== '' ? label.trim() : undefined;
@@ -301,9 +309,12 @@ export function dispatchActionEvent(
     actionId: action.id,
     event: context.event,
     status: context.status,
-    // Spread rather than assigned: an explicit `pubkey: undefined` survives
-    // structured cloning as a key with no value, and the iframe path posts this
-    // very object to the embedding window.
+    // Spread rather than assigned, so a button press carries no `pubkey` key at
+    // all: `'pubkey' in detail` is then the check for which kind of press this
+    // was, on both sides of the iframe boundary (structured cloning keeps a key
+    // whose value is undefined). `status` is assigned unconditionally because
+    // it means something either way — an absent verdict is a verdict that has
+    // not arrived.
     ...(context.pubkey ? { pubkey: context.pubkey } : {}),
   };
   host.dispatchEvent(

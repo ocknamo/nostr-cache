@@ -1007,6 +1007,9 @@ window.addEventListener('message', (event) => {
   遷移先がプロフィール以外なら必ず指定してください。
 - **`onSelect` は呼ばれません。** 属性は関数を持てないので、JS から受けたい場合も
   `nostr-timeline:action` を購読してください。
+- **`actions` のボタンと同じ ID は避けてください。** 受け取る側が区別できなくなります
+  （`detail.pubkey` の有無でしか見分けられません）。
+- `show-avatars="false"` のときは**表示名だけ**が押下対象になります。
 - `<nostr-post>` では**投稿本体と返信ツリーの各返信の両方**に効きます（`actions` と違い、
   カードに行が増えるわけではないため）。引用カード（`nostr:` 参照の入れ子）と
   リアクター一覧はまだ対象外です。
@@ -1018,7 +1021,9 @@ window.addEventListener('message', (event) => {
 - 押下対象は**アイコンと表示名の 2 つ**ですが、**アイコン側はタブ順とスクリーンリーダーから
   外しています**（`tabindex="-1"` + `aria-hidden="true"`）。同じ行き先が 1 枚のカードに
   2 回読み上げられるのと、50 枚のタイムラインでタブストップが 100 個増えるのを避けるためです。
-  マウス・タッチではアイコンも押せます。
+  マウス・タッチではアイコンも押せます（押してもフォーカスは移りません）。
+- 表示名側のアクセシブル名は `プロフィールを開く: たけし @takeshi` のようになります
+  （`aria-label` はボタン内の文字を置き換えてしまうため、`@handle` も含めています）。
 - Shadow parts: 表示名が `::part(author)`、アイコンが `::part(author-avatar)`
   （例: `nostr-timeline::part(author):hover { color: #1d9bf0 }`）。
 - 既定では下線を出さず、ホバー・フォーカス時に表示名だけに下線を引きます
@@ -1093,7 +1098,7 @@ window.addEventListener('message', (event) => {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **412 KB（gzip 約 133 KB）** の自己完結した IIFE です
+`dist/nostr-timeline.js` は約 **413 KB（gzip 約 134 KB）** の自己完結した IIFE です
 （`<nostr-timeline>` / `<nostr-follow-timeline>` / `<nostr-post>` の 3 つすべてを含みます）。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、

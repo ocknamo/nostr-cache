@@ -846,9 +846,22 @@ describe('EventCard', () => {
         },
       });
 
-      const author = screen.getByRole('button', { name: 'プロフィールを開く: たけし' });
+      // The handle is in the label too: an `aria-label` replaces the text
+      // inside the button, so leaving it out would take the @handle away from a
+      // screen reader while everyone else keeps seeing it.
+      const author = screen.getByRole('button', { name: 'プロフィールを開く: たけし @takeshi' });
       expect(author).toHaveTextContent('たけし');
       expect(author).toHaveTextContent('@takeshi');
+    });
+
+    it('names the press with the display name alone when there is no handle', () => {
+      render(EventCard, {
+        props: { event: makeEvent(), profile: { displayName: 'たけし' }, authorAction: AUTHOR },
+      });
+
+      expect(
+        screen.getByRole('button', { name: 'プロフィールを開く: たけし' })
+      ).toBeInTheDocument();
     });
 
     it('reports the press with the author it was on', async () => {
@@ -898,6 +911,12 @@ describe('EventCard', () => {
       const avatar = container.querySelector<HTMLElement>('.author-avatar');
       expect(avatar).toHaveAttribute('tabindex', '-1');
       expect(avatar).toHaveAttribute('aria-hidden', 'true');
+      // `tabindex="-1"` only covers the keyboard: a pointer press focuses a
+      // button by itself, and focus must not land on something hidden from the
+      // accessibility tree. Cancelling the press is what withholds it.
+      const press = new Event('pointerdown', { bubbles: true, cancelable: true });
+      avatar?.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
       // Both targets exist, but only the identity is in the accessibility tree.
       expect(screen.getAllByRole('button', { name: /プロフィールを開く/ })).toHaveLength(1);
 

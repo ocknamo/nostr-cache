@@ -185,6 +185,31 @@ describe('PostView', () => {
       expect(screen.getByText('a reply to the reply')).toBeInTheDocument();
     });
 
+    it('makes every reply author pressable, not only the post author', async () => {
+      const onAction = vi.fn();
+      const authorAction = { id: 'open-profile', label: 'プロフィールを開く' };
+      const { container } = render(PostView, {
+        props: {
+          state: state({ events: [POST], replies: THREAD }),
+          target: TARGET,
+          authorAction,
+          onAction,
+        },
+      });
+
+      // The post and both replies: unlike `actions`, this adds no row to a card,
+      // and a thread is mostly other people.
+      const authors = container.querySelectorAll<HTMLButtonElement>('button[part="author"]');
+      expect(authors).toHaveLength(3);
+
+      await fireEvent.click(authors[2]);
+
+      expect(onAction).toHaveBeenCalledWith(
+        authorAction,
+        expect.objectContaining({ pubkey: reply(GRANDCHILD_ID, REPLY_ID, '').pubkey })
+      );
+    });
+
     it('renders nothing at all for a post with no replies', () => {
       render(PostView, {
         props: { state: state({ events: [POST] }), target: TARGET },
