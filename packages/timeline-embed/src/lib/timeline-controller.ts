@@ -440,6 +440,27 @@ export class TimelineController {
     this.subscribe(filters);
   }
 
+  /**
+   * Boot for a single post: open its own REQ first, then the watches around it.
+   *
+   * The order is why this exists rather than a `start()` with a
+   * {@link watchPost} beside it. The post itself is one primary-key lookup; the
+   * two watches read every row carrying the post's id in an `e` tag, so what
+   * they cost grows with how much the post was answered. The relay reads for
+   * both on the page's own thread, so whichever REQ arrives first is served
+   * first — and the one the reader is waiting to see is the post.
+   *
+   * It buys less than it looks like it should: the reads interleave, so the
+   * post's still lands after some of the watches' work either way (measured at
+   * 8000 reactions: 430ms → 390ms). What actually made this page slow was the
+   * watches' filter shape rather than their place in the queue — see
+   * `query-builder.ts`.
+   */
+  async startPost(target: PostTarget, wants: PostWatches): Promise<void> {
+    await this.start([target.filter]);
+    this.watchPost(target, wants);
+  }
+
   /** Replace the subscription, clearing the timeline and restarting timing. */
   applyFilter(filters: Filter[]): void {
     this.subscribe(filters);

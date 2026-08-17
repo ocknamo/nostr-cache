@@ -359,13 +359,10 @@
     untrack(() => {
       const wants = watches(opening);
       if (startedFor !== active) {
-        // `start()` opens the timeline REQ itself, so `showPost` here as well
-        // would issue it twice.
+        // `startPost()` opens the post's own REQ itself, so `showPost` here as
+        // well would issue it twice.
         startedFor = active;
-        void active.start([shown.filter]);
-        // No need to await it: the watches queue until the socket is up and the
-        // `connected` handler pumps them.
-        active.watchPost(shown, wants);
+        void active.startPost(shown, wants);
         return;
       }
       active.showPost(shown, wants);

@@ -51,11 +51,21 @@ export function buildOptimizedQuery(
     }
   }
 
-  // Use indexed_tags if available and no other primary filters
-  if (indexedTagValues.length > 0 && !ids?.length && !authors?.length && !kinds?.length) {
-    collection = table.where('indexed_tags').anyOf(indexedTagValues);
-  } else if (ids?.length) {
+  if (ids?.length) {
     collection = table.where('id').anyOf(ids);
+  }
+  // タグ条件は kinds / authors より先に選ぶ。1つのタグ値に一致する行は普通ごく
+  // 少数で、`kind` インデックスはその kind の全行を返すため（`{kinds:[1],'#e':[…]}`
+  // ならキャッシュ内の全 kind 1）。`distinct()` は multiEntry の必然で、複数の
+  // 指定値に一致する行（root と parent の両方を `e` タグに持つリプライなど）が
+  // 重複して返るのを防ぐ。
+  //
+  // 前提: `indexed_tags` は保存時に MAX_INDEXED_TAGS 件で切り詰められる
+  // （`tag-index.ts`）。単一文字タグが 100 個を超えるイベントは、溢れたタグでは
+  // 引けない。この経路を kinds 併用のフィルタにも広げたことで、その切り詰めが
+  // 見える範囲も広がっている
+  else if (indexedTagValues.length > 0) {
+    collection = table.where('indexed_tags').anyOf(indexedTagValues).distinct();
   }
   // authors + kinds + 時間範囲の組み合わせ
   else if (authors?.length && kinds?.length && (since !== undefined || until !== undefined)) {

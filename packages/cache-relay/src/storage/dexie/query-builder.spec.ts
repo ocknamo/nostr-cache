@@ -1,14 +1,86 @@
 /**
- * Tests for the pure post-index validation in the query builder.
+ * Tests for the query builder: which index a filter is planned onto, and the
+ * pure post-index validation that follows it.
  *
- * `buildOptimizedQuery` needs a live Dexie table and is exercised end-to-end
- * by `dexie-storage.spec.ts`; here we cover the pure `eventRowMatchesFilter`
- * predicate directly.
+ * The plan is asserted against a recording stub rather than a live Dexie table.
+ * What matters about it is not the rows it returns — `dexie-storage.spec.ts`
+ * covers those end to end — but *how many* it has to read to find them, and
+ * only the chosen index says that.
  */
 
 import type { Filter } from '@nostr-cache/shared';
-import { eventRowMatchesFilter } from './query-builder.js';
+import { buildOptimizedQuery, eventRowMatchesFilter } from './query-builder.js';
 import type { NostrEventTable } from './schema.js';
+
+interface Plan {
+  /** The index the query was put on, or `(scan)` for a full-table collection. */
+  index: string;
+  distinct: boolean;
+}
+
+/** Run `buildOptimizedQuery` against a stub table and report what it chose. */
+function planFor(filter: Filter): Plan {
+  const plan: Plan = { index: '(scan)', distinct: false };
+  const collection = {
+    filter: () => collection,
+    distinct: () => {
+      plan.distinct = true;
+      return collection;
+    },
+  };
+  const table = {
+    where: (index: string) => {
+      plan.index = index;
+      return {
+        anyOf: () => collection,
+        between: () => collection,
+      };
+    },
+    toCollection: () => collection,
+  };
+  buildOptimizedQuery(table as never, filter);
+  return plan;
+}
+
+describe('buildOptimizedQuery', () => {
+  const ID = 'a'.repeat(64);
+  const PUBKEY = 'b'.repeat(64);
+
+  it('serves a tag condition from the tag index even beside kinds', () => {
+    // The two filters `<nostr-post>` opens for one post. On the `kind` index
+    // these read every kind 1 / kind 7 row the cache holds, and the post's own
+    // id lookup cannot be answered while they do.
+    expect(planFor({ kinds: [1], '#e': [ID], limit: 100 }).index).toBe('indexed_tags');
+    expect(planFor({ kinds: [7], '#e': [ID], limit: 200 }).index).toBe('indexed_tags');
+  });
+
+  it('de-duplicates the tag index, which is multi-entry', () => {
+    // A NIP-10 reply names its root and its parent, so a level asking about
+    // both would otherwise get the same row twice — and `limit` would count it
+    // twice.
+    expect(planFor({ kinds: [1], '#e': [ID, PUBKEY] }).distinct).toBe(true);
+  });
+
+  it('prefers the primary key to the tag index', () => {
+    expect(planFor({ ids: [ID], '#e': [ID] }).index).toBe('id');
+  });
+
+  it('keeps the plans that have no tag condition to move', () => {
+    expect(planFor({ '#e': [ID] }).index).toBe('indexed_tags');
+    expect(planFor({ authors: [PUBKEY], kinds: [1] }).index).toBe('[pubkey+kind]');
+    expect(planFor({ kinds: [1] }).index).toBe('kind');
+    expect(planFor({ authors: [PUBKEY] }).index).toBe('pubkey');
+    expect(planFor({ kinds: [1], since: 1 }).index).toBe('created_at');
+    expect(planFor({}).index).toBe('(scan)');
+  });
+
+  it('falls back when the tag condition is not one the index can answer', () => {
+    // A multi-letter tag name is not indexed (and `eventRowMatchesFilter`
+    // rejects every row for it), so the plan must not claim the tag index.
+    expect(planFor({ kinds: [1], '#ee': [ID] } as unknown as Filter).index).toBe('kind');
+    expect(planFor({ kinds: [1], '#e': [] }).index).toBe('kind');
+  });
+});
 
 function makeRow(overrides: Partial<NostrEventTable> = {}): NostrEventTable {
   return {

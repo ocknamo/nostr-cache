@@ -1460,4 +1460,49 @@ describe('TimelineController', () => {
       expect(states.at(-1)?.reactions.has(POST_ID)).toBe(false);
     });
   });
+
+  describe('startPost', () => {
+    const POST_ID = 'aa00000000000000000000000000000000000000000000000000000000000003';
+    const post = parsePostTarget({ eventId: POST_ID });
+    if (!post) {
+      throw new Error('fixture post id should parse');
+    }
+
+    it('asks for the post itself before the watches around it', async () => {
+      const { controller } = createController();
+
+      await controller.startPost(post, { reactions: { limit: 50 }, replies: { maxDepth: 3 } });
+
+      await waitFor(() => openSubscriptionIds(controller).length === 3, 'all three subscriptions');
+      // The order is the assertion: what the reader is waiting to see is the
+      // post, and the watches' reads grow with how much the post was answered.
+      expect(openSubscriptionIds(controller)).toEqual(
+        ['timeline-1', 'reactions-1', 'replies-1'].map(wireSubId)
+      );
+    });
+
+    it('opens the same watches showPost would', async () => {
+      const { controller } = createController();
+
+      await controller.startPost(post, { reactions: { limit: 50 }, replies: { limit: 20 } });
+
+      await waitFor(() => openSubscriptionIds(controller).length === 3, 'all three subscriptions');
+      const subscriptions = openSubscriptions(controller);
+      expect(subscriptions.find((sub) => sub.id.startsWith('reactions-'))?.filters).toEqual([
+        { kinds: [7], '#e': [POST_ID], limit: 50 },
+      ]);
+      expect(subscriptions.find((sub) => sub.id.startsWith('replies-'))?.filters).toEqual([
+        { kinds: [1], '#e': [POST_ID], limit: 20 },
+      ]);
+    });
+
+    it('opens no watch the caller did not ask for', async () => {
+      const { controller } = createController();
+
+      await controller.startPost(post, {});
+
+      await waitFor(() => openSubscriptionIds(controller).length > 0, 'the post subscription');
+      expect(openSubscriptionIds(controller)).toEqual([wireSubId('timeline-1')]);
+    });
+  });
 });

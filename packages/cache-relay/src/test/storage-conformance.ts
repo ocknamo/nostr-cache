@@ -688,6 +688,27 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
         expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3', 'event5']);
       });
 
+      // A tag condition beside `kinds` / `authors` is the shape a post detail
+      // asks with (`{kinds:[1],'#e':[…]}` for the thread, `{kinds:[7],…}` for
+      // the reactions), and an adapter is free to serve it from whichever index
+      // it likes — so the results are pinned here rather than in an
+      // adapter-specific spec.
+      it('should combine a tag filter with kinds', async () => {
+        const result = await storage.getEvents([{ kinds: [1, 3], '#e': ['event1'] }]);
+        expect(result.map((e) => e.id).sort()).toEqual(['event1', 'event3']);
+      });
+
+      it('should combine a tag filter with authors and a time range', async () => {
+        const result = await storage.getEvents([
+          { authors: ['author1', 'author3'], '#p': ['user1'], since: 2000 },
+        ]);
+        expect(result.map((e) => e.id)).toEqual(['event3']);
+      });
+
+      it('should return nothing when the kinds and the tag disagree', async () => {
+        expect(await storage.getEvents([{ kinds: [2], '#e': ['event1'] }])).toEqual([]);
+      });
+
       it('should handle multiple tag filters with time range', async () => {
         const result = await storage.getEvents([
           { '#p': ['user2'], '#e': ['event2'], since: 3000, until: 5000 },
