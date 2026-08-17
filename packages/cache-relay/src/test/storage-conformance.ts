@@ -709,6 +709,33 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
         expect(await storage.getEvents([{ kinds: [2], '#e': ['event1'] }])).toEqual([]);
       });
 
+      // An event carrying two of the filter's tag values matches once, not
+      // twice. A NIP-10 reply names its root and its parent, so a thread level
+      // asking about both hits this on every reply it wants — and counting one
+      // event twice against `limit` silently halves the answer.
+      it('should count an event matching two tag values once against limit', async () => {
+        for (const n of [1, 2]) {
+          await storage.saveEvent({
+            id: `both${n}`,
+            pubkey: 'author9',
+            created_at: 9000 + n,
+            kind: 9,
+            tags: [
+              ['e', 'root9'],
+              ['e', 'parent9'],
+            ],
+            content: `both${n}`,
+            sig: `sig-both${n}`,
+          });
+        }
+
+        const result = await storage.getEvents([
+          { kinds: [9], '#e': ['root9', 'parent9'], limit: 2 },
+        ]);
+
+        expect(result.map((e) => e.id).sort()).toEqual(['both1', 'both2']);
+      });
+
       it('should handle multiple tag filters with time range', async () => {
         const result = await storage.getEvents([
           { '#p': ['user2'], '#e': ['event2'], since: 3000, until: 5000 },

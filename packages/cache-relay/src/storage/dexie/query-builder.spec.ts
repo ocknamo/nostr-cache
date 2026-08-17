@@ -61,8 +61,22 @@ describe('buildOptimizedQuery', () => {
     expect(planFor({ kinds: [1], '#e': [ID, PUBKEY] }).distinct).toBe(true);
   });
 
+  it('serves a tag condition beside kinds and a time range from the tag index', () => {
+    expect(planFor({ kinds: [1], '#e': [ID], since: 1 }).index).toBe('indexed_tags');
+    expect(planFor({ authors: [PUBKEY], '#e': [ID] }).index).toBe('indexed_tags');
+  });
+
   it('prefers the primary key to the tag index', () => {
     expect(planFor({ ids: [ID], '#e': [ID] }).index).toBe('id');
+  });
+
+  it('prefers authors × kinds to the tag index', () => {
+    // The addressable lookup `<nostr-post>` and the quote cards use. Two-field
+    // equality already narrows to one person's events of one kind, while a `d`
+    // value collides across people (`d:"1"` and friends).
+    expect(planFor({ kinds: [30023], authors: [PUBKEY], '#d': ['slug'] }).index).toBe(
+      '[pubkey+kind]'
+    );
   });
 
   it('keeps the plans that have no tag condition to move', () => {
@@ -71,6 +85,7 @@ describe('buildOptimizedQuery', () => {
     expect(planFor({ kinds: [1] }).index).toBe('kind');
     expect(planFor({ authors: [PUBKEY] }).index).toBe('pubkey');
     expect(planFor({ kinds: [1], since: 1 }).index).toBe('created_at');
+    expect(planFor({ authors: [PUBKEY], '#p': [ID], since: 1 }).index).toBe('created_at');
     expect(planFor({}).index).toBe('(scan)');
   });
 
