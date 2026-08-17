@@ -758,6 +758,73 @@ describe('MessageHandler', () => {
       expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
     });
 
+    describe('id coverage', () => {
+      const idFilter = { ids: [sampleEvent.id] };
+
+      // messageHandler は鮮度ウィンドウ無しで構築されている。id カバレッジが
+      // `upstreamFreshness` の設定に依存しないことを、この describe 全体が示す。
+      it('skips upstream and sends EOSE itself when the cache holds every id', async () => {
+        const coordinator = makeCoordinator();
+        messageHandler.setUpstreamCoordinator(coordinator as never);
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce([sampleEvent]);
+
+        await messageHandler.handleMessage('client1', ['REQ', 'sub1', idFilter]);
+
+        expect(responseCallback).toHaveBeenCalledWith('client1', ['EVENT', 'sub1', sampleEvent]);
+        expect(responseCallback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+        expect(coordinator.openForSubscription).not.toHaveBeenCalled();
+      });
+
+      it('forwards upstream when the cache does not hold the id', async () => {
+        const coordinator = makeCoordinator();
+        messageHandler.setUpstreamCoordinator(coordinator as never);
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce([]);
+
+        await messageHandler.handleMessage('client1', ['REQ', 'sub1', idFilter]);
+
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [idFilter],
+          []
+        );
+        expect(responseCallback).not.toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+      });
+
+      it('forwards only the filters that are not answered by id', async () => {
+        const coordinator = makeCoordinator();
+        messageHandler.setUpstreamCoordinator(coordinator as never);
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce([sampleEvent]);
+        const openFilter = { kinds: [1], '#e': [sampleEvent.id] };
+
+        await messageHandler.handleMessage('client1', ['REQ', 'sub1', idFilter, openFilter]);
+
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [openFilter],
+          [sampleEvent.id]
+        );
+      });
+
+      it('forwards an id filter whose event was held back by another condition', async () => {
+        const coordinator = makeCoordinator();
+        messageHandler.setUpstreamCoordinator(coordinator as never);
+        // ストレージが kind で弾いた結果、配信 0 件。保持しているとは証明できない
+        (mockStorage.getEvents as Mock).mockResolvedValueOnce([]);
+        const mismatched = { ids: [sampleEvent.id], kinds: [7] };
+
+        await messageHandler.handleMessage('client1', ['REQ', 'sub1', mismatched]);
+
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [mismatched],
+          []
+        );
+      });
+    });
+
     describe('freshness window', () => {
       const PROFILE_PUBKEY = sampleEvent.pubkey;
       const profileFilter = { kinds: [0], authors: [PROFILE_PUBKEY] };

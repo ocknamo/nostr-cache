@@ -84,8 +84,8 @@ function isWithinWindow(
  *   window. A single regular kind (e.g. kind 1) makes the result set unbounded.
  * - `authors` non-empty — the coordinates are `kinds × authors`, so without
  *   authors there is nothing to enumerate.
- * - No `ids`: an id-keyed lookup is a different (and stronger) short-circuit,
- *   not this one.
+ * - No `ids`: an id-keyed lookup is a different (and stronger) short-circuit —
+ *   see `id-coverage.ts`, which needs no window at all.
  * - No `since` / `until`: `until` asks for the newest version *as of* that
  *   moment, which is not necessarily the newest version the cache holds.
  * - No tag conditions: a `#`-prefixed condition narrows the result set in a way

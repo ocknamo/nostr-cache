@@ -55,6 +55,41 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
   - 一方、座標解決（`addressOf` / `matchesAddressIdentifier`）と適合性テストは NIP-01 に
     従い「`d` 無し = 空識別子」で揃っている。保存側も空識別子として扱うのが筋
 
+## 優先度: 中（上流透過キャッシュ）
+
+id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-relay/upstream.md)
+第6節）を入れた際に、意図的にスコープから外した課題。
+
+- [ ] **ingest 時に `id === getEventHash(event)` を検算する**
+  - 現状: `EventValidator` は `@rx-nostr/crypto` の `verifier` を呼ぶだけで、これは
+    内容から再計算したハッシュに対して署名を検証する（`schnorr.verify(sig,
+    getEventHash(event), pubkey)`）ものの、**`event.id` とは突き合わせない**。
+    rx-nostr 側にも id の検算は無く、しかも上流プールもウィジェットも
+    `skipVerify: true` で通している。「署名は本物だが id だけ差し替えた」イベントは
+    その偽 id で保存されうる
+  - **id カバレッジ短絡はこの前提の上に成り立っている**が、今回の変更で新たに生じた
+    穴ではない: `UpstreamCoordinator` の重複排除も id ベースなので、後から上流が本物を
+    配信しても dedup されて訂正されない
+  - `id` は `DexieStorage` の主キーであり、クライアント EVENT 経路も server 運用も
+    rx-nostr を介さないため、**クライアントライブラリには委譲できない不変条件**
+  - 対応: `validateEventsType` と**無関係に**無条件で検算する（LAZY に載せると最大
+    `lazyValidateInterval` 秒のあいだ汚染された id を配信しうる）。コストは
+    イベント 1 件あたり SHA-256 1 回で、署名検証に比べれば無視できる
+- [ ] **部分カバー時に、欠けている id だけへ絞った残余フィルタを上流へ送る**
+  - 現状: `narrowFiltersByIdCoverage` は all-or-nothing。`{"ids":[a,b]}` で b だけが
+    キャッシュに無い場合、a も含めた元のフィルタがそのまま上流へ行く
+  - 既存の鮮度ゲートと方針を揃えた保守的な初手。ウィジェットの REQ は単一 id が
+    ほとんどなので効果は限定的だが、`limit` セマンティクスの扱い（ローカル配信済みの
+    件数と合わせて `limit` を超えうる）を決めれば入れられる
+- [ ] **開いたフィルタの EOSE 保留ポリシーを見直す**
+  - 現状: `{"kinds":[7],"#e":[…]}` のような開いたフィルタは上流必須で、EOSE は上流の
+    集約 EOSE か `upstreamEoseTimeout`（既定 3 秒）まで保留される。投稿詳細の
+    リプライツリーは階層 N の EOSE で階層 N+1 を開くため、**3 階層で最大 9 秒**かかる
+  - 「ローカルが尽きたら即 EOSE、上流分は EOSE 後にリアルタイムとして流す」は普通の
+    リレーの挙動だが、`UpstreamCoordinator` が EOSE を保留している理由
+    （ワンショットクライアントが上流結果を EOSE 前に受け取れるようにする）を壊す。
+    REQ からクライアントがワンショットかは判別できないため、やるならオプション化が要る
+
 ## 優先度: 中（NIP 対応の拡張）
 
 いずれも「リレーとしての正しさ」または「キャッシュとしての正しさ」に効く。
@@ -134,6 +169,16 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
   - 現状の挙動（一度数えた分は減らない）は `packages/timeline-embed/README.md` の
     「制約（投稿詳細固有）」に明記済み。直したらその記述も対で更新すること
 
+- [ ] **投稿を切り替えるとき、手元に持っている本体イベントを捨てている**
+  - 現状: 「返信先」チップで遷移すると `TimelineController.showPost()` →
+    `applyFilter()` → `subscribe()` が `events` と `embeds` を空にする。ところが
+    遷移先の投稿は、チップのプレビュー（投稿者アイコン + 本文一行）を出すために
+    **`state.embeds` に既に載っている**。表示できる状態から白紙に戻して REQ を
+    投げ直しているため、リレーが即答しても「読み込み中…」が一瞬挟まる
+  - id カバレッジ短絡でリレー側の待ちは消えたので、残っているのはこのちらつきだけ
+  - 対応: 遷移先の `embeds` エントリを `events` の初期値として引き継ぐ。ただし
+    `showPost` は「別の投稿に切り替える」汎用経路なので、引き継ぎ条件
+    （target と embed key の一致）を明示すること
 - [ ] **読んでいる最中に届いた返信の、さらにその返信を取りに行く**
   - 現状: `TimelineController` は階層 N の REQ を、階層 N-1 の **EOSE のときにだけ**開く。
     EOSE 後に live で届いた返信は表示されるが、その id を次の階層の `#e` に足す機会が
@@ -148,6 +193,17 @@ replaceable / addressable の版比較（NIP-01「最新の1件だけを保持�
 
 ## 優先度: 中（ストレージ / テスト基盤）
 
+- [ ] **`kinds` があるとタグインデックスが使われない**
+  - 現状: `buildOptimizedQuery` が `indexed_tags` インデックスを使うのは
+    `ids` / `authors` / `kinds` のいずれも無いときだけ（`query-builder.ts`）。
+    そのため `{kinds:[1], '#e':[…]}` は `kind` インデックスに落ち、**キャッシュ内の
+    全 kind 1 行**を読み出して JS で `eventRowMatchesFilter` を回す
+  - 影響が大きいのは投稿詳細。リプライは階層ごとに 1 本この形の REQ を投げるため、
+    1 回の遷移で全 kind 1 走査が最大 3 回、加えてリアクションで全 kind 7 走査が 1 回
+  - `storageMaxSize` を設定していない構成（`timeline-embed` の `relay-host.ts` は
+    未設定）ではキャッシュが際限なく育つため、**使い込むほど遅くなる**
+  - 対応: タグ条件がある場合は `indexed_tags` で引いてから `kinds` を JS で絞る、
+    または複合インデックスを足す。どちらが速いかは実測してから決めること
 - [ ] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
   - 現状: NIP-01 準拠（最新 N 件・新しい順）を優先し、`limit` の有無にかかわらず一致行を
     全件 `toArray()` してから `rowToEvent` → 切り詰める。10 万件規模のキャッシュに

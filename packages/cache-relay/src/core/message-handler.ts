@@ -11,6 +11,7 @@ import { EventHandler, type ValidateEventsType } from '../event/event-handler.js
 import type { CachePriority } from '../storage/priority.js';
 import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
 import type { FreshnessGate } from '../upstream/freshness.js';
+import { narrowFiltersByIdCoverage } from '../upstream/id-coverage.js';
 import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { capEvents, isValidFilterShape } from '../utils/filter-utils.js';
 import { ClientResponder } from './client-responder.js';
@@ -292,17 +293,29 @@ export class MessageHandler {
         return;
       }
 
-      // 鮮度ウィンドウ: キャッシュだけで完全に充足したフィルタは上流へ投げない。
-      // 未設定・判定不能・ストレージ非対応ならフィルタはそのまま返る（フェイルオープン）。
+      // キャッシュだけで完全に充足したフィルタは上流へ投げない。判定は2段構えで、
+      // どちらも充足を証明できないケースは上流へ転送する側に倒す（フェイルオープン）。
       // 上流が無い構成では判定自体が無意味なので、ストレージに触る前に短絡する
-      const upstreamFilters =
-        this.upstreamCoordinator && this.freshnessGate
-          ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
-          : filters;
-      if (upstreamFilters.length < filters.length) {
-        logger.debug(
-          `Subscription ${subscriptionId}: ${filters.length - upstreamFilters.length}/${filters.length} filters served from cache within the freshness window`
-        );
+      let upstreamFilters = filters;
+      if (this.upstreamCoordinator) {
+        // id カバレッジは設定に依存しない正確な判定なので、鮮度ウィンドウが構成
+        // されているかどうかに関わらず常に適用する
+        upstreamFilters = narrowFiltersByIdCoverage(filters, sentIds);
+        const byId = filters.length - upstreamFilters.length;
+
+        let byFreshness = 0;
+        if (this.freshnessGate && upstreamFilters.length > 0) {
+          const candidates = upstreamFilters;
+          // sentEvents は絞らない: 充足判定の根拠は REQ 全体の配信結果である
+          upstreamFilters = await this.freshnessGate.filtersForUpstream(candidates, sentEvents);
+          byFreshness = candidates.length - upstreamFilters.length;
+        }
+
+        if (byId > 0 || byFreshness > 0) {
+          logger.debug(
+            `Subscription ${subscriptionId}: ${byId} filters answered by id and ${byFreshness} within the freshness window, out of ${filters.length}; ${upstreamFilters.length} forwarded upstream`
+          );
+        }
       }
 
       // リードスルー有効時は上流へ REQ を展開し、EOSE の送出は coordinator に委譲する
