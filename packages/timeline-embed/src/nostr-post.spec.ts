@@ -115,6 +115,28 @@ describe('<nostr-post> custom element', () => {
     }
   });
 
+  it('asks for the post before the watches around it', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, postWithReactions());
+    mount({ 'event-id': POST_ID, 'db-name': dbName });
+
+    await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+    const host = await acquireRelayHost({ dbName });
+    try {
+      await waitFor(() => subscriptionsNamed(host, 'replies-').length === 1, 'all three REQs');
+      // The relay reads for all three on the page's own thread, and the reaction
+      // and thread filters read every row carrying the post's id — so the one
+      // the reader is waiting to see has to be asked for first.
+      expect(
+        subscriptionsNamed(host, '')
+          .map((subscription) => subscription.id)
+          .filter((id) => !id.startsWith('profile-'))
+      ).toEqual(['timeline-1:0', 'reactions-1:0', 'replies-1:0']);
+    } finally {
+      await host.release();
+    }
+  });
+
   it('opens no reaction REQ when reactions are turned off', async () => {
     const dbName = `post-${crypto.randomUUID()}`;
     await seed(dbName, postWithReactions());

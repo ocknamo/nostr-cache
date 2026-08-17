@@ -1504,5 +1504,33 @@ describe('TimelineController', () => {
       await waitFor(() => openSubscriptionIds(controller).length > 0, 'the post subscription');
       expect(openSubscriptionIds(controller)).toEqual([wireSubId('timeline-1')]);
     });
+
+    it('opens no watch for a post it was re-pointed away from while booting', async () => {
+      const other = parsePostTarget({
+        eventId: 'aa00000000000000000000000000000000000000000000000000000000000004',
+      });
+      if (!other) {
+        throw new Error('fixture post id should parse');
+      }
+      const { controller } = createController();
+
+      // Deliberately not awaited: the window this closes is the relay boot, and
+      // a page setting `event-id` from script lands inside it.
+      const booting = controller.startPost(post, { reactions: {}, replies: {} });
+      controller.showPost(other, { reactions: {}, replies: {} });
+      await booting;
+
+      // Left to open, the superseded boot's pair would run on with nothing to
+      // close them: `showPost` had already closed the watches it knew about.
+      await waitFor(
+        () => openSubscriptionIds(controller).some((id) => id.startsWith('reactions-')),
+        "the new post's watches"
+      );
+      const filters = openSubscriptions(controller)
+        .filter((sub) => sub.id.startsWith('reactions-') || sub.id.startsWith('replies-'))
+        .flatMap((sub) => sub.filters);
+      expect(filters).toHaveLength(2);
+      expect(JSON.stringify(filters)).not.toContain(POST_ID);
+    });
   });
 });
