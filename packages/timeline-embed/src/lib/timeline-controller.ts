@@ -279,6 +279,13 @@ export class TimelineController {
   private pendingReplies: ReplyRequest[] = [];
   private requestedReplies = new Set<string>();
   private replySeq = 0;
+  /**
+   * Which post the post-scoped watches belong to, as a counter.
+   *
+   * Only {@link startPost} reads it, and only to find out whether the post it
+   * was booting for is still the one on screen — see there.
+   */
+  private postGeneration = 0;
   private readonly timer = new RequestTimer();
   private readonly options: TimelineControllerOptions;
   private state: TimelineState = {
@@ -438,6 +445,42 @@ export class TimelineController {
       return;
     }
     this.subscribe(filters);
+  }
+
+  /**
+   * Boot for a single post: open its own REQ first, then the watches around it.
+   *
+   * The order is why this exists rather than a `start()` with a
+   * {@link watchPost} beside it. The post itself is one primary-key lookup; the
+   * two watches read every row carrying the post's id in an `e` tag, so what
+   * they cost grows with how much the post was answered. The relay reads for
+   * both on the page's own thread, so the REQ that arrives first is served
+   * first — and the one the reader is waiting to see is the post.
+   *
+   * The measured effect is modest on its own; what made this page slow was the
+   * filter shape of the watches rather than their place in the queue (see
+   * `storage.md` §4.1.1).
+   */
+  async startPost(target: PostTarget, wants: PostWatches = {}): Promise<void> {
+    this.postGeneration += 1;
+    const generation = this.postGeneration;
+    await this.start([target.filter]);
+    // The boot takes as long as the relay does, and the element can be pointed
+    // somewhere else in that window — a page setting `event-id` from script, or
+    // turning `show-replies` off. A later {@link showPost} has already closed
+    // the watches by then, and opening these would leave the *previous* post's
+    // kind 7 and kind 1 subscriptions running with nothing to close them.
+    if (generation !== this.postGeneration) {
+      return;
+    }
+    // Nothing was asked of the relay (it failed to boot, or the socket is
+    // down), so there is no post for these to be about — and `requestReactions`
+    // remembers what it has been asked for, so queueing them here would make
+    // the omission permanent.
+    if (!this.currentSubId) {
+      return;
+    }
+    this.watchPost(target, wants);
   }
 
   /** Replace the subscription, clearing the timeline and restarting timing. */
@@ -1155,6 +1198,9 @@ export class TimelineController {
    * visited and the cache answers the way back from IndexedDB anyway.
    */
   showPost(target: PostTarget, wants: PostWatches = {}): void {
+    // Supersedes a {@link startPost} still waiting on the relay, whose watches
+    // are about the post this one is replacing.
+    this.postGeneration += 1;
     this.closeReactions();
     this.closeReplies();
     this.applyFilter([target.filter]);

@@ -51,10 +51,7 @@ export function buildOptimizedQuery(
     }
   }
 
-  // Use indexed_tags if available and no other primary filters
-  if (indexedTagValues.length > 0 && !ids?.length && !authors?.length && !kinds?.length) {
-    collection = table.where('indexed_tags').anyOf(indexedTagValues);
-  } else if (ids?.length) {
+  if (ids?.length) {
     collection = table.where('id').anyOf(ids);
   }
   // authors + kinds + 時間範囲の組み合わせ
@@ -69,10 +66,28 @@ export function buildOptimizedQuery(
     collection = betweenCreatedAt(table, since, until);
     collection = collection.filter((event) => authors.includes(event.pubkey));
   }
-  // authors + kinds の組み合わせ
+  // authors + kinds の組み合わせ。タグ条件より先に見る: 2 フィールドの等値
+  // なので普通は「その人のその kind」まで絞れているうえ、アドレサブルの参照
+  // （`{kinds:[k],authors:[p],'#d':[id]}`）がこの形で、`d` の値は
+  // 人をまたいで衝突する（`d:"1"` など）
   else if (authors?.length && kinds?.length) {
     const combinations = authors.flatMap((author) => kinds.map((kind) => [author, kind]));
     collection = table.where('[pubkey+kind]').anyOf(combinations);
+  }
+  // タグ条件は単一フィールドの `kind` / `pubkey` / `created_at` より先に選ぶ。
+  // 1 つのタグ値に一致する行は普通ごく少数だが、`kind` インデックスはその kind の
+  // 全行を返す（`{kinds:[1],'#e':[…]}` ならキャッシュ内の全 kind 1）。
+  //
+  // `distinct()` は multiEntry の必然。複数の指定値に一致する行（root と parent の
+  // 両方を `e` タグに持つ NIP-10 のリプライ）は同じ行が指定値の数だけ返るため、
+  // これが無いと `limit` を重複が食う。
+  //
+  // 前提: `indexed_tags` は保存時に MAX_INDEXED_TAGS 件で切り詰められる
+  // （`tag-index.ts`）。単一文字タグが 100 個を超えるイベントは、溢れたタグでは
+  // 引けない。この経路を kinds 併用のフィルタにも広げたことで、その切り詰めが
+  // 見える範囲も広がっている
+  else if (indexedTagValues.length > 0) {
+    collection = table.where('indexed_tags').anyOf(indexedTagValues).distinct();
   }
   // kinds + 時間範囲の組み合わせ
   else if (kinds?.length && (since !== undefined || until !== undefined)) {
