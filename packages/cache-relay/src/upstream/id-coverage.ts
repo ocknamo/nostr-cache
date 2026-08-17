@@ -38,7 +38,14 @@ import type { Filter } from '@nostr-cache/shared';
  *   the id, and a delivery under any filter of the same REQ proves that.
  */
 export function isIdCovered(filter: Filter, delivered: ReadonlySet<string>): boolean {
-  if (filter.ids === undefined) {
+  // `ids` reaching here is not necessarily an array: `isValidFilterShape` is a
+  // disjunction, so `{"ids":"abc","limit":1}` is admitted on the strength of
+  // `limit` alone. Everything downstream of it happens to tolerate the string
+  // (`includes` and `length` both exist on one), so this is the first place a
+  // non-array would throw — and a throw here would leave the REQ with neither
+  // EOSE nor CLOSED. Treated as uncovered, which forwards it upstream exactly
+  // as before this short-circuit existed.
+  if (!Array.isArray(filter.ids)) {
     return false;
   }
   return filter.ids.every((id) => delivered.has(id));
@@ -56,7 +63,7 @@ export function isIdCovered(filter: Filter, delivered: ReadonlySet<string>): boo
  *   already complete and can be finished with an immediate EOSE
  */
 export function narrowFiltersByIdCoverage(filters: Filter[], sentIds: Iterable<string>): Filter[] {
-  if (!filters.some((filter) => filter.ids !== undefined)) {
+  if (!filters.some((filter) => Array.isArray(filter.ids))) {
     return filters;
   }
   const delivered = new Set(sentIds);

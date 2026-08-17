@@ -807,21 +807,24 @@ describe('MessageHandler', () => {
         );
       });
 
-      it('forwards an id filter whose event was held back by another condition', async () => {
+      it('forwards a malformed ids filter instead of failing the subscription', async () => {
         const coordinator = makeCoordinator();
         messageHandler.setUpstreamCoordinator(coordinator as never);
-        // ストレージが kind で弾いた結果、配信 0 件。保持しているとは証明できない
-        (mockStorage.getEvents as Mock).mockResolvedValueOnce([]);
-        const mismatched = { ids: [sampleEvent.id], kinds: [7] };
+        // `isValidFilterShape` は選言なので、`limit` だけを根拠にこれが受理される
+        const malformed = { ids: 'abc', limit: 1 } as unknown as Filter;
 
-        await messageHandler.handleMessage('client1', ['REQ', 'sub1', mismatched]);
+        await messageHandler.handleMessage('client1', ['REQ', 'sub1', malformed]);
 
         expect(coordinator.openForSubscription).toHaveBeenCalledWith(
           'client1',
           'sub1',
-          [mismatched],
+          [malformed],
           []
         );
+        expect(responseCallback).not.toHaveBeenCalledWith('client1', [
+          'NOTICE',
+          'Failed to create subscription: subscription error',
+        ]);
       });
     });
 
@@ -832,10 +835,10 @@ describe('MessageHandler', () => {
       const NOW = 1_700_000_000_000;
 
       /** MessageHandler wired with a freshness gate over `getCachedAt`. */
-      function makeHandler(cachedSecondsAgo: number | undefined) {
+      function makeHandler(cachedSecondsAgo: number | undefined, alsoStored: NostrEvent[] = []) {
         const storage = {
           ...mockStorage,
-          getEvents: vi.fn().mockResolvedValue([profileEvent]),
+          getEvents: vi.fn().mockResolvedValue([profileEvent, ...alsoStored]),
           getCachedAt: vi
             .fn()
             .mockResolvedValue(
@@ -902,6 +905,38 @@ describe('MessageHandler', () => {
           'client1',
           'sub1',
           [sampleFilter],
+          [profileEvent.id]
+        );
+      });
+
+      it('composes with the id coverage short-circuit', async () => {
+        const coordinator = makeCoordinator();
+        const { handler, callback } = makeHandler(60, [sampleEvent]);
+        handler.setUpstreamCoordinator(coordinator as never);
+
+        await handler.handleMessage('client1', [
+          'REQ',
+          'sub1',
+          { ids: [sampleEvent.id] },
+          profileFilter,
+        ]);
+
+        expect(coordinator.openForSubscription).not.toHaveBeenCalled();
+        expect(callback).toHaveBeenCalledWith('client1', ['EOSE', 'sub1']);
+      });
+
+      it('leaves an uncovered id filter upstream while the window drops the other', async () => {
+        const coordinator = makeCoordinator();
+        const uncached = { ids: ['f'.repeat(64)] };
+        const { handler } = makeHandler(60);
+        handler.setUpstreamCoordinator(coordinator as never);
+
+        await handler.handleMessage('client1', ['REQ', 'sub1', uncached, profileFilter]);
+
+        expect(coordinator.openForSubscription).toHaveBeenCalledWith(
+          'client1',
+          'sub1',
+          [uncached],
           [profileEvent.id]
         );
       });

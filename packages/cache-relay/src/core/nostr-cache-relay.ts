@@ -16,6 +16,7 @@ import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter, ValidationStatus } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { FreshnessGate } from '../upstream/freshness.js';
+import { narrowFiltersByIdCoverage } from '../upstream/id-coverage.js';
 import { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from '../upstream/upstream-relay-pool.js';
 import { capEvents } from '../utils/filter-utils.js';
@@ -342,12 +343,15 @@ export class NostrCacheRelay {
       this.emitter.emit('error', error instanceof Error ? error : new Error(String(error)));
     }
 
-    // 鮮度ウィンドウ: キャッシュだけで充足したフィルタは上流へ投げない
-    // （transport 経由の REQ と同じ判定を通す。上流が無ければ短絡する）
-    const upstreamFilters =
-      this.upstreamCoordinator && this.freshnessGate
-        ? await this.freshnessGate.filtersForUpstream(filters, sentEvents)
-        : filters;
+    // キャッシュだけで充足したフィルタは上流へ投げない
+    // （transport 経由の REQ と同じ2段の判定を通す。上流が無ければ短絡する）
+    let upstreamFilters = filters;
+    if (this.upstreamCoordinator) {
+      upstreamFilters = narrowFiltersByIdCoverage(filters, sentIds);
+      if (this.freshnessGate && upstreamFilters.length > 0) {
+        upstreamFilters = await this.freshnessGate.filtersForUpstream(upstreamFilters, sentEvents);
+      }
+    }
 
     // リードスルー有効時は上流へも問い合わせ、EOSE は coordinator が
     // （上流 EOSE の集約 or タイムアウトで）発火する。無効時、および鮮度ウィンドウで

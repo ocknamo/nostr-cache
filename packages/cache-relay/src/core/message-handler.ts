@@ -313,7 +313,7 @@ export class MessageHandler {
 
         if (byId > 0 || byFreshness > 0) {
           logger.debug(
-            `Subscription ${subscriptionId}: ${byId} filters answered by id and ${byFreshness} within the freshness window, out of ${filters.length}; ${upstreamFilters.length} forwarded upstream`
+            `Subscription ${subscriptionId}: ${byId} filters answered by id, ${byFreshness} within the freshness window, ${upstreamFilters.length} forwarded upstream`
           );
         }
       }

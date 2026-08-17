@@ -29,6 +29,15 @@ describe('isIdCovered', () => {
 
   it('covers an empty ids array', () => {
     expect(isIdCovered({ ids: [] }, new Set())).toBe(true);
+    // `ids` 以外の条件は見ない。空配列はローカルでも何にもマッチしないため
+    expect(isIdCovered({ ids: [], kinds: [1] }, new Set())).toBe(true);
+  });
+
+  it('does not cover a filter whose ids is not an array', () => {
+    // `isValidFilterShape` は選言なので、`limit` だけを根拠にここへ到達しうる
+    const malformed = { ids: ID_A, limit: 1 } as unknown as Filter;
+
+    expect(isIdCovered(malformed, new Set([ID_A]))).toBe(false);
   });
 });
 
@@ -60,5 +69,11 @@ describe('narrowFiltersByIdCoverage', () => {
     const filters: Filter[] = [{ ids: [ID_A] }];
 
     expect(narrowFiltersByIdCoverage(filters, [])).toEqual(filters);
+  });
+
+  it('forwards a malformed ids filter instead of throwing', () => {
+    const filters = [{ ids: ID_A, limit: 1 }] as unknown as Filter[];
+
+    expect(narrowFiltersByIdCoverage(filters, [ID_A])).toEqual(filters);
   });
 });

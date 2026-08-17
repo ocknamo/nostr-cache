@@ -58,6 +58,7 @@ import {
   isFreshnessEligible,
   narrowFiltersByFreshness,
 } from './upstream/freshness.js';
+import { isIdCovered, narrowFiltersByIdCoverage } from './upstream/id-coverage.js';
 import { UpstreamCoordinator } from './upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from './upstream/upstream-relay-pool.js';
 import type { UpstreamPool, UpstreamPoolOptions } from './upstream/upstream-types.js';
@@ -112,6 +113,9 @@ export {
   type FreshnessWindows,
   isFreshnessEligible,
   narrowFiltersByFreshness,
+  // id coverage (exact read-through)
+  isIdCovered,
+  narrowFiltersByIdCoverage,
   // Utils
   filterUtils,
 };
