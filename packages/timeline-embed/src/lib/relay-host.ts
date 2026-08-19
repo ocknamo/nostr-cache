@@ -19,6 +19,8 @@
  */
 
 import {
+  type CachePriority,
+  type CacheStrategy,
   DexieStorage,
   NostrCacheRelay,
   UpstreamRelayPool,
@@ -70,6 +72,50 @@ export const DEFAULT_PROFILE_FRESHNESS = 86_400;
  */
 export const DEFAULT_FOLLOWS_FRESHNESS = 600;
 
+/**
+ * How many events the shared cache keeps before it starts evicting.
+ *
+ * On by default, unlike every other cache setting here: the widget's IndexedDB
+ * lives on the *embedding site's* origin, and without a ceiling it grows for as
+ * long as the reader keeps reading — the notes, plus a profile per author, plus
+ * the reactions and replies each opened card pulls in. Spending an unbounded
+ * share of someone else's storage quota is not a default an embed gets to pick.
+ *
+ * Five thousand events is roughly five megabytes once the row and its indexes
+ * are counted, which is small against a browser's per-origin budget while still
+ * holding many visits' worth of timeline. Embedders who want more (or none) set
+ * `max-events`.
+ */
+export const DEFAULT_STORAGE_MAX_SIZE = 5000;
+
+/**
+ * Eviction order once {@link DEFAULT_STORAGE_MAX_SIZE} is reached.
+ *
+ * LRU rather than the relay's own FIFO default, because FIFO evicts by
+ * `created_at`: a profile published years ago goes first however often the
+ * widget reads it, which is exactly backwards for a cache whose most reused
+ * rows are the oldest ones. Reads are already tracked for every strategy
+ * (`DexieStorage` stamps `last_accessed_at` on each hit), so LRU costs nothing
+ * over FIFO here.
+ */
+export const DEFAULT_CACHE_STRATEGY: CacheStrategy = 'LRU';
+
+/**
+ * Kinds that survive eviction until nothing else is left.
+ *
+ * Profiles (kind 0) and follow lists (kind 3) back the freshness windows above:
+ * evict one and the next load spends the upstream round trip the window exists
+ * to save — and a follow timeline whose kind 3 is gone stops rendering
+ * altogether. They are also a rounding error next to the kind 1 / 7 traffic
+ * that fills the cache, so protecting them costs the reader almost none of the
+ * ceiling.
+ *
+ * Not configurable through an attribute: it is a consequence of how this widget
+ * reads, not a preference. JS callers who need something else can build their
+ * own relay against `@nostr-cache/cache-relay`.
+ */
+const CACHE_PRIORITY: CachePriority = { kinds: [0, 3] };
+
 export interface RelayHostConfig {
   /** Upstream relay URLs (`wss://…`). Empty means a cache-only relay. */
   upstreamRelays?: string[];
@@ -99,6 +145,25 @@ export interface RelayHostConfig {
    * outright — taking the whole widget's startup down with it.
    */
   followsFreshness?: number;
+  /**
+   * Maximum number of events kept in the cache. Once the store grows past it,
+   * the relay evicts in {@link RelayHostConfig.cacheStrategy} order after each
+   * save. Defaults to {@link DEFAULT_STORAGE_MAX_SIZE}; zero or negative turns
+   * eviction off and lets the cache grow without a ceiling.
+   *
+   * Shared by every widget on the page, like the rest of this config — the
+   * ceiling is the database's, not one widget's.
+   */
+  storageMaxSize?: number;
+  /**
+   * Which events are evicted first once `storageMaxSize` is exceeded — `LRU`
+   * (least recently read), `FIFO` (oldest `created_at`) or `LFU` (least
+   * frequently read). Defaults to {@link DEFAULT_CACHE_STRATEGY}.
+   *
+   * JS callers only: there is no attribute for it, since an embedder choosing a
+   * ceiling is not thereby choosing an eviction order.
+   */
+  cacheStrategy?: CacheStrategy;
 }
 
 interface ResolvedConfig extends Required<RelayHostConfig> {}
@@ -143,6 +208,8 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
     lazyValidateInterval: config.lazyValidateInterval ?? DEFAULT_LAZY_VALIDATE_INTERVAL,
     profileFreshness: config.profileFreshness ?? DEFAULT_PROFILE_FRESHNESS,
     followsFreshness: config.followsFreshness ?? DEFAULT_FOLLOWS_FRESHNESS,
+    storageMaxSize: config.storageMaxSize ?? DEFAULT_STORAGE_MAX_SIZE,
+    cacheStrategy: config.cacheStrategy ?? DEFAULT_CACHE_STRATEGY,
   };
 }
 
@@ -239,6 +306,13 @@ async function connectHost(
     // than in the timeline code so the "when do we re-check upstream" policy
     // lives with the cache that answers it.
     upstreamFreshness: freshnessWindows(config),
+    // Bound the database rather than letting it grow for as long as the page is
+    // read; see DEFAULT_STORAGE_MAX_SIZE. A non-positive size reaches the relay
+    // as-is — unlike a freshness window it is *defined* there as "no limit",
+    // so it needs no translation here.
+    storageMaxSize: config.storageMaxSize,
+    cacheStrategy: config.cacheStrategy,
+    cachePriority: CACHE_PRIORITY,
   });
 
   await relay.connect();

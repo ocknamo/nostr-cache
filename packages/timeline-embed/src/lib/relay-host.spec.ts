@@ -2,9 +2,12 @@
 import 'fake-indexeddb/auto';
 import { NostrCacheRelay, WebSocketServerEmulator } from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '../test-fixtures.ts';
 import {
+  DEFAULT_CACHE_STRATEGY,
   DEFAULT_FOLLOWS_FRESHNESS,
   DEFAULT_PROFILE_FRESHNESS,
+  DEFAULT_STORAGE_MAX_SIZE,
   type RelayHost,
   acquireRelayHost,
   getRelayHostRefCount,
@@ -200,6 +203,70 @@ describe('acquireRelayHost', () => {
 
     await expect(eose).resolves.toBeUndefined();
     socket.close();
+  });
+
+  /**
+   * The cache ceiling is the only setting here that bounds what the widget
+   * costs the *embedding* page, so what reaches the relay is worth pinning:
+   * dropping it would go unnoticed until someone's IndexedDB had grown for a
+   * month.
+   */
+  describe('cache ceiling', () => {
+    /** The eviction options the relay was actually constructed with. */
+    function evictionOptions(host: RelayHost): {
+      storageMaxSize?: number;
+      cacheStrategy?: string;
+      cachePriority?: { pubkeys?: string[]; kinds?: number[] };
+    } {
+      return (host.relay as unknown as { options: Record<string, never> }).options;
+    }
+
+    it('bounds the cache by default', async () => {
+      const host = await acquire();
+
+      expect(evictionOptions(host).storageMaxSize).toBe(DEFAULT_STORAGE_MAX_SIZE);
+      expect(evictionOptions(host).cacheStrategy).toBe(DEFAULT_CACHE_STRATEGY);
+    });
+
+    it('keeps profiles and follow lists to the end of the eviction order', async () => {
+      const host = await acquire();
+
+      // Evicting these would spend the upstream round trip the freshness
+      // windows exist to save — and leave a follow timeline with no list at all.
+      expect(evictionOptions(host).cachePriority).toEqual({ pubkeys: [], kinds: [0, 3] });
+    });
+
+    it('accepts an overridden ceiling', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 10 });
+
+      expect(evictionOptions(host).storageMaxSize).toBe(10);
+    });
+
+    it('accepts an overridden eviction strategy', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, cacheStrategy: 'FIFO' });
+
+      expect(evictionOptions(host).cacheStrategy).toBe('FIFO');
+    });
+
+    it('lets the cache grow unbounded when the ceiling is switched off', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 0 });
+
+      // The relay reads a non-positive size as "no limit", so unlike a
+      // freshness window this one is passed straight through.
+      expect(evictionOptions(host).storageMaxSize).toBe(0);
+    });
+
+    it('evicts down to the ceiling as events are saved', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 2 });
+
+      for (const index of [1, 2, 3]) {
+        await host.relay.publishEvent(
+          makeEvent({ id: `${index}`.repeat(64), created_at: 1_700_000_000 + index })
+        );
+      }
+
+      expect(await host.storage.count()).toBe(2);
+    });
   });
 
   /**

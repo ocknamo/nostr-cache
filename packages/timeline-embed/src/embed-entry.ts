@@ -24,11 +24,13 @@ import './nostr-post.svelte';
 import NostrTimeline from './nostr-timeline.svelte';
 
 export {
+  DEFAULT_CACHE_STRATEGY,
   DEFAULT_DB_NAME,
   DEFAULT_FOLLOWS_FRESHNESS,
   DEFAULT_INTERCEPT_URL,
   DEFAULT_LAZY_VALIDATE_INTERVAL,
   DEFAULT_PROFILE_FRESHNESS,
+  DEFAULT_STORAGE_MAX_SIZE,
   acquireRelayHost,
   getRelayHostRefCount,
 } from './lib/relay-host.ts';

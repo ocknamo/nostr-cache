@@ -10,6 +10,7 @@
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       followsFreshness: { attribute: 'follows-freshness' },
+      maxEvents: { attribute: 'max-events' },
       debug: { attribute: 'debug' },
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
@@ -66,6 +67,7 @@
     parseEnabled,
     parseFlag,
     parseFreshness,
+    parseMaxEvents,
     parseReactionsLimit,
     parseRelays,
     parseRepliesDepth,
@@ -106,6 +108,16 @@
      * one relay, and the first to mount configures it.
      */
     followsFreshness?: string;
+    /**
+     * Maximum number of events the shared cache keeps, evicting the least
+     * recently read once it is exceeded. Defaults to 5000; `0` lets the cache
+     * grow without a ceiling.
+     *
+     * Bounds the database, not this widget's timeline — the ceiling is shared
+     * with every other widget on the page, and profiles and follow lists are
+     * evicted last so the freshness windows keep working.
+     */
+    maxEvents?: string;
     /**
      * Renders the diagnostic cache/upstream badge. Typed as a boolean too
      * because a Svelte parent's bare `debug` sets the property, not the
@@ -183,6 +195,7 @@
     dbName,
     profileFreshness,
     followsFreshness,
+    maxEvents,
     debug,
     showAvatars,
     showMedia,
@@ -309,6 +322,7 @@
         // widgets that both omit it do not look like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
         followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
+        storageMaxSize: parseMaxEvents(maxEvents),
       },
       onChange: (next) => {
         snapshot = next;

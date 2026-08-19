@@ -115,6 +115,33 @@ export function parseFreshness(
 }
 
 /**
+ * Parse the cache ceiling (`max-events`) out of a string input.
+ *
+ * Whole events; `0` turns eviction off, leaving the cache to grow unbounded the
+ * way it did before the ceiling existed. Unparseable input is ignored with a
+ * warning so a typo costs the reader the default ceiling rather than an
+ * unbounded database.
+ *
+ * @returns The requested ceiling, or `undefined` to leave the relay host's
+ *   default (`DEFAULT_STORAGE_MAX_SIZE`) in place
+ */
+export function parseMaxEvents(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  // Negatives are rejected rather than read as "no limit": the relay counts
+  // events, and 0 already spells that case — same reading as `parseFreshness`.
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(
+      `[nostr-timeline] Ignoring invalid max-events (expected a whole number of events, 0 to disable): ${value}`
+    );
+    return undefined;
+  }
+  return parsed;
+}
+
+/**
  * An opt-in boolean attribute: bare (empty string, as HTML boolean attributes
  * arrive), `"true"` or `"1"` turns it on, anything else leaves it off. Booleans
  * are accepted too, because a Svelte parent sets the property rather than the
@@ -396,6 +423,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   profileFreshness: number | undefined;
   /** Configures the shared relay, not this widget; see `<nostr-timeline>`. */
   followsFreshness: number | undefined;
+  /** Events the shared cache keeps; `undefined` keeps the default ceiling. */
+  maxEvents: number | undefined;
   /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
   /** Whether to render author avatars. */
@@ -430,6 +459,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
+    maxEvents: parseMaxEvents(params.get('max-events')),
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
@@ -460,6 +490,8 @@ export interface FollowTimelineConfig {
   profileFreshness: number | undefined;
   /** Seconds a cached follow list is served for; `undefined` keeps the default. */
   followsFreshness: number | undefined;
+  /** Events the shared cache keeps; `undefined` keeps the default ceiling. */
+  maxEvents: number | undefined;
   debug: boolean;
   showAvatars: boolean;
   showMedia: boolean;
@@ -494,6 +526,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
+    maxEvents: parseMaxEvents(params.get('max-events')),
     debug: parseDebug(params.get('debug')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',

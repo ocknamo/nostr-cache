@@ -10,6 +10,7 @@
       includeSelf: { attribute: 'include-self' },
       sinceDays: { attribute: 'since-days' },
       followsFreshness: { attribute: 'follows-freshness' },
+      maxEvents: { attribute: 'max-events' },
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       debug: { attribute: 'debug' },
@@ -53,6 +54,7 @@
     parseFreshness,
     parseKinds,
     parseLimit,
+    parseMaxEvents,
     parseMaxFollows,
     parsePubkey,
     parseRelays,
@@ -89,6 +91,16 @@
     sinceDays?: string;
     /** Defaults to ten minutes; `0` re-asks upstream on every load. */
     followsFreshness?: string;
+    /**
+     * Maximum number of events the shared cache keeps, evicting the least
+     * recently read once it is exceeded. Defaults to 5000; `0` lets the cache
+     * grow without a ceiling.
+     *
+     * Bounds the database, not this widget's timeline — the ceiling is shared
+     * with every other widget on the page, and profiles and follow lists are
+     * evicted last so the freshness windows keep working.
+     */
+    maxEvents?: string;
     dbName?: string;
     /** Defaults to a day; `0` re-asks upstream on every lookup. */
     profileFreshness?: string;
@@ -148,6 +160,7 @@
     includeSelf,
     sinceDays,
     followsFreshness,
+    maxEvents,
     dbName,
     profileFreshness,
     debug,
@@ -220,6 +233,7 @@
         // omit the attribute from looking like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
         followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
+        storageMaxSize: parseMaxEvents(maxEvents),
       },
       onChange: (next) => {
         state = next;
