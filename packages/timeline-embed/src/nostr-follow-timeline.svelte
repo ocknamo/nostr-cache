@@ -89,7 +89,7 @@
      * way for the reader to tell that from "nobody posted".
      */
     sinceDays?: string;
-    /** Defaults to ten minutes; `0` re-asks upstream on every load. */
+    /** Defaults to an hour; `0` re-asks upstream on every load. */
     followsFreshness?: string;
     /**
      * Maximum number of events the shared cache keeps, evicting the least

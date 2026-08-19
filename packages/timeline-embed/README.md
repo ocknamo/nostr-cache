@@ -33,7 +33,7 @@
   `pubkey` が `nostr-timeline:action` で通知されます（プロフィール画面への導線用・
   [下記](#著者アイコン表示名の押下)）
 - フォローリスト（kind 3）も replaceable として同じキャッシュに載り、鮮度ウィンドウ
-  （既定 10 分・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
+  （既定 1 時間・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
   2 回目以降のロードは**上流に問い合わせずフォローリストがキャッシュから即座に出ます**
 
 公開デモ: <https://ocknamo.github.io/nostr-cache/>
@@ -122,7 +122,7 @@ npm パッケージを入れられない構成のための入口です。
 | `upstreamRelays` | `relays`（こちらは**配列**） | `[]`（キャッシュのみ） |
 | `dbName` | `db-name` | `nostr-cache-embed` |
 | `profileFreshness` | `profile-freshness` | `86400` |
-| `followsFreshness` | `follows-freshness` | `600` |
+| `followsFreshness` | `follows-freshness` | `3600` |
 | `storageMaxSize` | `max-events` | `5000` |
 | `cacheStrategy` | （属性なし） | `LRU` |
 | `interceptUrl` / `lazyValidateInterval` | （属性なし） | `ws://nostr-cache.invalid` / `5` |
@@ -168,7 +168,7 @@ npm パッケージを入れられない構成のための入口です。
 | `limit` | 取得件数 | `50` |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `86400`（24 時間） |
-| `follows-freshness` | フォローリスト（kind 3）の同じ設定。**この要素自身は kind 3 を取得しません** — 同じページに `<nostr-follow-timeline>` を置く場合に設定を揃えるためのものです（[下記](#フォロータイムライン)） | `600`（10 分） |
+| `follows-freshness` | フォローリスト（kind 3）の同じ設定。**この要素自身は kind 3 を取得しません** — 同じページに `<nostr-follow-timeline>` を置く場合に設定を揃えるためのものです（[下記](#フォロータイムライン)） | `3600`（1 時間） |
 | `max-events` | キャッシュに保存するイベント数の上限。超えると読み出しが古い順に退避する。`0` で上限なし（[下記](#キャッシュ量の上限)） | `5000` |
 | `debug` | 動作確認用。付けると各投稿に `cache` / `upstream` バッジを表示する | なし（非表示） |
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
@@ -286,7 +286,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `max-follows` | `authors` に載せるフォロー先の上限（病的なリストへの安全弁） | `2000` |
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
-| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
+| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `3600`（1 時間） |
 | `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `author-action` / `author-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
@@ -508,7 +508,7 @@ level 3  …
 | `relays` | 上流リレー URL（カンマ区切り） | なし |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィールの鮮度ウィンドウ（秒） | `86400` |
-| `follows-freshness` | フォローリストの鮮度ウィンドウ（秒・この要素は取得しないが、同一ページの他ウィジェットと設定を揃えるため） | `600` |
+| `follows-freshness` | フォローリストの鮮度ウィンドウ（秒・この要素は取得しないが、同一ページの他ウィジェットと設定を揃えるため） | `3600` |
 | `max-events` | キャッシュに保存するイベント数の上限（[下記](#キャッシュ量の上限)） | `5000` |
 | `debug` | `cache` / `upstream` バッジを表示 | オフ |
 | `show-avatars` | `"false"` でアバターを出さない（著者・リアクター両方） | オン |

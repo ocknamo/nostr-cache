@@ -312,13 +312,13 @@ describe('acquireRelayHost', () => {
       expect(DEFAULT_PROFILE_FRESHNESS).toBe(24 * 60 * 60);
     });
 
-    it('configures a ten-minute kind 3 window by default', async () => {
+    it('configures an hour-long kind 3 window by default', async () => {
       const host = await acquire();
 
       // This is what makes a follow timeline's second load skip the upstream
       // round trip it needs before it can even build the timeline REQ.
       expect(windowForKind(host, 3)).toBe(DEFAULT_FOLLOWS_FRESHNESS);
-      expect(DEFAULT_FOLLOWS_FRESHNESS).toBe(10 * 60);
+      expect(DEFAULT_FOLLOWS_FRESHNESS).toBe(60 * 60);
     });
 
     it('accepts an overridden window', async () => {

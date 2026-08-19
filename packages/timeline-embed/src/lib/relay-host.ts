@@ -65,12 +65,20 @@ export const DEFAULT_PROFILE_FRESHNESS = 86_400;
  * without a window every visit spends an upstream round trip before the
  * timeline REQ can even be built.
  *
- * Ten minutes, matching the worked example in `doc/cache-relay/upstream.md`:
- * follow lists change more often than display names, and the cost of being one
- * window behind is a few authors missing from the timeline — not a wrong avatar
- * that stays wrong for a day.
+ * That round trip is the blocking kind: the widget cannot even build the
+ * timeline REQ until the list arrives, and waits up to five seconds for it. So
+ * the window is what decides whether a visit renders from cache or stalls
+ * first.
+ *
+ * An hour. Still far shorter than the day given to profiles, because a stale
+ * list changes *which* posts appear rather than how an avatar looks — but far
+ * longer than the ten minutes this started at, which expired inside an ordinary
+ * reading session and made a reader who came back to the page pay for the round
+ * trip again. Follow lists change on the order of days; an hour is well under
+ * that while covering a whole visit. A subject who just followed someone and
+ * wants to see it now sets `follows-freshness` lower (`0` re-asks every load).
  */
-export const DEFAULT_FOLLOWS_FRESHNESS = 600;
+export const DEFAULT_FOLLOWS_FRESHNESS = 3600;
 
 /**
  * How many events the shared cache keeps before it starts evicting.
