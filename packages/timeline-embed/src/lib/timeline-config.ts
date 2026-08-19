@@ -115,12 +115,10 @@ export function parseFreshness(
 }
 
 /**
- * Parse the cache ceiling (`max-events`) out of a string input.
+ * Parse the cache ceiling (`max-events`); `0` turns eviction off.
  *
- * Whole events; `0` turns eviction off, leaving the cache to grow unbounded the
- * way it did before the ceiling existed. Unparseable input is ignored with a
- * warning so a typo costs the reader the default ceiling rather than an
- * unbounded database.
+ * A typo should cost the reader the default ceiling, not an unbounded database,
+ * so anything unparseable is warned about and ignored.
  *
  * @returns The requested ceiling, or `undefined` to leave the relay host's
  *   default (`DEFAULT_STORAGE_MAX_SIZE`) in place
@@ -130,8 +128,8 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
     return undefined;
   }
   const parsed = Number(value);
-  // Negatives are rejected rather than read as "no limit": the relay counts
-  // events, and 0 already spells that case — same reading as `parseFreshness`.
+  // 0 already spells "no limit", so a negative one is a typo — as in
+  // `parseFreshness`.
   if (!Number.isInteger(parsed) || parsed < 0) {
     console.warn(
       `[nostr-timeline] Ignoring invalid max-events (expected a whole number of events, 0 to disable): ${value}`
@@ -423,10 +421,7 @@ export function configFromSearchParams(params: URLSearchParams): {
   profileFreshness: number | undefined;
   /** Configures the shared relay, not this widget; see `<nostr-timeline>`. */
   followsFreshness: number | undefined;
-  /**
-   * Events the shared cache keeps, for `RelayHostConfig.storageMaxSize`;
-   * `undefined` keeps the default ceiling.
-   */
+  /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
   /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
@@ -493,10 +488,7 @@ export interface FollowTimelineConfig {
   profileFreshness: number | undefined;
   /** Seconds a cached follow list is served for; `undefined` keeps the default. */
   followsFreshness: number | undefined;
-  /**
-   * Events the shared cache keeps, for `RelayHostConfig.storageMaxSize`;
-   * `undefined` keeps the default ceiling.
-   */
+  /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
   debug: boolean;
   showAvatars: boolean;

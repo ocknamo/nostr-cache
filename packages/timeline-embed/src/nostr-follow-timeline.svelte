@@ -92,13 +92,9 @@
     /** Defaults to an hour; `0` re-asks upstream on every load. */
     followsFreshness?: string;
     /**
-     * Maximum number of events the shared cache keeps, evicting the least
-     * recently read once it is exceeded. Defaults to 5000; `0` lets the cache
-     * grow without a ceiling.
-     *
-     * Bounds the database, not this widget's timeline — the ceiling is shared
-     * with every other widget on the page, and profiles and follow lists are
-     * evicted last so the freshness windows keep working.
+     * Events the page-shared cache keeps before evicting the least recently
+     * read. Defaults to 5000; `0` lets it grow without a ceiling. Profiles and
+     * follow lists are evicted last, so the freshness windows keep working.
      */
     maxEvents?: string;
     dbName?: string;

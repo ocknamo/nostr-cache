@@ -102,11 +102,7 @@ describe('<nostr-timeline> custom element', () => {
     });
   });
 
-  /**
-   * Same wiring risk as `profile-freshness`, and the same way of catching it:
-   * nothing on screen changes if the ceiling stops reaching the relay, so read
-   * it back off the running host.
-   */
+  /** Nothing on screen changes if the ceiling stops reaching the relay. */
   describe('max-events attribute', () => {
     async function ceilingOnHost(storageMaxSize: number): Promise<number | undefined> {
       const host = await acquireRelayHost({ storageMaxSize });

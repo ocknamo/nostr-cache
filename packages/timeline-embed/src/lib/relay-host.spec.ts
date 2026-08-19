@@ -206,13 +206,10 @@ describe('acquireRelayHost', () => {
   });
 
   /**
-   * The cache ceiling is the only setting here that bounds what the widget
-   * costs the *embedding* page, so what reaches the relay is worth pinning:
-   * dropping it would go unnoticed until someone's IndexedDB had grown for a
-   * month.
+   * Losing the ceiling would go unnoticed until someone's IndexedDB had grown
+   * for a month, so pin what reaches the relay.
    */
   describe('cache ceiling', () => {
-    /** The eviction options the relay was actually constructed with. */
     function evictionOptions(host: RelayHost): {
       storageMaxSize?: number;
       cacheStrategy?: string;
@@ -231,8 +228,6 @@ describe('acquireRelayHost', () => {
     it('keeps profiles and follow lists to the end of the eviction order', async () => {
       const host = await acquire();
 
-      // Evicting these would spend the upstream round trip the freshness
-      // windows exist to save — and leave a follow timeline with no list at all.
       expect(evictionOptions(host).cachePriority).toEqual({ pubkeys: [], kinds: [0, 3] });
     });
 
@@ -251,8 +246,6 @@ describe('acquireRelayHost', () => {
     it('lets the cache grow unbounded when the ceiling is switched off', async () => {
       const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 0 });
 
-      // The relay reads a non-positive size as "no limit", so unlike a
-      // freshness window this one is passed straight through.
       expect(evictionOptions(host).storageMaxSize).toBe(0);
     });
 
