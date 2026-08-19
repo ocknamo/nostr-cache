@@ -116,6 +116,12 @@ export const DEFAULT_CACHE_STRATEGY: CacheStrategy = 'LRU';
  */
 const CACHE_PRIORITY: CachePriority = { kinds: [0, 3] };
 
+/**
+ * Re-exported so a JS caller can name the type of the strategy it passes
+ * without reaching past this module into `@nostr-cache/cache-relay`.
+ */
+export type { CacheStrategy };
+
 export interface RelayHostConfig {
   /** Upstream relay URLs (`wss://…`). Empty means a cache-only relay. */
   upstreamRelays?: string[];

@@ -34,7 +34,7 @@ export {
   acquireRelayHost,
   getRelayHostRefCount,
 } from './lib/relay-host.ts';
-export type { RelayHost, RelayHostConfig } from './lib/relay-host.ts';
+export type { CacheStrategy, RelayHost, RelayHostConfig } from './lib/relay-host.ts';
 
 /**
  * Kept as the default export for the pages that loaded this bundle before it

@@ -267,6 +267,22 @@ describe('acquireRelayHost', () => {
 
       expect(await host.storage.count()).toBe(2);
     });
+
+    it('evicts notes rather than the profile they belong to', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 2 });
+
+      // The profile goes in first, so every eviction order that ignores the
+      // priority rules — LRU, FIFO and LFU alike — would pick it as the victim.
+      await host.relay.publishEvent(makeEvent({ id: '0'.repeat(64), kind: 0, content: '{}' }));
+      for (const index of [1, 2]) {
+        await host.relay.publishEvent(
+          makeEvent({ id: `${index}`.repeat(64), created_at: 1_700_000_000 + index })
+        );
+      }
+
+      expect(await host.storage.count()).toBe(2);
+      expect(await host.storage.getEvents([{ kinds: [0] }])).toHaveLength(1);
+    });
   });
 
   /**

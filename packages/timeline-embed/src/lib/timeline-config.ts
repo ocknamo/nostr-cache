@@ -423,7 +423,10 @@ export function configFromSearchParams(params: URLSearchParams): {
   profileFreshness: number | undefined;
   /** Configures the shared relay, not this widget; see `<nostr-timeline>`. */
   followsFreshness: number | undefined;
-  /** Events the shared cache keeps; `undefined` keeps the default ceiling. */
+  /**
+   * Events the shared cache keeps, for `RelayHostConfig.storageMaxSize`;
+   * `undefined` keeps the default ceiling.
+   */
   maxEvents: number | undefined;
   /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
@@ -490,7 +493,10 @@ export interface FollowTimelineConfig {
   profileFreshness: number | undefined;
   /** Seconds a cached follow list is served for; `undefined` keeps the default. */
   followsFreshness: number | undefined;
-  /** Events the shared cache keeps; `undefined` keeps the default ceiling. */
+  /**
+   * Events the shared cache keeps, for `RelayHostConfig.storageMaxSize`;
+   * `undefined` keeps the default ceiling.
+   */
   maxEvents: number | undefined;
   debug: boolean;
   showAvatars: boolean;

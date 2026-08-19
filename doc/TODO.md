@@ -222,6 +222,9 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
     起きないこともある）
   - 対応の候補: リレー起動時に一度 `enforceLimit` を呼ぶ。`acquireRelayHost` から
     呼ぶか、`NostrCacheRelay.connect()` に入れるかは要検討
+  - 併せて **1 パスあたりの退避件数に上限がない**（`eviction.ts` は超過分を 1 トランザクションで
+    まとめて削除する）点も検討すること。上限を導入する前に育った DB では、最初の 1 回だけ
+    数万件の削除が単一トランザクションで走り、その間 `events` が rw ロックされる
   - なお `storageMaxSize` を設定しない構成（`server` の既定など）では従来どおり
     退避が走らないので、読むほどストレージが育つ。インデックスを使えるクエリは
     行数に比例しないが、`{kinds:[1], limit:50}` のようなインデックス走査（下記）は

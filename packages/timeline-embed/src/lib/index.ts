@@ -134,7 +134,7 @@ export {
   acquireRelayHost,
   getRelayHostRefCount,
 } from './relay-host.ts';
-export type { RelayHost, RelayHostConfig } from './relay-host.ts';
+export type { CacheStrategy, RelayHost, RelayHostConfig } from './relay-host.ts';
 export { RequestTimer } from './request-timer.ts';
 export type { RequestDurations, RequestTiming } from './request-timer.ts';
 export {
