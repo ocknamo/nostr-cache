@@ -114,15 +114,13 @@ describe('TimelineController', () => {
   ): Promise<void> {
     const host = await acquireRelayHost({ dbName });
     seeded.push(host);
-    if (options.validated) {
-      await seedValidated(host.storage, events);
+    if (options.validated === false) {
+      for (const event of events) {
+        await host.storage.saveEvent(event);
+      }
       return;
     }
-    // 未検証で置くのは、遅延検証がまだ届いていない状態そのものを見るテストの
-    // ためだけ。イベントが生き残る必要があるなら `validated` を渡すこと
-    for (const event of events) {
-      await host.storage.saveEvent(event);
-    }
+    await seedValidated(host.storage, events);
   }
 
   async function waitFor(predicate: () => boolean, what: string, timeoutMs = 3000): Promise<void> {
@@ -671,7 +669,9 @@ describe('TimelineController', () => {
         const dbName = `controller-${crypto.randomUUID()}`;
         // Stored and unvalidated — exactly the state a freshly ingested kind 3
         // is in while lazy validation has yet to reach it.
-        await seedCache(dbName, [makeEvent({ id: 'follows-1', kind: 3, pubkey: 'alice' })]);
+        await seedCache(dbName, [makeEvent({ id: 'follows-1', kind: 3, pubkey: 'alice' })], {
+          validated: false,
+        });
         const { dropped } = await startWatch(dbName, 'follows-1');
 
         // The watch has to see it `pending` first, so let a poll land before
@@ -700,9 +700,6 @@ describe('TimelineController', () => {
       it('stays quiet for an event the relay has validated', async () => {
         const dbName = `controller-${crypto.randomUUID()}`;
         await seedCache(dbName, [makeEvent({ id: 'follows-2', kind: 3, pubkey: 'alice' })]);
-        const host = await acquireRelayHost({ dbName });
-        seeded.push(host);
-        await host.storage.markValidated(['follows-2']);
 
         const { dropped } = await startWatch(dbName, 'follows-2');
 
@@ -995,27 +992,23 @@ describe('TimelineController', () => {
 
     it('collects the reactions the relay holds, and only those on this post', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(
-        dbName,
-        [
-          reactionEvent('r1', 'p1'),
-          reactionEvent('r2', 'p2', '🔥'),
-          // A reaction to a reply: NIP-10 keeps the root in the tags, so the
-          // relay's `#e` filter delivers it — and NIP-25 says the last `e` tag is
-          // the target, which is not us.
-          makeEvent({
-            id: 'r3',
-            pubkey: 'p3',
-            kind: 7,
-            content: '+',
-            tags: [
-              ['e', POST_ID],
-              ['e', OTHER_ID],
-            ],
-          }),
-        ],
-        { validated: true }
-      );
+      await seedCache(dbName, [
+        reactionEvent('r1', 'p1'),
+        reactionEvent('r2', 'p2', '🔥'),
+        // A reaction to a reply: NIP-10 keeps the root in the tags, so the
+        // relay's `#e` filter delivers it — and NIP-25 says the last `e` tag is
+        // the target, which is not us.
+        makeEvent({
+          id: 'r3',
+          pubkey: 'p3',
+          kind: 7,
+          content: '+',
+          tags: [
+            ['e', POST_ID],
+            ['e', OTHER_ID],
+          ],
+        }),
+      ]);
       const { controller, states } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
 
@@ -1198,7 +1191,7 @@ describe('TimelineController', () => {
 
     it('opens the next level with the ids the level above delivered', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)]);
       const { controller } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
 
@@ -1214,11 +1207,7 @@ describe('TimelineController', () => {
 
     it('stops opening levels at maxDepth', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(
-        dbName,
-        [replyEvent(REPLY_ID, POST_ID), replyEvent(GRANDCHILD_ID, REPLY_ID)],
-        { validated: true }
-      );
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID), replyEvent(GRANDCHILD_ID, REPLY_ID)]);
       const { controller, states } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
 
@@ -1253,20 +1242,16 @@ describe('TimelineController', () => {
 
     it('keeps the replies to this post and drops what the #e match dragged in', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(
-        dbName,
-        [
-          replyEvent(REPLY_ID, POST_ID),
-          // A reaction and a mention, both delivered by the same `#e` filter.
-          makeEvent({ id: 'r1', pubkey: 'p1', kind: 7, content: '+', tags: [['e', POST_ID]] }),
-          makeEvent({
-            id: ELSEWHERE_ID,
-            pubkey: 'p2',
-            tags: [['e', POST_ID, '', 'mention']],
-          }),
-        ],
-        { validated: true }
-      );
+      await seedCache(dbName, [
+        replyEvent(REPLY_ID, POST_ID),
+        // A reaction and a mention, both delivered by the same `#e` filter.
+        makeEvent({ id: 'r1', pubkey: 'p1', kind: 7, content: '+', tags: [['e', POST_ID]] }),
+        makeEvent({
+          id: ELSEWHERE_ID,
+          pubkey: 'p2',
+          tags: [['e', POST_ID, '', 'mention']],
+        }),
+      ]);
       const { controller, states } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
 
@@ -1281,25 +1266,21 @@ describe('TimelineController', () => {
 
     it('refuses an answer to something else that claims this post as its root', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(
-        dbName,
-        [
-          replyEvent(REPLY_ID, POST_ID),
-          // Anyone can write this, and the relay's `#e` delivers it. Ungated,
-          // enough of them push the real replies out of MAX_REPLIES — and
-          // `insertEvent` drops the oldest, so fresh timestamps decide.
-          makeEvent({
-            id: ELSEWHERE_ID,
-            pubkey: 'spam',
-            created_at: 1_900_000_000,
-            tags: [
-              ['e', POST_ID, '', 'root'],
-              ['e', GRANDCHILD_ID, '', 'reply'],
-            ],
-          }),
-        ],
-        { validated: true }
-      );
+      await seedCache(dbName, [
+        replyEvent(REPLY_ID, POST_ID),
+        // Anyone can write this, and the relay's `#e` delivers it. Ungated,
+        // enough of them push the real replies out of MAX_REPLIES — and
+        // `insertEvent` drops the oldest, so fresh timestamps decide.
+        makeEvent({
+          id: ELSEWHERE_ID,
+          pubkey: 'spam',
+          created_at: 1_900_000_000,
+          tags: [
+            ['e', POST_ID, '', 'root'],
+            ['e', GRANDCHILD_ID, '', 'reply'],
+          ],
+        }),
+      ]);
       const { controller, states } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
 
@@ -1312,7 +1293,7 @@ describe('TimelineController', () => {
 
     it('asks the relay to vouch for the replies, not only the post', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)]);
       const { controller, states } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
 
@@ -1328,7 +1309,7 @@ describe('TimelineController', () => {
 
     it('ends every level on suspend, so a cold benchmark stays cold', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)], { validated: true });
+      await seedCache(dbName, [replyEvent(REPLY_ID, POST_ID)]);
       const { controller } = createController(dbName);
       await controller.start([{ ids: [POST_ID] }]);
       controller.requestReplies(target);
@@ -1412,8 +1393,7 @@ describe('TimelineController', () => {
             pubkey: 'p2',
             tags: [['e', id, '', 'root']],
           }),
-        ]),
-        { validated: true }
+        ])
       );
       const { controller } = createController(dbName);
       const first = parsePostTarget({ eventId: chain[0] });
@@ -1442,11 +1422,9 @@ describe('TimelineController', () => {
 
     it('drops what the old post had collected', async () => {
       const dbName = `controller-${crypto.randomUUID()}`;
-      await seedCache(
-        dbName,
-        [makeEvent({ id: 'r1', pubkey: 'p1', kind: 7, content: '+', tags: [['e', POST_ID]] })],
-        { validated: true }
-      );
+      await seedCache(dbName, [
+        makeEvent({ id: 'r1', pubkey: 'p1', kind: 7, content: '+', tags: [['e', POST_ID]] }),
+      ]);
       const { controller, states } = createController(dbName);
       await controller.start([post.filter]);
       controller.requestReactions(post);

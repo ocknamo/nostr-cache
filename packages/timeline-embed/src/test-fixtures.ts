@@ -16,10 +16,9 @@ export function makeEvent(overrides: Partial<NostrEvent> = {}): NostrEvent {
 }
 
 /**
- * Put fixture events into a relay's cache as signature-verified.
- *
  * `makeEvent` の署名はでたらめなので、未検証のまま入れると遅延検証のパス
- * （リレー起動時と一定間隔）がこれらを消しにかかり、読み出しとの競争になる。
+ * （リレー起動時と 5 秒ごと）が消しにかかる。単体では通るのにスイートが混むと
+ * パスが assert の途中に降ってきて落ちる、という形で表面化する。
  */
 export async function seedValidated(
   storage: Pick<StorageAdapter, 'saveEvent'>,
