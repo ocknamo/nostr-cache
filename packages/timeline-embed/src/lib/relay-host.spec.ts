@@ -2,9 +2,12 @@
 import 'fake-indexeddb/auto';
 import { NostrCacheRelay, WebSocketServerEmulator } from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '../test-fixtures.ts';
 import {
+  DEFAULT_CACHE_STRATEGY,
   DEFAULT_FOLLOWS_FRESHNESS,
   DEFAULT_PROFILE_FRESHNESS,
+  DEFAULT_STORAGE_MAX_SIZE,
   type RelayHost,
   acquireRelayHost,
   getRelayHostRefCount,
@@ -203,6 +206,79 @@ describe('acquireRelayHost', () => {
   });
 
   /**
+   * Losing the ceiling would go unnoticed until someone's IndexedDB had grown
+   * for a month, so pin what reaches the relay.
+   */
+  describe('cache ceiling', () => {
+    function evictionOptions(host: RelayHost): {
+      storageMaxSize?: number;
+      cacheStrategy?: string;
+      cachePriority?: { pubkeys?: string[]; kinds?: number[] };
+    } {
+      return (host.relay as unknown as { options: Record<string, never> }).options;
+    }
+
+    it('bounds the cache by default', async () => {
+      const host = await acquire();
+
+      expect(evictionOptions(host).storageMaxSize).toBe(DEFAULT_STORAGE_MAX_SIZE);
+      expect(evictionOptions(host).cacheStrategy).toBe(DEFAULT_CACHE_STRATEGY);
+    });
+
+    it('keeps profiles and follow lists to the end of the eviction order', async () => {
+      const host = await acquire();
+
+      expect(evictionOptions(host).cachePriority).toEqual({ pubkeys: [], kinds: [0, 3] });
+    });
+
+    it('accepts an overridden ceiling', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 10 });
+
+      expect(evictionOptions(host).storageMaxSize).toBe(10);
+    });
+
+    it('accepts an overridden eviction strategy', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, cacheStrategy: 'FIFO' });
+
+      expect(evictionOptions(host).cacheStrategy).toBe('FIFO');
+    });
+
+    it('lets the cache grow unbounded when the ceiling is switched off', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 0 });
+
+      expect(evictionOptions(host).storageMaxSize).toBe(0);
+    });
+
+    it('evicts down to the ceiling as events are saved', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 2 });
+
+      for (const index of [1, 2, 3]) {
+        await host.relay.publishEvent(
+          makeEvent({ id: `${index}`.repeat(64), created_at: 1_700_000_000 + index })
+        );
+      }
+
+      expect(await host.storage.count()).toBe(2);
+    });
+
+    it('evicts notes rather than the profile they belong to', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 2 });
+
+      // The profile goes in first, so every eviction order that ignores the
+      // priority rules — LRU, FIFO and LFU alike — would pick it as the victim.
+      await host.relay.publishEvent(makeEvent({ id: '0'.repeat(64), kind: 0, content: '{}' }));
+      for (const index of [1, 2]) {
+        await host.relay.publishEvent(
+          makeEvent({ id: `${index}`.repeat(64), created_at: 1_700_000_000 + index })
+        );
+      }
+
+      expect(await host.storage.count()).toBe(2);
+      expect(await host.storage.getEvents([{ kinds: [0] }])).toHaveLength(1);
+    });
+  });
+
+  /**
    * The kind 0 freshness window is what keeps the timeline's profile lookups
    * from forwarding a REQ upstream on every re-subscribe. Nothing else in the
    * package would notice if this stopped being passed to the relay, so the
@@ -229,13 +305,13 @@ describe('acquireRelayHost', () => {
       expect(DEFAULT_PROFILE_FRESHNESS).toBe(24 * 60 * 60);
     });
 
-    it('configures a ten-minute kind 3 window by default', async () => {
+    it('configures an hour-long kind 3 window by default', async () => {
       const host = await acquire();
 
       // This is what makes a follow timeline's second load skip the upstream
       // round trip it needs before it can even build the timeline REQ.
       expect(windowForKind(host, 3)).toBe(DEFAULT_FOLLOWS_FRESHNESS);
-      expect(DEFAULT_FOLLOWS_FRESHNESS).toBe(10 * 60);
+      expect(DEFAULT_FOLLOWS_FRESHNESS).toBe(60 * 60);
     });
 
     it('accepts an overridden window', async () => {

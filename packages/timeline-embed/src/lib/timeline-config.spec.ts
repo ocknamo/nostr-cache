@@ -15,6 +15,7 @@ import {
   parseFreshness,
   parseKinds,
   parseLimit,
+  parseMaxEvents,
   parseMaxFollows,
   parsePubkey,
   parseReactionsLimit,
@@ -359,7 +360,7 @@ describe('configFromSearchParams', () => {
   it('reads the same options the custom element takes as attributes', () => {
     const config = configFromSearchParams(
       new URLSearchParams(
-        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&profile-freshness=600&debug=true'
+        'relays=wss://a.example&kinds=1,7&authors=abc&limit=20&db-name=demo&profile-freshness=600&max-events=1000&debug=true'
       )
     );
 
@@ -368,6 +369,7 @@ describe('configFromSearchParams', () => {
       filters: [{ kinds: [1, 7], authors: ['abc'], limit: 20 }],
       dbName: 'demo',
       profileFreshness: 600,
+      maxEvents: 1000,
       debug: true,
       showAvatars: true,
       showMedia: true,
@@ -505,6 +507,38 @@ describe('parseMaxFollows', () => {
   });
 });
 
+describe('parseMaxEvents', () => {
+  it('reads a whole number of events', () => {
+    expect(parseMaxEvents('20000')).toBe(20_000);
+  });
+
+  it('reads zero as "no ceiling" rather than an empty cache', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseMaxEvents('0')).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('leaves the default ceiling in place for anything unusable', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // A typo must cost the reader the default ceiling, not an unbounded
+    // database on the embedding site's origin.
+    expect(parseMaxEvents('-1')).toBeUndefined();
+    expect(parseMaxEvents('1.5')).toBeUndefined();
+    expect(parseMaxEvents('lots')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('says nothing when the attribute is simply absent', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseMaxEvents(undefined)).toBeUndefined();
+    expect(parseMaxEvents('')).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe('parseSinceDays', () => {
   it('converts whole days to seconds', () => {
     expect(parseSinceDays('30')).toBe(30 * 86_400);
@@ -545,7 +579,7 @@ describe('followConfigFromSearchParams', () => {
   it('reads the same options the custom element takes as attributes', () => {
     const config = followConfigFromSearchParams(
       new URLSearchParams(
-        `pubkey=${NPUB}&relays=wss://a.example&kinds=1&limit=20&max-follows=100&include-self=false&since-days=7&follows-freshness=900&profile-freshness=600&db-name=demo&debug=true`
+        `pubkey=${NPUB}&relays=wss://a.example&kinds=1&limit=20&max-follows=100&include-self=false&since-days=7&follows-freshness=900&profile-freshness=600&db-name=demo&max-events=1000&debug=true`
       )
     );
 
@@ -560,6 +594,7 @@ describe('followConfigFromSearchParams', () => {
       dbName: 'demo',
       profileFreshness: 600,
       followsFreshness: 900,
+      maxEvents: 1000,
       debug: true,
       showAvatars: true,
       showMedia: true,
@@ -578,6 +613,7 @@ describe('followConfigFromSearchParams', () => {
     expect(config.includeSelf).toBe(true);
     expect(config.sinceSeconds).toBeUndefined();
     expect(config.followsFreshness).toBeUndefined();
+    expect(config.maxEvents).toBeUndefined();
     expect(config.debug).toBe(false);
     expect(config.authorAction).toBeUndefined();
   });

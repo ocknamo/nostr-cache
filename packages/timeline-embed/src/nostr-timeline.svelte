@@ -10,6 +10,7 @@
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       followsFreshness: { attribute: 'follows-freshness' },
+      maxEvents: { attribute: 'max-events' },
       debug: { attribute: 'debug' },
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
@@ -38,6 +39,7 @@
     parseDebug,
     parseFilters,
     parseFreshness,
+    parseMaxEvents,
     parseRelays,
     parseShowOriginAlias,
   } from './lib/timeline-config.ts';
@@ -79,6 +81,12 @@
      * no way to spell.
      */
     followsFreshness?: string;
+    /**
+     * Events the page-shared cache keeps before evicting the least recently
+     * read. Defaults to 5000; `0` lets it grow without a ceiling. Profiles and
+     * follow lists are evicted last, so the freshness windows keep working.
+     */
+    maxEvents?: string;
     /**
      * Set (`debug` / `debug="true"`) to render the diagnostic cache/upstream
      * badges. Off by default — they are for checking that the cache works, not
@@ -172,6 +180,7 @@
     dbName,
     profileFreshness,
     followsFreshness,
+    maxEvents,
     debug,
     showOrigin,
     showAvatars,
@@ -238,6 +247,7 @@
         // omit the attribute from looking like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
         followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
+        storageMaxSize: parseMaxEvents(maxEvents),
       },
       onChange: (next) => {
         state = next;

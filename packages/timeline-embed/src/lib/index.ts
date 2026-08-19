@@ -124,15 +124,17 @@ export type {
   SubscriptionHandlers,
 } from './relay-connection.ts';
 export {
+  DEFAULT_CACHE_STRATEGY,
   DEFAULT_DB_NAME,
   DEFAULT_FOLLOWS_FRESHNESS,
   DEFAULT_INTERCEPT_URL,
   DEFAULT_LAZY_VALIDATE_INTERVAL,
   DEFAULT_PROFILE_FRESHNESS,
+  DEFAULT_STORAGE_MAX_SIZE,
   acquireRelayHost,
   getRelayHostRefCount,
 } from './relay-host.ts';
-export type { RelayHost, RelayHostConfig } from './relay-host.ts';
+export type { CacheStrategy, RelayHost, RelayHostConfig } from './relay-host.ts';
 export { RequestTimer } from './request-timer.ts';
 export type { RequestDurations, RequestTiming } from './request-timer.ts';
 export {
@@ -148,6 +150,7 @@ export {
   parseFreshness,
   parseKinds,
   parseLimit,
+  parseMaxEvents,
   parseMaxFollows,
   parsePubkey,
   parseReactionsLimit,

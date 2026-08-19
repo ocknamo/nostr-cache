@@ -10,6 +10,7 @@
       includeSelf: { attribute: 'include-self' },
       sinceDays: { attribute: 'since-days' },
       followsFreshness: { attribute: 'follows-freshness' },
+      maxEvents: { attribute: 'max-events' },
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       debug: { attribute: 'debug' },
@@ -53,6 +54,7 @@
     parseFreshness,
     parseKinds,
     parseLimit,
+    parseMaxEvents,
     parseMaxFollows,
     parsePubkey,
     parseRelays,
@@ -87,8 +89,14 @@
      * way for the reader to tell that from "nobody posted".
      */
     sinceDays?: string;
-    /** Defaults to ten minutes; `0` re-asks upstream on every load. */
+    /** Defaults to an hour; `0` re-asks upstream on every load. */
     followsFreshness?: string;
+    /**
+     * Events the page-shared cache keeps before evicting the least recently
+     * read. Defaults to 5000; `0` lets it grow without a ceiling. Profiles and
+     * follow lists are evicted last, so the freshness windows keep working.
+     */
+    maxEvents?: string;
     dbName?: string;
     /** Defaults to a day; `0` re-asks upstream on every lookup. */
     profileFreshness?: string;
@@ -148,6 +156,7 @@
     includeSelf,
     sinceDays,
     followsFreshness,
+    maxEvents,
     dbName,
     profileFreshness,
     debug,
@@ -220,6 +229,7 @@
         // omit the attribute from looking like conflicting configurations.
         profileFreshness: parseFreshness(profileFreshness),
         followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
+        storageMaxSize: parseMaxEvents(maxEvents),
       },
       onChange: (next) => {
         state = next;

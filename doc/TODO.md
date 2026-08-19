@@ -215,11 +215,6 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
   - どちらを直すかは要検討: 空値を許すよう最終判定を緩めるか（`indexed_tags` は
     空値を落とすので index 側も要る）、`d` が空のときは `#d` を付けずに
     kind × author で引いて照合するか
-- [ ] **キャッシュが際限なく育つ**
-  - `storageMaxSize` を設定していない構成（`timeline-embed` の `relay-host.ts` は
-    未設定）では退避が走らないので、読むほど IndexedDB が育つ。インデックスを
-    使えるクエリは行数に比例しないが、`{kinds:[1], limit:50}` のような
-    インデックス走査（下記）は素直に遅くなる
 - [ ] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
   - 現状: NIP-01 準拠（最新 N 件・新しい順）を優先し、`limit` の有無にかかわらず一致行を
     全件 `toArray()` してから `rowToEvent` → 切り詰める。10 万件規模のキャッシュに

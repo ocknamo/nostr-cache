@@ -21,6 +21,8 @@ declare namespace svelteHTML {
       'follows-freshness'?: string;
       'db-name'?: string;
       'profile-freshness'?: string;
+      /** Events the page-shared cache keeps; `0` for no ceiling. */
+      'max-events'?: string;
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
@@ -48,6 +50,8 @@ declare namespace svelteHTML {
       'db-name'?: string;
       'profile-freshness'?: string;
       'follows-freshness'?: string;
+      /** Events the page-shared cache keeps; `0` for no ceiling. */
+      'max-events'?: string;
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;
@@ -72,6 +76,10 @@ declare namespace svelteHTML {
       limit?: string;
       'db-name'?: string;
       'profile-freshness'?: string;
+      /** Configures the page-shared relay; this element fetches no kind 3. */
+      'follows-freshness'?: string;
+      /** Events the page-shared cache keeps; `0` for no ceiling. */
+      'max-events'?: string;
       debug?: string | boolean;
       'show-avatars'?: string;
       'show-media'?: string;

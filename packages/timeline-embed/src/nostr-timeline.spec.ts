@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { EventActionDetail } from './lib/event-actions.ts';
 import {
   DEFAULT_PROFILE_FRESHNESS,
+  DEFAULT_STORAGE_MAX_SIZE,
   acquireRelayHost,
   getRelayHostRefCount,
 } from './lib/relay-host.ts';
@@ -98,6 +99,36 @@ describe('<nostr-timeline> custom element', () => {
       await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
 
       expect(await windowForKind0(DEFAULT_PROFILE_FRESHNESS)).toBe(DEFAULT_PROFILE_FRESHNESS);
+    });
+  });
+
+  /** Nothing on screen changes if the ceiling stops reaching the relay. */
+  describe('max-events attribute', () => {
+    async function ceilingOnHost(storageMaxSize: number): Promise<number | undefined> {
+      const host = await acquireRelayHost({ storageMaxSize });
+      try {
+        return (host.relay as unknown as { options: { storageMaxSize?: number } }).options
+          .storageMaxSize;
+      } finally {
+        await host.release();
+      }
+    }
+
+    it('passes the configured ceiling to the relay', async () => {
+      const element = document.createElement('nostr-timeline');
+      element.setAttribute('max-events', '250');
+      document.body.appendChild(element);
+      await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+
+      expect(await ceilingOnHost(250)).toBe(250);
+    });
+
+    it('bounds the cache by default when the attribute is absent', async () => {
+      const element = document.createElement('nostr-timeline');
+      document.body.appendChild(element);
+      await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+
+      expect(await ceilingOnHost(DEFAULT_STORAGE_MAX_SIZE)).toBe(DEFAULT_STORAGE_MAX_SIZE);
     });
   });
 

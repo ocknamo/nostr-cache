@@ -33,7 +33,7 @@
   `pubkey` が `nostr-timeline:action` で通知されます（プロフィール画面への導線用・
   [下記](#著者アイコン表示名の押下)）
 - フォローリスト（kind 3）も replaceable として同じキャッシュに載り、鮮度ウィンドウ
-  （既定 10 分・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
+  （既定 1 時間・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
   2 回目以降のロードは**上流に問い合わせずフォローリストがキャッシュから即座に出ます**
 
 公開デモ: <https://ocknamo.github.io/nostr-cache/>
@@ -122,7 +122,9 @@ npm パッケージを入れられない構成のための入口です。
 | `upstreamRelays` | `relays`（こちらは**配列**） | `[]`（キャッシュのみ） |
 | `dbName` | `db-name` | `nostr-cache-embed` |
 | `profileFreshness` | `profile-freshness` | `86400` |
-| `followsFreshness` | `follows-freshness` | `600` |
+| `followsFreshness` | `follows-freshness` | `3600` |
+| `storageMaxSize` | `max-events` | `5000` |
+| `cacheStrategy` | （属性なし） | `LRU` |
 | `interceptUrl` / `lazyValidateInterval` | （属性なし） | `ws://nostr-cache.invalid` / `5` |
 
 エクスポートされるもの:
@@ -131,7 +133,7 @@ npm パッケージを入れられない構成のための入口です。
 |---|---|
 | `acquireRelayHost(config?)` | ページ共有リレーを取得（未起動なら起動）。`{ relay, storage, metrics, interceptUrl, getConnectedUpstreams(), release() }` を返す（**埋め込む側が使うのは `interceptUrl` と `release()` だけで十分です**。`relay` / `storage` / `metrics` は内部実装のインスタンスなので、予告なく変わり得ます） |
 | `getRelayHostRefCount()` | 未 `release()` の取得数。0 は「停止処理に入った」であって、`globalThis.WebSocket` が戻るのは最後の `release()` の await が解決したあとです |
-| `DEFAULT_INTERCEPT_URL` / `DEFAULT_DB_NAME` / `DEFAULT_PROFILE_FRESHNESS` / `DEFAULT_FOLLOWS_FRESHNESS` / `DEFAULT_LAZY_VALIDATE_INTERVAL` | 上表の既定値 |
+| `DEFAULT_INTERCEPT_URL` / `DEFAULT_DB_NAME` / `DEFAULT_PROFILE_FRESHNESS` / `DEFAULT_FOLLOWS_FRESHNESS` / `DEFAULT_LAZY_VALIDATE_INTERVAL` / `DEFAULT_STORAGE_MAX_SIZE` / `DEFAULT_CACHE_STRATEGY` | 上表の既定値 |
 | `default` | `<nostr-timeline>` のコンポーネント（**通常は使いません**。要素は読み込み時に自動登録されます） |
 
 注意点:
@@ -166,7 +168,8 @@ npm パッケージを入れられない構成のための入口です。
 | `limit` | 取得件数 | `50` |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `86400`（24 時間） |
-| `follows-freshness` | フォローリスト（kind 3）の同じ設定。**この要素自身は kind 3 を取得しません** — 同じページに `<nostr-follow-timeline>` を置く場合に設定を揃えるためのものです（[下記](#フォロータイムライン)） | `600`（10 分） |
+| `follows-freshness` | フォローリスト（kind 3）の同じ設定。**この要素自身は kind 3 を取得しません** — 同じページに `<nostr-follow-timeline>` を置く場合に設定を揃えるためのものです（[下記](#フォロータイムライン)） | `3600`（1 時間） |
+| `max-events` | キャッシュに保存するイベント数の上限。超えると読み出しが古い順に退避する。`0` で上限なし（[下記](#キャッシュ量の上限)） | `5000` |
 | `debug` | 動作確認用。付けると各投稿に `cache` / `upstream` バッジを表示する | なし（非表示） |
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
@@ -195,6 +198,37 @@ npm パッケージを入れられない構成のための入口です。
 警告を出して無視されます（既定値のまま動作します）。
 **https のページからは `ws://` の上流リレーを指定できません**（ブラウザが混在コンテンツ
 として遮断するため）。`wss://` を使ってください。
+
+## キャッシュ量の上限
+
+キャッシュ（IndexedDB）に貯めるイベント数には**既定で上限があります**（`max-events`・
+既定 5000 件）。Web Component 方式では**埋め込み先ページのオリジンの保存容量**を使うため、
+放っておくと読むほど際限なく育つ、という状態を既定にはしていません。
+
+| 項目 | 内容 |
+|---|---|
+| 単位 | **イベント件数**（バイト数ではありません）。5000 件で 5MB 前後が目安ですが、本文の長さとタグ数で数倍振れます |
+| 退避の順序 | 読み出しが最も古いものから（LRU）。JS API では `cacheStrategy` で `FIFO` / `LFU` にも変えられます |
+| 最後に退避されるもの | プロフィール（kind 0）・フォローリスト（kind 3）・削除リクエスト（kind 5）。**上限は必ず守られる**ので、これらだけになったら通常の順序で退避します |
+| 実行されるタイミング | イベントを保存した直後。**上限を超えた状態が一瞬生じてから**縮みます |
+| 無効化 | `max-events="0"`（iframe なら `&max-events=0`）。上限なしで際限なく育ちます |
+
+kind 0 / 3 を優先しているのは、これらが**鮮度ウィンドウの土台**だからです
+（`profile-freshness` / `follows-freshness`）。退避されると次の表示で上流への往復が
+発生し、窓を設けた意味がなくなります。件数としては kind 1 / 7 に比べて誤差なので、
+守っても上限のほとんどは通常のイベントに使えます。
+
+上限は**ページ共有のデータベースに対するもの**で、1 ウィジェットあたりではありません。
+1 ページに複数のウィジェットを置く場合は、他の設定と同様に値を揃えてください
+（揃っていないと最初のウィジェットの値が採用され、警告が出ます）。
+
+**iframe 方式では容量を使うのは配信元のオリジン**（このウィジェットを配っている側）です。
+`&max-events=0` を書くのは埋め込む側なので、配信する立場でこれを許したくない場合は
+iframe ページ側でパラメータを外してください。
+
+退避されたイベントは**キャッシュから消えるだけ**で、上流リレーが持っていれば次の購読で
+また取得されます。ただし `getValidationStatus()` は「無い」としか答えられないため、
+✓ バッジは付き直すまで表示されません。
 
 ## フォロータイムライン
 
@@ -252,8 +286,8 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `max-follows` | `authors` に載せるフォロー先の上限（病的なリストへの安全弁） | `2000` |
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
-| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `600`（10 分） |
-| `db-name` / `profile-freshness` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `author-action` / `author-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `3600`（1 時間） |
+| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `author-action` / `author-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -295,8 +329,10 @@ iframe は**別のページ**（`embed/follow/`）です:
   kind 6 の `content` は空かリポスト元イベントの JSON 文字列なので、**空カードか生 JSON**が出ます
 - **NIP-51（kind 30000 のフォローセット）は対象外**です。addressable なので鮮度ウィンドウの
   対象にもなりません
-- `storageMaxSize` を設定した構成では kind 3 が退避されると毎回上流へ戻ります
-  （`cachePriority: { kinds: [3] }` で守れます。現状 embed は `storageMaxSize` を設定していません）
+- **kind 3 が退避されると毎回上流へ戻ります。** ウィジェットは kind 0 / 3 を
+  優先イベント（最後に退避）として起動するので通常は起きませんが、`max-events` を
+  フォロー数より小さくすると優先イベントだけで上限に達し、退避されます
+  （[キャッシュ量の上限](#キャッシュ量の上限)）
 
 ## 投稿詳細
 
@@ -472,7 +508,8 @@ level 3  …
 | `relays` | 上流リレー URL（カンマ区切り） | なし |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィールの鮮度ウィンドウ（秒） | `86400` |
-| `follows-freshness` | フォローリストの鮮度ウィンドウ（秒・この要素は取得しないが、同一ページの他ウィジェットと設定を揃えるため） | `600` |
+| `follows-freshness` | フォローリストの鮮度ウィンドウ（秒・この要素は取得しないが、同一ページの他ウィジェットと設定を揃えるため） | `3600` |
+| `max-events` | キャッシュに保存するイベント数の上限（[下記](#キャッシュ量の上限)） | `5000` |
 | `debug` | `cache` / `upstream` バッジを表示 | オフ |
 | `show-avatars` | `"false"` でアバターを出さない（著者・リアクター両方） | オン |
 | `show-media` | `"false"` で本文中のメディアを描画しない | オン |
