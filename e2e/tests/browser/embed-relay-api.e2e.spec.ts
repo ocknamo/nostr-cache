@@ -120,7 +120,7 @@ describe('Embed bundle relay API E2E', () => {
       dbName: 'nostr-cache-embed',
       lazyValidateInterval: 5,
       profileFreshness: 86_400,
-      followsFreshness: 600,
+      followsFreshness: 3600,
       component: 'function',
       timeline: true,
       followTimeline: true,
