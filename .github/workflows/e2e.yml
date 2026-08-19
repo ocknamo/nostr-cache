@@ -13,6 +13,17 @@ jobs:
   e2e:
 
     runs-on: ubuntu-latest
+    # Playwright の公式イメージにはブラウザと OS 依存（日本語フォントを含む）が
+    # 同梱されている。`playwright install --with-deps` を毎回走らせていた頃は、
+    # apt がランナーのイメージ次第で 20 秒にも 4 分にもなり、テスト本体の 40 秒を
+    # 大きく超えて振れていた。
+    #
+    # タグは package-lock.json の playwright と一致させること。ずれると
+    # 「Executable doesn't exist」でブラウザ側の spec が落ちる。
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble
+      # Chromium が既定の 64MB の /dev/shm で落ちるのを避ける
+      options: --ipc=host
 
     steps:
     - uses: actions/checkout@v4
@@ -25,6 +36,4 @@ jobs:
     # The Node E2E suite spawns the built server (packages/server/dist), so a
     # build is required before running the tests.
     - run: npm run build
-    - name: Install Playwright browser
-      run: npx playwright install --with-deps chromium
     - run: npm run test:e2e
