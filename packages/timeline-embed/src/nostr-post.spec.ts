@@ -5,7 +5,7 @@ import type { NostrEvent } from '@nostr-cache/shared';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { EventActionDetail } from './lib/event-actions.ts';
 import { acquireRelayHost, getRelayHostRefCount } from './lib/relay-host.ts';
-import { makeEvent } from './test-fixtures.ts';
+import { makeEvent, seedValidated } from './test-fixtures.ts';
 
 const POST_ID = 'aa00000000000000000000000000000000000000000000000000000000000001';
 /** The same event as POST_ID, written as NIP-19. */
@@ -33,17 +33,10 @@ describe('<nostr-post> custom element', () => {
     await waitFor(() => getRelayHostRefCount() === 0, 'the relay host to be released');
   });
 
-  /**
-   * Marked validated after saving: the fixtures carry a fake `sig`, and the
-   * relay's lazy validation pass *deletes* whatever fails to verify every 5s.
-   */
   async function seed(dbName: string, events: NostrEvent[]): Promise<void> {
     const host = await acquireRelayHost({ dbName });
     try {
-      for (const event of events) {
-        await host.storage.saveEvent(event);
-      }
-      await host.storage.markValidated(events.map((event) => event.id));
+      await seedValidated(host.storage, events);
     } finally {
       await host.release();
     }

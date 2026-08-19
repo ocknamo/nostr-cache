@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { makeEvent } from '../test-fixtures.ts';
+import { makeEvent, seedValidated } from '../test-fixtures.ts';
 import { parsePostTarget } from './post-target.ts';
 import type { RelayConnection } from './relay-connection.ts';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
@@ -114,16 +114,14 @@ describe('TimelineController', () => {
   ): Promise<void> {
     const host = await acquireRelayHost({ dbName });
     seeded.push(host);
+    if (options.validated) {
+      await seedValidated(host.storage, events);
+      return;
+    }
+    // 未検証で置くのは、遅延検証がまだ届いていない状態そのものを見るテストの
+    // ためだけ。イベントが生き残る必要があるなら `validated` を渡すこと
     for (const event of events) {
       await host.storage.saveEvent(event);
-    }
-    if (options.validated) {
-      // The fixtures carry a fake `sig`, and the relay runs a lazy validation
-      // pass every 5s that *deletes* what fails to verify. A test whose events
-      // have to survive longer than one tick has to opt out of it — otherwise
-      // it passes alone and times out whenever the suite runs slowly enough for
-      // the pass to land mid-assertion.
-      await host.storage.markValidated(events.map((event) => event.id));
     }
   }
 

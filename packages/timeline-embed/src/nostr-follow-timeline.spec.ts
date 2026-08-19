@@ -10,7 +10,7 @@ import {
   acquireRelayHost,
   getRelayHostRefCount,
 } from './lib/relay-host.ts';
-import { makeEvent } from './test-fixtures.ts';
+import { makeEvent, seedValidated } from './test-fixtures.ts';
 
 /** A distinct, valid 64-character hex pubkey per index. */
 function hex(seed: number): string {
@@ -51,9 +51,7 @@ describe('<nostr-follow-timeline> custom element', () => {
   async function seedCache(dbName: string, events: NostrEvent[]): Promise<void> {
     const host = await acquireRelayHost({ dbName });
     seeded.push(host);
-    for (const event of events) {
-      await host.storage.saveEvent(event);
-    }
+    await seedValidated(host.storage, events);
   }
 
   function followList(pubkeys: string[], overrides: Partial<NostrEvent> = {}): NostrEvent {
