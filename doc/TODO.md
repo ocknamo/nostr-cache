@@ -1,7 +1,7 @@
 # TODO リスト
 
-残作業の一覧。**このファイルは未着手の課題だけを追う**。完了した作業の経緯は
-git の履歴と各設計書（[doc/](.) 以下）を参照。
+残作業の一覧。**片付いた項目は消さずに `[x]` を付けて残す**（何をどう解決したかが
+次の判断材料になるため）。詳しい経緯は git の履歴と各設計書（[doc/](.) 以下）を参照。
 
 ## 現状（2026-07）
 
@@ -221,11 +221,20 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
   - どちらを直すかは要検討: 空値を許すよう最終判定を緩めるか（`indexed_tags` は
     空値を落とすので index 側も要る）、`d` が空のときは `#d` を付けずに
     kind × author で引いて照合するか
+- [x] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
+  - `planQuery` の順序ありプランで対応（`doc/cache-relay/storage.md` 4.1.0）。
+    `limit` 付きフィルタは `created_at` 降順に走査して N 件（+ 同着）で打ち切る。
+    フォロータイムラインの `{kinds:[1],authors:[…500],limit:50}` が 574ms → 36ms
+  - 想定していた「`created_at` インデックスを使う分岐だけ」ではなく、既存の未使用
+    インデックス（`[kind+created_at]` / `[pubkey+kind+created_at]`）を使って
+    `[pubkey+kind]` 分岐も降順化した。`since` を足す案は不要
+- [x] `eventMatchesFilter` の `authors` / `kinds` / `ids` 照合を Set 化する
+  - `compileFilterMatcher` として実装。値が 8 個超なら Set で照合する
+  - 実測では 4000 行 × 500 authors で 4ms → 0.7ms と主項ではなかった。効いたのは
+    「フィルタごとに 1 回だけ述語を組む」ほう（購読の配信照合・SQLite の Stage C）
 - [ ] `limit` を持たないフィルタも早期打ち切りの対象にする
-  - `limit` 付きフィルタは `planQuery` の順序ありプランで N 件打ち切りできるようになった
-    （`doc/cache-relay/storage.md` 4.1.0）が、`limit` 無しのフィルタは相変わらず一致行を
-    全件 materialize してから relay 側の `maxEventsPerRequest`（500）で切っている。
-    `{kinds:[1]}` のような REQ がそれ
+  - 上記の続き。`limit` 無しのフィルタは相変わらず一致行を全件 materialize してから
+    relay 側の `maxEventsPerRequest`（500）で切っている。`{kinds:[1]}` のような REQ がそれ
   - やるなら `StorageAdapter.getEvents(filters, { maxEvents })` を足して relay から
     実効上限を渡す。Dexie / SQLite 両アダプタと適合性テストに手が要る
 - [ ] ページロード直後、最初の IndexedDB アクセスが遅い
