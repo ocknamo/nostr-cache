@@ -3,8 +3,9 @@
  *
  * In the dev container a Chromium build is preinstalled under
  * PLAYWRIGHT_BROWSERS_PATH but may not match Playwright's expected revision,
- * so we point at it explicitly. In CI, `npx playwright install` provides the
- * matching build and the default launch (no executablePath) is used.
+ * so we point at it explicitly. In CI the Playwright image ships only the
+ * revision-suffixed directories Playwright looks up itself, so no explicit
+ * path is found and the default launch is used.
  */
 
 import { existsSync } from 'node:fs';

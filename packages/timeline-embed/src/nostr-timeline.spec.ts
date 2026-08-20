@@ -9,6 +9,7 @@ import {
   acquireRelayHost,
   getRelayHostRefCount,
 } from './lib/relay-host.ts';
+import { makeEvent, seedValidated } from './test-fixtures.ts';
 
 /**
  * Verifies the packaging contract of the embed bundle: importing the entry
@@ -190,15 +191,13 @@ describe('<nostr-timeline> custom element', () => {
     const author = 'ee0000000000000000000000000000000000000000000000000000000000000e';
     const seeding = await acquireRelayHost({ dbName });
     try {
-      await seeding.storage.saveEvent({
-        id: 'ff00000000000000000000000000000000000000000000000000000000000001',
-        pubkey: author,
-        created_at: 1_700_000_000,
-        kind: 1,
-        tags: [],
-        content: 'カードが 1 枚あればよい',
-        sig: 'sig',
-      });
+      await seedValidated(seeding.storage, [
+        makeEvent({
+          id: 'ff00000000000000000000000000000000000000000000000000000000000001',
+          pubkey: author,
+          content: 'カードが 1 枚あればよい',
+        }),
+      ]);
     } finally {
       await seeding.release();
     }
