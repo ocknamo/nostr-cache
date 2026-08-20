@@ -44,10 +44,18 @@ export function normalizeFilter(filter: Filter): Filter {
  */
 const SET_MATCH_THRESHOLD = 8;
 
-/** Membership test over a filter condition, without a `Set` for short ones. */
+/**
+ * Membership test over a filter condition, without a `Set` for short ones.
+ *
+ * Both branches copy, so a compiled matcher is a snapshot of the filter however
+ * many values it had. A matcher outlives the call that built it — a subscription
+ * keeps one per filter for its whole life — and having only the long branch copy
+ * would make "does a later edit to the filter show up?" depend on its length.
+ */
 function memberOf<T>(values: readonly T[]): (value: T) => boolean {
   if (values.length <= SET_MATCH_THRESHOLD) {
-    return (value) => values.includes(value);
+    const snapshot = [...values];
+    return (value) => snapshot.includes(value);
   }
   const set = new Set(values);
   return (value) => set.has(value);

@@ -838,7 +838,10 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
         // limit を大きく超えるのが常態で、アダプタが「新しい順に走査して N 件で
         // 打ち切る」実装を採るならその打ち切りが正しいことをここで縛る
         describe('the follow-timeline shape (kinds + many authors + limit)', () => {
-          const authors = Array.from({ length: 12 }, (_, i) => `follow${i}`);
+          // 20 人。「著者ごとにカーソルを開く」戦略が割に合わなくなる規模
+          // （DexieStorage の MAX_ORDERED_AUTHOR_CURSORS = 16）を意図的に超えて
+          // いるので、著者ごとの経路と kind 走査の経路が両方この describe で通る
+          const authors = Array.from({ length: 20 }, (_, i) => `follow${i}`);
 
           beforeEach(async () => {
             // 一致 24 件（kind 1）。ほかに limit に混ざってはいけない行も置く
@@ -934,7 +937,7 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
             const result = await storage.getEvents([
               { kinds: [1], authors: [authors[0]], limit: 50 },
             ]);
-            expect(result.map((e) => e.id)).toEqual(['follow-note-12', 'follow-note-00']);
+            expect(result.map((e) => e.id)).toEqual(['follow-note-20', 'follow-note-00']);
           });
         });
       });

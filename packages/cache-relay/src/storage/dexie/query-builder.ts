@@ -14,6 +14,18 @@ import { getIndexedTagValues } from './tag-index.js';
 const MAX_ORDERED_KINDS = 8;
 
 /**
+ * Author-keyed descending cursors a `limit` query is willing to open.
+ *
+ * Opening a cursor per author is what makes a *narrow* author set fast: it reads
+ * only that person's newest rows instead of walking the kind looking for them.
+ * It stops paying off in bulk, though — the sub-range seek is the expensive part
+ * of a per-author plan, which is exactly why `[pubkey+kind]` with 500 of them
+ * takes 538ms where one descending walk takes 5ms. So a set this size or smaller
+ * gets its own cursors and anything larger walks the kind.
+ */
+const MAX_ORDERED_AUTHOR_CURSORS = 16;
+
+/**
  * Narrow the events table by the filter's time range on the `created_at` index.
  *
  * NIP-01 の `since` / `until` はどちらも境界を含む（`since <= created_at <= until`）。
@@ -26,9 +38,12 @@ function betweenCreatedAt(
   since: number | undefined,
   until: number | undefined
 ): Dexie.Collection<NostrEventTable, string> {
+  // 開いた端は `Dexie.minKey` / `maxKey`。0 を下端にすると `created_at` が負の行を
+  // 落とすが、最終判定の側は `since` 未指定なら下限を課さないので、その行は
+  // 復活できない。`[kind+created_at]` を使う分岐と端の扱いをそろえる意味もある
   return table
     .where('created_at')
-    .between(since ?? 0, until ?? Number.POSITIVE_INFINITY, true, true);
+    .between(since ?? Dexie.minKey, until ?? Dexie.maxKey, true, true);
 }
 
 /**
@@ -137,8 +152,11 @@ export function buildOptimizedQuery(
  */
 export interface QueryPlan {
   /**
-   * Collections to read. Always exactly one unless the filter names several
-   * kinds, which get a cursor each ({@link MAX_ORDERED_KINDS}).
+   * Collections to read, one per cursor the plan opens.
+   *
+   * Single use only: Dexie's `filter` / `until` mutate a collection's context
+   * rather than deriving a new one, so a plan that is kept and read twice would
+   * carry the first read's chain into the second.
    */
   collections: Dexie.Collection<NostrEventTable, string>[];
   /** Whether the rows arrive newest-first, so `limit` can stop the walk. */
@@ -165,6 +183,32 @@ function newestOfKind(
 }
 
 /**
+ * Descending range over one author's events, optionally of one kind.
+ *
+ * Reads nothing but that person's rows, which is what a narrow `authors` needs:
+ * walking the kind instead would read everyone else's rows looking for theirs.
+ */
+function newestOfAuthor(
+  table: Dexie.Table<NostrEventTable, string>,
+  pubkey: string,
+  kind: number | undefined,
+  since: number | undefined,
+  until: number | undefined
+): Dexie.Collection<NostrEventTable, string> {
+  const low = since ?? Dexie.minKey;
+  const high = until ?? Dexie.maxKey;
+  return kind === undefined
+    ? table
+        .where('[pubkey+created_at]')
+        .between([pubkey, low], [pubkey, high], true, true)
+        .reverse()
+    : table
+        .where('[pubkey+kind+created_at]')
+        .between([pubkey, kind, low], [pubkey, kind, high], true, true)
+        .reverse();
+}
+
+/**
  * Plan how to read one filter's rows.
  *
  * The ordered mode exists for the follow timeline. `{kinds:[1],authors:[…500],
@@ -173,18 +217,25 @@ function newestOfKind(
  * measured at 574ms against a 5000-event cache with 4000 of them matching,
  * against 36ms for the same answer read newest-first and cut off at 50.
  *
- * `authors` is deliberately not on the index here. It is checked per row as the
- * cursor advances (by {@link compileRowMatcher}, exactly as the unordered plans
- * already do), which is what turns it from a post-filter into a stopping
- * condition: only rows that pass count towards `limit`.
+ * Which descending cursors to open depends on how many the filter implies:
  *
- * The trade-off is the mirror image of the old plan's. An unordered plan reads
- * as many rows as *match*; an ordered one reads as many as it *walks* — so a
- * filter whose matches are sparse (someone whose posts are not in the cache at
- * all) walks that kind's whole range. That worst case measured 145ms on the same
- * cache, still under what the old plan cost in the common case, and the default
- * `storageMaxSize` of 5000 bounds the walk — which is why no scan budget is
- * imposed here.
+ * - A narrow `authors` (up to {@link MAX_ORDERED_AUTHOR_CURSORS} cursors) gets
+ *   one per author, so the walk stays inside their own rows.
+ * - Otherwise a narrow `kinds` (up to {@link MAX_ORDERED_KINDS}) gets one per
+ *   kind, and `authors` — 500 of them, for a follow timeline — is checked per
+ *   row as the cursor advances (by {@link compileRowMatcher}, exactly as the
+ *   unordered plans already do). That is what turns it from a post-filter into a
+ *   stopping condition: only rows that pass count towards `limit`.
+ * - Failing both, `created_at` itself is walked.
+ *
+ * The trade-off in the kind-walking shape is the mirror image of the old plan's.
+ * An unordered plan reads as many rows as *match*; this one reads as many as it
+ * *walks* — so an author set that is wide but matches sparsely walks the kind's
+ * whole range. That worst case measured 145ms against the 5000-event cache, and
+ * `storageMaxSize` bounds it, which is why no scan budget is imposed. The band
+ * where this is genuinely a worse bet than the old plan is an author set too
+ * wide for its own cursors but too sparse to fill `limit` early; both cost tens
+ * of milliseconds there, so the cut-off is not tuned for it.
  *
  * @param limit The filter's `limit`, already through `normalizeLimit`. Without
  *   one there is nothing to stop at, so the plan is always unordered.
@@ -209,18 +260,32 @@ export function planQuery(
     return unordered();
   }
 
-  const { kinds, since, until } = filter;
-  if (kinds?.length) {
-    // De-duplicated before it is counted as well as before it is walked: two
-    // cursors over the same kind would deliver every one of its rows twice, and
-    // `capEvents` would count the copies against `limit`.
-    const distinctKinds = [...new Set(kinds)];
-    if (distinctKinds.length <= MAX_ORDERED_KINDS) {
-      return {
-        collections: distinctKinds.map((kind) => newestOfKind(table, kind, since, until)),
-        ordered: true,
-      };
-    }
+  const { authors, kinds, since, until } = filter;
+  // De-duplicated before they are counted as well as before they are walked: two
+  // cursors over the same range would deliver every one of its rows twice, and
+  // `capEvents` would count the copies against `limit`.
+  const distinctKinds = kinds?.length ? [...new Set(kinds)] : [];
+  const distinctAuthors = authors?.length ? [...new Set(authors)] : [];
+
+  // A narrow author set is read per author, so the walk never leaves their rows.
+  // Without this a single-author timeline — which `parseFilter` always gives a
+  // `limit` — would walk the whole kind to find that one person's posts:
+  // measured at 128ms against 8ms for the same filter on `[pubkey+kind]`.
+  const authorCursors = distinctAuthors.length * Math.max(distinctKinds.length, 1);
+  if (distinctAuthors.length && authorCursors <= MAX_ORDERED_AUTHOR_CURSORS) {
+    const collections = distinctKinds.length
+      ? distinctAuthors.flatMap((pubkey) =>
+          distinctKinds.map((kind) => newestOfAuthor(table, pubkey, kind, since, until))
+        )
+      : distinctAuthors.map((pubkey) => newestOfAuthor(table, pubkey, undefined, since, until));
+    return { collections, ordered: true };
+  }
+
+  if (distinctKinds.length && distinctKinds.length <= MAX_ORDERED_KINDS) {
+    return {
+      collections: distinctKinds.map((kind) => newestOfKind(table, kind, since, until)),
+      ordered: true,
+    };
   }
 
   return { collections: [betweenCreatedAt(table, since, until).reverse()], ordered: true };
@@ -240,19 +305,37 @@ export function planQuery(
  * against every row it walks rather than only the matching ones.
  */
 export function compileRowMatcher(filter: Filter): (row: NostrEventTable) => boolean {
-  for (const [key, values] of Object.entries(filter)) {
-    if (key.startsWith('#')) {
-      const tagName = key.slice(1);
-      if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
-        return () => false;
-      }
-      if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
-        return () => false;
-      }
-    }
+  if (rejectsEveryRow(filter)) {
+    return () => false;
   }
 
   return compileFilterMatcher(filter);
+}
+
+/**
+ * Whether a filter's tag conditions are ones no stored row can satisfy: a `#x`
+ * key whose name is not a single letter, or whose values are not all non-empty
+ * strings.
+ *
+ * Worth asking before the query rather than only inside the row predicate. A
+ * descending plan would otherwise walk its whole range without ever filling
+ * `limit` — for an answer that was known to be empty before the first row was
+ * read.
+ */
+export function rejectsEveryRow(filter: Filter): boolean {
+  for (const [key, values] of Object.entries(filter)) {
+    if (!key.startsWith('#')) {
+      continue;
+    }
+    const tagName = key.slice(1);
+    if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
+      return true;
+    }
+    if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** One-shot {@link compileRowMatcher}. */

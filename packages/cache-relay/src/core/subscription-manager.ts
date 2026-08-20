@@ -5,7 +5,7 @@
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { eventMatchesFilter } from '../utils/filter-utils.js';
+import { compileFilterMatcher } from '../utils/filter-utils.js';
 interface Subscription {
   clientId: string;
 
@@ -17,12 +17,25 @@ interface Subscription {
   createdAt: number;
 }
 
+/** A subscription plus the predicates broadcast matching tests events against. */
+interface StoredSubscription {
+  subscription: Subscription;
+  /**
+   * One predicate per filter, built when the subscription is created.
+   *
+   * Every stored event is tested against every open subscription, so building
+   * these per event — which is what calling `eventMatchesFilter` in the loop
+   * amounts to — re-derives the same conditions thousands of times over.
+   */
+  matchers: ((event: NostrEvent) => boolean)[];
+}
+
 /**
  * Subscription manager class
  * Manages client subscriptions
  */
 export class SubscriptionManager {
-  private subscriptions: Map<string, Subscription> = new Map();
+  private subscriptions: Map<string, StoredSubscription> = new Map();
   private clientSubscriptions: Map<string, Set<string>> = new Map();
 
   createSubscription(clientId: string, subscriptionId: string, filters: Filter[]): Subscription {
@@ -39,7 +52,7 @@ export class SubscriptionManager {
 
     // Store the subscription
     const key = this.getSubscriptionKey(clientId, subscriptionId);
-    this.subscriptions.set(key, subscription);
+    this.subscriptions.set(key, { subscription, matchers: filters.map(compileFilterMatcher) });
 
     // Add to client subscriptions
     if (!this.clientSubscriptions.has(clientId)) {
@@ -111,7 +124,7 @@ export class SubscriptionManager {
 
   getSubscription(clientId: string, subscriptionId: string): Subscription | undefined {
     const key = this.getSubscriptionKey(clientId, subscriptionId);
-    return this.subscriptions.get(key);
+    return this.subscriptions.get(key)?.subscription;
   }
 
   getClientSubscriptions(clientId: string): Subscription[] {
@@ -125,10 +138,10 @@ export class SubscriptionManager {
 
     for (const subscriptionId of subscriptionIds) {
       const key = this.getSubscriptionKey(clientId, subscriptionId);
-      const subscription = this.subscriptions.get(key);
+      const stored = this.subscriptions.get(key);
 
-      if (subscription) {
-        subscriptions.push(subscription);
+      if (stored) {
+        subscriptions.push(stored.subscription);
       }
     }
 
@@ -136,7 +149,7 @@ export class SubscriptionManager {
   }
 
   getAllSubscriptions(): Subscription[] {
-    return Array.from(this.subscriptions.values());
+    return Array.from(this.subscriptions.values(), (stored) => stored.subscription);
   }
 
   /** Get the number of subscriptions for a client */
@@ -147,9 +160,9 @@ export class SubscriptionManager {
   findMatchingSubscriptions(event: NostrEvent): Map<string, Subscription[]> {
     const matches = new Map<string, Subscription[]>();
 
-    for (const subscription of this.subscriptions.values()) {
+    for (const { subscription, matchers } of this.subscriptions.values()) {
       // Check if any filter matches the event
-      const matchesEvent = subscription.filters.some((filter) => eventMatchesFilter(event, filter));
+      const matchesEvent = matchers.some((matchesFilter) => matchesFilter(event));
 
       if (matchesEvent) {
         if (!matches.has(subscription.clientId)) {

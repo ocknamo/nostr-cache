@@ -13,7 +13,8 @@ import {
   describeStorageAdapterConformance,
 } from '../test/storage-conformance.js';
 import { sortNewestFirst } from '../utils/filter-utils.js';
-import { DexieStorage } from './dexie-storage.js';
+import { DexieStorage, readNewest } from './dexie-storage.js';
+import type { NostrEventTable } from './dexie/schema.js';
 
 const createStorage = () => new DexieStorage('TestNostrCacheRelay');
 
@@ -33,6 +34,96 @@ describeStorageAdapterConformance('DexieStorage', {
     const row = await storage.table('events').get(id);
     return row && { validated: row.validated === 1, accessCount: row.access_count };
   },
+});
+
+/**
+ * Stand-in for a descending Dexie collection that records how far the walk got.
+ *
+ * Reproduces the two behaviours `readNewest` depends on: filters run **in the
+ * order they were chained** and **short-circuit**, and `until` stops the walk at
+ * the first row it accepts, excluding that row (dexie 4.4.4 `combine()` /
+ * `addFilter()` / `Collection.until`).
+ */
+function descendingCollection(rows: NostrEventTable[]) {
+  const chain: ((row: NostrEventTable) => boolean)[] = [];
+  let scanned = 0;
+  let stopped = false;
+
+  const collection = {
+    until(stop: (row: NostrEventTable) => boolean) {
+      chain.push((row) => {
+        if (stop(row)) {
+          stopped = true;
+          return false;
+        }
+        return true;
+      });
+      return collection;
+    },
+    filter(keep: (row: NostrEventTable) => boolean) {
+      chain.push(keep);
+      return collection;
+    },
+    async each(visit: (row: NostrEventTable) => void) {
+      for (const row of rows) {
+        // 「カーソルが読んだ行数」。打ち切りを判定した行も読んではいる
+        scanned++;
+        const kept = chain.every((link) => link(row));
+        if (stopped) {
+          return;
+        }
+        if (kept) {
+          visit(row);
+        }
+      }
+    },
+    get scanned() {
+      return scanned;
+    },
+  };
+  return collection;
+}
+
+describe('readNewest', () => {
+  const row = (i: number, matching: boolean): NostrEventTable =>
+    ({
+      id: `row-${String(i).padStart(3, '0')}`,
+      pubkey: matching ? 'wanted' : 'other',
+      created_at: 10_000 - i,
+      kind: 1,
+    }) as NostrEventTable;
+
+  it('stops walking once the limit is met, even if no later row matches', () => {
+    // 鎖の順序が逆でも**結果は正しいまま**（切り詰めは capEvents が行う）で、
+    // 早期打ち切りだけが静かに効かなくなる。結果を見るテストでは捕まらないので、
+    // 走査した行数そのものを縛る
+    const rows = [
+      ...Array.from({ length: 5 }, (_, i) => row(i, true)),
+      ...Array.from({ length: 200 }, (_, i) => row(i + 5, false)),
+    ];
+    const collection = descendingCollection(rows);
+
+    return readNewest(collection as never, (candidate) => candidate.pubkey === 'wanted', 5).then(
+      (found) => {
+        expect(found.map((e) => e.id)).toEqual(rows.slice(0, 5).map((e) => e.id));
+        // 5 件そろった次の行で打ち切られる
+        expect(collection.scanned).toBe(6);
+      }
+    );
+  });
+
+  it('keeps reading while the boundary timestamp continues', async () => {
+    // 同着は id 昇順で切るため、境界と同時刻の行は一致・不一致にかかわらず
+    // 読み切ってからでないと切り詰められない
+    const tied = [row(0, true), row(1, true), { ...row(2, true), created_at: 9_999 }];
+    const rows = [...tied, { ...row(3, true), created_at: 9_999 }, row(4, true)];
+    const collection = descendingCollection(rows);
+
+    const found = await readNewest(collection as never, () => true, 3);
+
+    expect(found.map((e) => e.id)).toEqual(['row-000', 'row-001', 'row-002', 'row-003']);
+    expect(collection.scanned).toBe(5);
+  });
 });
 
 describe('DexieStorage (Dexie-specific)', () => {
