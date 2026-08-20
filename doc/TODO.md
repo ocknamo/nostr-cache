@@ -228,10 +228,16 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
   - 想定していた「`created_at` インデックスを使う分岐だけ」ではなく、既存の未使用
     インデックス（`[kind+created_at]` / `[pubkey+kind+created_at]`）を使って
     `[pubkey+kind]` 分岐も降順化した。`since` を足す案は不要
-- [x] `eventMatchesFilter` の `authors` / `kinds` / `ids` 照合を Set 化する
-  - `compileFilterMatcher` として実装。値が 8 個超なら Set で照合する
-  - 実測では 4000 行 × 500 authors で 4ms → 0.7ms と主項ではなかった。効いたのは
-    「フィルタごとに 1 回だけ述語を組む」ほう（購読の配信照合・SQLite の Stage C）
+- [ ] `eventMatchesFilter` の照合をフィルタごとに 1 回だけ組む形にする
+  - 現状は毎回 `Array.prototype.includes` の線形探索で、条件も呼び出しごとに
+    `Object.entries` で組み直す。1 イベントごとに呼ぶ経路が 2 つある
+    （`SubscriptionManager` の配信照合・`SqliteStorage` の Stage C）
+  - 早期打ち切りの実装時に一度入れたが、本題（574ms → 36ms）はプラン変更だけで
+    達成でき、述語側は同じコーパスで 45.2ms → 41.7ms・最悪ケース 121.4ms → 106.4ms と
+    測定ばらつきと同オーダーだったため、独立した変更として切り戻した
+  - やるなら「1 回コンパイルして使い回す」形にし、上記 2 経路にも適用すること。
+    `eventMatchesFilter` をその一発版にすると、その 2 経路が呼び出しごとに
+    コンパイルする側に倒れて逆に遅くなる
 - [ ] `limit` を持たないフィルタも早期打ち切りの対象にする
   - 上記の続き。`limit` 無しのフィルタは相変わらず一致行を全件 materialize してから
     relay 側の `maxEventsPerRequest`（500）で切っている。`{kinds:[1]}` のような REQ がそれ

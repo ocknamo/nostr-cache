@@ -1,7 +1,7 @@
 import type { Filter } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
-import { compileFilterMatcher } from '../../utils/filter-utils.js';
-import type { NostrEventTable } from './schema.js';
+import { eventMatchesFilter } from '../../utils/filter-utils.js';
+import { type NostrEventTable, rowToEvent } from './schema.js';
 import { getIndexedTagValues } from './tag-index.js';
 
 /** Beyond this, one `created_at` walk beats a cursor per kind. */
@@ -19,7 +19,7 @@ const MAX_ORDERED_AUTHOR_CURSORS = 16;
  *
  * NIP-01 の `since` / `until` はどちらも境界を含む（`since <= created_at <= until`）。
  * Dexie の `between()` は既定で上限排他のため、両端を明示的に包含指定する。
- * 最終判定を行う {@link compileFilterMatcher} も包含なので、ここで境界のイベントを
+ * 最終判定を行う {@link eventMatchesFilter} も包含なので、ここで境界のイベントを
  * 落とすと二段構えの絞り込みが不整合になり、そのイベントは復活しない。
  */
 function betweenCreatedAt(
@@ -183,7 +183,7 @@ function newestOfAuthor(
  * cutting off at 50 answers the same filter in 36ms.
  *
  * When the kind is walked, `authors` is checked per row by the caller's
- * {@link compileRowMatcher} — which is what makes it a stopping condition rather
+ * {@link eventRowMatchesFilter} — which is what makes it a stopping condition rather
  * than a post-filter, since only rows that pass count towards `limit`. The cost
  * is then in rows *walked* rather than rows *matched*, so a wide but sparse
  * author set walks the whole kind (145ms worst case, bounded by
@@ -239,21 +239,6 @@ export function planQuery(
 }
 
 /**
- * The final per-row validation for one filter: the conditions the index cannot
- * express, plus the malformed tag filters no row can satisfy.
- *
- * Rows are matched as they are, without projecting to {@link NostrEvent} first —
- * an ordered plan runs this on every row it walks, not only on matching ones.
- */
-export function compileRowMatcher(filter: Filter): (row: NostrEventTable) => boolean {
-  if (rejectsEveryRow(filter)) {
-    return () => false;
-  }
-
-  return compileFilterMatcher(filter);
-}
-
-/**
  * Whether a filter's tag conditions are ones no stored row can satisfy: a `#x`
  * key whose name is not a single letter, or whose values are not all non-empty
  * strings.
@@ -277,7 +262,14 @@ export function rejectsEveryRow(filter: Filter): boolean {
   return false;
 }
 
-/** One-shot {@link compileRowMatcher}. */
+/**
+ * Final per-row validation applied while the query's rows are read: the
+ * conditions the index cannot express, plus the malformed tag filters no row can
+ * satisfy.
+ */
 export function eventRowMatchesFilter(row: NostrEventTable, filter: Filter): boolean {
-  return compileRowMatcher(filter)(row);
+  if (rejectsEveryRow(filter)) {
+    return false;
+  }
+  return eventMatchesFilter(rowToEvent(row), filter);
 }

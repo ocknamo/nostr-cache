@@ -6,7 +6,7 @@ import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 import { selectCurrentVersion } from '../event/replaceable.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
-import { compileRowMatcher, planQuery, rejectsEveryRow } from './dexie/query-builder.js';
+import { eventRowMatchesFilter, planQuery, rejectsEveryRow } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
 import { type CachePriority, createPriorityMatcher } from './priority.js';
@@ -31,7 +31,7 @@ import type {
  * wrong, which no assertion about the returned rows can see.
  *
  * @param collection Must come from a {@link planQuery} plan whose `ordered` is set
- * @param matches From {@link compileRowMatcher}
+ * @param matches The filter's row predicate
  */
 export async function readNewest(
   collection: Dexie.Collection<NostrEventTable, string>,
@@ -301,7 +301,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
 
           const limit = normalizeLimit(filter.limit);
           const plan = planQuery(this.events, filter, limit);
-          const matches = compileRowMatcher(filter);
+          const matches = (row: NostrEventTable) => eventRowMatchesFilter(row, filter);
 
           if (plan.ordered && limit !== undefined) {
             // カーソルの間に書き込みが挟まると、1 つのフィルタの答えが別々の

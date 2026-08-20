@@ -89,7 +89,7 @@ StorageAdapterインターフェースの実装
    （`kinds` 無しなら `[pubkey+created_at]`）の降順レンジ
 2. そうでなく `kinds` が少数（`MAX_ORDERED_KINDS` = 8 本まで）→ **kind ごと**に
    `[kind+created_at]` の降順レンジ。`authors` はインデックスに載せず、カーソルが
-   1 行進むごとに `compileRowMatcher` の述語が判定する
+   1 行進むごとに `eventRowMatchesFilter` が判定する
 3. どちらでもない → `created_at` を降順に走る
 
 いずれの経路でも**判定に通った行だけが `limit` に数えられる**ので、この照合が

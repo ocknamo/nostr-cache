@@ -456,10 +456,10 @@ export class SqliteStorage implements StorageAdapter {
       }
     }
     const rows: EventRow[] = query.all();
-    // Stage C: 完全なイベントに対する最終判定（Dexie と同じ共通実装）。
-    // 述語は行ループの外で 1 回だけ組む
-    const matchesFilter = filterUtils.compileFilterMatcher(filter);
-    let matched = rows.map(rowToEvent).filter(matchesFilter);
+    // Stage C: 完全なイベントに対する最終判定（Dexie と同じ共通実装）
+    let matched = rows
+      .map(rowToEvent)
+      .filter((event) => filterUtils.eventMatchesFilter(event, filter));
     if (limit !== undefined) {
       matched = matched.slice(0, limit);
     }
