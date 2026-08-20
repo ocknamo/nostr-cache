@@ -17,15 +17,11 @@ interface Subscription {
   createdAt: number;
 }
 
-/** A subscription plus the predicates broadcast matching tests events against. */
 interface StoredSubscription {
   subscription: Subscription;
   /**
-   * One predicate per filter, built when the subscription is created.
-   *
-   * Every stored event is tested against every open subscription, so building
-   * these per event — which is what calling `eventMatchesFilter` in the loop
-   * amounts to — re-derives the same conditions thousands of times over.
+   * One predicate per filter, built once here rather than per event: every
+   * stored event is tested against every open subscription.
    */
   matchers: ((event: NostrEvent) => boolean)[];
 }

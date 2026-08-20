@@ -18,12 +18,7 @@ interface Plan {
   distinct: boolean;
 }
 
-/**
- * Stub table that records the indexes it is asked for.
- *
- * Every `where()` appends to `indexes`, so a plan opening one cursor per kind
- * shows up as one entry per kind.
- */
+/** Stub table that records the indexes it is asked for, one entry per cursor. */
 function recordingTable() {
   const indexes: string[] = [];
   const reversed: boolean[] = [];
@@ -141,9 +136,7 @@ describe('buildOptimizedQuery', () => {
   const FOLLOWS = Array.from({ length: 500 }, (_, i) => `${i}`.padStart(64, '0'));
 
   it('walks a kind newest-first for a follow list, so the walk can stop early', () => {
-    // `[pubkey+kind]` に載せると 500 本の部分範囲を舐めて一致行を全件読むことに
-    // なる（実測 574ms）ので、kind の範囲を新しい順に 1 本走査して limit 件で
-    // 打ち切る側に倒す。authors は走査中に照合する
+    // `[pubkey+kind]` だと 500 本の部分範囲を舐めて一致行を全件読む（574ms）
     const follows = orderedPlanFor({ kinds: [1], authors: FOLLOWS, limit: 50 }, 50);
     expect(follows.ordered).toBe(true);
     expect(follows.indexes).toEqual(['[kind+created_at]']);
@@ -157,9 +150,8 @@ describe('buildOptimizedQuery', () => {
   });
 
   it('reads a narrow author set per author, never leaving their rows', () => {
-    // `<nostr-timeline authors="npub1…">` の形。`parseFilter` が必ず limit を
-    // 入れるので、kind を走査する側に載せるとその 1 人を探して全 kind 1 を
-    // 読むことになる（実測 128ms。旧経路は 8ms）
+    // `<nostr-timeline authors="npub1…">` の形。kind 走査に載せると、その 1 人を
+    // 探して全 kind 1 を読むことになる（128ms。旧経路は 8ms）
     const single = orderedPlanFor({ kinds: [1], authors: [PUBKEY], limit: 50 }, 50);
     expect(single.indexes).toEqual(['[pubkey+kind+created_at]']);
     expect(single.reversed).toEqual([true]);
@@ -176,8 +168,7 @@ describe('buildOptimizedQuery', () => {
       Array(4).fill('[pubkey+kind+created_at]')
     );
 
-    // 座標が増えるとサブレンジのシーク自体が高くつく（`[pubkey+kind]` に 500 本
-    // 積んだのが 538ms だった理由）ので、上限を超えたら kind 走査へ倒す
+    // 座標が増えるとサブレンジのシーク自体が高くつくので kind 走査へ倒す
     const many = Array.from({ length: 9 }, (_, i) => `${i}`.padStart(64, 'a'));
     expect(orderedPlanFor({ kinds: [1, 7], authors: many, limit: 50 }, 50).indexes).toEqual([
       '[kind+created_at]',
@@ -186,7 +177,7 @@ describe('buildOptimizedQuery', () => {
   });
 
   it('de-duplicates kinds and authors, which would otherwise deliver a row twice', () => {
-    // 同じ範囲を 2 本開くと同じ行が 2 回届き、`capEvents` が limit を重複で食う
+    // 同じ行が 2 回届き、`capEvents` が limit を重複で食う
     expect(orderedPlanFor({ kinds: [1, 1], limit: 50 }, 50).indexes).toEqual(['[kind+created_at]']);
     expect(orderedPlanFor({ authors: [PUBKEY, PUBKEY], limit: 50 }, 50).indexes).toEqual([
       '[pubkey+created_at]',
@@ -211,15 +202,13 @@ describe('buildOptimizedQuery', () => {
     expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }, undefined).indexes).toEqual([
       '[pubkey+kind]',
     ]);
-    // 主キー参照は必要な行しか読まない
     expect(orderedPlanFor({ ids: [ID], limit: 10 }, 10).ordered).toBe(false);
     expect(orderedPlanFor({ ids: [ID], limit: 10 }, 10).indexes).toEqual(['id']);
-    // タグ値に一致する行は普通ごく少数で、そもそも created_at 順には並べられない
+    // タグ値に一致する行は普通ごく少数で、created_at 順には並べられない
     expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }, 100).ordered).toBe(false);
     expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }, 100).indexes).toEqual([
       'indexed_tags',
     ]);
-    // limit 0 / 負値は capEvents が空にする。降順で走査する意味が無い
     expect(orderedPlanFor({ kinds: [1], limit: 0 }, 0).ordered).toBe(false);
   });
 

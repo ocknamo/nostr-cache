@@ -4,24 +4,13 @@ import { compileFilterMatcher } from '../../utils/filter-utils.js';
 import type { NostrEventTable } from './schema.js';
 import { getIndexedTagValues } from './tag-index.js';
 
-/**
- * Kinds a `limit` query is still willing to walk as separate descending scans.
- *
- * Each kind costs its own cursor, and every one of them reads up to `limit`
- * rows, so a filter naming a long list of kinds is cheaper to answer from the
- * plain `created_at` index in one pass.
- */
+/** Beyond this, one `created_at` walk beats a cursor per kind. */
 const MAX_ORDERED_KINDS = 8;
 
 /**
- * Author-keyed descending cursors a `limit` query is willing to open.
- *
- * Opening a cursor per author is what makes a *narrow* author set fast: it reads
- * only that person's newest rows instead of walking the kind looking for them.
- * It stops paying off in bulk, though — the sub-range seek is the expensive part
- * of a per-author plan, which is exactly why `[pubkey+kind]` with 500 of them
- * takes 538ms where one descending walk takes 5ms. So a set this size or smaller
- * gets its own cursors and anything larger walks the kind.
+ * Beyond this, walking the kind beats a cursor per author: the sub-range seek is
+ * the expensive part, which is why `[pubkey+kind]` with 500 of them takes 538ms
+ * against 5ms for one descending walk.
  */
 const MAX_ORDERED_AUTHOR_CURSORS = 16;
 
@@ -38,18 +27,14 @@ function betweenCreatedAt(
   since: number | undefined,
   until: number | undefined
 ): Dexie.Collection<NostrEventTable, string> {
-  // 開いた端は `Dexie.minKey` / `maxKey`。0 を下端にすると `created_at` が負の行を
-  // 落とすが、最終判定の側は `since` 未指定なら下限を課さないので、その行は
-  // 復活できない。`[kind+created_at]` を使う分岐と端の扱いをそろえる意味もある
+  // 開いた端が 0 だと `created_at` が負の行を落とすが、最終判定は `since` 未指定なら
+  // 下限を課さないため復活できない
   return table
     .where('created_at')
     .between(since ?? Dexie.minKey, until ?? Dexie.maxKey, true, true);
 }
 
-/**
- * The `indexed_tags` values a filter's single-letter tag conditions can be
- * looked up by, empty when it has none the index can answer.
- */
+/** The `indexed_tags` values a filter's tag conditions can be looked up by. */
 function tagIndexValues(filter: Filter): string[] {
   const values: string[] = [];
   for (const [key, condition] of Object.entries(filter)) {
@@ -141,35 +126,21 @@ export function buildOptimizedQuery(
 }
 
 /**
- * How a filter's rows are to be read.
- *
- * `ordered` is the whole point of the two modes. An ordered plan hands back
- * collections that already walk `created_at` **descending**, which is the order
- * NIP-01 wants `limit` applied in — so the caller can stop the cursor once it
- * has enough and never look at the rest. An unordered plan is the classic
- * "narrow by the most selective index, then sort what came back", where every
- * matching row has to be read before the newest N can be known.
+ * How a filter's rows are to be read: an ordered plan walks `created_at`
+ * descending — the order NIP-01 applies `limit` in — so the caller can stop the
+ * cursor once it has enough. An unordered one must read every matching row
+ * before the newest N is known.
  */
 export interface QueryPlan {
   /**
-   * Collections to read, one per cursor the plan opens.
-   *
    * Single use only: Dexie's `filter` / `until` mutate a collection's context
-   * rather than deriving a new one, so a plan that is kept and read twice would
-   * carry the first read's chain into the second.
+   * rather than deriving a new one, so a re-read carries the first read's chain.
    */
   collections: Dexie.Collection<NostrEventTable, string>[];
-  /** Whether the rows arrive newest-first, so `limit` can stop the walk. */
   ordered: boolean;
 }
 
-/**
- * Descending range over one kind, on the `[kind+created_at]` index.
- *
- * Both ends are inclusive for the same reason as {@link betweenCreatedAt}, and
- * the open end of the range is `Dexie.minKey` / `maxKey` rather than a number:
- * this is a compound key, and those sort below and above every real value.
- */
+/** Descending range over one kind. Both ends inclusive, as in {@link betweenCreatedAt}. */
 function newestOfKind(
   table: Dexie.Table<NostrEventTable, string>,
   kind: number,
@@ -182,12 +153,7 @@ function newestOfKind(
     .reverse();
 }
 
-/**
- * Descending range over one author's events, optionally of one kind.
- *
- * Reads nothing but that person's rows, which is what a narrow `authors` needs:
- * walking the kind instead would read everyone else's rows looking for theirs.
- */
+/** Descending range over one author's events, optionally of one kind. */
 function newestOfAuthor(
   table: Dexie.Table<NostrEventTable, string>,
   pubkey: string,
@@ -211,34 +177,20 @@ function newestOfAuthor(
 /**
  * Plan how to read one filter's rows.
  *
- * The ordered mode exists for the follow timeline. `{kinds:[1],authors:[…500],
- * limit:50}` has no time range, so {@link buildOptimizedQuery} puts it on
- * `[pubkey+kind]` as 500 sub-ranges and reads *every* matching row — `getEvents`
- * measured at 574ms against a 5000-event cache with 4000 of them matching,
- * against 36ms for the same answer read newest-first and cut off at 50.
+ * The ordered mode exists for the follow timeline: `{kinds:[1],authors:[…500],
+ * limit:50}` lands on `[pubkey+kind]` as 500 sub-ranges and reads every matching
+ * row (574ms against a 5000-event cache), where walking the kind newest-first and
+ * cutting off at 50 answers the same filter in 36ms.
  *
- * Which descending cursors to open depends on how many the filter implies:
+ * When the kind is walked, `authors` is checked per row by the caller's
+ * {@link compileRowMatcher} — which is what makes it a stopping condition rather
+ * than a post-filter, since only rows that pass count towards `limit`. The cost
+ * is then in rows *walked* rather than rows *matched*, so a wide but sparse
+ * author set walks the whole kind (145ms worst case, bounded by
+ * `storageMaxSize`). No scan budget is imposed for it.
  *
- * - A narrow `authors` (up to {@link MAX_ORDERED_AUTHOR_CURSORS} cursors) gets
- *   one per author, so the walk stays inside their own rows.
- * - Otherwise a narrow `kinds` (up to {@link MAX_ORDERED_KINDS}) gets one per
- *   kind, and `authors` — 500 of them, for a follow timeline — is checked per
- *   row as the cursor advances (by {@link compileRowMatcher}, exactly as the
- *   unordered plans already do). That is what turns it from a post-filter into a
- *   stopping condition: only rows that pass count towards `limit`.
- * - Failing both, `created_at` itself is walked.
- *
- * The trade-off in the kind-walking shape is the mirror image of the old plan's.
- * An unordered plan reads as many rows as *match*; this one reads as many as it
- * *walks* — so an author set that is wide but matches sparsely walks the kind's
- * whole range. That worst case measured 145ms against the 5000-event cache, and
- * `storageMaxSize` bounds it, which is why no scan budget is imposed. The band
- * where this is genuinely a worse bet than the old plan is an author set too
- * wide for its own cursors but too sparse to fill `limit` early; both cost tens
- * of milliseconds there, so the cut-off is not tuned for it.
- *
- * @param limit The filter's `limit`, already through `normalizeLimit`. Without
- *   one there is nothing to stop at, so the plan is always unordered.
+ * @param limit Already through `normalizeLimit`; without one nothing can stop
+ *   the walk, so the plan is unordered.
  */
 export function planQuery(
   table: Dexie.Table<NostrEventTable, string>,
@@ -253,24 +205,19 @@ export function planQuery(
   if (limit === undefined || limit <= 0) {
     return unordered();
   }
-  // A primary-key lookup already reads only the rows asked for, and a tag value
-  // normally matches a handful of rows — neither has a cheaper descending form,
-  // and `indexed_tags` cannot be walked in `created_at` order at all.
+  // 主キー参照は必要な行しか読まず、タグ値に一致する行も普通ごく少数。
+  // `indexed_tags` はそもそも created_at 順に並べられない
   if (filter.ids !== undefined || tagIndexValues(filter).length > 0) {
     return unordered();
   }
 
   const { authors, kinds, since, until } = filter;
-  // De-duplicated before they are counted as well as before they are walked: two
-  // cursors over the same range would deliver every one of its rows twice, and
-  // `capEvents` would count the copies against `limit`.
+  // 同じ範囲に 2 本開くと同じ行が 2 回届き、`capEvents` が limit を重複で食う
   const distinctKinds = kinds?.length ? [...new Set(kinds)] : [];
   const distinctAuthors = authors?.length ? [...new Set(authors)] : [];
 
-  // A narrow author set is read per author, so the walk never leaves their rows.
-  // Without this a single-author timeline — which `parseFilter` always gives a
-  // `limit` — would walk the whole kind to find that one person's posts:
-  // measured at 128ms against 8ms for the same filter on `[pubkey+kind]`.
+  // 著者ごとに開けばその人の行しか読まない。kind 走査に落とすと、単著者
+  // タイムライン（`parseFilter` が必ず limit を入れる）が 8ms から 128ms になる
   const authorCursors = distinctAuthors.length * Math.max(distinctKinds.length, 1);
   if (distinctAuthors.length && authorCursors <= MAX_ORDERED_AUTHOR_CURSORS) {
     const collections = distinctKinds.length
@@ -292,17 +239,11 @@ export function planQuery(
 }
 
 /**
- * Build the final per-row validation for one filter, doing the per-filter work
- * once.
+ * The final per-row validation for one filter: the conditions the index cannot
+ * express, plus the malformed tag filters no row can satisfy.
  *
- * Rejects every row for malformed tag filters (a `#x` key whose name is not a
- * single letter, or whose values are not all non-empty strings) and otherwise
- * defers to the shared {@link compileFilterMatcher}. This reproduces the exact
- * conditions the index cannot express.
- *
- * Rows are matched as they are — a stored row carries every {@link NostrEvent}
- * field, so there is nothing to project first, and an ordered plan tests this
- * against every row it walks rather than only the matching ones.
+ * Rows are matched as they are, without projecting to {@link NostrEvent} first —
+ * an ordered plan runs this on every row it walks, not only on matching ones.
  */
 export function compileRowMatcher(filter: Filter): (row: NostrEventTable) => boolean {
   if (rejectsEveryRow(filter)) {
@@ -317,10 +258,8 @@ export function compileRowMatcher(filter: Filter): (row: NostrEventTable) => boo
  * key whose name is not a single letter, or whose values are not all non-empty
  * strings.
  *
- * Worth asking before the query rather than only inside the row predicate. A
- * descending plan would otherwise walk its whole range without ever filling
- * `limit` — for an answer that was known to be empty before the first row was
- * read.
+ * Asked before the query, not only inside the row predicate: a descending plan
+ * would otherwise walk its whole range to fill a `limit` that never can be.
  */
 export function rejectsEveryRow(filter: Filter): boolean {
   for (const [key, values] of Object.entries(filter)) {

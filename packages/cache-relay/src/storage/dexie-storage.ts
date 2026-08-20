@@ -22,21 +22,16 @@ import type {
  * Read the newest `limit` matching rows from a descending collection, plus
  * everything tied with the last of them.
  *
- * The ties are why this is not `collection.filter(…).limit(limit)`. Walking
- * `created_at` descending puts equal timestamps in *descending primary key*
- * order, while NIP-01 (and `capEvents`, and the conformance suite) break such a
- * tie by the **lowest** id — so cutting the walk at exactly `limit` rows can drop
- * the very row that should have been kept. Reading the whole boundary timestamp
- * out and letting `capEvents` order it is what keeps the answer identical to the
- * one a full materialization would have given.
+ * The ties are why this is not `collection.filter(…).limit(limit)`: a descending
+ * walk puts equal timestamps in *descending primary key* order, while NIP-01
+ * breaks such a tie by the **lowest** id, so stopping at exactly `limit` rows can
+ * drop the row that should have been kept.
  *
- * Exported for its own test: the chain order below decides whether the walk
- * stops early, and getting it wrong costs nothing but speed — which no
- * assertion about the returned rows can see.
+ * Exported for its own test — the chain order below only costs speed when it is
+ * wrong, which no assertion about the returned rows can see.
  *
- * @param collection Must be ordered newest-first, i.e. come from a
- *   {@link planQuery} plan whose `ordered` is set
- * @param matches The filter's row predicate, from {@link compileRowMatcher}
+ * @param collection Must come from a {@link planQuery} plan whose `ordered` is set
+ * @param matches From {@link compileRowMatcher}
  */
 export async function readNewest(
   collection: Dexie.Collection<NostrEventTable, string>,
@@ -48,10 +43,8 @@ export async function readNewest(
   let boundary: number | undefined;
 
   await collection
-    // Chained before `filter` on purpose: Dexie evaluates a collection's filter
-    // chain in order and short-circuits, so a `filter` in front would leave this
-    // unevaluated on non-matching rows — and the walk would run on to the next
-    // *matching* row before noticing it should have stopped.
+    // `filter` より先に積む。Dexie の鎖は短絡評価なので、逆順だと一致しない行で
+    // 打ち切り判定が評価されず、次の一致行まで走査が伸びる
     .until((row) => boundary !== undefined && row.created_at < boundary)
     .filter(matches)
     .each((row) => {
@@ -299,13 +292,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       const eventSets = await Promise.all(
         filters.map(async (filter) => {
-          // NIP-01 の `limit` は「一致するイベントのうち**最新** N 件を、新しい順で」。
-          // Dexie の `Collection.limit()` は選ばれたインデックス順の先頭 N 件になり
-          // 最新順にならないため、切り詰めは常に capEvents（created_at 降順・
-          // id 昇順タイブレーク）が行う。SqliteStorage / relay 側の
-          // maxEventsPerRequest と同じ順序規則。
-          // 引けないタグ条件を持つフィルタはどの行にも一致しない。走査してから
-          // 気付くと、降順プランは limit が埋まらないままレンジを最後まで読む
+          // NIP-01 の `limit` は「一致するうち最新 N 件を新しい順で」。Dexie の
+          // `Collection.limit()` はインデックス順の先頭 N 件なので、切り詰めは常に
+          // capEvents が行う（SqliteStorage / maxEventsPerRequest と同じ規則）
           if (rejectsEveryRow(filter)) {
             return [];
           }
@@ -314,12 +303,9 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           const plan = planQuery(this.events, filter, limit);
           const matches = compileRowMatcher(filter);
 
-          // 走査順が created_at 降順なので、limit 件そろった時点で打ち切れる
-          // （`planQuery` は limit の無いフィルタを ordered にしない）
           if (plan.ordered && limit !== undefined) {
-            // 1 フィルタぶんのカーソルを 1 つの読み取りトランザクションに束ねる。
-            // kind ごと・著者ごとに開いたカーソルの間に書き込みが挟まると、
-            // 同じフィルタの答えが別々のスナップショットから組み上がる
+            // カーソルの間に書き込みが挟まると、1 つのフィルタの答えが別々の
+            // スナップショットから組み上がってしまう
             const rows = await this.transaction('r', this.events, async () =>
               (
                 await Promise.all(

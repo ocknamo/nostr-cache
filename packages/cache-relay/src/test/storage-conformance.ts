@@ -835,12 +835,10 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
         });
 
         // フォロータイムライン（`<nostr-follow-timeline>`）が投げる形。一致件数が
-        // limit を大きく超えるのが常態で、アダプタが「新しい順に走査して N 件で
-        // 打ち切る」実装を採るならその打ち切りが正しいことをここで縛る
+        // limit を大きく超えるのが常態なので、切り詰めの正しさをここで縛る
         describe('the follow-timeline shape (kinds + many authors + limit)', () => {
-          // 20 人。「著者ごとにカーソルを開く」戦略が割に合わなくなる規模
-          // （DexieStorage の MAX_ORDERED_AUTHOR_CURSORS = 16）を意図的に超えて
-          // いるので、著者ごとの経路と kind 走査の経路が両方この describe で通る
+          // DexieStorage が著者ごとにカーソルを開く上限（16）を超える人数にして、
+          // 著者ごとの経路と kind 走査の経路を両方この describe で通す
           const authors = Array.from({ length: 20 }, (_, i) => `follow${i}`);
 
           beforeEach(async () => {
@@ -890,7 +888,7 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
           });
 
           it('should break a tie at the truncation boundary by the lowest id', async () => {
-            // 境界（follow-note-19）と同時刻の 2 件。id 昇順で先に来る方だけが残る
+            // 境界（follow-note-19）と同時刻の 2 件
             for (const id of ['aaa-tied', 'zzz-tied']) {
               await storage.saveEvent({
                 id,

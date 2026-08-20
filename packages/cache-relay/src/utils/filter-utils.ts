@@ -33,24 +33,18 @@ export function normalizeFilter(filter: Filter): Filter {
 }
 
 /**
- * Above this many values, a condition is matched through a `Set` rather than
- * `Array.prototype.includes`.
- *
- * Below it the linear scan wins: building the `Set` costs more than the handful
- * of comparisons it saves, and most filters name one or two of anything. The
- * case this exists for is the follow timeline's `authors`, which carries every
- * person the reader follows and is now tested against every row a descending
- * scan walks (`dexie-storage.readNewest`).
+ * Below this many values the linear scan wins: building the `Set` costs more
+ * than the comparisons it saves, and most filters name one or two of anything.
+ * The follow timeline's `authors` is the case that needs the `Set`.
  */
 const SET_MATCH_THRESHOLD = 8;
 
 /**
- * Membership test over a filter condition, without a `Set` for short ones.
+ * Membership test over a filter condition.
  *
- * Both branches copy, so a compiled matcher is a snapshot of the filter however
- * many values it had. A matcher outlives the call that built it — a subscription
- * keeps one per filter for its whole life — and having only the long branch copy
- * would make "does a later edit to the filter show up?" depend on its length.
+ * Both branches copy, so a compiled matcher is a snapshot however many values it
+ * had — it outlives the call that built it (a subscription keeps one per filter),
+ * and copying in only one branch would make that depend on the length.
  */
 function memberOf<T>(values: readonly T[]): (value: T) => boolean {
   if (values.length <= SET_MATCH_THRESHOLD) {
@@ -62,11 +56,10 @@ function memberOf<T>(values: readonly T[]): (value: T) => boolean {
 }
 
 /**
- * Build the predicate a filter stands for, doing the per-filter work once.
+ * Build the predicate a filter stands for, preparing its conditions once.
  *
- * The point is repeated application: a storage scan runs this against every row
- * it walks, so the conditions are prepared here rather than re-derived per
- * event. {@link eventMatchesFilter} is the one-shot spelling of the same thing.
+ * For repeated application — a storage scan or a subscription runs it per row /
+ * per event. {@link eventMatchesFilter} is the one-shot spelling.
  */
 export function compileFilterMatcher(filter: Filter): (event: NostrEvent) => boolean {
   const matchesId = filter.ids && memberOf(filter.ids);

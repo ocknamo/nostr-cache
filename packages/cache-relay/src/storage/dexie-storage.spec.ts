@@ -39,10 +39,10 @@ describeStorageAdapterConformance('DexieStorage', {
 /**
  * Stand-in for a descending Dexie collection that records how far the walk got.
  *
- * Reproduces the two behaviours `readNewest` depends on: filters run **in the
- * order they were chained** and **short-circuit**, and `until` stops the walk at
- * the first row it accepts, excluding that row (dexie 4.4.4 `combine()` /
- * `addFilter()` / `Collection.until`).
+ * Reproduces the two behaviours `readNewest` depends on (dexie 4.4.4
+ * `combine()` / `addFilter()` / `Collection.until`): the filter chain runs in
+ * the order it was built and short-circuits, and `until` stops the walk at the
+ * first row it accepts, excluding it.
  */
 function descendingCollection(rows: NostrEventTable[]) {
   const chain: ((row: NostrEventTable) => boolean)[] = [];
@@ -66,7 +66,7 @@ function descendingCollection(rows: NostrEventTable[]) {
     },
     async each(visit: (row: NostrEventTable) => void) {
       for (const row of rows) {
-        // 「カーソルが読んだ行数」。打ち切りを判定した行も読んではいる
+        // 打ち切りを判定した行も「読んだ」に数える
         scanned++;
         const kept = chain.every((link) => link(row));
         if (stopped) {
@@ -94,8 +94,7 @@ describe('readNewest', () => {
     }) as NostrEventTable;
 
   it('stops walking once the limit is met, even if no later row matches', () => {
-    // 鎖の順序が逆でも**結果は正しいまま**（切り詰めは capEvents が行う）で、
-    // 早期打ち切りだけが静かに効かなくなる。結果を見るテストでは捕まらないので、
+    // 鎖の順序が逆でも結果は正しいまま早期打ち切りだけが消えるので、
     // 走査した行数そのものを縛る
     const rows = [
       ...Array.from({ length: 5 }, (_, i) => row(i, true)),
@@ -113,8 +112,7 @@ describe('readNewest', () => {
   });
 
   it('keeps reading while the boundary timestamp continues', async () => {
-    // 同着は id 昇順で切るため、境界と同時刻の行は一致・不一致にかかわらず
-    // 読み切ってからでないと切り詰められない
+    // 同着は id 昇順で切るため、境界と同時刻の行は読み切る必要がある
     const tied = [row(0, true), row(1, true), { ...row(2, true), created_at: 9_999 }];
     const rows = [...tied, { ...row(3, true), created_at: 9_999 }, row(4, true)];
     const collection = descendingCollection(rows);
@@ -184,10 +182,9 @@ describe('DexieStorage (Dexie-specific)', () => {
     });
   });
 
-  // `limit` の有無でクエリプランが変わる（有ると created_at 降順で走査して
-  // 打ち切る）。両者が別々の経路である以上、切り詰めた結果が「全一致を新しい順に
-  // 並べた先頭 N 件」と一致することは明示的に縛る（limit 無しの結果は
-  // インデックス順のままなので、比較の前に共通の規則で並べ替える）
+  // `limit` の有無で別々の経路を通るので、切り詰めた結果が「全一致を新しい順に
+  // 並べた先頭 N 件」と一致することを縛る（limit 無しの結果はインデックス順の
+  // ままなので、比較の前に並べ替える）
   describe('the ordered and unordered plans agree', () => {
     const authors = Array.from({ length: 12 }, (_, i) => `author${i}`);
 
