@@ -1,7 +1,7 @@
 # TODO リスト
 
-残作業の一覧。**このファイルは未着手の課題だけを追う**。完了した作業の経緯は
-git の履歴と各設計書（[doc/](.) 以下）を参照。
+残作業の一覧。**片付いた項目は消さずに `[x]` を付けて残す**（何をどう解決したかが
+次の判断材料になるため）。詳しい経緯は git の履歴と各設計書（[doc/](.) 以下）を参照。
 
 ## 現状（2026-07）
 
@@ -190,6 +190,12 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
   - 直接の返信（階層 1）は購読が開いたままなのでその場で増える。影響は階層 2 以降だけ
   - 現状の挙動は `packages/timeline-embed/README.md` の「制約（投稿詳細固有）」に
     明記済み。直したらその記述も対で更新すること
+- [ ] カードの時刻表示が描画のたびに `Intl` を作っている
+  - `EventCard.svelte` / `EmbeddedNote.svelte` の `formatTime` が
+    `at.toLocaleTimeString(undefined, {…})` を呼ぶ。呼び出しごとに
+    `Intl.DateTimeFormat` が作られ、カードの再描画のたびに走る
+  - 実測（50 枚のタイムライン・CPU 4x スロットル）で CPU プロファイルの上位に出て、
+    自己時間 0.5 秒前後。フォーマッタをモジュール内に 1 つ作って使い回すだけで消える
 
 ## 優先度: 中（ストレージ / テスト基盤）
 
@@ -215,24 +221,34 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
   - どちらを直すかは要検討: 空値を許すよう最終判定を緩めるか（`indexed_tags` は
     空値を落とすので index 側も要る）、`d` が空のときは `#d` を付けずに
     kind × author で引いて照合するか
-- [ ] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
-  - 現状: NIP-01 準拠（最新 N 件・新しい順）を優先し、`limit` の有無にかかわらず一致行を
-    全件 `toArray()` してから `rowToEvent` → 切り詰める。10 万件規模のキャッシュに
-    `{kinds:[1], limit:20}` を投げると 10 万件ぶんのオブジェクト生成が走り、上限もない
-  - `created_at` インデックスを使う分岐（時間範囲の 3 分岐 + 時間単独分岐）は走査順が
-    `created_at` 昇順なので、`.filter(...)` の後に `.reverse().limit(n)` とすれば
-    NIP-01 準拠のまま N 件で打ち切れる。それ以外の分岐（`kind` / `pubkey` / タグ index）は
-    走査順が `created_at` と無関係なため全件走査が必要で、この最適化は使えない
-  - 着手時は「どの分岐で早期打ち切りしたか」がテストから見えるようにすること
-  - **フォロータイムライン（`<nostr-follow-timeline>`）はここに正面から当たる**。
-    `{kinds:[1],authors:[…500],limit:50}` は時間範囲を持たないので
-    `[pubkey+kind]` 分岐に入り、早期打ち切りが使えない側になる。フィルタに `since` を
-    足せば時間範囲分岐へ移せるが、その場合 `isFreshnessEligible` を通らなくなる
-- [ ] `eventMatchesFilter` の `authors` / `kinds` / `ids` 照合を Set 化する
-  - 現状は毎回 `Array.prototype.includes` の線形探索（`utils/filter-utils.ts:76` ほか）。
-    authors が数百件あるフィルタでは候補行 × authors 件数の比較になる
-  - ただし上記の「全件 materialize」のほうが主項なので、**効くのはそちらを直したあと**。
-    先に測ること
+- [x] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
+  - `planQuery` の順序ありプランで対応（`doc/cache-relay/storage.md` 4.1.0）。
+    `limit` 付きフィルタは `created_at` 降順に走査して N 件（+ 同着）で打ち切る。
+    フォロータイムラインの `{kinds:[1],authors:[…500],limit:50}` が 574ms → 36ms
+  - 想定していた「`created_at` インデックスを使う分岐だけ」ではなく、既存の未使用
+    インデックス（`[kind+created_at]` / `[pubkey+kind+created_at]`）を使って
+    `[pubkey+kind]` 分岐も降順化した。`since` を足す案は不要
+- [ ] `limit` を持たないフィルタも早期打ち切りの対象にする
+  - 上記の続き。`limit` 無しのフィルタは相変わらず一致行を全件 materialize してから
+    relay 側の `maxEventsPerRequest`（500）で切っている。`{kinds:[1]}` のような REQ がそれ
+  - やるなら `StorageAdapter.getEvents(filters, { maxEvents })` を足して relay から
+    実効上限を渡す。Dexie / SQLite 両アダプタと適合性テストに手が要る
+- [ ] ページロード直後、最初の IndexedDB アクセスが遅い
+  - 実測（実 Chromium・キャッシュ 5000 件・CPU 4x スロットル）で、リロード後に
+    `<nostr-follow-timeline>` が投げる最初の REQ（kind 3。鮮度ウィンドウ命中で上流には
+    出ない）の EOSE までが約 1.1〜1.5 秒。スロットル無しでも 0.3 秒前後で、内訳は
+    Dexie の open ではなく、使うインデックスごとのウォームアップ（`table.count()` 213ms →
+    `[pubkey+kind]` の初回 121ms → 2 回目 6ms、という減り方をする）
+  - フォローリスト取得はタイムライン REQ の前段なので、この分がそのまま初描画に乗る。
+    バンドル読み込みと並行に DB を温める / kind 3 を先読みするなどが候補
+- [ ] `enforceLimit` が保存 1 件ごとにテーブル全件を count している
+  - `storageMaxSize` が有効だと、保存されたイベント 1 件ごとに rw トランザクションを開いて
+    `table.count()` する。実測（実 Chromium）で ingest が 1.5ms/件（上限なし）→
+    3.5ms/件（上限 5000・件数は上限未満）、5000 件まで埋まった状態では約 7ms/件
+  - 上流から 50〜100 件届くたびに 0.4〜0.7 秒が直列で積まれ、EOSE はこの ingest チェーンを
+    待つ（`UpstreamCoordinator.flushEose`）
+  - 候補: 件数をメモリ上のカウンタで持ち、超過が見込まれるときだけ実際の count と退避を
+    走らせる（プロセス外の変更が無い前提が要る）
 
 ## 優先度: 低（整備）
 

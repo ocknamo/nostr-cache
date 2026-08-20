@@ -6,7 +6,7 @@ import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 import { selectCurrentVersion } from '../event/replaceable.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
-import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
+import { eventRowMatchesFilter, planQuery, rejectsEveryRow } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
 import { type CachePriority, createPriorityMatcher } from './priority.js';
@@ -17,6 +17,45 @@ import type {
   StorageAdapter,
   ValidationStatus,
 } from './storage-adapter.js';
+
+/**
+ * Read the newest `limit` matching rows from a descending collection, plus
+ * everything tied with the last of them.
+ *
+ * The ties are why this is not `collection.filter(…).limit(limit)`: a descending
+ * walk puts equal timestamps in *descending primary key* order, while NIP-01
+ * breaks such a tie by the **lowest** id, so stopping at exactly `limit` rows can
+ * drop the row that should have been kept.
+ *
+ * Exported for its own test — the chain order below only costs speed when it is
+ * wrong, which no assertion about the returned rows can see.
+ *
+ * @param collection Must come from a {@link planQuery} plan whose `ordered` is set
+ * @param matches The filter's row predicate
+ */
+export async function readNewest(
+  collection: Dexie.Collection<NostrEventTable, string>,
+  matches: (row: NostrEventTable) => boolean,
+  limit: number
+): Promise<NostrEventTable[]> {
+  const rows: NostrEventTable[] = [];
+  /** `created_at` of the `limit`-th match; rows older than it are surplus. */
+  let boundary: number | undefined;
+
+  await collection
+    // `filter` より先に積む。Dexie の鎖は短絡評価なので、逆順だと一致しない行で
+    // 打ち切り判定が評価されず、次の一致行まで走査が伸びる
+    .until((row) => boundary !== undefined && row.created_at < boundary)
+    .filter(matches)
+    .each((row) => {
+      rows.push(row);
+      if (rows.length === limit) {
+        boundary = row.created_at;
+      }
+    });
+
+  return rows;
+}
 
 /**
  * DexieStorage class implements StorageAdapter using Dexie.js
@@ -253,20 +292,32 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       const eventSets = await Promise.all(
         filters.map(async (filter) => {
-          let collection = buildOptimizedQuery(this.events, filter);
+          // NIP-01 の `limit` は「一致するうち最新 N 件を新しい順で」。Dexie の
+          // `Collection.limit()` はインデックス順の先頭 N 件なので、切り詰めは常に
+          // capEvents が行う（SqliteStorage / maxEventsPerRequest と同じ規則）
+          if (rejectsEveryRow(filter)) {
+            return [];
+          }
 
-          collection = collection.filter((event) => eventRowMatchesFilter(event, filter));
-
-          const events = (await collection.toArray()).map(rowToEvent);
-
-          // NIP-01 の `limit` は「一致するイベントのうち**最新** N 件を、新しい順で」。
-          // Dexie の `Collection.limit()` は選ばれたインデックス順（kind 順・pubkey 順など、
-          // created_at とは無関係）の先頭 N 件になり最新順にならないため、全件取得してから
-          // capEvents（created_at 降順・id 昇順タイブレーク）で並べ替えつつ切り詰める。
-          // SqliteStorage / relay 側の maxEventsPerRequest と同じ順序規則。
-          // トレードオフ: インデックス走査を N 件で打ち切れず、一致イベントを
-          // いったん全件 materialize する
           const limit = normalizeLimit(filter.limit);
+          const plan = planQuery(this.events, filter, limit);
+          const matches = (row: NostrEventTable) => eventRowMatchesFilter(row, filter);
+
+          if (plan.ordered && limit !== undefined) {
+            // カーソルの間に書き込みが挟まると、1 つのフィルタの答えが別々の
+            // スナップショットから組み上がってしまう
+            const rows = await this.transaction('r', this.events, async () =>
+              (
+                await Promise.all(
+                  plan.collections.map((collection) => readNewest(collection, matches, limit))
+                )
+              ).flat()
+            );
+            return capEvents(rows.map(rowToEvent), limit);
+          }
+
+          const collection = plan.collections[0].filter(matches);
+          const events = (await collection.toArray()).map(rowToEvent);
           return limit !== undefined ? capEvents(events, limit) : events;
         })
       );

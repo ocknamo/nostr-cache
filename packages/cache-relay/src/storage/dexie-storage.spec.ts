@@ -12,7 +12,9 @@ import {
   CONFORMANCE_MOCK_EVENT,
   describeStorageAdapterConformance,
 } from '../test/storage-conformance.js';
-import { DexieStorage } from './dexie-storage.js';
+import { sortNewestFirst } from '../utils/filter-utils.js';
+import { DexieStorage, readNewest } from './dexie-storage.js';
+import type { NostrEventTable } from './dexie/schema.js';
 
 const createStorage = () => new DexieStorage('TestNostrCacheRelay');
 
@@ -32,6 +34,94 @@ describeStorageAdapterConformance('DexieStorage', {
     const row = await storage.table('events').get(id);
     return row && { validated: row.validated === 1, accessCount: row.access_count };
   },
+});
+
+/**
+ * Stand-in for a descending Dexie collection that records how far the walk got.
+ *
+ * Reproduces the two behaviours `readNewest` depends on (dexie 4.4.4
+ * `combine()` / `addFilter()` / `Collection.until`): the filter chain runs in
+ * the order it was built and short-circuits, and `until` stops the walk at the
+ * first row it accepts, excluding it.
+ */
+function descendingCollection(rows: NostrEventTable[]) {
+  const chain: ((row: NostrEventTable) => boolean)[] = [];
+  let scanned = 0;
+  let stopped = false;
+
+  const collection = {
+    until(stop: (row: NostrEventTable) => boolean) {
+      chain.push((row) => {
+        if (stop(row)) {
+          stopped = true;
+          return false;
+        }
+        return true;
+      });
+      return collection;
+    },
+    filter(keep: (row: NostrEventTable) => boolean) {
+      chain.push(keep);
+      return collection;
+    },
+    async each(visit: (row: NostrEventTable) => void) {
+      for (const row of rows) {
+        // 打ち切りを判定した行も「読んだ」に数える
+        scanned++;
+        const kept = chain.every((link) => link(row));
+        if (stopped) {
+          return;
+        }
+        if (kept) {
+          visit(row);
+        }
+      }
+    },
+    get scanned() {
+      return scanned;
+    },
+  };
+  return collection;
+}
+
+describe('readNewest', () => {
+  const row = (i: number, matching: boolean): NostrEventTable =>
+    ({
+      id: `row-${String(i).padStart(3, '0')}`,
+      pubkey: matching ? 'wanted' : 'other',
+      created_at: 10_000 - i,
+      kind: 1,
+    }) as NostrEventTable;
+
+  it('stops walking once the limit is met, even if no later row matches', () => {
+    // 鎖の順序が逆でも結果は正しいまま早期打ち切りだけが消えるので、
+    // 走査した行数そのものを縛る
+    const rows = [
+      ...Array.from({ length: 5 }, (_, i) => row(i, true)),
+      ...Array.from({ length: 200 }, (_, i) => row(i + 5, false)),
+    ];
+    const collection = descendingCollection(rows);
+
+    return readNewest(collection as never, (candidate) => candidate.pubkey === 'wanted', 5).then(
+      (found) => {
+        expect(found.map((e) => e.id)).toEqual(rows.slice(0, 5).map((e) => e.id));
+        // 5 件そろった次の行で打ち切られる
+        expect(collection.scanned).toBe(6);
+      }
+    );
+  });
+
+  it('keeps reading while the boundary timestamp continues', async () => {
+    // 同着は id 昇順で切るため、境界と同時刻の行は読み切る必要がある
+    const tied = [row(0, true), row(1, true), { ...row(2, true), created_at: 9_999 }];
+    const rows = [...tied, { ...row(3, true), created_at: 9_999 }, row(4, true)];
+    const collection = descendingCollection(rows);
+
+    const found = await readNewest(collection as never, () => true, 3);
+
+    expect(found.map((e) => e.id)).toEqual(['row-000', 'row-001', 'row-002', 'row-003']);
+    expect(collection.scanned).toBe(5);
+  });
 });
 
 describe('DexieStorage (Dexie-specific)', () => {
@@ -89,6 +179,52 @@ describe('DexieStorage (Dexie-specific)', () => {
           identifier: '',
         })
       ).rejects.toThrow('Database is locked');
+    });
+  });
+
+  // `limit` の有無で別々の経路を通るので、切り詰めた結果が「全一致を新しい順に
+  // 並べた先頭 N 件」と一致することを縛る（limit 無しの結果はインデックス順の
+  // ままなので、比較の前に並べ替える）
+  describe('the ordered and unordered plans agree', () => {
+    const authors = Array.from({ length: 12 }, (_, i) => `author${i}`);
+
+    beforeEach(async () => {
+      for (let i = 0; i < 40; i++) {
+        await storage.saveEvent({
+          id: `note-${String(i).padStart(2, '0')}`,
+          pubkey: authors[i % authors.length],
+          // 同時刻を混ぜて、id によるタイブレークも経路間で一致させる
+          created_at: 1000 + Math.floor(i / 2),
+          kind: i % 3 === 0 ? 7 : 1,
+          tags: [],
+          content: `note ${i}`,
+          sig: 'sig',
+        });
+      }
+    });
+
+    it('should return the same prefix the unlimited query starts with', async () => {
+      const filter = { kinds: [1], authors };
+      const all = sortNewestFirst(await storage.getEvents([filter]));
+      const limited = await storage.getEvents([{ ...filter, limit: 7 }]);
+
+      expect(limited.map((e) => e.id)).toEqual(all.slice(0, 7).map((e) => e.id));
+    });
+
+    it('should agree for a multi-kind filter, which reads a cursor per kind', async () => {
+      const filter = { kinds: [1, 7], authors };
+      const all = sortNewestFirst(await storage.getEvents([filter]));
+      const limited = await storage.getEvents([{ ...filter, limit: 9 }]);
+
+      expect(limited.map((e) => e.id)).toEqual(all.slice(0, 9).map((e) => e.id));
+    });
+
+    it('should agree when the limit exceeds the number of matches', async () => {
+      const filter = { kinds: [1], authors: [authors[0]] };
+      const all = sortNewestFirst(await storage.getEvents([filter]));
+      const limited = await storage.getEvents([{ ...filter, limit: 500 }]);
+
+      expect(limited.map((e) => e.id)).toEqual(all.map((e) => e.id));
     });
   });
 });

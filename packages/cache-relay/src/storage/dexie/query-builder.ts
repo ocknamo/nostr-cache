@@ -1,8 +1,18 @@
 import type { Filter } from '@nostr-cache/shared';
-import type { Dexie } from 'dexie';
+import { Dexie } from 'dexie';
 import { eventMatchesFilter } from '../../utils/filter-utils.js';
 import { type NostrEventTable, rowToEvent } from './schema.js';
 import { getIndexedTagValues } from './tag-index.js';
+
+/** Beyond this, one `created_at` walk beats a cursor per kind. */
+const MAX_ORDERED_KINDS = 8;
+
+/**
+ * Beyond this, walking the kind beats a cursor per author: the sub-range seek is
+ * the expensive part, which is why `[pubkey+kind]` with 500 of them takes 538ms
+ * against 5ms for one descending walk.
+ */
+const MAX_ORDERED_AUTHOR_CURSORS = 16;
 
 /**
  * Narrow the events table by the filter's time range on the `created_at` index.
@@ -17,9 +27,27 @@ function betweenCreatedAt(
   since: number | undefined,
   until: number | undefined
 ): Dexie.Collection<NostrEventTable, string> {
+  // 開いた端が 0 だと `created_at` が負の行を落とすが、最終判定は `since` 未指定なら
+  // 下限を課さないため復活できない
   return table
     .where('created_at')
-    .between(since ?? 0, until ?? Number.POSITIVE_INFINITY, true, true);
+    .between(since ?? Dexie.minKey, until ?? Dexie.maxKey, true, true);
+}
+
+/** The `indexed_tags` values a filter's tag conditions can be looked up by. */
+function tagIndexValues(filter: Filter): string[] {
+  const values: string[] = [];
+  for (const [key, condition] of Object.entries(filter)) {
+    if (!key.startsWith('#') || !Array.isArray(condition) || condition.length === 0) {
+      continue;
+    }
+    const tagName = key.slice(1);
+    if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
+      continue;
+    }
+    values.push(...getIndexedTagValues(tagName, condition as string[]));
+  }
+  return values;
 }
 
 /**
@@ -35,21 +63,10 @@ export function buildOptimizedQuery(
   table: Dexie.Table<NostrEventTable, string>,
   filter: Filter
 ): Dexie.Collection<NostrEventTable, string> {
-  const { ids, authors, kinds, since, until, ...tagFilters } = filter;
+  const { ids, authors, kinds, since, until } = filter;
   let collection: Dexie.Collection<NostrEventTable, string>;
 
-  const indexedTagValues: string[] = [];
-  for (const [key, values] of Object.entries(tagFilters)) {
-    if (key.startsWith('#') && Array.isArray(values) && values.length > 0) {
-      const tagName = key.slice(1);
-      if (tagName.length === 1 && /^[a-zA-Z]$/.test(tagName)) {
-        const indexedValues = getIndexedTagValues(tagName, values as string[]);
-        if (indexedValues.length > 0) {
-          indexedTagValues.push(...indexedValues);
-        }
-      }
-    }
-  }
+  const indexedTagValues = tagIndexValues(filter);
 
   if (ids?.length) {
     collection = table.where('id').anyOf(ids);
@@ -109,25 +126,150 @@ export function buildOptimizedQuery(
 }
 
 /**
- * Final per-row validation applied after the index query.
- *
- * Rejects rows for malformed tag filters (a `#x` key whose name is not a
- * single letter, or whose values are not all non-empty strings) and otherwise
- * defers to the shared {@link eventMatchesFilter}. This reproduces the exact
- * conditions the index cannot express.
+ * How a filter's rows are to be read: an ordered plan walks `created_at`
+ * descending — the order NIP-01 applies `limit` in — so the caller can stop the
+ * cursor once it has enough. An unordered one must read every matching row
+ * before the newest N is known.
  */
-export function eventRowMatchesFilter(row: NostrEventTable, filter: Filter): boolean {
-  for (const [key, values] of Object.entries(filter)) {
-    if (key.startsWith('#')) {
-      const tagName = key.slice(1);
-      if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
-        return false;
-      }
-      if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
-        return false;
-      }
-    }
+export interface QueryPlan {
+  /**
+   * Single use only: Dexie's `filter` / `until` mutate a collection's context
+   * rather than deriving a new one, so a re-read carries the first read's chain.
+   */
+  collections: Dexie.Collection<NostrEventTable, string>[];
+  ordered: boolean;
+}
+
+/** Descending range over one kind. Both ends inclusive, as in {@link betweenCreatedAt}. */
+function newestOfKind(
+  table: Dexie.Table<NostrEventTable, string>,
+  kind: number,
+  since: number | undefined,
+  until: number | undefined
+): Dexie.Collection<NostrEventTable, string> {
+  return table
+    .where('[kind+created_at]')
+    .between([kind, since ?? Dexie.minKey], [kind, until ?? Dexie.maxKey], true, true)
+    .reverse();
+}
+
+/** Descending range over one author's events, optionally of one kind. */
+function newestOfAuthor(
+  table: Dexie.Table<NostrEventTable, string>,
+  pubkey: string,
+  kind: number | undefined,
+  since: number | undefined,
+  until: number | undefined
+): Dexie.Collection<NostrEventTable, string> {
+  const low = since ?? Dexie.minKey;
+  const high = until ?? Dexie.maxKey;
+  return kind === undefined
+    ? table
+        .where('[pubkey+created_at]')
+        .between([pubkey, low], [pubkey, high], true, true)
+        .reverse()
+    : table
+        .where('[pubkey+kind+created_at]')
+        .between([pubkey, kind, low], [pubkey, kind, high], true, true)
+        .reverse();
+}
+
+/**
+ * Plan how to read one filter's rows.
+ *
+ * The ordered mode exists for the follow timeline: `{kinds:[1],authors:[…500],
+ * limit:50}` lands on `[pubkey+kind]` as 500 sub-ranges and reads every matching
+ * row (574ms against a 5000-event cache), where walking the kind newest-first and
+ * cutting off at 50 answers the same filter in 36ms.
+ *
+ * When the kind is walked, `authors` is checked per row by the caller's
+ * {@link eventRowMatchesFilter} — which is what makes it a stopping condition rather
+ * than a post-filter, since only rows that pass count towards `limit`. The cost
+ * is then in rows *walked* rather than rows *matched*, so a wide but sparse
+ * author set walks the whole kind (145ms worst case, bounded by
+ * `storageMaxSize`). No scan budget is imposed for it.
+ *
+ * @param limit Already through `normalizeLimit`; without one nothing can stop
+ *   the walk, so the plan is unordered.
+ */
+export function planQuery(
+  table: Dexie.Table<NostrEventTable, string>,
+  filter: Filter,
+  limit: number | undefined
+): QueryPlan {
+  const unordered = (): QueryPlan => ({
+    collections: [buildOptimizedQuery(table, filter)],
+    ordered: false,
+  });
+
+  if (limit === undefined || limit <= 0) {
+    return unordered();
+  }
+  // 主キー参照は必要な行しか読まず、タグ値に一致する行も普通ごく少数。
+  // `indexed_tags` はそもそも created_at 順に並べられない
+  if (filter.ids !== undefined || tagIndexValues(filter).length > 0) {
+    return unordered();
   }
 
+  const { authors, kinds, since, until } = filter;
+  // 同じ範囲に 2 本開くと同じ行が 2 回届き、`capEvents` が limit を重複で食う
+  const distinctKinds = kinds?.length ? [...new Set(kinds)] : [];
+  const distinctAuthors = authors?.length ? [...new Set(authors)] : [];
+
+  // 著者ごとに開けばその人の行しか読まない。kind 走査に落とすと、単著者
+  // タイムライン（`parseFilter` が必ず limit を入れる）が 8ms から 128ms になる
+  const authorCursors = distinctAuthors.length * Math.max(distinctKinds.length, 1);
+  if (distinctAuthors.length && authorCursors <= MAX_ORDERED_AUTHOR_CURSORS) {
+    const collections = distinctKinds.length
+      ? distinctAuthors.flatMap((pubkey) =>
+          distinctKinds.map((kind) => newestOfAuthor(table, pubkey, kind, since, until))
+        )
+      : distinctAuthors.map((pubkey) => newestOfAuthor(table, pubkey, undefined, since, until));
+    return { collections, ordered: true };
+  }
+
+  if (distinctKinds.length && distinctKinds.length <= MAX_ORDERED_KINDS) {
+    return {
+      collections: distinctKinds.map((kind) => newestOfKind(table, kind, since, until)),
+      ordered: true,
+    };
+  }
+
+  return { collections: [betweenCreatedAt(table, since, until).reverse()], ordered: true };
+}
+
+/**
+ * Whether a filter's tag conditions are ones no stored row can satisfy: a `#x`
+ * key whose name is not a single letter, or whose values are not all non-empty
+ * strings.
+ *
+ * Asked before the query, not only inside the row predicate: a descending plan
+ * would otherwise walk its whole range to fill a `limit` that never can be.
+ */
+export function rejectsEveryRow(filter: Filter): boolean {
+  for (const [key, values] of Object.entries(filter)) {
+    if (!key.startsWith('#')) {
+      continue;
+    }
+    const tagName = key.slice(1);
+    if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
+      return true;
+    }
+    if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Final per-row validation applied while the query's rows are read: the
+ * conditions the index cannot express, plus the malformed tag filters no row can
+ * satisfy.
+ */
+export function eventRowMatchesFilter(row: NostrEventTable, filter: Filter): boolean {
+  if (rejectsEveryRow(filter)) {
+    return false;
+  }
   return eventMatchesFilter(rowToEvent(row), filter);
 }
