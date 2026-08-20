@@ -1,6 +1,6 @@
 /**
- * Tests for the query builder: which index a filter is planned onto, and the
- * pure post-index validation that follows it.
+ * Tests for the read strategy: which index a filter is planned onto, how far a
+ * descending walk reads, and the pure post-index validation in between.
  *
  * The plan is asserted against a recording stub rather than a live Dexie table.
  * What matters about it is not the rows it returns — `dexie-storage.spec.ts`
@@ -9,7 +9,7 @@
  */
 
 import type { Filter } from '@nostr-cache/shared';
-import { buildOptimizedQuery, eventRowMatchesFilter, planQuery } from './query-builder.js';
+import { buildOptimizedQuery, eventRowMatchesFilter, planQuery, readNewest } from './query.js';
 import type { NostrEventTable } from './schema.js';
 
 interface Plan {
@@ -79,10 +79,14 @@ interface OrderedPlan {
 }
 
 /** Run `planQuery` against a stub table and report the cursors it opened. */
-function orderedPlanFor(filter: Filter, limit: number | undefined): OrderedPlan {
+function orderedPlanFor(filter: Filter): OrderedPlan {
   const recorder = recordingTable();
-  const plan = planQuery(recorder.table as never, filter, limit);
-  return { indexes: recorder.indexes, reversed: recorder.reversed, ordered: plan.ordered };
+  const plan = planQuery(recorder.table as never, filter);
+  return {
+    indexes: recorder.indexes,
+    reversed: recorder.reversed,
+    ordered: plan.mode === 'newest',
+  };
 }
 
 describe('buildOptimizedQuery', () => {
@@ -137,14 +141,14 @@ describe('buildOptimizedQuery', () => {
 
   it('walks a kind newest-first for a follow list, so the walk can stop early', () => {
     // `[pubkey+kind]` だと 500 本の部分範囲を舐めて一致行を全件読む（574ms）
-    const follows = orderedPlanFor({ kinds: [1], authors: FOLLOWS, limit: 50 }, 50);
+    const follows = orderedPlanFor({ kinds: [1], authors: FOLLOWS, limit: 50 });
     expect(follows.ordered).toBe(true);
     expect(follows.indexes).toEqual(['[kind+created_at]']);
     expect(follows.reversed).toEqual([true]);
   });
 
   it('opens one cursor per kind, since a compound range covers only one', () => {
-    const plan = orderedPlanFor({ kinds: [1, 6], authors: FOLLOWS, limit: 50 }, 50);
+    const plan = orderedPlanFor({ kinds: [1, 6], authors: FOLLOWS, limit: 50 });
     expect(plan.indexes).toEqual(['[kind+created_at]', '[kind+created_at]']);
     expect(plan.reversed).toEqual([true, true]);
   });
@@ -152,25 +156,25 @@ describe('buildOptimizedQuery', () => {
   it('reads a narrow author set per author, never leaving their rows', () => {
     // `<nostr-timeline authors="npub1…">` の形。kind 走査に載せると、その 1 人を
     // 探して全 kind 1 を読むことになる（128ms。旧経路は 8ms）
-    const single = orderedPlanFor({ kinds: [1], authors: [PUBKEY], limit: 50 }, 50);
+    const single = orderedPlanFor({ kinds: [1], authors: [PUBKEY], limit: 50 });
     expect(single.indexes).toEqual(['[pubkey+kind+created_at]']);
     expect(single.reversed).toEqual([true]);
 
     // kind の指定が無ければ著者だけの複合インデックスで足りる
-    expect(orderedPlanFor({ authors: [PUBKEY], limit: 50 }, 50).indexes).toEqual([
+    expect(orderedPlanFor({ authors: [PUBKEY], limit: 50 }).indexes).toEqual([
       '[pubkey+created_at]',
     ]);
   });
 
   it('opens a cursor per (author, kind) pair, and stops when there are too many', () => {
     const two = [PUBKEY, ID];
-    expect(orderedPlanFor({ kinds: [1, 7], authors: two, limit: 50 }, 50).indexes).toEqual(
+    expect(orderedPlanFor({ kinds: [1, 7], authors: two, limit: 50 }).indexes).toEqual(
       Array(4).fill('[pubkey+kind+created_at]')
     );
 
     // 座標が増えるとサブレンジのシーク自体が高くつくので kind 走査へ倒す
     const many = Array.from({ length: 9 }, (_, i) => `${i}`.padStart(64, 'a'));
-    expect(orderedPlanFor({ kinds: [1, 7], authors: many, limit: 50 }, 50).indexes).toEqual([
+    expect(orderedPlanFor({ kinds: [1, 7], authors: many, limit: 50 }).indexes).toEqual([
       '[kind+created_at]',
       '[kind+created_at]',
     ]);
@@ -178,38 +182,36 @@ describe('buildOptimizedQuery', () => {
 
   it('de-duplicates kinds and authors, which would otherwise deliver a row twice', () => {
     // 同じ行が 2 回届き、`capEvents` が limit を重複で食う
-    expect(orderedPlanFor({ kinds: [1, 1], limit: 50 }, 50).indexes).toEqual(['[kind+created_at]']);
-    expect(orderedPlanFor({ authors: [PUBKEY, PUBKEY], limit: 50 }, 50).indexes).toEqual([
+    expect(orderedPlanFor({ kinds: [1, 1], limit: 50 }).indexes).toEqual(['[kind+created_at]']);
+    expect(orderedPlanFor({ authors: [PUBKEY, PUBKEY], limit: 50 }).indexes).toEqual([
       '[pubkey+created_at]',
     ]);
   });
 
   it('walks created_at itself when the kinds are too many to be worth a cursor each', () => {
     const manyKinds = [0, 1, 3, 4, 5, 6, 7, 40, 1984];
-    const plan = orderedPlanFor({ kinds: manyKinds, limit: 50 }, 50);
+    const plan = orderedPlanFor({ kinds: manyKinds, limit: 50 });
     expect(plan.indexes).toEqual(['created_at']);
     expect(plan.reversed).toEqual([true]);
   });
 
   it('walks created_at itself when nothing narrows the range', () => {
-    expect(orderedPlanFor({ limit: 3 }, 3).indexes).toEqual(['created_at']);
-    expect(orderedPlanFor({ since: 1, limit: 3 }, 3).indexes).toEqual(['created_at']);
+    expect(orderedPlanFor({ limit: 3 }).indexes).toEqual(['created_at']);
+    expect(orderedPlanFor({ since: 1, limit: 3 }).indexes).toEqual(['created_at']);
   });
 
   it('keeps the plans that have nothing to gain from reading newest-first', () => {
     // limit が無ければ打ち切る先が無い
-    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }, undefined).ordered).toBe(false);
-    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }, undefined).indexes).toEqual([
-      '[pubkey+kind]',
-    ]);
-    expect(orderedPlanFor({ ids: [ID], limit: 10 }, 10).ordered).toBe(false);
-    expect(orderedPlanFor({ ids: [ID], limit: 10 }, 10).indexes).toEqual(['id']);
+    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }).ordered).toBe(false);
+    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }).indexes).toEqual(['[pubkey+kind]']);
+    expect(orderedPlanFor({ ids: [ID], limit: 10 }).ordered).toBe(false);
+    expect(orderedPlanFor({ ids: [ID], limit: 10 }).indexes).toEqual(['id']);
     // タグ値に一致する行は普通ごく少数で、created_at 順には並べられない
-    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }, 100).ordered).toBe(false);
-    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }, 100).indexes).toEqual([
+    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }).ordered).toBe(false);
+    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }).indexes).toEqual([
       'indexed_tags',
     ]);
-    expect(orderedPlanFor({ kinds: [1], limit: 0 }, 0).ordered).toBe(false);
+    expect(orderedPlanFor({ kinds: [1], limit: 0 }).ordered).toBe(false);
   });
 
   it('falls back when the tag condition is not one the index can answer', () => {
@@ -261,5 +263,93 @@ describe('eventRowMatchesFilter', () => {
   it('does not match when a non-tag condition fails', () => {
     expect(eventRowMatchesFilter(makeRow(), { kinds: [2] })).toBe(false);
     expect(eventRowMatchesFilter(makeRow(), { authors: ['other'] })).toBe(false);
+  });
+});
+
+/**
+ * Stand-in for a descending Dexie collection that records how far the walk got.
+ *
+ * Reproduces the two behaviours `readNewest` depends on (dexie 4.4.4
+ * `combine()` / `addFilter()` / `Collection.until`): the filter chain runs in
+ * the order it was built and short-circuits, and `until` stops the walk at the
+ * first row it accepts, excluding it.
+ */
+function descendingCollection(rows: NostrEventTable[]) {
+  const chain: ((row: NostrEventTable) => boolean)[] = [];
+  let scanned = 0;
+  let stopped = false;
+
+  const collection = {
+    until(stop: (row: NostrEventTable) => boolean) {
+      chain.push((row) => {
+        if (stop(row)) {
+          stopped = true;
+          return false;
+        }
+        return true;
+      });
+      return collection;
+    },
+    filter(keep: (row: NostrEventTable) => boolean) {
+      chain.push(keep);
+      return collection;
+    },
+    async each(visit: (row: NostrEventTable) => void) {
+      for (const row of rows) {
+        // 打ち切りを判定した行も「読んだ」に数える
+        scanned++;
+        const kept = chain.every((link) => link(row));
+        if (stopped) {
+          return;
+        }
+        if (kept) {
+          visit(row);
+        }
+      }
+    },
+    get scanned() {
+      return scanned;
+    },
+  };
+  return collection;
+}
+
+describe('readNewest', () => {
+  const row = (i: number, matching: boolean): NostrEventTable =>
+    ({
+      id: `row-${String(i).padStart(3, '0')}`,
+      pubkey: matching ? 'wanted' : 'other',
+      created_at: 10_000 - i,
+      kind: 1,
+    }) as NostrEventTable;
+
+  it('stops walking once the limit is met, even if no later row matches', () => {
+    // 鎖の順序が逆でも結果は正しいまま早期打ち切りだけが消えるので、
+    // 走査した行数そのものを縛る
+    const rows = [
+      ...Array.from({ length: 5 }, (_, i) => row(i, true)),
+      ...Array.from({ length: 200 }, (_, i) => row(i + 5, false)),
+    ];
+    const collection = descendingCollection(rows);
+
+    return readNewest(collection as never, (candidate) => candidate.pubkey === 'wanted', 5).then(
+      (found) => {
+        expect(found.map((e) => e.id)).toEqual(rows.slice(0, 5).map((e) => e.id));
+        // 5 件そろった次の行で打ち切られる
+        expect(collection.scanned).toBe(6);
+      }
+    );
+  });
+
+  it('keeps reading while the boundary timestamp continues', async () => {
+    // 同着は id 昇順で切るため、境界と同時刻の行は読み切る必要がある
+    const tied = [row(0, true), row(1, true), { ...row(2, true), created_at: 9_999 }];
+    const rows = [...tied, { ...row(3, true), created_at: 9_999 }, row(4, true)];
+    const collection = descendingCollection(rows);
+
+    const found = await readNewest(collection as never, () => true, 3);
+
+    expect(found.map((e) => e.id)).toEqual(['row-000', 'row-001', 'row-002', 'row-003']);
+    expect(collection.scanned).toBe(5);
   });
 });

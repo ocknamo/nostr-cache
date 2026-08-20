@@ -15,7 +15,6 @@ import type {
 } from '@nostr-cache/cache-relay';
 import {
   DELETION_EVENT_KIND,
-  filterUtils,
   getAlwaysRetainedKinds,
   getIndexedTags,
   hasPriorityRules,
@@ -28,31 +27,10 @@ import { logger } from '@nostr-cache/shared';
 // drizzle-orm 本体と sqlite-core は node:sqlite をロードしないため静的 import で安全。
 // ドライバ（drizzle-orm/node-sqlite）だけは node:sqlite を即ロードするため、
 // open() 内で遅延ロードする（下記 requireModule 参照）
-import {
-  type SQL,
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  inArray,
-  lt,
-  lte,
-  ne,
-  not,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { type SQL, and, asc, count, eq, inArray, lt, lte, ne, not, or, sql } from 'drizzle-orm';
 import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
-import { buildFilterQuery, hasInvalidTagFilter } from './sqlite/query-builder.js';
-import {
-  events,
-  type EventRow,
-  SQLITE_PRAGMAS,
-  SQLITE_SCHEMA,
-  eventTags,
-  rowToEvent,
-} from './sqlite/schema.js';
+import { queryEvents } from './sqlite/query.js';
+import { events, SQLITE_PRAGMAS, SQLITE_SCHEMA, eventTags, rowToEvent } from './sqlite/schema.js';
 
 // ESM から drizzle ドライバの CJS ビルドを同期・遅延ロードするための require。
 // 静的 import だとモジュール評価時に node:sqlite が読み込まれ、永続化を使わない
@@ -111,8 +89,8 @@ function chunk<T>(items: T[], size: number): T[][] {
  * cache-relay の `DexieStorage` のセマンティクスを忠実にミラーする
  * （検証状態の 1→0 ダウングレード禁止、getEvents のみのアクセス追跡、
  * FIFO/LRU/LFU 退避、cached_at 基準 TTL、タグインデックスの 100 件キャップ等）。
- * テーブル定義・DDL は `./sqlite/schema.js`、フィルタ→条件式の変換は
- * `./sqlite/query-builder.js`。
+ * テーブル定義・DDL は `./sqlite/schema.js`、フィルタの読み方は
+ * `./sqlite/query.js`。
  *
  * クエリは Drizzle の同期 API（`.run()` / `.all()` / `.get()`）のみを使う。
  * 非同期化するとトランザクション（BEGIN〜COMMIT）の間に並行タスクの文が
@@ -411,12 +389,12 @@ export class SqliteStorage implements StorageAdapter {
   /**
    * Get events matching the given filters.
    *
-   * 各フィルタを独立に評価して id でデデュープ（Dexie 実装と同一）。
-   * SQL は候補を絞るだけで、最終判定は共通の `eventMatchesFilter`。
+   * 各フィルタの読み方は `./sqlite/query.js` が持ち、ここは結果の統合と
+   * アクセス追跡だけを行う（Dexie 実装と同一）。
    */
   async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
     try {
-      const eventSets = filters.map((filter) => this.queryFilter(filter));
+      const eventSets = filters.map((filter) => queryEvents(this.db, filter));
 
       const results = Array.from(
         new Map(eventSets.flat().map((event) => [event.id, event])).values()
@@ -432,38 +410,6 @@ export class SqliteStorage implements StorageAdapter {
       );
       return [];
     }
-  }
-
-  /** Evaluate a single filter: SQL narrowing + final JS validation + limit. */
-  private queryFilter(filter: Filter): NostrEvent[] {
-    // Stage A: 不正なタグ条件を持つフィルタは何にもマッチしない
-    if (hasInvalidTagFilter(filter)) {
-      return [];
-    }
-    // Stage B: インデックスで候補を絞る
-    const { where, complete } = buildFilterQuery(this.db, filter);
-    let query = this.db.select().from(events).where(where).$dynamic();
-    // 非負整数へ正規化する（SQLite の LIMIT は小数を受け付けずクエリ全体が失敗するため、
-    // クライアントから `limit: 1.5` が来ただけで空応答になってしまう）。Dexie 実装も同じ正規化
-    const limit = filterUtils.normalizeLimit(filter.limit);
-    if (limit !== undefined) {
-      // 切り詰めは「新しい順」（NIP-01 の limit セマンティクス / capEvents と同じ、
-      // id は決定性のためのタイブレーク）。SQL 段階の LIMIT は絞り込みが最終判定と
-      // 完全等価な場合のみ（そうでない場合は JS 判定後に切り詰める）
-      query = query.orderBy(desc(events.createdAt), asc(events.id));
-      if (complete) {
-        query = query.limit(limit);
-      }
-    }
-    const rows: EventRow[] = query.all();
-    // Stage C: 完全なイベントに対する最終判定（Dexie と同じ共通実装）
-    let matched = rows
-      .map(rowToEvent)
-      .filter((event) => filterUtils.eventMatchesFilter(event, filter));
-    if (limit !== undefined) {
-      matched = matched.slice(0, limit);
-    }
-    return matched;
   }
 
   /**
