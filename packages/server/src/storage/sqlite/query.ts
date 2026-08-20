@@ -1,19 +1,10 @@
-import { filterUtils } from '@nostr-cache/cache-relay';
-import type { Filter, NostrEvent } from '@nostr-cache/shared';
-import { type SQL, and, asc, desc, gte, inArray, lte } from 'drizzle-orm';
-import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
-import { events, type EventRow, eventTags, rowToEvent } from './schema.js';
-
 /**
  * How a filter is answered from the SQLite tables.
  *
  * 1 つのフィルタの読み方（絞り込み条件・並び・切り詰め）はすべてこのモジュールが
  * 持ち、`SqliteStorage` は接続を渡して結果を統合するだけ。cache-relay の
- * `dexie/query.ts` と対になる。
- *
- * Dexie 実装（cache-relay の `dexie/query.ts`）と同じ二段構え:
- * SQL（インデックス）は候補を「絞る」だけで、最終判定は共通の
- * `filterUtils.eventMatchesFilter` が完全なイベントに対して行う。
+ * `dexie/query.ts` と同じ二段構えで、SQL（インデックス）は候補を「絞る」だけ、
+ * 最終判定は共通の `filterUtils.eventMatchesFilter` が完全なイベントに対して行う。
  * したがってここで押し込む条件は「取りこぼしを生まない」ものに限る。
  *
  * 特にタグ条件（`#e` / `#p` …）は、タグ主導の分岐（ids / authors / kinds が
@@ -23,6 +14,12 @@ import { events, type EventRow, eventTags, rowToEvent } from './schema.js';
  * 除外される（最終判定は完全な tags 配列に対して行われるため一致し得る）。
  * これは Dexie 実装と同一の設計判断。
  */
+
+import { filterUtils } from '@nostr-cache/cache-relay';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
+import { type SQL, and, asc, desc, gte, inArray, lte } from 'drizzle-orm';
+import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
+import { events, type EventRow, eventTags, rowToEvent } from './schema.js';
 
 /**
  * 単一の IN 句に押し込むパラメータ数の上限。超える場合はその条件を SQL に

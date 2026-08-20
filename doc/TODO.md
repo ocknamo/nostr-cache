@@ -222,7 +222,7 @@ id カバレッジ短絡（`upstream/id-coverage.ts`、[upstream.md](./cache-rel
     空値を落とすので index 側も要る）、`d` が空のときは `#d` を付けずに
     kind × author で引いて照合するか
 - [x] `DexieStorage` の `limit` クエリで早期打ち切りできる分岐を最適化する
-  - `planQuery` の順序ありプランで対応（`doc/cache-relay/storage.md` 4.1.0）。
+  - `planQuery` の `newest` プランで対応（`doc/cache-relay/storage.md` 4.1.0）。
     `limit` 付きフィルタは `created_at` 降順に走査して N 件（+ 同着）で打ち切る。
     フォロータイムラインの `{kinds:[1],authors:[…500],limit:50}` が 574ms → 36ms
   - 想定していた「`created_at` インデックスを使う分岐だけ」ではなく、既存の未使用

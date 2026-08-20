@@ -9,7 +9,14 @@
  */
 
 import type { Filter } from '@nostr-cache/shared';
-import { buildOptimizedQuery, eventRowMatchesFilter, planQuery, readNewest } from './query.js';
+import {
+  type QueryPlan,
+  buildOptimizedQuery,
+  eventRowMatchesFilter,
+  planQuery,
+  readNewest,
+  rejectsEveryRow,
+} from './query.js';
 import type { NostrEventTable } from './schema.js';
 
 interface Plan {
@@ -70,23 +77,19 @@ function planFor(filter: Filter): Plan {
   return { index: recorder.indexes[0] ?? '(scan)', distinct: recorder.distinct };
 }
 
-interface OrderedPlan {
+interface ReadPlan {
   /** One entry per cursor the plan opens, in the order they were opened. */
   indexes: string[];
   /** Whether each cursor walks its index backwards (newest first). */
   reversed: boolean[];
-  ordered: boolean;
+  mode: QueryPlan['mode'];
 }
 
 /** Run `planQuery` against a stub table and report the cursors it opened. */
-function orderedPlanFor(filter: Filter): OrderedPlan {
+function readPlanFor(filter: Filter): ReadPlan {
   const recorder = recordingTable();
   const plan = planQuery(recorder.table as never, filter);
-  return {
-    indexes: recorder.indexes,
-    reversed: recorder.reversed,
-    ordered: plan.mode === 'newest',
-  };
+  return { indexes: recorder.indexes, reversed: recorder.reversed, mode: plan.mode };
 }
 
 describe('buildOptimizedQuery', () => {
@@ -141,14 +144,14 @@ describe('buildOptimizedQuery', () => {
 
   it('walks a kind newest-first for a follow list, so the walk can stop early', () => {
     // `[pubkey+kind]` だと 500 本の部分範囲を舐めて一致行を全件読む（574ms）
-    const follows = orderedPlanFor({ kinds: [1], authors: FOLLOWS, limit: 50 });
-    expect(follows.ordered).toBe(true);
+    const follows = readPlanFor({ kinds: [1], authors: FOLLOWS, limit: 50 });
+    expect(follows.mode).toBe('newest');
     expect(follows.indexes).toEqual(['[kind+created_at]']);
     expect(follows.reversed).toEqual([true]);
   });
 
   it('opens one cursor per kind, since a compound range covers only one', () => {
-    const plan = orderedPlanFor({ kinds: [1, 6], authors: FOLLOWS, limit: 50 });
+    const plan = readPlanFor({ kinds: [1, 6], authors: FOLLOWS, limit: 50 });
     expect(plan.indexes).toEqual(['[kind+created_at]', '[kind+created_at]']);
     expect(plan.reversed).toEqual([true, true]);
   });
@@ -156,25 +159,23 @@ describe('buildOptimizedQuery', () => {
   it('reads a narrow author set per author, never leaving their rows', () => {
     // `<nostr-timeline authors="npub1…">` の形。kind 走査に載せると、その 1 人を
     // 探して全 kind 1 を読むことになる（128ms。旧経路は 8ms）
-    const single = orderedPlanFor({ kinds: [1], authors: [PUBKEY], limit: 50 });
+    const single = readPlanFor({ kinds: [1], authors: [PUBKEY], limit: 50 });
     expect(single.indexes).toEqual(['[pubkey+kind+created_at]']);
     expect(single.reversed).toEqual([true]);
 
     // kind の指定が無ければ著者だけの複合インデックスで足りる
-    expect(orderedPlanFor({ authors: [PUBKEY], limit: 50 }).indexes).toEqual([
-      '[pubkey+created_at]',
-    ]);
+    expect(readPlanFor({ authors: [PUBKEY], limit: 50 }).indexes).toEqual(['[pubkey+created_at]']);
   });
 
   it('opens a cursor per (author, kind) pair, and stops when there are too many', () => {
     const two = [PUBKEY, ID];
-    expect(orderedPlanFor({ kinds: [1, 7], authors: two, limit: 50 }).indexes).toEqual(
+    expect(readPlanFor({ kinds: [1, 7], authors: two, limit: 50 }).indexes).toEqual(
       Array(4).fill('[pubkey+kind+created_at]')
     );
 
     // 座標が増えるとサブレンジのシーク自体が高くつくので kind 走査へ倒す
     const many = Array.from({ length: 9 }, (_, i) => `${i}`.padStart(64, 'a'));
-    expect(orderedPlanFor({ kinds: [1, 7], authors: many, limit: 50 }).indexes).toEqual([
+    expect(readPlanFor({ kinds: [1, 7], authors: many, limit: 50 }).indexes).toEqual([
       '[kind+created_at]',
       '[kind+created_at]',
     ]);
@@ -182,41 +183,39 @@ describe('buildOptimizedQuery', () => {
 
   it('de-duplicates kinds and authors, which would otherwise deliver a row twice', () => {
     // 同じ行が 2 回届き、`capEvents` が limit を重複で食う
-    expect(orderedPlanFor({ kinds: [1, 1], limit: 50 }).indexes).toEqual(['[kind+created_at]']);
-    expect(orderedPlanFor({ authors: [PUBKEY, PUBKEY], limit: 50 }).indexes).toEqual([
+    expect(readPlanFor({ kinds: [1, 1], limit: 50 }).indexes).toEqual(['[kind+created_at]']);
+    expect(readPlanFor({ authors: [PUBKEY, PUBKEY], limit: 50 }).indexes).toEqual([
       '[pubkey+created_at]',
     ]);
   });
 
   it('walks created_at itself when the kinds are too many to be worth a cursor each', () => {
     const manyKinds = [0, 1, 3, 4, 5, 6, 7, 40, 1984];
-    const plan = orderedPlanFor({ kinds: manyKinds, limit: 50 });
+    const plan = readPlanFor({ kinds: manyKinds, limit: 50 });
     expect(plan.indexes).toEqual(['created_at']);
     expect(plan.reversed).toEqual([true]);
   });
 
   it('walks created_at itself when nothing narrows the range', () => {
-    expect(orderedPlanFor({ limit: 3 }).indexes).toEqual(['created_at']);
-    expect(orderedPlanFor({ since: 1, limit: 3 }).indexes).toEqual(['created_at']);
+    expect(readPlanFor({ limit: 3 }).indexes).toEqual(['created_at']);
+    expect(readPlanFor({ since: 1, limit: 3 }).indexes).toEqual(['created_at']);
   });
 
   it('keeps the plans that have nothing to gain from reading newest-first', () => {
     // limit が無ければ打ち切る先が無い
-    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }).ordered).toBe(false);
-    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }).indexes).toEqual(['[pubkey+kind]']);
-    expect(orderedPlanFor({ ids: [ID], limit: 10 }).ordered).toBe(false);
-    expect(orderedPlanFor({ ids: [ID], limit: 10 }).indexes).toEqual(['id']);
+    expect(readPlanFor({ kinds: [1], authors: [PUBKEY] }).mode).toBe('scan');
+    expect(readPlanFor({ kinds: [1], authors: [PUBKEY] }).indexes).toEqual(['[pubkey+kind]']);
+    expect(readPlanFor({ ids: [ID], limit: 10 }).mode).toBe('scan');
+    expect(readPlanFor({ ids: [ID], limit: 10 }).indexes).toEqual(['id']);
     // タグ値に一致する行は普通ごく少数で、created_at 順には並べられない
-    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }).ordered).toBe(false);
-    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }).indexes).toEqual([
-      'indexed_tags',
-    ]);
-    expect(orderedPlanFor({ kinds: [1], limit: 0 }).ordered).toBe(false);
+    expect(readPlanFor({ kinds: [1], '#e': [ID], limit: 100 }).mode).toBe('scan');
+    expect(readPlanFor({ kinds: [1], '#e': [ID], limit: 100 }).indexes).toEqual(['indexed_tags']);
+    expect(readPlanFor({ kinds: [1], limit: 0 }).mode).toBe('scan');
   });
 
   it('falls back when the tag condition is not one the index can answer', () => {
-    // A multi-letter tag name is not indexed (and `eventRowMatchesFilter`
-    // rejects every row for it), so the plan must not claim the tag index.
+    // A multi-letter tag name is not indexed (and `rejectsEveryRow` rejects
+    // the whole filter), so the plan must not claim the tag index.
     expect(planFor({ kinds: [1], '#ee': [ID] } as unknown as Filter).index).toBe('kind');
     expect(planFor({ kinds: [1], '#e': [] }).index).toBe('kind');
   });
@@ -251,18 +250,24 @@ describe('eventRowMatchesFilter', () => {
     expect(eventRowMatchesFilter(makeRow(), { '#e': ['other'] })).toBe(false);
   });
 
-  it('rejects malformed tag filter names (not a single letter)', () => {
-    expect(eventRowMatchesFilter(makeRow(), { '#ee': ['evt1'] } as unknown as Filter)).toBe(false);
-  });
-
-  it('rejects tag filters whose values are not all non-empty strings', () => {
-    expect(eventRowMatchesFilter(makeRow(), { '#e': [123] } as unknown as Filter)).toBe(false);
-    expect(eventRowMatchesFilter(makeRow(), { '#e': [''] })).toBe(false);
-  });
-
   it('does not match when a non-tag condition fails', () => {
     expect(eventRowMatchesFilter(makeRow(), { kinds: [2] })).toBe(false);
     expect(eventRowMatchesFilter(makeRow(), { authors: ['other'] })).toBe(false);
+  });
+});
+
+describe('rejectsEveryRow', () => {
+  it('rejects malformed tag filter names (not a single letter)', () => {
+    expect(rejectsEveryRow({ '#ee': ['evt1'] } as unknown as Filter)).toBe(true);
+  });
+
+  it('rejects tag filters whose values are not all non-empty strings', () => {
+    expect(rejectsEveryRow({ '#e': [123] } as unknown as Filter)).toBe(true);
+    expect(rejectsEveryRow({ '#e': [''] })).toBe(true);
+  });
+
+  it('accepts a well-formed filter', () => {
+    expect(rejectsEveryRow({ kinds: [1], '#e': ['evt1'] })).toBe(false);
   });
 });
 

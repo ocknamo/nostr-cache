@@ -249,10 +249,8 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   /**
-   * Get events matching the given filters.
-   *
-   * 各フィルタの読み方は `./dexie/query.js` が持ち、ここは結果の統合と
-   * アクセス追跡だけを行う。
+   * Get events matching the given filters: one `queryEvents` per filter, then
+   * de-duplication and access tracking over the union.
    */
   async getEvents(filters: Filter[]): Promise<NostrEvent[]> {
     try {

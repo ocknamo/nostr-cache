@@ -263,8 +263,8 @@ export function planQuery(table: Dexie.Table<NostrEventTable, string>, filter: F
  * key whose name is not a single letter, or whose values are not all non-empty
  * strings.
  *
- * Asked before the query, not only inside the row predicate: a descending plan
- * would otherwise walk its whole range to fill a `limit` that never can be.
+ * Asked once before the query rather than per row: a descending plan would
+ * otherwise walk its whole range to fill a `limit` that never can be.
  */
 export function rejectsEveryRow(filter: Filter): boolean {
   for (const [key, values] of Object.entries(filter)) {
@@ -284,13 +284,13 @@ export function rejectsEveryRow(filter: Filter): boolean {
 
 /**
  * Final per-row validation applied while the query's rows are read: the
- * conditions the index cannot express, plus the malformed tag filters no row can
- * satisfy.
+ * conditions the index cannot express.
+ *
+ * Runs on every row a descending plan *walks*, so it does not re-check
+ * {@link rejectsEveryRow} — `queryEvents` has already rejected such filters
+ * whole.
  */
 export function eventRowMatchesFilter(row: NostrEventTable, filter: Filter): boolean {
-  if (rejectsEveryRow(filter)) {
-    return false;
-  }
   return eventMatchesFilter(rowToEvent(row), filter);
 }
 
