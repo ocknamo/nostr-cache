@@ -833,6 +833,110 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
           ]);
           expect(result.map((e) => e.id).sort()).toEqual(['event2', 'event5']);
         });
+
+        // フォロータイムライン（`<nostr-follow-timeline>`）が投げる形。一致件数が
+        // limit を大きく超えるのが常態で、アダプタが「新しい順に走査して N 件で
+        // 打ち切る」実装を採るならその打ち切りが正しいことをここで縛る
+        describe('the follow-timeline shape (kinds + many authors + limit)', () => {
+          const authors = Array.from({ length: 12 }, (_, i) => `follow${i}`);
+
+          beforeEach(async () => {
+            // 一致 24 件（kind 1）。ほかに limit に混ざってはいけない行も置く
+            for (let i = 0; i < 24; i++) {
+              await storage.saveEvent({
+                id: `follow-note-${String(i).padStart(2, '0')}`,
+                pubkey: authors[i % authors.length],
+                created_at: 10_000 + i,
+                kind: 1,
+                tags: [],
+                content: `note ${i}`,
+                sig: 'sig',
+              });
+            }
+            // フォロー外の著者の、いちばん新しい kind 1
+            await storage.saveEvent({
+              id: 'stranger-note',
+              pubkey: 'stranger',
+              created_at: 99_999,
+              kind: 1,
+              tags: [],
+              content: 'not followed',
+              sig: 'sig',
+            });
+            // フォロー中の著者の、いちばん新しい別 kind
+            await storage.saveEvent({
+              id: 'follow-reaction',
+              pubkey: authors[0],
+              created_at: 99_999,
+              kind: 7,
+              tags: [],
+              content: '+',
+              sig: 'sig',
+            });
+          });
+
+          it('should return the newest N of the followed authors only', async () => {
+            const result = await storage.getEvents([{ kinds: [1], authors, limit: 5 }]);
+            expect(result.map((e) => e.id)).toEqual([
+              'follow-note-23',
+              'follow-note-22',
+              'follow-note-21',
+              'follow-note-20',
+              'follow-note-19',
+            ]);
+          });
+
+          it('should break a tie at the truncation boundary by the lowest id', async () => {
+            // 境界（follow-note-19）と同時刻の 2 件。id 昇順で先に来る方だけが残る
+            for (const id of ['aaa-tied', 'zzz-tied']) {
+              await storage.saveEvent({
+                id,
+                pubkey: authors[0],
+                created_at: 10_019,
+                kind: 1,
+                tags: [],
+                content: 'tied',
+                sig: 'sig',
+              });
+            }
+
+            const result = await storage.getEvents([{ kinds: [1], authors, limit: 5 }]);
+            expect(result.map((e) => e.id)).toEqual([
+              'follow-note-23',
+              'follow-note-22',
+              'follow-note-21',
+              'follow-note-20',
+              'aaa-tied',
+            ]);
+          });
+
+          it('should honour a time range alongside the limit, bounds included', async () => {
+            const result = await storage.getEvents([
+              { kinds: [1], authors, since: 10_005, until: 10_010, limit: 3 },
+            ]);
+            expect(result.map((e) => e.id)).toEqual([
+              'follow-note-10',
+              'follow-note-09',
+              'follow-note-08',
+            ]);
+          });
+
+          it('should take the newest N across several kinds, not N per kind', async () => {
+            const result = await storage.getEvents([{ kinds: [1, 7], authors, limit: 3 }]);
+            expect(result.map((e) => e.id)).toEqual([
+              'follow-reaction',
+              'follow-note-23',
+              'follow-note-22',
+            ]);
+          });
+
+          it('should return every match when fewer of them than the limit', async () => {
+            const result = await storage.getEvents([
+              { kinds: [1], authors: [authors[0]], limit: 50 },
+            ]);
+            expect(result.map((e) => e.id)).toEqual(['follow-note-12', 'follow-note-00']);
+          });
+        });
       });
 
       // since / until はどちらも境界を含む（NIP-01）。範囲クエリの上限を排他で

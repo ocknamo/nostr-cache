@@ -12,6 +12,7 @@ import {
   CONFORMANCE_MOCK_EVENT,
   describeStorageAdapterConformance,
 } from '../test/storage-conformance.js';
+import { sortNewestFirst } from '../utils/filter-utils.js';
 import { DexieStorage } from './dexie-storage.js';
 
 const createStorage = () => new DexieStorage('TestNostrCacheRelay');
@@ -89,6 +90,53 @@ describe('DexieStorage (Dexie-specific)', () => {
           identifier: '',
         })
       ).rejects.toThrow('Database is locked');
+    });
+  });
+
+  // `limit` の有無でクエリプランが変わる（有ると created_at 降順で走査して
+  // 打ち切る）。両者が別々の経路である以上、切り詰めた結果が「全一致を新しい順に
+  // 並べた先頭 N 件」と一致することは明示的に縛る（limit 無しの結果は
+  // インデックス順のままなので、比較の前に共通の規則で並べ替える）
+  describe('the ordered and unordered plans agree', () => {
+    const authors = Array.from({ length: 12 }, (_, i) => `author${i}`);
+
+    beforeEach(async () => {
+      for (let i = 0; i < 40; i++) {
+        await storage.saveEvent({
+          id: `note-${String(i).padStart(2, '0')}`,
+          pubkey: authors[i % authors.length],
+          // 同時刻を混ぜて、id によるタイブレークも経路間で一致させる
+          created_at: 1000 + Math.floor(i / 2),
+          kind: i % 3 === 0 ? 7 : 1,
+          tags: [],
+          content: `note ${i}`,
+          sig: 'sig',
+        });
+      }
+    });
+
+    it('should return the same prefix the unlimited query starts with', async () => {
+      const filter = { kinds: [1], authors };
+      const all = sortNewestFirst(await storage.getEvents([filter]));
+      const limited = await storage.getEvents([{ ...filter, limit: 7 }]);
+
+      expect(limited.map((e) => e.id)).toEqual(all.slice(0, 7).map((e) => e.id));
+    });
+
+    it('should agree for a multi-kind filter, which reads a cursor per kind', async () => {
+      const filter = { kinds: [1, 7], authors };
+      const all = sortNewestFirst(await storage.getEvents([filter]));
+      const limited = await storage.getEvents([{ ...filter, limit: 9 }]);
+
+      expect(limited.map((e) => e.id)).toEqual(all.slice(0, 9).map((e) => e.id));
+    });
+
+    it('should agree when the limit exceeds the number of matches', async () => {
+      const filter = { kinds: [1], authors: [authors[0]] };
+      const all = sortNewestFirst(await storage.getEvents([filter]));
+      const limited = await storage.getEvents([{ ...filter, limit: 500 }]);
+
+      expect(limited.map((e) => e.id)).toEqual(all.map((e) => e.id));
     });
   });
 });

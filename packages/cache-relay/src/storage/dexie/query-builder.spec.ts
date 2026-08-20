@@ -9,7 +9,7 @@
  */
 
 import type { Filter } from '@nostr-cache/shared';
-import { buildOptimizedQuery, eventRowMatchesFilter } from './query-builder.js';
+import { buildOptimizedQuery, eventRowMatchesFilter, planQuery } from './query-builder.js';
 import type { NostrEventTable } from './schema.js';
 
 interface Plan {
@@ -18,28 +18,76 @@ interface Plan {
   distinct: boolean;
 }
 
-/** Run `buildOptimizedQuery` against a stub table and report what it chose. */
-function planFor(filter: Filter): Plan {
-  const plan: Plan = { index: '(scan)', distinct: false };
+/**
+ * Stub table that records the indexes it is asked for.
+ *
+ * Every `where()` appends to `indexes`, so a plan opening one cursor per kind
+ * shows up as one entry per kind.
+ */
+function recordingTable() {
+  const indexes: string[] = [];
+  const reversed: boolean[] = [];
+  let distinct = false;
   const collection = {
     filter: () => collection,
+    reverse: () => {
+      reversed[indexes.length - 1] = true;
+      return collection;
+    },
     distinct: () => {
-      plan.distinct = true;
+      distinct = true;
       return collection;
     },
   };
   const table = {
     where: (index: string) => {
-      plan.index = index;
+      indexes.push(index);
+      reversed.push(false);
       return {
         anyOf: () => collection,
         between: () => collection,
       };
     },
-    toCollection: () => collection,
+    toCollection: () => {
+      indexes.push('(scan)');
+      reversed.push(false);
+      return collection;
+    },
   };
-  buildOptimizedQuery(table as never, filter);
-  return plan;
+  return {
+    table,
+    get indexes() {
+      return indexes;
+    },
+    get reversed() {
+      return reversed;
+    },
+    get distinct() {
+      return distinct;
+    },
+  };
+}
+
+/** Run `buildOptimizedQuery` against a stub table and report what it chose. */
+function planFor(filter: Filter): Plan {
+  const recorder = recordingTable();
+  buildOptimizedQuery(recorder.table as never, filter);
+  return { index: recorder.indexes[0] ?? '(scan)', distinct: recorder.distinct };
+}
+
+interface OrderedPlan {
+  /** One entry per cursor the plan opens, in the order they were opened. */
+  indexes: string[];
+  /** Whether each cursor walks its index backwards (newest first). */
+  reversed: boolean[];
+  ordered: boolean;
+}
+
+/** Run `planQuery` against a stub table and report the cursors it opened. */
+function orderedPlanFor(filter: Filter, limit: number | undefined): OrderedPlan {
+  const recorder = recordingTable();
+  const plan = planQuery(recorder.table as never, filter, limit);
+  return { indexes: recorder.indexes, reversed: recorder.reversed, ordered: plan.ordered };
 }
 
 describe('buildOptimizedQuery', () => {
@@ -87,6 +135,57 @@ describe('buildOptimizedQuery', () => {
     expect(planFor({ kinds: [1], since: 1 }).index).toBe('created_at');
     expect(planFor({ authors: [PUBKEY], '#p': [ID], since: 1 }).index).toBe('created_at');
     expect(planFor({}).index).toBe('(scan)');
+  });
+
+  it('reads a limit query newest-first so the walk can stop early', () => {
+    // フォロータイムライン。`[pubkey+kind]` に載せると 500 本の部分範囲を舐めて
+    // 一致行を全件読むことになる（実測 574ms）ので、kind の範囲を新しい順に
+    // 1 本走査して limit 件で打ち切る側に倒す
+    const follows = orderedPlanFor({ kinds: [1], authors: [PUBKEY], limit: 50 }, 50);
+    expect(follows.ordered).toBe(true);
+    expect(follows.indexes).toEqual(['[kind+created_at]']);
+    expect(follows.reversed).toEqual([true]);
+  });
+
+  it('opens one cursor per kind, since a compound range covers only one', () => {
+    const plan = orderedPlanFor({ kinds: [1, 6], authors: [PUBKEY], limit: 50 }, 50);
+    expect(plan.indexes).toEqual(['[kind+created_at]', '[kind+created_at]']);
+    expect(plan.reversed).toEqual([true, true]);
+  });
+
+  it('de-duplicates kinds, which would otherwise deliver a row twice', () => {
+    // 同じ範囲を 2 本開くと同じ行が 2 回届き、`capEvents` が limit を重複で食う
+    expect(orderedPlanFor({ kinds: [1, 1], limit: 50 }, 50).indexes).toEqual(['[kind+created_at]']);
+  });
+
+  it('walks created_at itself when the kinds are too many to be worth a cursor each', () => {
+    const manyKinds = [0, 1, 3, 4, 5, 6, 7, 40, 1984];
+    const plan = orderedPlanFor({ kinds: manyKinds, limit: 50 }, 50);
+    expect(plan.indexes).toEqual(['created_at']);
+    expect(plan.reversed).toEqual([true]);
+  });
+
+  it('walks created_at itself when no kind narrows the range', () => {
+    expect(orderedPlanFor({ authors: [PUBKEY], limit: 50 }, 50).indexes).toEqual(['created_at']);
+    expect(orderedPlanFor({ limit: 3 }, 3).indexes).toEqual(['created_at']);
+  });
+
+  it('keeps the plans that have nothing to gain from reading newest-first', () => {
+    // limit が無ければ打ち切る先が無い
+    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }, undefined).ordered).toBe(false);
+    expect(orderedPlanFor({ kinds: [1], authors: [PUBKEY] }, undefined).indexes).toEqual([
+      '[pubkey+kind]',
+    ]);
+    // 主キー参照は必要な行しか読まない
+    expect(orderedPlanFor({ ids: [ID], limit: 10 }, 10).ordered).toBe(false);
+    expect(orderedPlanFor({ ids: [ID], limit: 10 }, 10).indexes).toEqual(['id']);
+    // タグ値に一致する行は普通ごく少数で、そもそも created_at 順には並べられない
+    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }, 100).ordered).toBe(false);
+    expect(orderedPlanFor({ kinds: [1], '#e': [ID], limit: 100 }, 100).indexes).toEqual([
+      'indexed_tags',
+    ]);
+    // limit 0 / 負値は capEvents が空にする。降順で走査する意味が無い
+    expect(orderedPlanFor({ kinds: [1], limit: 0 }, 0).ordered).toBe(false);
   });
 
   it('falls back when the tag condition is not one the index can answer', () => {

@@ -32,44 +32,82 @@ export function normalizeFilter(filter: Filter): Filter {
   return normalized;
 }
 
-export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
-  if (filter.ids && !filter.ids.includes(event.id)) {
-    return false;
-  }
+/**
+ * Above this many values, a condition is matched through a `Set` rather than
+ * `Array.prototype.includes`.
+ *
+ * Below it the linear scan wins: building the `Set` costs more than the handful
+ * of comparisons it saves, and most filters name one or two of anything. The
+ * case this exists for is the follow timeline's `authors`, which carries every
+ * person the reader follows and is now tested against every row a descending
+ * scan walks (`dexie-storage.readNewest`).
+ */
+const SET_MATCH_THRESHOLD = 8;
 
-  if (filter.authors && !filter.authors.includes(event.pubkey)) {
-    return false;
+/** Membership test over a filter condition, without a `Set` for short ones. */
+function memberOf<T>(values: readonly T[]): (value: T) => boolean {
+  if (values.length <= SET_MATCH_THRESHOLD) {
+    return (value) => values.includes(value);
   }
+  const set = new Set(values);
+  return (value) => set.has(value);
+}
 
-  if (filter.kinds && !filter.kinds.includes(event.kind)) {
-    return false;
-  }
+/**
+ * Build the predicate a filter stands for, doing the per-filter work once.
+ *
+ * The point is repeated application: a storage scan runs this against every row
+ * it walks, so the conditions are prepared here rather than re-derived per
+ * event. {@link eventMatchesFilter} is the one-shot spelling of the same thing.
+ */
+export function compileFilterMatcher(filter: Filter): (event: NostrEvent) => boolean {
+  const matchesId = filter.ids && memberOf(filter.ids);
+  const matchesAuthor = filter.authors && memberOf(filter.authors);
+  const matchesKind = filter.kinds && memberOf(filter.kinds);
+  const { since, until } = filter;
 
-  // `!== undefined` で判定する（`since` が truthy かで見ると `since: 0` を
-  // 「指定なし」として無視してしまい、ストレージ側のインデックス絞り込みと割れる）
-  if (filter.since !== undefined && event.created_at < filter.since) {
-    return false;
-  }
-
-  if (filter.until !== undefined && event.created_at > filter.until) {
-    return false;
-  }
-
+  const tagConditions: [string, (value: string) => boolean][] = [];
   for (const [key, values] of Object.entries(filter)) {
     if (key.startsWith('#') && Array.isArray(values)) {
-      const tagName = key.slice(1);
-      const eventTags = event.tags.filter((tag) => tag[0] === tagName);
-      const eventTagValues = eventTags.map((tag) => tag[1]);
-
-      const hasMatch = (values as string[]).some((value) => eventTagValues.includes(value));
-
-      if (!hasMatch) {
-        return false;
-      }
+      tagConditions.push([key.slice(1), memberOf(values as string[])]);
     }
   }
 
-  return true;
+  return (event) => {
+    if (matchesId && !matchesId(event.id)) {
+      return false;
+    }
+
+    if (matchesAuthor && !matchesAuthor(event.pubkey)) {
+      return false;
+    }
+
+    if (matchesKind && !matchesKind(event.kind)) {
+      return false;
+    }
+
+    // `!== undefined` で判定する（`since` が truthy かで見ると `since: 0` を
+    // 「指定なし」として無視してしまい、ストレージ側のインデックス絞り込みと割れる）
+    if (since !== undefined && event.created_at < since) {
+      return false;
+    }
+
+    if (until !== undefined && event.created_at > until) {
+      return false;
+    }
+
+    for (const [tagName, matchesValue] of tagConditions) {
+      if (!event.tags.some((tag) => tag[0] === tagName && matchesValue(tag[1]))) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+}
+
+export function eventMatchesFilter(event: NostrEvent, filter: Filter): boolean {
+  return compileFilterMatcher(filter)(event);
 }
 
 /**

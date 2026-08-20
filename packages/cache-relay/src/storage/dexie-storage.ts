@@ -6,7 +6,7 @@ import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 import { selectCurrentVersion } from '../event/replaceable.js';
 import { capEvents, normalizeLimit } from '../utils/filter-utils.js';
 import { enforceLimit } from './dexie/eviction.js';
-import { buildOptimizedQuery, eventRowMatchesFilter } from './dexie/query-builder.js';
+import { compileRowMatcher, planQuery } from './dexie/query-builder.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
 import { type CachePriority, createPriorityMatcher } from './priority.js';
@@ -253,20 +253,28 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     try {
       const eventSets = await Promise.all(
         filters.map(async (filter) => {
-          let collection = buildOptimizedQuery(this.events, filter);
-
-          collection = collection.filter((event) => eventRowMatchesFilter(event, filter));
-
-          const events = (await collection.toArray()).map(rowToEvent);
-
           // NIP-01 の `limit` は「一致するイベントのうち**最新** N 件を、新しい順で」。
-          // Dexie の `Collection.limit()` は選ばれたインデックス順（kind 順・pubkey 順など、
-          // created_at とは無関係）の先頭 N 件になり最新順にならないため、全件取得してから
-          // capEvents（created_at 降順・id 昇順タイブレーク）で並べ替えつつ切り詰める。
-          // SqliteStorage / relay 側の maxEventsPerRequest と同じ順序規則。
-          // トレードオフ: インデックス走査を N 件で打ち切れず、一致イベントを
-          // いったん全件 materialize する
+          // Dexie の `Collection.limit()` は選ばれたインデックス順の先頭 N 件になり
+          // 最新順にならないため、切り詰めは常に capEvents（created_at 降順・
+          // id 昇順タイブレーク）が行う。SqliteStorage / relay 側の
+          // maxEventsPerRequest と同じ順序規則。
           const limit = normalizeLimit(filter.limit);
+          const plan = planQuery(this.events, filter, limit);
+          const matches = compileRowMatcher(filter);
+
+          // 走査順が created_at 降順なので、limit 件そろった時点で打ち切れる
+          // （`planQuery` は limit の無いフィルタを ordered にしない）
+          if (plan.ordered && limit !== undefined) {
+            const rows = (
+              await Promise.all(
+                plan.collections.map((collection) => this.readNewest(collection, matches, limit))
+              )
+            ).flat();
+            return capEvents(rows.map(rowToEvent), limit);
+          }
+
+          const collection = plan.collections[0].filter(matches);
+          const events = (await collection.toArray()).map(rowToEvent);
           return limit !== undefined ? capEvents(events, limit) : events;
         })
       );
@@ -287,6 +295,48 @@ export class DexieStorage extends Dexie implements StorageAdapter {
       );
       return [];
     }
+  }
+
+  /**
+   * Read the newest `limit` matching rows from a descending collection, plus
+   * everything tied with the last of them.
+   *
+   * The ties are why this is not `collection.filter(…).limit(limit)`. Walking
+   * `created_at` descending puts equal timestamps in *descending primary key*
+   * order, while NIP-01 (and `capEvents`, and the conformance suite) break such
+   * a tie by the **lowest** id — so cutting the walk at exactly `limit` rows can
+   * drop the very row that should have been kept. Reading the whole boundary
+   * timestamp out and letting `capEvents` order it is what keeps the answer
+   * identical to the one a full materialization would have given.
+   *
+   * @param collection Must be ordered newest-first, i.e. come from a
+   *   {@link planQuery} plan whose `ordered` is set
+   * @param matches The filter's row predicate, from {@link compileRowMatcher}
+   */
+  private async readNewest(
+    collection: Dexie.Collection<NostrEventTable, string>,
+    matches: (row: NostrEventTable) => boolean,
+    limit: number
+  ): Promise<NostrEventTable[]> {
+    const rows: NostrEventTable[] = [];
+    /** `created_at` of the `limit`-th match; rows older than it are surplus. */
+    let boundary: number | undefined;
+
+    await collection
+      // Chained before `filter` on purpose: Dexie evaluates a collection's
+      // filter chain in order and short-circuits, so a `filter` in front would
+      // leave this unevaluated on non-matching rows — and the walk would run on
+      // to the next *matching* row before noticing it should have stopped.
+      .until((row) => boundary !== undefined && row.created_at < boundary)
+      .filter(matches)
+      .each((row) => {
+        rows.push(row);
+        if (rows.length === limit) {
+          boundary = row.created_at;
+        }
+      });
+
+    return rows;
   }
 
   /**
