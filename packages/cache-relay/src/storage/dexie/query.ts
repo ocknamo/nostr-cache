@@ -1,6 +1,15 @@
-import type { Filter } from '@nostr-cache/shared';
+/**
+ * How a filter is answered from the Dexie events table.
+ *
+ * The whole read strategy lives here: which index a filter is put on, in which
+ * order its rows are walked, when the walk can stop, and how NIP-01's `limit`
+ * truncates the result. `DexieStorage` only hands over the table and the
+ * transaction scope, so a change of strategy is a change to this module.
+ */
+
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
-import { eventMatchesFilter } from '../../utils/filter-utils.js';
+import { capEvents, eventMatchesFilter, normalizeLimit } from '../../utils/filter-utils.js';
 import { type NostrEventTable, rowToEvent } from './schema.js';
 import { getIndexedTagValues } from './tag-index.js';
 
@@ -126,19 +135,28 @@ export function buildOptimizedQuery(
 }
 
 /**
- * How a filter's rows are to be read: an ordered plan walks `created_at`
- * descending — the order NIP-01 applies `limit` in — so the caller can stop the
- * cursor once it has enough. An unordered one must read every matching row
- * before the newest N is known.
+ * How a filter's rows are to be read.
+ *
+ * `newest` walks `created_at` descending — the order NIP-01 applies `limit` in —
+ * so each cursor can stop once it has enough. `scan` must read every matching
+ * row before the newest N is known, so it is also the only mode that can serve
+ * a filter without a `limit`.
+ *
+ * Collections are single use: Dexie's `filter` / `until` mutate a collection's
+ * context rather than deriving a new one, so a re-read carries the first read's
+ * chain.
  */
-export interface QueryPlan {
-  /**
-   * Single use only: Dexie's `filter` / `until` mutate a collection's context
-   * rather than deriving a new one, so a re-read carries the first read's chain.
-   */
-  collections: Dexie.Collection<NostrEventTable, string>[];
-  ordered: boolean;
-}
+export type QueryPlan =
+  | {
+      mode: 'newest';
+      collections: Dexie.Collection<NostrEventTable, string>[];
+      limit: number;
+    }
+  | {
+      mode: 'scan';
+      collection: Dexie.Collection<NostrEventTable, string>;
+      limit: number | undefined;
+    };
 
 /** Descending range over one kind. Both ends inclusive, as in {@link betweenCreatedAt}. */
 function newestOfKind(
@@ -182,33 +200,30 @@ function newestOfAuthor(
  * row (574ms against a 5000-event cache), where walking the kind newest-first and
  * cutting off at 50 answers the same filter in 36ms.
  *
- * When the kind is walked, `authors` is checked per row by the caller's
+ * When the kind is walked, `authors` is checked per row by
  * {@link eventRowMatchesFilter} — which is what makes it a stopping condition rather
  * than a post-filter, since only rows that pass count towards `limit`. The cost
  * is then in rows *walked* rather than rows *matched*, so a wide but sparse
  * author set walks the whole kind (145ms worst case, bounded by
  * `storageMaxSize`). No scan budget is imposed for it.
- *
- * @param limit Already through `normalizeLimit`; without one nothing can stop
- *   the walk, so the plan is unordered.
  */
-export function planQuery(
-  table: Dexie.Table<NostrEventTable, string>,
-  filter: Filter,
-  limit: number | undefined
-): QueryPlan {
-  const unordered = (): QueryPlan => ({
-    collections: [buildOptimizedQuery(table, filter)],
-    ordered: false,
+export function planQuery(table: Dexie.Table<NostrEventTable, string>, filter: Filter): QueryPlan {
+  const limit = normalizeLimit(filter.limit);
+  const scan = (): QueryPlan => ({
+    mode: 'scan',
+    collection: buildOptimizedQuery(table, filter),
+    limit,
   });
 
+  // limit なしでは打ち切る根拠が無く、limit 0 は readNewest が境界を置けないため
+  // 降順に開いても走査が止まらない
   if (limit === undefined || limit <= 0) {
-    return unordered();
+    return scan();
   }
   // 主キー参照は必要な行しか読まず、タグ値に一致する行も普通ごく少数。
   // `indexed_tags` はそもそも created_at 順に並べられない
   if (filter.ids !== undefined || tagIndexValues(filter).length > 0) {
-    return unordered();
+    return scan();
   }
 
   const { authors, kinds, since, until } = filter;
@@ -225,17 +240,22 @@ export function planQuery(
           distinctKinds.map((kind) => newestOfAuthor(table, pubkey, kind, since, until))
         )
       : distinctAuthors.map((pubkey) => newestOfAuthor(table, pubkey, undefined, since, until));
-    return { collections, ordered: true };
+    return { mode: 'newest', collections, limit };
   }
 
   if (distinctKinds.length && distinctKinds.length <= MAX_ORDERED_KINDS) {
     return {
+      mode: 'newest',
       collections: distinctKinds.map((kind) => newestOfKind(table, kind, since, until)),
-      ordered: true,
+      limit,
     };
   }
 
-  return { collections: [betweenCreatedAt(table, since, until).reverse()], ordered: true };
+  return {
+    mode: 'newest',
+    collections: [betweenCreatedAt(table, since, until).reverse()],
+    limit,
+  };
 }
 
 /**
@@ -243,8 +263,8 @@ export function planQuery(
  * key whose name is not a single letter, or whose values are not all non-empty
  * strings.
  *
- * Asked before the query, not only inside the row predicate: a descending plan
- * would otherwise walk its whole range to fill a `limit` that never can be.
+ * Asked once before the query rather than per row: a descending plan would
+ * otherwise walk its whole range to fill a `limit` that never can be.
  */
 export function rejectsEveryRow(filter: Filter): boolean {
   for (const [key, values] of Object.entries(filter)) {
@@ -264,12 +284,90 @@ export function rejectsEveryRow(filter: Filter): boolean {
 
 /**
  * Final per-row validation applied while the query's rows are read: the
- * conditions the index cannot express, plus the malformed tag filters no row can
- * satisfy.
+ * conditions the index cannot express.
+ *
+ * Runs on every row a descending plan *walks*, so it does not re-check
+ * {@link rejectsEveryRow} — `queryEvents` has already rejected such filters
+ * whole.
  */
 export function eventRowMatchesFilter(row: NostrEventTable, filter: Filter): boolean {
-  if (rejectsEveryRow(filter)) {
-    return false;
-  }
   return eventMatchesFilter(rowToEvent(row), filter);
+}
+
+/**
+ * Read the newest `limit` matching rows from a descending collection, plus
+ * everything tied with the last of them.
+ *
+ * The ties are why this is not `collection.filter(…).limit(limit)`: a descending
+ * walk puts equal timestamps in *descending primary key* order, while NIP-01
+ * breaks such a tie by the **lowest** id, so stopping at exactly `limit` rows can
+ * drop the row that should have been kept.
+ *
+ * Exported for its own test — the chain order below only costs speed when it is
+ * wrong, which no assertion about the returned rows can see.
+ *
+ * @param collection Must come from a {@link planQuery} plan in `newest` mode
+ * @param matches The filter's row predicate
+ */
+export async function readNewest(
+  collection: Dexie.Collection<NostrEventTable, string>,
+  matches: (row: NostrEventTable) => boolean,
+  limit: number
+): Promise<NostrEventTable[]> {
+  const rows: NostrEventTable[] = [];
+  /** `created_at` of the `limit`-th match; rows older than it are surplus. */
+  let boundary: number | undefined;
+
+  await collection
+    // `filter` より先に積む。Dexie の鎖は短絡評価なので、逆順だと一致しない行で
+    // 打ち切り判定が評価されず、次の一致行まで走査が伸びる
+    .until((row) => boundary !== undefined && row.created_at < boundary)
+    .filter(matches)
+    .each((row) => {
+      rows.push(row);
+      if (rows.length === limit) {
+        boundary = row.created_at;
+      }
+    });
+
+  return rows;
+}
+
+/**
+ * Answer one filter: plan it, read its rows, and truncate to NIP-01's `limit`.
+ *
+ * The truncation is always `capEvents` — Dexie's `Collection.limit()` takes the
+ * first N in *index* order, while NIP-01 asks for the newest N in descending
+ * order (the rule `SqliteStorage` and `maxEventsPerRequest` also follow).
+ *
+ * @param db The database owning `table`, for the read transaction a multi-cursor
+ *   plan needs
+ */
+export async function queryEvents(
+  db: Dexie,
+  table: Dexie.Table<NostrEventTable, string>,
+  filter: Filter
+): Promise<NostrEvent[]> {
+  if (rejectsEveryRow(filter)) {
+    return [];
+  }
+
+  const matches = (row: NostrEventTable) => eventRowMatchesFilter(row, filter);
+  const plan = planQuery(table, filter);
+
+  if (plan.mode === 'newest') {
+    // カーソルの間に書き込みが挟まると、1 つのフィルタの答えが別々の
+    // スナップショットから組み上がってしまう
+    const rows = await db.transaction('r', table, async () =>
+      (
+        await Promise.all(
+          plan.collections.map((collection) => readNewest(collection, matches, plan.limit))
+        )
+      ).flat()
+    );
+    return capEvents(rows.map(rowToEvent), plan.limit);
+  }
+
+  const events = (await plan.collection.filter(matches).toArray()).map(rowToEvent);
+  return plan.limit !== undefined ? capEvents(events, plan.limit) : events;
 }

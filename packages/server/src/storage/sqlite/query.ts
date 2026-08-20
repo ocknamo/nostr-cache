@@ -1,14 +1,10 @@
-import type { Filter } from '@nostr-cache/shared';
-import { type SQL, and, gte, inArray, lte } from 'drizzle-orm';
-import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
-import { events, eventTags } from './schema.js';
-
 /**
- * NIP-01 filter → Drizzle 条件式の変換（SQLite ストレージアダプタ用）。
+ * How a filter is answered from the SQLite tables.
  *
- * Dexie 実装（cache-relay の `dexie/query-builder.ts`）と同じ二段構え:
- * SQL（インデックス）は候補を「絞る」だけで、最終判定は共通の
- * `filterUtils.eventMatchesFilter` が完全なイベントに対して行う。
+ * 1 つのフィルタの読み方（絞り込み条件・並び・切り詰め）はすべてこのモジュールが
+ * 持ち、`SqliteStorage` は接続を渡して結果を統合するだけ。cache-relay の
+ * `dexie/query.ts` と同じ二段構えで、SQL（インデックス）は候補を「絞る」だけ、
+ * 最終判定は共通の `filterUtils.eventMatchesFilter` が完全なイベントに対して行う。
  * したがってここで押し込む条件は「取りこぼしを生まない」ものに限る。
  *
  * 特にタグ条件（`#e` / `#p` …）は、タグ主導の分岐（ids / authors / kinds が
@@ -19,6 +15,12 @@ import { events, eventTags } from './schema.js';
  * これは Dexie 実装と同一の設計判断。
  */
 
+import { filterUtils } from '@nostr-cache/cache-relay';
+import type { Filter, NostrEvent } from '@nostr-cache/shared';
+import { type SQL, and, asc, desc, gte, inArray, lte } from 'drizzle-orm';
+import type { NodeSQLiteDatabase } from 'drizzle-orm/node-sqlite';
+import { events, type EventRow, eventTags, rowToEvent } from './schema.js';
+
 /**
  * 単一の IN 句に押し込むパラメータ数の上限。超える場合はその条件を SQL に
  * 押し込まず、最終の JS 判定に委ねる（結果は正しいまま、絞り込みだけ粗くなる）。
@@ -27,7 +29,7 @@ import { events, eventTags } from './schema.js';
 const MAX_IN_PARAMS = 500;
 
 /** Built narrowing condition for a single filter. */
-export interface BuiltFilterQuery {
+interface BuiltFilterQuery {
   /** WHERE 条件（絞り込み条件が無い場合は undefined = 全件走査） */
   where: SQL | undefined;
   /**
@@ -45,7 +47,7 @@ export interface BuiltFilterQuery {
  * `#x` のタグ名が単一英字でない、値が配列でない、または空・非文字列の値を
  * 含むフィルタは何にもマッチしない（結果は空）。
  */
-export function hasInvalidTagFilter(filter: Filter): boolean {
+function hasInvalidTagFilter(filter: Filter): boolean {
   for (const [key, values] of Object.entries(filter)) {
     if (!key.startsWith('#')) continue;
     const tagName = key.slice(1);
@@ -68,7 +70,7 @@ export function hasInvalidTagFilter(filter: Filter): boolean {
  * `created_at <= until`（since / until は truthy のときのみ —
  * `eventMatchesFilter` の `filter.since &&` と同じ挙動）。
  */
-export function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltFilterQuery {
+function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltFilterQuery {
   const { ids, authors, kinds, since, until, ...rest } = filter;
   const conditions: SQL[] = [];
 
@@ -134,4 +136,39 @@ export function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltF
     where: conditions.length > 0 ? and(...conditions) : undefined,
     complete: !narrowingIncomplete,
   };
+}
+
+/**
+ * Answer one filter: narrow in SQL, validate in JS, truncate to NIP-01's
+ * `limit`.
+ *
+ * 切り詰めは「新しい順」（`capEvents` と同じ規則、id は決定性のためのタイブレーク）。
+ * SQL 段階の LIMIT は Stage B の絞り込みが最終判定と完全等価な場合のみで、
+ * そうでなければ Stage C の後に切り詰める。
+ */
+export function queryEvents(db: NodeSQLiteDatabase, filter: Filter): NostrEvent[] {
+  // Stage A: 不正なタグ条件を持つフィルタは何にもマッチしない
+  if (hasInvalidTagFilter(filter)) {
+    return [];
+  }
+
+  // Stage B: インデックスで候補を絞る
+  const { where, complete } = buildFilterQuery(db, filter);
+  let query = db.select().from(events).where(where).$dynamic();
+  // 非負整数へ正規化する（SQLite の LIMIT は小数を受け付けずクエリ全体が失敗するため、
+  // クライアントから `limit: 1.5` が来ただけで空応答になってしまう）。Dexie 実装も同じ正規化
+  const limit = filterUtils.normalizeLimit(filter.limit);
+  if (limit !== undefined) {
+    query = query.orderBy(desc(events.createdAt), asc(events.id));
+    if (complete) {
+      query = query.limit(limit);
+    }
+  }
+  const rows: EventRow[] = query.all();
+
+  // Stage C: 完全なイベントに対する最終判定（Dexie と同じ共通実装）
+  const matched = rows
+    .map(rowToEvent)
+    .filter((event) => filterUtils.eventMatchesFilter(event, filter));
+  return limit !== undefined ? matched.slice(0, limit) : matched;
 }
