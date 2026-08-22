@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_AUTHOR_LABEL } from './event-actions.ts';
+import { DEFAULT_AUTHOR_LABEL, DEFAULT_NOTE_LABEL } from './event-actions.ts';
 import { MAX_REACTIONS } from './reactions.ts';
 import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 import {
@@ -398,6 +398,16 @@ describe('configFromSearchParams', () => {
     expect(configFromSearchParams(new URLSearchParams()).authorAction).toBeUndefined();
   });
 
+  it('reads the quoted-note press out of the query string', () => {
+    expect(
+      configFromSearchParams(
+        new URLSearchParams({ 'note-action': 'open-post', 'note-action-label': '投稿へ' })
+      ).noteAction
+    ).toEqual({ id: 'open-post', label: '投稿へ' });
+    // Absent leaves the quote cards the plain frames they were.
+    expect(configFromSearchParams(new URLSearchParams()).noteAction).toBeUndefined();
+  });
+
   it('reads the filters JSON out of the query string', () => {
     const config = configFromSearchParams(
       new URLSearchParams({ filters: '[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]' })
@@ -623,6 +633,12 @@ describe('followConfigFromSearchParams', () => {
       followConfigFromSearchParams(new URLSearchParams({ 'author-action': 'open-profile' }))
         .authorAction
     ).toEqual({ id: 'open-profile', label: DEFAULT_AUTHOR_LABEL });
+  });
+
+  it('reads the quoted-note press, as the timeline reader does', () => {
+    expect(
+      followConfigFromSearchParams(new URLSearchParams({ 'note-action': 'open-post' })).noteAction
+    ).toEqual({ id: 'open-post', label: DEFAULT_NOTE_LABEL });
   });
 
   it('does not accept the deprecated show-origin alias', () => {

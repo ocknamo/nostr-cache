@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { type EntityPart, parseContent } from '../lib/content-parts.ts';
 import type { EmbeddedEvent } from '../lib/note-embeds.ts';
@@ -262,6 +262,90 @@ describe('EmbeddedNote', () => {
 
     expect(container.querySelectorAll('.quote')).toHaveLength(1);
     expect(container.querySelector('.content')).toHaveTextContent('outer note14242…q9y6');
+  });
+
+  it('leaves the quote unpressable until a note action is declared', () => {
+    const { container } = render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: ready(NOTE_HEX, 'quoted body'),
+      },
+    });
+
+    expect(container.querySelector('.open')).toBeNull();
+  });
+
+  it('reports a press on the quote with the quoted event', async () => {
+    const onAction = vi.fn();
+    render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: ready(NOTE_HEX, 'quoted body'),
+        validationStatuses: new Map([[NOTE_HEX, 'validated' as const]]),
+        noteAction: { id: 'open-post', label: '投稿を開く' },
+        onAction,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: /投稿を開く/ }));
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    const [action, context] = onAction.mock.calls[0];
+    expect(action).toEqual({ id: 'open-post', label: '投稿を開く' });
+    // The quoted post, not the note quoting it: that is what the press opens.
+    expect(context.event.id).toBe(NOTE_HEX);
+    expect(context.status).toBe('validated');
+  });
+
+  it('covers the whole frame with the press, so the card itself is the target', () => {
+    const { container } = render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: ready(NOTE_HEX, 'quoted body'),
+        noteAction: { id: 'open-post', label: '投稿を開く' },
+      },
+    });
+
+    // The press is a child of the frame it opens, laid over it — not a button
+    // added under the body.
+    const quote = container.querySelector('.quote');
+    const open = quote?.querySelector('.open');
+    expect(open).not.toBeNull();
+    expect(open?.textContent?.trim()).toBe('');
+  });
+
+  it('offers the press on a nested quote too', () => {
+    const { container } = render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: new Map([
+          ...ready(NOTE_HEX, `outer nostr:${OTHER_NOTE}`),
+          ...ready(OTHER_NOTE_HEX, 'inner'),
+        ]),
+        noteAction: { id: 'open-post', label: '投稿を開く' },
+      },
+    });
+
+    expect(container.querySelectorAll('.open')).toHaveLength(2);
+  });
+
+  it('names the quoted author in the accessible name of the press', () => {
+    const event = makeEvent({ id: NOTE_HEX, pubkey: 'f'.repeat(64), content: 'quoted' });
+    render(EmbeddedNote, {
+      props: {
+        entity: entityOf(`nostr:${NOTE}`),
+        depth: 1,
+        embeds: new Map<string, EmbeddedEvent>([[NOTE_HEX, { status: 'ready', event }]]),
+        profiles: new Map<string, Profile>([['f'.repeat(64), { displayName: 'たけし' }]]),
+        noteAction: { id: 'open-post', label: '投稿を開く' },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: '投稿を開く: たけし' })).toBeInTheDocument();
   });
 
   it('renders a chip for a reference that names a person', () => {

@@ -130,6 +130,27 @@ export interface AuthorAction {
 export const DEFAULT_AUTHOR_LABEL = 'プロフィールを開く';
 
 /**
+ * A quoted note's card as a press target, on the same contract as
+ * {@link AuthorAction}.
+ *
+ * It exists because a quote is the one post the widget draws with no way out of
+ * its own: a card carries the embedder's action bar, and the post a reader
+ * opened is where they already are. A press carries no `pubkey` — what was
+ * pressed is a post, not a person.
+ */
+export interface NoteAction {
+  id: string;
+  /** The accessible name of the press; the quoted author's name is appended. */
+  label: string;
+}
+
+/**
+ * Shown when `note-action-label` is not set — see {@link DEFAULT_AUTHOR_LABEL}
+ * for why there is a default at all.
+ */
+export const DEFAULT_NOTE_LABEL = '投稿を開く';
+
+/**
  * Cap on buttons per card. Not a tuning knob — the bar is one row that has to
  * survive a narrow embed, and a list long enough to wrap is a mistake rather
  * than a design.
@@ -265,13 +286,18 @@ export function normalizeActions(value: unknown): EventAction[] {
 }
 
 /**
- * Read the author press out of the two attributes that declare it.
+ * Read a press target out of the two attributes that declare it.
  *
  * Only the id is required: it is what a listener switches on, and without it
  * there is nothing to report. The label has a default because a press target
  * cannot go unnamed — see {@link DEFAULT_AUTHOR_LABEL}.
  */
-export function normalizeAuthorAction(id: unknown, label?: unknown): AuthorAction | undefined {
+function normalizePressAction(
+  attribute: string,
+  fallback: string,
+  id: unknown,
+  label: unknown
+): { id: string; label: string } | undefined {
   if (id === undefined || id === null || (typeof id === 'string' && id.trim() === '')) {
     // Silently: an absent attribute is the default, not a mistake — it is every
     // embed written before this existed.
@@ -280,13 +306,21 @@ export function normalizeAuthorAction(id: unknown, label?: unknown): AuthorActio
   if (typeof id !== 'string') {
     // Anything else is a property set from JS with the wrong type, which would
     // otherwise take the press away without saying so.
-    console.warn(
-      `[nostr-timeline] Ignoring author-action: expected a string id, got ${typeof id}.`
-    );
+    console.warn(`[nostr-timeline] Ignoring ${attribute}: expected a string id, got ${typeof id}.`);
     return undefined;
   }
   const name = typeof label === 'string' && label.trim() !== '' ? label.trim() : undefined;
-  return { id: id.trim(), label: name ?? DEFAULT_AUTHOR_LABEL };
+  return { id: id.trim(), label: name ?? fallback };
+}
+
+/** The author press, from `author-action` / `author-action-label`. */
+export function normalizeAuthorAction(id: unknown, label?: unknown): AuthorAction | undefined {
+  return normalizePressAction('author-action', DEFAULT_AUTHOR_LABEL, id, label);
+}
+
+/** The quoted-note press, from `note-action` / `note-action-label`. */
+export function normalizeNoteAction(id: unknown, label?: unknown): NoteAction | undefined {
+  return normalizePressAction('note-action', DEFAULT_NOTE_LABEL, id, label);
 }
 
 /**

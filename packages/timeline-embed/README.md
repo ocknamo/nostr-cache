@@ -32,6 +32,9 @@
 - `author-action` を指定すると**アイコンと表示名が押せるようになり**、押された著者の
   `pubkey` が `nostr-timeline:action` で通知されます（プロフィール画面への導線用・
   [下記](#著者アイコン表示名の押下)）
+- `note-action` を指定すると**引用カード全体が押せるようになり**、引用先の投稿が
+  `nostr-timeline:action` で通知されます（投稿詳細画面への導線用・
+  [下記](#引用カードから投稿を開く)）
 - フォローリスト（kind 3）も replaceable として同じキャッシュに載り、鮮度ウィンドウ
   （既定 1 時間・`follows-freshness` で変更可）が効くため、`<nostr-follow-timeline>` の
   2 回目以降のロードは**上流に問い合わせずフォローリストがキャッシュから即座に出ます**
@@ -178,6 +181,8 @@ npm パッケージを入れられない構成のための入口です。
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 | `author-action` | 指定するとアイコン・表示名が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する（[下記](#著者アイコン表示名の押下)） | なし（押せない・従来どおり） |
 | `author-action-label` | その押下の説明（アクセシブル名）。`author-action` が無いときは効きません | `プロフィールを開く` |
+| `note-action` | 指定すると本文中の**引用カード全体**が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する。`detail.event` は**引用先の投稿**（[下記](#引用カードから投稿を開く)） | なし（押せない・従来どおり） |
+| `note-action-label` | その押下の説明（アクセシブル名）。`note-action` が無いときは効きません | `投稿を開く` |
 | `material-icons` | ボタンのアイコンを [Material Symbols](https://fonts.google.com/icons) で描画する。`outlined` / `rounded` / `sharp`（値なしは `outlined`） | なし（`icon` は文字そのまま） |
 | `material-icons-font` | `none` で Google Fonts の読み込みを止める（埋め込み先ページが自前で読み込む場合） | `google`（Google Fonts から読み込む） |
 
@@ -287,7 +292,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `3600`（1 時間） |
-| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `author-action` / `author-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -523,6 +528,8 @@ level 3  …
 | `actions` | ボタン定義の JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし |
 | `author-action` | アイコン・表示名を押せるようにし、押下をこの ID で通知する。**投稿本体だけでなく返信ツリーの各返信にも効きます**（[下記](#著者アイコン表示名の押下)） | なし |
 | `author-action-label` | その押下の説明（アクセシブル名） | `プロフィールを開く` |
+| `note-action` | 本文中の引用カード全体を押せるようにし、押下をこの ID で通知する。**投稿本体だけでなく返信ツリーの各返信にも効きます**（[下記](#引用カードから投稿を開く)） | なし |
+| `note-action-label` | その押下の説明（アクセシブル名） | `投稿を開く` |
 | `material-icons` | アイコンを Material Symbols で描画（`outlined` / `rounded` / `sharp`） | オフ |
 | `material-icons-font` | `none` でフォントを読み込まない | `google` |
 
@@ -684,8 +691,9 @@ nostr-timeline {
   --nt-ref-avatar-size: 16px;   /* 「返信先」プレビューのアイコン */
   --nt-ref-avatar-radius: 999px;
   --nt-focus: #1d9bf0;          /* フォーカスリング（返信先チップ・著者の押下など） */
-  --nt-tip-bg: #0f1419;         /* 日付ツールチップの背景 */
-  --nt-tip-fg: #ffffff;         /* 日付ツールチップの文字色 */
+  --nt-tip-bg: #161b22;         /* 日付ツールチップの背景。既定は #fff */
+  --nt-tip-fg: #e6edf3;         /* 日付ツールチップの文字色。既定は #0f1419 */
+  --nt-tip-border: #30363d;     /* ツールチップの枠線。既定は --nt-border */
   --nt-list-padding-top: 16px;  /* リスト先頭の余白 */
   /* --nt-tip-clearance: 48px;     旧称。指定があればそのまま余白として効きます */
   --nt-unverified-opacity: 0.6; /* 署名未検証カードの不透明度。1 で区別しない */
@@ -729,6 +737,7 @@ nostr-timeline {
   --nt-quote-avatar-size: 20px; /* ヘッダー行のアイコン。親カードの --nt-avatar-size とは別 */
   --nt-quote-avatar-radius: 999px;
   --nt-embed-gap: 8px;          /* 本文と引用カードの間隔、引用カード同士の間隔 */
+  --nt-quote-hover-bg: rgb(255 255 255 / 6%); /* note-action 指定時、引用カードのホバー。既定は rgb(15 20 25 / 4%) */
 }
 ```
 
@@ -736,7 +745,10 @@ nostr-timeline {
 省いた日付は時刻をホバー、またはタップすると**ツールチップ**で表示されます
 （キーボードでも開けます。Esc で閉じます）。`<time datetime>` には ISO 8601 の
 完全な日時が入っているので、機械可読な値はそのまま取得できます。ツールチップは
-時刻の上に開きますが、**先頭カードだけは下向きに開きます**（上に開く場所が無いため）。
+カードと同じ**白系の背景**（枠線と影で浮かせています。以前は暗い背景だったので、
+`--nt-tip-bg` / `--nt-tip-fg` を指定していない暗いテーマの埋め込みは見え方が変わります）で、
+時刻の上に開きますが、
+**先頭カードだけは下向きに開きます**（上に開く場所が無いため）。
 上部の余白は `--nt-list-padding-top`（既定 16px）で調整します（旧称
 `--nt-tip-clearance` も引き続き読みます）。
 
@@ -843,6 +855,8 @@ nostr-timeline {
 - 追加の取得を一切させたくない場合は `show-embeds="false"` を指定してください
   （[返信先のプレビュー](#返信先のプレビュー)も止まります）。
 - 入れ子カードは `::part(quote)` で公開しています（取得中のプレースホルダも同じ part です）。
+- **引用先の投稿を開く導線は既定では出ません。** `note-action` を指定すると引用カード全体が
+  押せるようになります（[下記](#引用カードから投稿を開く)）。
 
 **引用先は埋め込む側が選んでいない第三者の投稿です。** `filters` / `authors` で絞り込んでいても、
 その投稿が引用しているのは任意の著者の投稿で、その本文に含まれる画像・動画は
@@ -1065,6 +1079,58 @@ window.addEventListener('message', (event) => {
   （例: `nostr-timeline::part(author):hover { color: #1d9bf0 }`）。
 - 既定では下線を出さず、ホバー・フォーカス時に表示名だけに下線を引きます
   （フォーカスリングは `--nt-focus`）。
+
+## 引用カードから投稿を開く
+
+本文中に展開された**引用カード**（`nostr:` 参照の入れ子カード）を、**カードごと押せる**
+ようにできます。押下は著者の押下と同じ `nostr-timeline:action` で通知され、`detail.event`
+には**引用先の投稿**が載ります。埋め込み先の投稿詳細画面へ送る導線を、埋め込む側で作るための
+ものです。
+
+引用カードだけが対象なのは、**そこだけが行き場を持たないから**です。タイムラインのカードに
+`actions` の行があり、`<nostr-post>` に出ている投稿は読者がいま開いている投稿そのものですが、
+本文の中で引用されている投稿は「画面には出ているが、そこから先へ行けない他人の投稿」でした。
+
+```html
+<nostr-timeline
+  relays="wss://nos.lol"
+  note-action="open-post"
+  note-action-label="この投稿を開く"
+></nostr-timeline>
+
+<script>
+  document.querySelector('nostr-timeline').addEventListener('nostr-timeline:action', (e) => {
+    if (e.detail.actionId !== 'open-post') return;
+    // e.detail = { actionId, event, status } — event は引用先の投稿
+    location.hash = `#/post/${e.detail.event.id}`;
+  });
+</script>
+```
+
+- **ウィジェットは自分では遷移しません**（`author-action` と同じ理由です。リンクにしない
+  理由は[そちら](#著者アイコン表示名の押下)を参照）。
+- **ID は埋め込む側が決めます。** `actions` のボタンや `author-action` と同じ ID は
+  避けてください（受け取る側が区別できなくなります）。`author-action` の押下と違い、
+  こちらは `detail.pubkey` を**持ちません** — 押されたのは人ではなく投稿です。
+- 押下対象は**カードの枠いっぱい**です（枠に重ねた透明なボタン 1 つ）。カードには何も
+  足さず、ホバーで薄く色が付くだけです（`--nt-quote-hover-bg`）。アクセシブル名は
+  `投稿を開く: たけし` のように引用先の著者名が続きます（1 つの本文に引用が複数あるとき、
+  同じ名前の押下対象が並ばないようにするため）。
+- **引用カードのヘッダの `title` は読めなくなります**（引用先著者の pubkey と完全な日時。
+  枠全体が押下対象になり、ポインタが下の要素に届かないため）。`datetime` 属性は
+  そのままなので、機械可読な値は変わりません。
+- **カードの中で元から押せたものは、そのまま押せます**（本文中のリンク、動画・音声の
+  コントロール、入れ子の引用カード自身の押下）。押下対象より上に出しているためです。
+  入れ子の引用を押すと、外側ではなく**その引用先**が通知されます。
+- **引用カードの本文は選択できなくなります**（枠全体が押下対象になるため）。
+  カード外の本文の選択には影響しません。
+- `<nostr-post>` では**投稿本体と返信ツリーの各返信の両方**の本文に効きます
+  （`author-action` と同じ扱いです）。
+- Shadow part は `::part(quote-open)`（枠に重ねた押下対象そのもの）。フォーカスリングは
+  `--nt-focus`、ホバーの色は `--nt-quote-hover-bg` です。
+- iframe 埋め込みでも同じで、クエリパラメータ（`&note-action=open-post`）で宣言し、
+  押下は `postMessage` で戻ります。
+- `show-embeds="false"` のときは引用カード自体が出ないので、この押下も出ません。
 
 ## 制約
 

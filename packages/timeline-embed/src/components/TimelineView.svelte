@@ -13,7 +13,12 @@
    * reconnect banners beside them.
    */
 
-  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type {
+    AuthorAction,
+    EventAction,
+    EventActionContext,
+    NoteAction,
+  } from '../lib/event-actions.ts';
   import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { EmbedTarget } from '../lib/note-embeds.ts';
   import type { TimelineState } from '../lib/timeline-controller.ts';
@@ -29,8 +34,13 @@
     actions?: EventAction[];
     /** Makes the author's avatar and name pressable on every card. */
     authorAction?: AuthorAction;
+    /** Makes the quote cards in every card's body pressable, under this id. */
+    noteAction?: NoteAction;
     /** Called on a press, after the action's own `onSelect`. */
-    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
+    onAction?: (
+      action: EventAction | AuthorAction | NoteAction,
+      context: EventActionContext
+    ) => void;
     /** Render action icons as Material Symbols ligatures of this variant. */
     materialIcons?: MaterialVariant;
     /**
@@ -57,6 +67,7 @@
     showEmbeds = true,
     actions = [],
     authorAction,
+    noteAction,
     onAction,
     materialIcons,
     debug = false,
@@ -133,6 +144,7 @@
         {showEmbeds}
         {actions}
         {authorAction}
+        {noteAction}
         {onAction}
         {materialIcons}
         {onAuthorVisible}

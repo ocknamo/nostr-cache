@@ -16,6 +16,7 @@
    */
 
   import { type EntityPart, embedKey, parseContent } from '../lib/content-parts.ts';
+  import type { EventActionContext, NoteAction } from '../lib/event-actions.ts';
   import {
     type EmbedTarget,
     type EmbeddedEvent,
@@ -58,6 +59,14 @@
      * can resolve, so the reference is left as the chip it was.
      */
     onEmbedRequest?: (target: EmbedTarget) => void;
+    /**
+     * Makes this card a press target, under this id. Undefined leaves it the
+     * plain frame it has always been — the widget does not know where the
+     * embedding page's post screen is.
+     */
+    noteAction?: NoteAction;
+    /** Called on that press, with the quoted event as the context. */
+    onAction?: (action: NoteAction, context: EventActionContext) => void;
   }
 
   const {
@@ -70,6 +79,8 @@
     showMedia = true,
     ancestorUnverified = false,
     onEmbedRequest,
+    noteAction,
+    onAction,
   }: Props = $props();
 
   const target = $derived(embedTarget(entity.entity));
@@ -130,10 +141,43 @@
     requested = true;
     onEmbedRequest(target);
   }
+
+  function openPost(): void {
+    if (!noteAction || !event) {
+      return;
+    }
+    // A snapshot for the same reason the card's own press takes one: what is
+    // handed out must not be the widget's reactive proxy — see `select` in
+    // `EventCard.svelte`.
+    onAction?.(noteAction, {
+      event: $state.snapshot(event),
+      status: validationStatuses?.get(event.id),
+    });
+  }
 </script>
 
 {#if event && createdAt}
-  <article class="quote" class:unverified={fade} part="quote" use:whenVisible={request}>
+  <article
+    class="quote"
+    class:unverified={fade}
+    class:pressable={Boolean(noteAction)}
+    part="quote"
+    use:whenVisible={request}
+  >
+    {#if noteAction}
+      <!-- The whole frame, not a button of its own: a quoted post reads as one
+           thing. First, so a keyboard reader is offered the card before its
+           contents — it covers them either way, since a positioned element
+           paints over text. The author is in the accessible name because one
+           body may hold several quotes. -->
+      <button
+        type="button"
+        class="open"
+        part="quote-open"
+        aria-label={`${noteAction.label}: ${name}`}
+        onclick={openPost}
+      ></button>
+    {/if}
     <header class="quote-header">
       {#if showAvatar}
         <Avatar pubkey={event.pubkey} {profile} {name} />
@@ -146,7 +190,9 @@
       </span>
       <!-- Not the tooltip button the timeline card carries: a quote can be five
            deep, and five nested popovers inside one scrolling note is more
-           chrome than the date is worth. The full date stays in the `title`. -->
+           chrome than the date is worth. The full date stays in the `title` —
+           out of reach of the pointer while `noteAction` covers the frame,
+           which is the trade the embedder makes by asking for the press. -->
       <time class="time" datetime={createdAt.toISOString()} title={createdAt.toLocaleString()}>
         {formatTime(createdAt)}
       </time>
@@ -173,6 +219,8 @@
               {showMedia}
               ancestorUnverified={ancestorUnverified || unverified}
               {onEmbedRequest}
+              {noteAction}
+              {onAction}
             />
           </div>
         {/if}
@@ -193,6 +241,8 @@
     /* Column, not the card's grid: the avatar lives in the header row and the
        body below it starts at the frame's edge — see the docblock above. */
     display: flex;
+    /* What `.open` is inset against. */
+    position: relative;
     flex-direction: column;
     box-sizing: border-box;
     border: 1px solid var(--nt-quote-border, var(--nt-border, #e1e8ed));
@@ -274,6 +324,45 @@
     font-size: 0.8em;
     white-space: nowrap;
     flex: none;
+  }
+
+  /* The press target, covering the frame it belongs to. Transparent until it is
+     hovered: the card is the affordance, and a tint under the pointer is the
+     cue. */
+  .open {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .open:hover {
+    background: var(--nt-quote-hover-bg, rgb(15 20 25 / 4%));
+  }
+
+  /* Inside the frame, which the overlay matches exactly — a ring outside it
+     would sit on the quoting note's own text. */
+  .open:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: -2px;
+  }
+
+  /* Above the overlay, so what a reader could already act on keeps working: a
+     link, a video's controls, and a nested quote's own press. Each nested card
+     is then its own stacking context, so its overlay covers exactly its own
+     frame. Scoped to a pressable card, because a z-index is not free: it also
+     orders these against the card's date tooltip. */
+  .pressable > .quote-body > .embed,
+  .pressable > .quote-body :global(a),
+  .pressable > .quote-body :global(video),
+  .pressable > .quote-body :global(audio) {
+    position: relative;
+    z-index: 1;
   }
 
   /* Reads as the mention chip in NoteContent, because that is what it is: the

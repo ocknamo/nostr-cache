@@ -150,6 +150,39 @@
     `<script src="${embedOrigin}nostr-timeline.js"><\/script>\n\n<nostr-post\n  event-id="${postEventId || 'note1...'}"\n  relays="${relays}"\n  material-icons="${MATERIAL_VARIANT}"\n  actions='${actionsSnippet}'\n></nostr-post>`
   );
 
+  /**
+   * The id a press on a quote card asks for, and where to take the reader.
+   *
+   * The one press this page acts on: it is the only one whose destination the
+   * demo actually has — its own `<nostr-post>`, further down this panel.
+   */
+  const OPEN_POST_ACTION = 'open-post';
+
+  let timelineElement = $state<HTMLElement | undefined>(undefined);
+  /** The detail below, which answers the same press: a quote can quote a quote. */
+  let postElement = $state<HTMLElement | undefined>(undefined);
+  let postHeading = $state<HTMLElement | undefined>(undefined);
+
+  $effect(() => {
+    const elements = [timelineElement, postElement];
+    const onPress = (press: Event) => {
+      const detail = (press as CustomEvent<{ actionId: string; event: { id: string } }>).detail;
+      if (detail?.actionId !== OPEN_POST_ACTION) {
+        return;
+      }
+      postEventId = detail.event.id;
+      postHeading?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    for (const element of elements) {
+      element?.addEventListener('nostr-timeline:action', onPress);
+    }
+    return () => {
+      for (const element of elements) {
+        element?.removeEventListener('nostr-timeline:action', onPress);
+      }
+    };
+  });
+
   /** Bounds on the height the embed page may ask for. */
   const MIN_IFRAME_HEIGHT = 160;
   const MAX_IFRAME_HEIGHT = 800;
@@ -223,6 +256,14 @@
     — 押下は <code>nostr-timeline:action</code> イベント（iframe なら
     <code>postMessage</code>）で通知されるだけで、このページはそれを使っていません。
   </p>
+  <p class="panel-note">
+    例外は、本文中に展開された<strong>引用カード</strong>です。引用カードにはアクションの行が無く、
+    そこから投稿へ行く手段が他にありませんでした。<code>note-action</code> を指定すると
+    <strong>カード全体が押せるようになり</strong>（下の Web Component 側だけ指定しています）、
+    押すと同じ <code>nostr-timeline:action</code> が飛びます。<strong>このページはそれを拾って</strong>
+    下の「投稿詳細」に引用先のイベント ID を流し込みます — 遷移先を決めるのは
+    埋め込む側だ、という導線の実例です。
+  </p>
 
   <div class="modes">
     <div class="mode">
@@ -257,12 +298,15 @@
              the explicit string is also what turns the flag back off when the
              form's checkbox is cleared. -->
         <nostr-timeline
+          bind:this={timelineElement}
           {relays}
           {kinds}
           {limit}
           db-name={dbName}
           profile-freshness={profileFreshness}
           actions={actionsJson}
+          note-action={OPEN_POST_ACTION}
+          note-action-label="この投稿の詳細を見る"
           material-icons={MATERIAL_VARIANT}
           debug={debug ? 'true' : 'false'}
         ></nostr-timeline>
@@ -326,7 +370,7 @@
     のような URL が「<code>filters</code> が黙って無視される」形で通ってしまいます。
   </p>
 
-  <h3 class="section-heading">投稿詳細</h3>
+  <h3 class="section-heading" bind:this={postHeading}>投稿詳細</h3>
   <p class="mode-note">
     <code>&lt;nostr-post&gt;</code> は投稿を 1 つだけ主役として表示します。本文とアクションボタンは
     タイムラインのカードと<strong>まったく同じ実装</strong>で、そこに
@@ -353,11 +397,14 @@
   {#if postEventIdReady}
     <div class="live">
       <nostr-post
+        bind:this={postElement}
         event-id={postEventId.trim()}
         {relays}
         db-name={dbName}
         profile-freshness={profileFreshness}
         actions={actionsJson}
+        note-action={OPEN_POST_ACTION}
+        note-action-label="この投稿の詳細を見る"
         material-icons={MATERIAL_VARIANT}
         debug={debug ? 'true' : 'false'}
       ></nostr-post>

@@ -12,8 +12,10 @@ import type { Filter } from '@nostr-cache/shared';
 import {
   type AuthorAction,
   type EventAction,
+  type NoteAction,
   normalizeActions,
   normalizeAuthorAction,
+  normalizeNoteAction,
 } from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 import { type MaterialVariant, parseMaterialVariant } from './material-symbols.ts';
@@ -441,6 +443,11 @@ export function configFromSearchParams(params: URLSearchParams): {
    * `undefined` leaves the avatar and the name plain.
    */
   authorAction: AuthorAction | undefined;
+  /**
+   * Makes the quote cards in a body pressable, under the embedder's own id.
+   * `undefined` leaves them the plain frames they are.
+   */
+  noteAction: NoteAction | undefined;
   /** Material Symbols variant for the action icons, if asked for. */
   materialIcons: MaterialVariant | undefined;
   /** `none` when the embedding page loads the icon font itself. */
@@ -467,6 +474,7 @@ export function configFromSearchParams(params: URLSearchParams): {
       params.get('author-action'),
       params.get('author-action-label')
     ),
+    noteAction: normalizeNoteAction(params.get('note-action'), params.get('note-action-label')),
     materialIcons: parseMaterialVariant(params.get('material-icons')),
     materialIconsFont: params.get('material-icons-font') ?? undefined,
   };
@@ -498,6 +506,8 @@ export interface FollowTimelineConfig {
   actions: EventAction[];
   /** The author press; see {@link configFromSearchParams}. */
   authorAction: AuthorAction | undefined;
+  /** The quoted-note press; see {@link configFromSearchParams}. */
+  noteAction: NoteAction | undefined;
   /** Material Symbols variant for the action icons, if asked for. */
   materialIcons: MaterialVariant | undefined;
   /** `none` when the embedding page loads the icon font itself. */
@@ -534,6 +544,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
       params.get('author-action'),
       params.get('author-action-label')
     ),
+    noteAction: normalizeNoteAction(params.get('note-action'), params.get('note-action-label')),
     materialIcons: parseMaterialVariant(params.get('material-icons')),
     materialIconsFont: params.get('material-icons-font') ?? undefined,
   };

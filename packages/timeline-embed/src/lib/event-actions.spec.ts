@@ -4,12 +4,14 @@ import { makeEvent } from '../test-fixtures.ts';
 import {
   ACTION_EVENT,
   DEFAULT_AUTHOR_LABEL,
+  DEFAULT_NOTE_LABEL,
   type EventAction,
   type EventActionDetail,
   MAX_ACTIONS,
   dispatchActionEvent,
   normalizeActions,
   normalizeAuthorAction,
+  normalizeNoteAction,
 } from './event-actions.ts';
 
 describe('normalizeActions', () => {
@@ -172,6 +174,35 @@ describe('normalizeAuthorAction', () => {
       expect(normalizeAuthorAction(id, 'プロフィール')).toBeUndefined();
     }
     expect(warn).toHaveBeenCalledTimes(3);
+
+    warn.mockRestore();
+  });
+});
+
+describe('normalizeNoteAction', () => {
+  it('reads the id and the label the embedder chose', () => {
+    expect(normalizeNoteAction(' open-post ', ' 投稿へ ')).toEqual({
+      id: 'open-post',
+      label: '投稿へ',
+    });
+  });
+
+  it('names the press when the embedder did not', () => {
+    expect(normalizeNoteAction('open-post')).toEqual({
+      id: 'open-post',
+      label: DEFAULT_NOTE_LABEL,
+    });
+  });
+
+  it('asks for nothing without an id, and says so for an unusable one', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(normalizeNoteAction(undefined)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+
+    expect(normalizeNoteAction(42)).toBeUndefined();
+    // Named after the attribute that declared it, not the author one.
+    expect(warn.mock.calls[0][0]).toContain('note-action');
 
     warn.mockRestore();
   });

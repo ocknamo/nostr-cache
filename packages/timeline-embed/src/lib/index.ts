@@ -38,16 +38,19 @@ export type { PreviewOptions } from './content-preview.ts';
 export {
   ACTION_EVENT,
   DEFAULT_AUTHOR_LABEL,
+  DEFAULT_NOTE_LABEL,
   MAX_ACTIONS,
   dispatchActionEvent,
   normalizeActions,
   normalizeAuthorAction,
+  normalizeNoteAction,
 } from './event-actions.ts';
 export type {
   AuthorAction,
   EventAction,
   EventActionContext,
   EventActionDetail,
+  NoteAction,
 } from './event-actions.ts';
 export { parseRefs, replyParentAddress, replyParentId } from './event-refs.ts';
 export type { EventRef, EventRefKind } from './event-refs.ts';

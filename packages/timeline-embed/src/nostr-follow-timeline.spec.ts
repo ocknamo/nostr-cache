@@ -19,6 +19,9 @@ function hex(seed: number): string {
 
 const SUBJECT = hex(0xaa);
 const FRIEND = hex(0x01);
+/** A quotable event, and the NIP-19 spelling a body would reference it by. */
+const QUOTED_NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
+const QUOTED_ID = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
 
 /**
  * The element's own contract: it resolves its authors from a kind 3 before it
@@ -233,6 +236,40 @@ describe('<nostr-follow-timeline> custom element', () => {
     expect(presses).toHaveLength(1);
     expect(presses[0].actionId).toBe('open-profile');
     expect(presses[0].pubkey).toBe(FRIEND);
+  });
+
+  it('raises the same event for a quote press, carrying the quoted post', async () => {
+    const dbName = `follow-${crypto.randomUUID()}`;
+    const quoted = makeEvent({ id: QUOTED_ID, pubkey: FRIEND, content: '引用された投稿' });
+    await seedCache(dbName, [
+      followList([FRIEND]),
+      quoted,
+      makeEvent({
+        id: `post-${crypto.randomUUID()}`,
+        pubkey: FRIEND,
+        content: `引用する nostr:${QUOTED_NOTE}`,
+      }),
+    ]);
+    const element = mount({
+      pubkey: SUBJECT,
+      'db-name': dbName,
+      'note-action': 'open-post',
+    });
+
+    const presses: EventActionDetail[] = [];
+    element.addEventListener('nostr-timeline:action', (press) => {
+      presses.push((press as CustomEvent<EventActionDetail>).detail);
+    });
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('button[part="quote-open"]')),
+      'the quote press target'
+    );
+    element.shadowRoot?.querySelector<HTMLButtonElement>('button[part="quote-open"]')?.click();
+
+    expect(presses).toHaveLength(1);
+    expect(presses[0].actionId).toBe('open-post');
+    expect(presses[0].event.id).toBe(quoted.id);
   });
 
   it('reports the truncation only under debug', async () => {
