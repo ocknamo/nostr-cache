@@ -13,7 +13,12 @@
    * back is `onBack` rather than a second post on screen.
    */
 
-  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type {
+    AuthorAction,
+    EventAction,
+    EventActionContext,
+    NoteAction,
+  } from '../lib/event-actions.ts';
   import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { EmbedTarget } from '../lib/note-embeds.ts';
   import type { PostTarget } from '../lib/post-target.ts';
@@ -56,8 +61,17 @@
      * author of a reply is exactly the person a reader would want to look up.
      */
     authorAction?: AuthorAction;
+    /**
+     * Makes the quote cards pressable — in the post's body and in every reply's,
+     * for the same reason `authorAction` reaches them: a quote is somebody
+     * else's post either way, and the thread is mostly other people's.
+     */
+    noteAction?: NoteAction;
     /** Called on a press, after the action's own `onSelect`. */
-    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
+    onAction?: (
+      action: EventAction | AuthorAction | NoteAction,
+      context: EventActionContext
+    ) => void;
     /** Render action icons as Material Symbols ligatures of this variant. */
     materialIcons?: MaterialVariant;
     /** Rendered instead of everything else, unlike `state.error`. */
@@ -81,6 +95,7 @@
     onBack,
     actions = [],
     authorAction,
+    noteAction,
     onAction,
     materialIcons,
     fatal,
@@ -158,6 +173,7 @@
           {showEmbeds}
           {actions}
           {authorAction}
+          {noteAction}
           {onAction}
           {materialIcons}
           {onEmbedRequest}
@@ -185,6 +201,7 @@
             {showMedia}
             {showEmbeds}
             {authorAction}
+            {noteAction}
             {onAction}
             {onAuthorVisible}
             {onEmbedRequest}

@@ -19,6 +19,8 @@
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },
+      noteAction: { attribute: 'note-action' },
+      noteActionLabel: { attribute: 'note-action-label' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
     },
@@ -32,6 +34,7 @@
     dispatchActionEvent,
     normalizeActions,
     normalizeAuthorAction,
+    normalizeNoteAction,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
@@ -152,6 +155,22 @@
      */
     authorActionLabel?: string;
     /**
+     * Makes the quote cards in a note's body pressable — the `nostr:` posts the
+     * widget expands inline — reported as the same `nostr-timeline:action`
+     * event under this id, with the **quoted** post in `detail.event`.
+     *
+     * A quote is the one post on screen with no way out of its own: the card
+     * around it carries `actions`, and a quote carries nothing. This is what
+     * lets a page send a reader from it to its own post screen; as with
+     * `author-action`, the widget navigates nowhere itself.
+     */
+    noteAction?: string;
+    /**
+     * What pressing a quote does, as the label on the target and its accessible
+     * name. Defaults to 「投稿を開く」.
+     */
+    noteActionLabel?: string;
+    /**
      * Render the action icons as Material Symbols
      * (<https://fonts.google.com/icons>): each `icon` is then a ligature name
      * such as `favorite`, not literal text. Values: `outlined` (the default for
@@ -189,6 +208,8 @@
     actions,
     authorAction,
     authorActionLabel,
+    noteAction,
+    noteActionLabel,
     materialIcons,
     materialIconsFont,
   }: Props = $props();
@@ -273,6 +294,7 @@
   showEmbeds={showEmbeds !== 'false'}
   actions={normalizeActions(actions)}
   authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
+  noteAction={normalizeNoteAction(noteAction, noteActionLabel)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}

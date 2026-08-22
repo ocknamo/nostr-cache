@@ -3,7 +3,12 @@
   import type { EventOrigin } from '../lib/cache-metrics.ts';
   import { parseContent } from '../lib/content-parts.ts';
   import { eventPreview } from '../lib/content-preview.ts';
-  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type {
+    AuthorAction,
+    EventAction,
+    EventActionContext,
+    NoteAction,
+  } from '../lib/event-actions.ts';
   import { parseRefs } from '../lib/event-refs.ts';
   import { type MaterialVariant, materialFontFamily } from '../lib/material-symbols.ts';
   import {
@@ -73,10 +78,18 @@
      */
     authorAction?: AuthorAction;
     /**
+     * Makes the quote cards in this note's body pressable, under this id. The
+     * card itself is unaffected: `actions` is the row it already has.
+     */
+    noteAction?: NoteAction;
+    /**
      * Called on a press, after the action's own `onSelect`. The widget uses it
      * to raise the `nostr-timeline:action` DOM event on the custom element.
      */
-    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
+    onAction?: (
+      action: EventAction | AuthorAction | NoteAction,
+      context: EventActionContext
+    ) => void;
     /**
      * Render action icons as Material Symbols ligatures of this variant.
      * Undefined leaves every `icon` as the literal text it is. An action's own
@@ -122,6 +135,7 @@
     datePlacement = 'above',
     actions = [],
     authorAction,
+    noteAction,
     onAction,
     materialIcons,
     onVisible,
@@ -519,6 +533,8 @@
               {showMedia}
               ancestorUnverified={unverified}
               {onEmbedRequest}
+              {noteAction}
+              {onAction}
             />
           </div>
         {/if}
@@ -866,14 +882,20 @@
     z-index: 1;
     padding: 3px 8px;
     border-radius: 6px;
-    background: var(--nt-tip-bg, #0f1419);
-    color: var(--nt-tip-fg, #fff);
+    background: var(--nt-tip-bg, #fff);
+    color: var(--nt-tip-fg, #0f1419);
+    /* The tooltip shares its background with the card underneath, so the edge
+       is the border's and the shadow's job. */
+    border: 1px solid var(--nt-tip-border, var(--nt-border, #e1e8ed));
     font-size: 0.75rem;
     line-height: 1.5;
-    box-shadow: 0 2px 8px rgb(15 20 25 / 25%);
+    box-shadow: 0 2px 8px rgb(15 20 25 / 18%);
     /* Out of the flow, so opening it moves nothing: it floats over the card
        rather than pushing the note down. */
     max-width: 100%;
+    /* So the cap above counts the border too, rather than letting it hang 2px
+       past the card. */
+    box-sizing: border-box;
     /* The whole point is the date the header dropped, so let it wrap on a
        narrow embed rather than hang off the card. */
     white-space: normal;

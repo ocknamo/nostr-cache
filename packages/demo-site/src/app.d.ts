@@ -29,6 +29,10 @@ declare namespace svelteHTML {
       'show-embeds'?: string;
       /** JSON array of buttons to render under each card. */
       actions?: string;
+      /** Makes the quote cards in a body pressable, under this id. */
+      'note-action'?: string;
+      /** The label on that press; defaults to 「投稿を開く」. */
+      'note-action-label'?: string;
       /** Render those buttons' icons as Material Symbols of this variant. */
       'material-icons'?: string;
       /** `none` when the embedding page loads the icon font itself. */
@@ -62,6 +66,10 @@ declare namespace svelteHTML {
       'reactions-open'?: string | boolean;
       /** JSON array of buttons to render under the post. */
       actions?: string;
+      /** Makes the quote cards in a body pressable, under this id. */
+      'note-action'?: string;
+      /** The label on that press; defaults to 「投稿を開く」. */
+      'note-action-label'?: string;
       /** Render those buttons' icons as Material Symbols of this variant. */
       'material-icons'?: string;
       /** `none` when the embedding page loads the icon font itself. */
@@ -86,6 +94,10 @@ declare namespace svelteHTML {
       'show-embeds'?: string;
       /** JSON array of buttons to render under each card. */
       actions?: string;
+      /** Makes the quote cards in a body pressable, under this id. */
+      'note-action'?: string;
+      /** The label on that press; defaults to 「投稿を開く」. */
+      'note-action-label'?: string;
       /** Render those buttons' icons as Material Symbols of this variant. */
       'material-icons'?: string;
       /** `none` when the embedding page loads the icon font itself. */

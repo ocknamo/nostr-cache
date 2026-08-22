@@ -17,7 +17,12 @@
    */
 
   import type { EventOrigin } from '../lib/cache-metrics.ts';
-  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type {
+    AuthorAction,
+    EventAction,
+    EventActionContext,
+    NoteAction,
+  } from '../lib/event-actions.ts';
   import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ReplyTree } from '../lib/reply-tree.ts';
@@ -37,8 +42,13 @@
     showEmbeds?: boolean;
     /** Makes each reply's author pressable, under this id. */
     authorAction?: AuthorAction;
+    /** Makes the quote cards in each reply's body pressable, under this id. */
+    noteAction?: NoteAction;
     /** Called on an author press; there are no buttons under a reply. */
-    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
+    onAction?: (
+      action: EventAction | AuthorAction | NoteAction,
+      context: EventActionContext
+    ) => void;
     onAuthorVisible?: (pubkey: string) => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
   }
@@ -54,6 +64,7 @@
     showMedia = true,
     showEmbeds = true,
     authorAction,
+    noteAction,
     onAction,
     onAuthorVisible,
     onEmbedRequest,
@@ -77,6 +88,7 @@
         {showMedia}
         {showEmbeds}
         {authorAction}
+        {noteAction}
         {onAction}
         {onAuthorVisible}
         {onEmbedRequest}

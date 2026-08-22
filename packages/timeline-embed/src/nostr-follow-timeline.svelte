@@ -20,6 +20,8 @@
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },
+      noteAction: { attribute: 'note-action' },
+      noteActionLabel: { attribute: 'note-action-label' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
     },
@@ -44,6 +46,7 @@
     dispatchActionEvent,
     normalizeActions,
     normalizeAuthorAction,
+    normalizeNoteAction,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { DEFAULT_MAX_FOLLOWS, followFilterSource } from './lib/follow-list.ts';
@@ -128,6 +131,18 @@
      */
     authorActionLabel?: string;
     /**
+     * Makes the quote cards in a note's body pressable, reported as the same
+     * `nostr-timeline:action` event under this id — with the **quoted** post in
+     * `detail.event`. The way out of a quote, which carries no action row of
+     * its own; the widget still navigates nowhere itself.
+     */
+    noteAction?: string;
+    /**
+     * The label on that press, and its accessible name. Defaults to
+     * 「投稿を開く」.
+     */
+    noteActionLabel?: string;
+    /**
      * Render the action icons as Material Symbols
      * (<https://fonts.google.com/icons>): each `icon` is then a ligature name
      * such as `favorite`, not literal text. Values: `outlined` (the default for
@@ -166,6 +181,8 @@
     actions,
     authorAction,
     authorActionLabel,
+    noteAction,
+    noteActionLabel,
     materialIcons,
     materialIconsFont,
   }: Props = $props();
@@ -265,6 +282,7 @@
   showEmbeds={showEmbeds !== 'false'}
   actions={normalizeActions(actions)}
   authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
+  noteAction={normalizeNoteAction(noteAction, noteActionLabel)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(key) => controller?.requestProfile(key)}

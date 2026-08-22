@@ -24,6 +24,8 @@
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },
+      noteAction: { attribute: 'note-action' },
+      noteActionLabel: { attribute: 'note-action-label' },
       materialIcons: { attribute: 'material-icons' },
       materialIconsFont: { attribute: 'material-icons-font' },
     },
@@ -54,6 +56,7 @@
     dispatchActionEvent,
     normalizeActions,
     normalizeAuthorAction,
+    normalizeNoteAction,
   } from './lib/event-actions.ts';
   import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
   import { type PostTarget, parsePostTarget } from './lib/post-target.ts';
@@ -169,6 +172,18 @@
      */
     authorActionLabel?: string;
     /**
+     * Makes the quote cards in a note's body pressable, reported as the same
+     * `nostr-timeline:action` event under this id — with the **quoted** post in
+     * `detail.event`. The way out of a quote, which carries no action row of
+     * its own; the widget still navigates nowhere itself.
+     */
+    noteAction?: string;
+    /**
+     * The label on that press, and its accessible name. Defaults to
+     * 「投稿を開く」.
+     */
+    noteActionLabel?: string;
+    /**
      * Render action icons as Material Symbols ligature names
      * (<https://fonts.google.com/icons>): `outlined` (the default for a bare
      * attribute), `rounded`, `sharp`. Also loads the font from Google Fonts,
@@ -205,6 +220,8 @@
     actions,
     authorAction,
     authorActionLabel,
+    noteAction,
+    noteActionLabel,
     materialIcons,
     materialIconsFont,
   }: Props = $props();
@@ -406,6 +423,7 @@
   repliesDepth={parseRepliesDepth(repliesDepth)}
   actions={normalizeActions(actions)}
   authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
+  noteAction={normalizeNoteAction(noteAction, noteActionLabel)}
   materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}

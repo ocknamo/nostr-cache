@@ -257,6 +257,40 @@ describe('<nostr-post> custom element', () => {
     expect(presses[0].event.id).toBe(POST_ID);
   });
 
+  it('raises the same event for a quote press, carrying the quoted post', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, [
+      makeEvent({ id: POST_ID, pubkey: ALICE, content: `引用する nostr:${NOTE}` }),
+      makeEvent({ id: NOTE_HEX, pubkey: BOB, content: '引用された投稿' }),
+    ]);
+    const element = mount({
+      'event-id': POST_ID,
+      'db-name': dbName,
+      'note-action': 'open-post',
+      'note-action-label': '投稿へ',
+    });
+
+    const presses: EventActionDetail[] = [];
+    element.addEventListener('nostr-timeline:action', (event) => {
+      presses.push((event as CustomEvent<EventActionDetail>).detail);
+    });
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('button[part="quote-open"]')),
+      'the quote press target'
+    );
+    const open = element.shadowRoot?.querySelector<HTMLButtonElement>('button[part="quote-open"]');
+    expect(open?.getAttribute('aria-label')).toContain('投稿へ');
+    open?.click();
+
+    // The quoted post, not the one on screen: the press is the way to it.
+    expect(presses).toHaveLength(1);
+    expect(presses[0].actionId).toBe('open-post');
+    expect(presses[0].event.id).toBe(NOTE_HEX);
+    // Nobody was pressed, so the field an author press carries stays off.
+    expect('pubkey' in presses[0]).toBe(false);
+  });
+
   it('raises the same event for an author press, naming who was pressed', async () => {
     const dbName = `post-${crypto.randomUUID()}`;
     await seed(dbName, postWithReactions());

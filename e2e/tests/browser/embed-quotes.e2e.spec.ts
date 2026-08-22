@@ -259,6 +259,95 @@ describe('Nested quotes E2E', () => {
   );
 
   it(
+    'makes a quote card pressable as a whole, without swallowing what is inside it',
+    async () => {
+      // Only a real browser answers this: the press is an overlay over the
+      // frame, and what it must *not* swallow — a nested quote's own press —
+      // is a question about paint order.
+      page = await browser.newPage();
+      await page.goto(embedUrl({ 'note-action': 'open-post' }));
+      // Down to the nested card's own header: `.quote` alone would also match
+      // the placeholder frame a card wears while its lookup is in flight.
+      // Written relative to the shadow root, which is where the DOM calls below
+      // run; Playwright's own selectors get the host prefixed back on.
+      const nested = '.quote:not(.loading) .embed .quote:not(.loading)';
+      await page.waitForSelector(`nostr-timeline ${nested} > .quote-header`, { timeout: TIMEOUT });
+
+      const layering = await page.$eval(
+        'nostr-timeline .quote:not(.loading)',
+        (quote, nestedSelector) => {
+          const root = quote.getRootNode() as ShadowRoot;
+          const box = (
+            quote.querySelector(':scope > .open') as HTMLElement
+          ).getBoundingClientRect();
+          // The nested card's header, which the nested card's own press must
+          // own rather than the outer one that is drawn under it.
+          const inner = root.querySelector(`${nestedSelector} > .quote-header`) as HTMLElement;
+          const innerBox = inner.getBoundingClientRect();
+          const at = root.elementFromPoint(
+            (innerBox.left + innerBox.right) / 2,
+            (innerBox.top + innerBox.bottom) / 2
+          );
+          return {
+            // Against the padding box, which is what `inset: 0` fills: the
+            // frame's own border is the only part of the card left over.
+            coversFrame:
+              Math.abs(box.width - quote.clientWidth) < 1 &&
+              Math.abs(box.height - quote.clientHeight) < 1,
+            innerOwnsItself: at === inner.parentElement?.querySelector(':scope > .open'),
+          };
+        },
+        nested
+      );
+
+      expect(layering.coversFrame).toBe(true);
+      expect(layering.innerOwnsItself).toBe(true);
+
+      // The host page is the top-level document, so the press it forwards to an
+      // embedding page lands back here — see the action test in
+      // timeline-embed.e2e.spec.ts.
+      await page.evaluate(() => {
+        (window as unknown as { pressed: string[] }).pressed = [];
+        window.addEventListener('message', (message) => {
+          const data = message.data as { type?: string; event?: { id: string } };
+          if (data?.type === 'nostr-timeline:action' && data.event) {
+            (window as unknown as { pressed: string[] }).pressed.push(data.event.id);
+          }
+        });
+      });
+
+      // Clicked by coordinate, over each card's own header: every card in this
+      // chain holds another one, so the centre of an outer press target is a
+      // point the inner card owns — which is the behaviour asserted above.
+      const headers = await page.$$eval(
+        `nostr-timeline .quote:not(.loading) > .quote-header, nostr-timeline ${nested} > .quote-header`,
+        (nodes) =>
+          nodes.map((node) => {
+            const box = node.getBoundingClientRect();
+            return { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 };
+          })
+      );
+      for (const point of headers.slice(0, 2)) {
+        await page.mouse.click(point.x, point.y);
+      }
+
+      // The press reaches this page as a `postMessage`, which is delivered on a
+      // later task than the click that raised it.
+      await page.waitForFunction(
+        () => (window as unknown as { pressed: string[] }).pressed.length === 2,
+        undefined,
+        { timeout: TIMEOUT }
+      );
+      const pressed = await page.evaluate(
+        () => (window as unknown as { pressed: string[] }).pressed
+      );
+      // Layer 1 is the card's own quote; layer 2 is the one quoted inside it.
+      expect(pressed).toEqual([chain[1].id, chain[2].id]);
+    },
+    TIMEOUT
+  );
+
+  it(
     'leaves the reference as a chip and fetches nothing when embeds are off',
     async () => {
       page = await browser.newPage();

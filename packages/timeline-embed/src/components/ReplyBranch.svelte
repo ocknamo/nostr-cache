@@ -13,7 +13,12 @@
    */
 
   import type { EventOrigin } from '../lib/cache-metrics.ts';
-  import type { AuthorAction, EventAction, EventActionContext } from '../lib/event-actions.ts';
+  import type {
+    AuthorAction,
+    EventAction,
+    EventActionContext,
+    NoteAction,
+  } from '../lib/event-actions.ts';
   import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ReplyNode } from '../lib/reply-tree.ts';
@@ -32,7 +37,11 @@
     showMedia?: boolean;
     showEmbeds?: boolean;
     authorAction?: AuthorAction;
-    onAction?: (action: EventAction | AuthorAction, context: EventActionContext) => void;
+    noteAction?: NoteAction;
+    onAction?: (
+      action: EventAction | AuthorAction | NoteAction,
+      context: EventActionContext
+    ) => void;
     onAuthorVisible?: (pubkey: string) => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
   }
@@ -48,6 +57,7 @@
     showMedia = true,
     showEmbeds = true,
     authorAction,
+    noteAction,
     onAction,
     onAuthorVisible,
     onEmbedRequest,
@@ -70,6 +80,7 @@
         {showEmbeds}
         showReplyRef={false}
         {authorAction}
+        {noteAction}
         {onAction}
         onVisible={onAuthorVisible && (() => onAuthorVisible(node.event.pubkey))}
         {onEmbedRequest}
@@ -86,6 +97,7 @@
           {showMedia}
           {showEmbeds}
           {authorAction}
+          {noteAction}
           {onAction}
           {onAuthorVisible}
           {onEmbedRequest}
