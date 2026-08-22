@@ -157,11 +157,14 @@
    * demo actually has — its own `<nostr-post>`, further down this panel.
    */
   const OPEN_POST_ACTION = 'open-post';
+
   let timelineElement = $state<HTMLElement | undefined>(undefined);
+  /** The detail below, which answers the same press: a quote can quote a quote. */
+  let postElement = $state<HTMLElement | undefined>(undefined);
   let postHeading = $state<HTMLElement | undefined>(undefined);
 
-  onMount(() => {
-    const element = timelineElement;
+  $effect(() => {
+    const elements = [timelineElement, postElement];
     const onPress = (press: Event) => {
       const detail = (press as CustomEvent<{ actionId: string; event: { id: string } }>).detail;
       if (detail?.actionId !== OPEN_POST_ACTION) {
@@ -170,8 +173,14 @@
       postEventId = detail.event.id;
       postHeading?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    element?.addEventListener('nostr-timeline:action', onPress);
-    return () => element?.removeEventListener('nostr-timeline:action', onPress);
+    for (const element of elements) {
+      element?.addEventListener('nostr-timeline:action', onPress);
+    }
+    return () => {
+      for (const element of elements) {
+        element?.removeEventListener('nostr-timeline:action', onPress);
+      }
+    };
   });
 
   /** Bounds on the height the embed page may ask for. */
@@ -388,11 +397,14 @@
   {#if postEventIdReady}
     <div class="live">
       <nostr-post
+        bind:this={postElement}
         event-id={postEventId.trim()}
         {relays}
         db-name={dbName}
         profile-freshness={profileFreshness}
         actions={actionsJson}
+        note-action={OPEN_POST_ACTION}
+        note-action-label="この投稿の詳細を見る"
         material-icons={MATERIAL_VARIANT}
         debug={debug ? 'true' : 'false'}
       ></nostr-post>

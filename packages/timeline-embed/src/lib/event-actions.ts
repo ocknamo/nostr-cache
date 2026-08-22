@@ -130,23 +130,17 @@ export interface AuthorAction {
 export const DEFAULT_AUTHOR_LABEL = 'プロフィールを開く';
 
 /**
- * A quoted note's card as a press target, so a reader can reach the post it
- * stands for.
+ * A quoted note's card as a press target, on the same contract as
+ * {@link AuthorAction}.
  *
- * Same `id` + `label` contract as {@link AuthorAction}, and the same event. It
- * exists because a quote is the one post the widget draws that has no way out
- * of its own: a timeline card carries the embedder's action bar, and the card
- * a reader opened is already the post they are on, but a `nostr:` quote inside
- * a body is somebody else's post with nothing to press.
+ * It exists because a quote is the one post the widget draws with no way out of
+ * its own: a card carries the embedder's action bar, and the post a reader
+ * opened is where they already are. A press carries no `pubkey` — what was
+ * pressed is a post, not a person.
  */
 export interface NoteAction {
-  /** Travels as `actionId`, exactly as a button's does. */
   id: string;
-  /**
-   * What pressing does: the words on the target, and its accessible name. The
-   * quoted author's name is appended to the latter, so a body holding several
-   * quotes does not announce them all identically.
-   */
+  /** The accessible name of the press; the quoted author's name is appended. */
   label: string;
 }
 

@@ -157,22 +157,23 @@
 </script>
 
 {#if event && createdAt}
-  <article class="quote" class:unverified={fade} part="quote" use:whenVisible={request}>
+  <article
+    class="quote"
+    class:unverified={fade}
+    class:pressable={Boolean(noteAction)}
+    part="quote"
+    use:whenVisible={request}
+  >
     {#if noteAction}
-      <!-- An overlay over the whole frame rather than a button of its own: a
-           quoted post reads as one thing, and pressing it anywhere is what a
-           reader expects of it. Empty, so nothing is added to the card; the
-           quoted author is named in the accessible name because a body may hold
-           several quotes, which the label alone would announce identically.
-
-           First, so a keyboard reader is offered the card before its contents;
-           it still covers them, because a positioned element paints over the
-           text either way. -->
+      <!-- The whole frame, not a button of its own: a quoted post reads as one
+           thing. First, so a keyboard reader is offered the card before its
+           contents — it covers them either way, since a positioned element
+           paints over text. The author is in the accessible name because one
+           body may hold several quotes. -->
       <button
         type="button"
         class="open"
         part="quote-open"
-        title={noteAction.label}
         aria-label={`${noteAction.label}: ${name}`}
         onclick={openPost}
       ></button>
@@ -189,7 +190,9 @@
       </span>
       <!-- Not the tooltip button the timeline card carries: a quote can be five
            deep, and five nested popovers inside one scrolling note is more
-           chrome than the date is worth. The full date stays in the `title`. -->
+           chrome than the date is worth. The full date stays in the `title` —
+           out of reach of the pointer while `noteAction` covers the frame,
+           which is the trade the embedder makes by asking for the press. -->
       <time class="time" datetime={createdAt.toISOString()} title={createdAt.toLocaleString()}>
         {formatTime(createdAt)}
       </time>
@@ -352,11 +355,12 @@
   /* Above the overlay, so what a reader could already act on keeps working: a
      link, a video's controls, and a nested quote's own press. Each nested card
      is then its own stacking context, so its overlay covers exactly its own
-     frame. */
-  .embed,
-  .quote-body :global(a),
-  .quote-body :global(video),
-  .quote-body :global(audio) {
+     frame. Scoped to a pressable card, because a z-index is not free: it also
+     orders these against the card's date tooltip. */
+  .pressable > .quote-body > .embed,
+  .pressable > .quote-body :global(a),
+  .pressable > .quote-body :global(video),
+  .pressable > .quote-body :global(audio) {
     position: relative;
     z-index: 1;
   }

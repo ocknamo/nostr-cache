@@ -879,7 +879,9 @@
        see the list's top padding in Timeline.svelte. */
     bottom: calc(100% + 2px);
     right: 0;
-    z-index: 1;
+    /* Over anything the note lifts within this card — a pressable quote raises
+       its links and nested cards (see EmbeddedNote.svelte). */
+    z-index: 3;
     padding: 3px 8px;
     border-radius: 6px;
     background: var(--nt-tip-bg, #fff);
