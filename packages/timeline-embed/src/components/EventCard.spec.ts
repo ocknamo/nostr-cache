@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetOgpCache } from '../lib/ogp.ts';
 import { makeEvent } from '../test-fixtures.ts';
 import EventCard from './EventCard.svelte';
 
@@ -1057,6 +1058,65 @@ describe('EventCard', () => {
       render(EventCard, { props: { event: makeEvent(), onVisible } });
 
       expect(onVisible).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('link preview', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      resetOgpCache();
+    });
+
+    /** Answer every request with the same metadata. */
+    function stubEndpoint(body: unknown) {
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        text: async () => JSON.stringify(body),
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    it('asks nobody anything without an endpoint', async () => {
+      const fetchMock = stubEndpoint({ title: 'A title' });
+
+      render(EventCard, {
+        props: { event: makeEvent({ content: 'see https://example.com/a' }) },
+      });
+      await Promise.resolve();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('previews the first link and leaves the URL in the text', async () => {
+      stubEndpoint({ title: 'A title' });
+
+      render(EventCard, {
+        props: {
+          event: makeEvent({ content: 'see https://example.com/a and https://example.com/b' }),
+          ogpEndpoint: 'https://ogp.example/api',
+        },
+      });
+
+      expect(await screen.findByText('A title')).toBeInTheDocument();
+      // One card, not one per link.
+      expect(screen.getAllByText('A title')).toHaveLength(1);
+      expect(screen.getByRole('link', { name: 'https://example.com/a' })).toBeInTheDocument();
+    });
+
+    it('leaves an attachment to the media renderer', async () => {
+      const fetchMock = stubEndpoint({ title: 'A title' });
+
+      render(EventCard, {
+        props: {
+          event: makeEvent({ content: 'https://cdn.example.com/a.jpg' }),
+          ogpEndpoint: 'https://ogp.example/api',
+        },
+      });
+      await Promise.resolve();
+
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });

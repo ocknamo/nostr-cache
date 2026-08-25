@@ -38,6 +38,12 @@
     showAvatars?: boolean;
     showMedia?: boolean;
     showEmbeds?: boolean;
+    /**
+     * Link preview endpoint for the post itself. The thread does not get one:
+     * a reply's links are context, and one endpoint request per reply is a
+     * cost the reader did not ask for.
+     */
+    ogpEndpoint?: string;
     /** Off also stops the element opening the kind 7 subscription at all. */
     showReactions?: boolean;
     /** Open the reactor list on first render. */
@@ -87,6 +93,7 @@
     showAvatars = true,
     showMedia = true,
     showEmbeds = true,
+    ogpEndpoint,
     showReactions = true,
     reactionsOpen = false,
     showReplies = true,
@@ -171,6 +178,7 @@
           showAvatar={showAvatars}
           {showMedia}
           {showEmbeds}
+          {ogpEndpoint}
           {actions}
           {authorAction}
           {noteAction}

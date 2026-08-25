@@ -142,6 +142,49 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
 }
 
 /**
+ * Parse the OGP endpoint (`ogp-endpoint`) the link previews are fetched from.
+ *
+ * Absent — the default — leaves the feature off entirely, so nothing about a
+ * reader reaches a third party unless the embedder named one.
+ *
+ * @returns The endpoint as written (the `{url}` placeholder has to survive), or
+ *   undefined when it is not a usable `http(s)` URL
+ */
+export function parseOgpEndpoint(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const endpoint = value.trim();
+  let url: URL;
+  try {
+    // The placeholder is not valid in a URL, so it is stood in for while the
+    // rest is checked.
+    url = new URL(
+      endpoint.replaceAll('{url}', 'x'),
+      typeof location === 'undefined' ? undefined : location.href
+    );
+  } catch {
+    console.warn(`[nostr-timeline] Ignoring malformed ogp-endpoint: ${value}`);
+    return undefined;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    console.warn(`[nostr-timeline] Ignoring non-http(s) ogp-endpoint: ${value}`);
+    return undefined;
+  }
+  if (
+    typeof location !== 'undefined' &&
+    location.protocol === 'https:' &&
+    url.protocol === 'http:'
+  ) {
+    console.warn(
+      `[nostr-timeline] Ignoring ${value}: an https page cannot fetch from an http:// endpoint (mixed content). Use https://.`
+    );
+    return undefined;
+  }
+  return endpoint;
+}
+
+/**
  * An opt-in boolean attribute: bare (empty string, as HTML boolean attributes
  * arrive), `"true"` or `"1"` turns it on, anything else leaves it off. Booleans
  * are accepted too, because a Svelte parent sets the property rather than the
@@ -433,6 +476,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   showMedia: boolean;
   /** Whether to render `nostr:` references in a body as nested cards. */
   showEmbeds: boolean;
+  /** Where link previews are fetched from; `undefined` leaves them off. */
+  ogpEndpoint: string | undefined;
   /**
    * The embedder's buttons under each card. A query string carries no
    * functions, so these are declarative only — a press is reported by event.
@@ -469,6 +514,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
+    ogpEndpoint: parseOgpEndpoint(params.get('ogp-endpoint')),
     actions: normalizeActions(params.get('actions')),
     authorAction: normalizeAuthorAction(
       params.get('author-action'),
@@ -502,6 +548,8 @@ export interface FollowTimelineConfig {
   showAvatars: boolean;
   showMedia: boolean;
   showEmbeds: boolean;
+  /** Link preview endpoint; see {@link configFromSearchParams}. */
+  ogpEndpoint: string | undefined;
   /** Declarative action buttons; see {@link configFromSearchParams}. */
   actions: EventAction[];
   /** The author press; see {@link configFromSearchParams}. */
@@ -539,6 +587,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
+    ogpEndpoint: parseOgpEndpoint(params.get('ogp-endpoint')),
     actions: normalizeActions(params.get('actions')),
     authorAction: normalizeAuthorAction(
       params.get('author-action'),

@@ -21,12 +21,14 @@
     segmentMedia,
     selectEmbeds,
   } from '../lib/note-embeds.ts';
+  import { previewTarget } from '../lib/ogp.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
   import EmbeddedNote from './EmbeddedNote.svelte';
   import NoteContent from './NoteContent.svelte';
+  import OgpCard from './OgpCard.svelte';
 
   interface Props {
     event: NostrEvent;
@@ -59,6 +61,12 @@
      * abbreviated chip it has always been.
      */
     showEmbeds?: boolean;
+    /**
+     * Where to fetch a link preview (OGP) for the first ordinary link in the
+     * body. Undefined — the default — renders no preview and asks nobody
+     * anything; see `lib/ogp.ts`.
+     */
+    ogpEndpoint?: string;
     /**
      * Which way the date tooltip opens.
      *
@@ -132,6 +140,7 @@
     showAvatar = true,
     showMedia = true,
     showEmbeds = true,
+    ogpEndpoint,
     datePlacement = 'above',
     actions = [],
     authorAction,
@@ -180,6 +189,8 @@
    * not just within whichever segment a repeated URL happens to fall in.
    */
   const segmentMediaLists = $derived(showMedia ? segmentMedia(segments) : []);
+
+  const ogpUrl = $derived(ogpEndpoint ? previewTarget(parts) : undefined);
 
   /**
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
@@ -539,6 +550,13 @@
           </div>
         {/if}
       {/each}
+      <!-- Under the whole body rather than where the link sits: the card
+           arrives after the text has been read, and the link itself stays in
+           the text — a preview that fails to load must not take the URL with
+           it. -->
+      {#if ogpEndpoint && ogpUrl}
+        <OgpCard endpoint={ogpEndpoint} url={ogpUrl} />
+      {/if}
     </div>
   </div>
   <!--

@@ -15,6 +15,7 @@
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
+      ogpEndpoint: { attribute: 'ogp-endpoint' },
       showReactions: { attribute: 'show-reactions' },
       reactionsLimit: { attribute: 'reactions-limit' },
       reactionsOpen: { attribute: 'reactions-open' },
@@ -71,6 +72,7 @@
     parseFlag,
     parseFreshness,
     parseMaxEvents,
+    parseOgpEndpoint,
     parseReactionsLimit,
     parseRelays,
     parseRepliesDepth,
@@ -129,6 +131,14 @@
     showMedia?: string;
     /** `"false"` leaves a `nostr:` reference as a chip instead of a card. */
     showEmbeds?: string;
+    /**
+     * Endpoint the link previews (OGP) are fetched from, e.g.
+     * `"https://ogp.example/api"` — the target URL is added as a `url` query
+     * parameter, or substituted for a `{url}` placeholder when the value has
+     * one. **Unset means no previews and no requests**; see the README for
+     * what the endpoint has to return and what it gets to see.
+     */
+    ogpEndpoint?: string;
     /** `"false"` also stops the kind 7 subscription being opened at all. */
     showReactions?: string | boolean;
     /** Backfill size. Defaults to 200, capped at 500; more may arrive live. */
@@ -211,6 +221,7 @@
     showAvatars,
     showMedia,
     showEmbeds,
+    ogpEndpoint,
     showReactions,
     reactionsLimit,
     reactionsOpen,
@@ -225,6 +236,8 @@
     materialIcons,
     materialIconsFont,
   }: Props = $props();
+
+  const ogpTarget = $derived(parseOgpEndpoint(ogpEndpoint));
 
   // So a press can be announced to a page that wrote HTML rather than JS and
   // has no callback to receive it.
@@ -417,6 +430,7 @@
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
+  ogpEndpoint={ogpTarget}
   showReactions={wantsReactions}
   reactionsOpen={parseFlag(reactionsOpen)}
   showReplies={wantsReplies}

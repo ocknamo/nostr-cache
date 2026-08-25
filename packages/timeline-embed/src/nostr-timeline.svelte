@@ -16,6 +16,7 @@
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
+      ogpEndpoint: { attribute: 'ogp-endpoint' },
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },
@@ -43,6 +44,7 @@
     parseFilters,
     parseFreshness,
     parseMaxEvents,
+    parseOgpEndpoint,
     parseRelays,
     parseShowOriginAlias,
   } from './lib/timeline-config.ts';
@@ -128,6 +130,14 @@
      */
     showEmbeds?: string;
     /**
+     * Endpoint the link previews (OGP) are fetched from, e.g.
+     * `"https://ogp.example/api"` — the target URL is added as a `url` query
+     * parameter, or substituted for a `{url}` placeholder when the value has
+     * one. **Unset means no previews and no requests**; see the README for
+     * what the endpoint has to return and what it gets to see.
+     */
+    ogpEndpoint?: string;
+    /**
      * Buttons to render under every card, as a JSON array of
      * `{"id","label","icon"}` — or, when set as a property from JS, the array
      * itself, whose entries may also carry an `onSelect` function.
@@ -205,6 +215,7 @@
     showAvatars,
     showMedia,
     showEmbeds,
+    ogpEndpoint,
     actions,
     authorAction,
     authorActionLabel,
@@ -213,6 +224,8 @@
     materialIcons,
     materialIconsFont,
   }: Props = $props();
+
+  const ogpTarget = $derived(parseOgpEndpoint(ogpEndpoint));
 
   // The element itself, so a press can be announced to the embedding page —
   // which, having written HTML rather than JS, has no callback to receive.
@@ -292,6 +305,7 @@
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
+  ogpEndpoint={ogpTarget}
   actions={normalizeActions(actions)}
   authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
   noteAction={normalizeNoteAction(noteAction, noteActionLabel)}

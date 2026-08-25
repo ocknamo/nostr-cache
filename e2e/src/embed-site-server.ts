@@ -75,6 +75,15 @@ function buildTallPng(width = 600, height = 1000): Buffer {
 
 const TALL_PNG = buildTallPng();
 
+/**
+ * Path of the stub link-preview endpoint. See {@link EmbedSiteServer.ogpEndpointUrl}.
+ *
+ * The widget ships no endpoint of its own — `ogp-endpoint` names one the
+ * embedder runs — so exercising the preview end to end needs a stand-in for
+ * that service.
+ */
+const OGP_PATH = '/ogp';
+
 /** Path of the bare host page. See {@link EmbedSiteServer.scriptOnlyUrl}. */
 const SCRIPT_ONLY_PATH = '/script-only/';
 /**
@@ -118,6 +127,8 @@ export interface EmbedSiteServer {
   avatarUrl: string;
   /** URL of a tall image, for a note whose body is a photo. */
   photoUrl: string;
+  /** URL of a stub OGP service, for the `ogp-endpoint` attribute. */
+  ogpEndpointUrl: string;
   close: () => Promise<void>;
 }
 
@@ -207,6 +218,22 @@ export async function startEmbedSiteServer(
       res.end(TALL_PNG);
       return;
     }
+    // Answers about any URL it is asked about, so a test can assert that the
+    // card shows what the endpoint said rather than anything the note carried.
+    if (path === OGP_PATH) {
+      const target = new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('url') ?? '';
+      const origin = `${options.tls ? 'https' : 'http'}://${req.headers.host}`;
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(
+        JSON.stringify({
+          title: `プレビュー: ${target}`,
+          description: 'リンク先の説明文',
+          siteName: 'example.com',
+          image: `${origin}${AVATAR_PATH}`,
+        })
+      );
+      return;
+    }
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
   };
@@ -230,6 +257,7 @@ export async function startEmbedSiteServer(
     postEmbedUrl: `${baseUrl}/embed/post/`,
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     photoUrl: `${baseUrl}${PHOTO_PATH}`,
+    ogpEndpointUrl: `${baseUrl}${OGP_PATH}`,
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };
 }
