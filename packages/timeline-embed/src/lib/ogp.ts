@@ -28,6 +28,14 @@ const MAX_SITE_NAME_LENGTH = 100;
 /** Past this a string is not a title that went long, it is a payload. */
 const MAX_FIELD_LENGTH = 4096;
 
+/**
+ * Longest image URL accepted — the body's link ceiling (`content-parts.ts`)
+ * rather than the avatar's, which `safeImageUrl` defaults to. A preview image
+ * is often generated per page, with the title and a signature in its query
+ * string, and cutting those off would cost the card its picture.
+ */
+const MAX_IMAGE_URL_LENGTH = 2048;
+
 /** Response bodies longer than this are dropped unparsed. */
 const MAX_RESPONSE_LENGTH = 64 * 1024;
 
@@ -161,7 +169,7 @@ export function parseOgpResponse(payload: unknown, url: string): OgpData | undef
     pick(record, ['siteName', 'site_name', 'og:site_name', 'ogSiteName']),
     MAX_SITE_NAME_LENGTH
   );
-  const image = safeImageUrl(pick(record, ['image', 'og:image', 'ogImage']));
+  const image = safeImageUrl(pick(record, ['image', 'og:image', 'ogImage']), MAX_IMAGE_URL_LENGTH);
 
   if (description) {
     data.description = description;

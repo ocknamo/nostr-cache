@@ -160,6 +160,24 @@ describe('parseOgpResponse', () => {
     ).toBeUndefined();
   });
 
+  it('keeps a long generated image URL, past the avatar-sized ceiling', () => {
+    // Preview images are routinely generated per page, with the title and a
+    // signature in the query string — far longer than any avatar URL.
+    const long = `https://cdn.example.com/og.png?t=${'x'.repeat(1900)}`;
+    expect(long.length).toBeGreaterThan(512);
+    expect(long.length).toBeLessThanOrEqual(2048);
+
+    expect(parseOgpResponse({ title: 'A', image: long }, url)?.image).toBe(long);
+  });
+
+  it('drops an image URL past 2048 characters, keeping the rest of the card', () => {
+    const tooLong = `https://cdn.example.com/og.png?t=${'x'.repeat(2100)}`;
+    const data = parseOgpResponse({ title: 'A title', image: tooLong }, url);
+
+    expect(data?.image).toBeUndefined();
+    expect(data?.title).toBe('A title');
+  });
+
   it('strips the control characters that would let a title reshape the card', () => {
     expect(parseOgpResponse({ title: 'safe‮title\nhere' }, url)?.title).toBe('safetitlehere');
   });
