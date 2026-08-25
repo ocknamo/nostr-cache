@@ -421,6 +421,91 @@ describe('Embeddable timeline E2E', () => {
       }
     });
 
+    it('leaves links unpreviewed until an ogp-endpoint is named', async () => {
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        const asked: string[] = [];
+        page.on('request', (request) => {
+          asked.push(request.url());
+        });
+        await page.goto(embedUrl({ relays: disposable.url }));
+        await waitForEventCount(page, 1);
+        await page.waitForSelector('nostr-timeline .content a', { timeout: TIMEOUT });
+
+        expect(await page.$$('nostr-timeline [part="ogp"]')).toHaveLength(0);
+        expect(asked.filter((url) => new URL(url).pathname === '/ogp')).toEqual([]);
+      } finally {
+        await disposable.close();
+      }
+    });
+
+    it('previews the first link through the endpoint the embedder named', async () => {
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        await page.goto(embedUrl({ relays: disposable.url, 'ogp-endpoint': site.ogpEndpointUrl }));
+        await waitForEventCount(page, 1);
+
+        const card = await page.waitForSelector('nostr-timeline [part="ogp"]', {
+          timeout: TIMEOUT,
+        });
+        // The card opens the URL the author wrote, whatever the endpoint said.
+        expect(await card.getAttribute('href')).toBe('https://example.com/a');
+        expect(await card.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+
+        const title = await page.$eval(
+          'nostr-timeline [part="ogp-title"]',
+          (node) => node.textContent ?? ''
+        );
+        expect(title).toBe('プレビュー: https://example.com/a');
+        expect(
+          await page.$eval('nostr-timeline [part="ogp-site"]', (node) => node.textContent ?? '')
+        ).toBe('example.com');
+
+        // The thumbnail really loads, and the image URL in the same body is
+        // still the attachment it was — only the ordinary link is previewed.
+        const thumbnail = await page.waitForSelector('nostr-timeline [part="ogp-image"]', {
+          timeout: TIMEOUT,
+        });
+        expect(await thumbnail.evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(1);
+        expect(await page.$$('nostr-timeline [part="ogp"]')).toHaveLength(1);
+
+        // The link stays in the text: a preview must never take the URL with it.
+        const hrefs = await page.$$eval('nostr-timeline .content a', (nodes) =>
+          nodes.map((node) => node.getAttribute('href'))
+        );
+        expect(hrefs).toEqual(['https://example.com/a']);
+      } finally {
+        await disposable.close();
+      }
+    });
+
+    it('reads a preview from an endpoint on another origin', async () => {
+      // How this is actually deployed: the OGP service is not the site the
+      // widget is served from, so the answer only arrives if CORS allows it.
+      const [disposable, elsewhere] = await Promise.all([
+        startRichUpstream(),
+        startEmbedSiteServer(),
+      ]);
+      try {
+        expect(new URL(elsewhere.ogpEndpointUrl).origin).not.toBe(new URL(site.baseUrl).origin);
+
+        page = await browser.newPage();
+        await page.goto(
+          embedUrl({ relays: disposable.url, 'ogp-endpoint': elsewhere.ogpEndpointUrl })
+        );
+        await waitForEventCount(page, 1);
+
+        const title = await page.waitForSelector('nostr-timeline [part="ogp-title"]', {
+          timeout: TIMEOUT,
+        });
+        expect(await title.textContent()).toBe('プレビュー: https://example.com/a');
+      } finally {
+        await Promise.all([disposable.close(), elsewhere.close()]);
+      }
+    });
+
     it('honours show-media=false from the iframe query string', async () => {
       const disposable = await startRichUpstream();
       try {

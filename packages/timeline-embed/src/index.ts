@@ -15,6 +15,7 @@ export { default as EmbeddedNote } from './components/EmbeddedNote.svelte';
 export { default as EventCard } from './components/EventCard.svelte';
 export { default as MediaAttachment } from './components/MediaAttachment.svelte';
 export { default as NoteContent } from './components/NoteContent.svelte';
+export { default as OgpCard } from './components/OgpCard.svelte';
 export { default as PostView } from './components/PostView.svelte';
 export { default as ReactionBar } from './components/ReactionBar.svelte';
 export { default as ReactionList } from './components/ReactionList.svelte';

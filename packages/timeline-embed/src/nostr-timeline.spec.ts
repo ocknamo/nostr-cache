@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // fake-indexeddb backs the DexieStorage the widget boots on mount.
 import 'fake-indexeddb/auto';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { EventActionDetail } from './lib/event-actions.ts';
+import { resetOgpCache } from './lib/ogp.ts';
 import {
   DEFAULT_PROFILE_FRESHNESS,
   DEFAULT_STORAGE_MAX_SIZE,
@@ -28,6 +29,10 @@ describe('<nostr-timeline> custom element', () => {
     document.body.innerHTML = '';
     await waitFor(() => getRelayHostRefCount() === 0, 'the relay host to be released');
     globalThis.WebSocket = originalWebSocket;
+    // Here rather than at the end of the test that stubs it: a failed wait
+    // throws, and a leaked `fetch` would follow it into the next test.
+    vi.unstubAllGlobals();
+    resetOgpCache();
   });
 
   it('registers the element', () => {
@@ -221,6 +226,42 @@ describe('<nostr-timeline> custom element', () => {
     expect(presses).toHaveLength(1);
     expect(presses[0].actionId).toBe('open-profile');
     expect(presses[0].pubkey).toBe(author);
+  });
+
+  it('forwards ogp-endpoint, so a card can preview a link', async () => {
+    const dbName = `timeline-${crypto.randomUUID()}`;
+    const seeding = await acquireRelayHost({ dbName });
+    try {
+      await seedValidated(seeding.storage, [
+        makeEvent({
+          id: 'ff00000000000000000000000000000000000000000000000000000000000002',
+          content: 'これを見て https://example.com/a',
+        }),
+      ]);
+    } finally {
+      await seeding.release();
+    }
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ title: 'リンク先の見出し' }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('db-name', dbName);
+    element.setAttribute('ogp-endpoint', 'https://ogp.example/api');
+    document.body.appendChild(element);
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('[part="ogp-title"]')),
+      'the link preview card'
+    );
+
+    expect(element.shadowRoot?.querySelector('[part="ogp-title"]')?.textContent).toBe(
+      'リンク先の見出し'
+    );
   });
 });
 

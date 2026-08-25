@@ -17,6 +17,7 @@ import {
   parseLimit,
   parseMaxEvents,
   parseMaxFollows,
+  parseOgpEndpoint,
   parsePubkey,
   parseReactionsLimit,
   parseRelays,
@@ -419,6 +420,15 @@ describe('configFromSearchParams', () => {
     ]);
   });
 
+  it('reads the link preview endpoint, and leaves it unset by default', () => {
+    expect(
+      configFromSearchParams(new URLSearchParams('ogp-endpoint=https://ogp.example/api'))
+        .ogpEndpoint
+    ).toBe('https://ogp.example/api');
+    expect(configFromSearchParams(new URLSearchParams('')).ogpEndpoint).toBeUndefined();
+    expect(followConfigFromSearchParams(new URLSearchParams('')).ogpEndpoint).toBeUndefined();
+  });
+
   it('turns media off only when asked', () => {
     expect(configFromSearchParams(new URLSearchParams('show-media=false')).showMedia).toBe(false);
     expect(configFromSearchParams(new URLSearchParams('show-media=true')).showMedia).toBe(true);
@@ -545,6 +555,34 @@ describe('parseMaxEvents', () => {
 
     expect(parseMaxEvents(undefined)).toBeUndefined();
     expect(parseMaxEvents('')).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseOgpEndpoint', () => {
+  it('keeps a usable endpoint as it was written', () => {
+    expect(parseOgpEndpoint('https://ogp.example/api?key=abc')).toBe(
+      'https://ogp.example/api?key=abc'
+    );
+  });
+
+  it('keeps the {url} placeholder rather than resolving it away', () => {
+    expect(parseOgpEndpoint('https://ogp.example/p/{url}')).toBe('https://ogp.example/p/{url}');
+  });
+
+  it('leaves previews off for anything that is not an http(s) endpoint', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseOgpEndpoint('javascript:alert(1)')).toBeUndefined();
+    expect(parseOgpEndpoint('not a url')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('says nothing when the attribute is simply absent', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseOgpEndpoint(undefined)).toBeUndefined();
+    expect(parseOgpEndpoint('  ')).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
   });
 });

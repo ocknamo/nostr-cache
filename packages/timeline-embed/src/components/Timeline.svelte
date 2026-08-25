@@ -44,6 +44,11 @@
      */
     showEmbeds?: boolean;
     /**
+     * Where to fetch a link preview for the first ordinary link in a body.
+     * Undefined leaves previews off, which is the default everywhere.
+     */
+    ogpEndpoint?: string;
+    /**
      * Buttons to render under every card. Empty by default — the widget ships
      * no actions of its own, only the mechanism (`lib/event-actions.ts`).
      */
@@ -85,6 +90,7 @@
     showAvatars = true,
     showMedia = true,
     showEmbeds = true,
+    ogpEndpoint,
     actions = [],
     authorAction,
     noteAction,
@@ -113,6 +119,7 @@
             showAvatar={showAvatars}
             {showMedia}
             {showEmbeds}
+            {ogpEndpoint}
             {actions}
             {authorAction}
             {noteAction}

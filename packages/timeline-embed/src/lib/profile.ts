@@ -86,9 +86,13 @@ export function safeText(value: unknown, maxLength: number): string | undefined 
  * Exported for `reactions.ts`: a NIP-30 custom emoji is an author-supplied
  * image URL that ends up in an `<img src>` exactly like an avatar does, so it
  * has to clear the same bar.
+ *
+ * @param maxLength Overrides the avatar-sized ceiling. `ogp.ts` raises it: an
+ *   OGP image is routinely a generated URL carrying a title and a signature in
+ *   its query string, which an avatar URL never is.
  */
-export function safeImageUrl(value: unknown): string | undefined {
-  const raw = safeText(value, MAX_URL_LENGTH);
+export function safeImageUrl(value: unknown, maxLength = MAX_URL_LENGTH): string | undefined {
+  const raw = safeText(value, maxLength);
   if (!raw) {
     return undefined;
   }

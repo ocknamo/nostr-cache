@@ -17,6 +17,7 @@
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
+      ogpEndpoint: { attribute: 'ogp-endpoint' },
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },
@@ -59,6 +60,7 @@
     parseLimit,
     parseMaxEvents,
     parseMaxFollows,
+    parseOgpEndpoint,
     parsePubkey,
     parseRelays,
     parseSinceDays,
@@ -113,6 +115,14 @@
      * as on `<nostr-timeline>`.
      */
     showEmbeds?: string;
+    /**
+     * Endpoint the link previews (OGP) are fetched from, e.g.
+     * `"https://ogp.example/api"` — the target URL is added as a `url` query
+     * parameter, or substituted for a `{url}` placeholder when the value has
+     * one. **Unset means no previews and no requests**; see the README for
+     * what the endpoint has to return and what it gets to see.
+     */
+    ogpEndpoint?: string;
     /**
      * The embedder's buttons under every card, exactly as on
      * `<nostr-timeline>`: a JSON array from an attribute, or the array itself
@@ -178,6 +188,7 @@
     showAvatars,
     showMedia,
     showEmbeds,
+    ogpEndpoint,
     actions,
     authorAction,
     authorActionLabel,
@@ -186,6 +197,8 @@
     materialIcons,
     materialIconsFont,
   }: Props = $props();
+
+  const ogpTarget = $derived(parseOgpEndpoint(ogpEndpoint));
 
   // The element itself, so a press reaches a page that only wrote HTML.
   const hostElement = $host();
@@ -280,6 +293,7 @@
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
+  ogpEndpoint={ogpTarget}
   actions={normalizeActions(actions)}
   authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
   noteAction={normalizeNoteAction(noteAction, noteActionLabel)}

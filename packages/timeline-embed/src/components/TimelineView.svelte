@@ -30,6 +30,8 @@
     showAvatars?: boolean;
     showMedia?: boolean;
     showEmbeds?: boolean;
+    /** Link preview endpoint; undefined leaves previews off. */
+    ogpEndpoint?: string;
     /** The embedder's buttons, rendered under every card. */
     actions?: EventAction[];
     /** Makes the author's avatar and name pressable on every card. */
@@ -65,6 +67,7 @@
     showAvatars = true,
     showMedia = true,
     showEmbeds = true,
+    ogpEndpoint,
     actions = [],
     authorAction,
     noteAction,
@@ -142,6 +145,7 @@
         {showAvatars}
         {showMedia}
         {showEmbeds}
+        {ogpEndpoint}
         {actions}
         {authorAction}
         {noteAction}
