@@ -1105,6 +1105,32 @@ describe('EventCard', () => {
       expect(screen.getByRole('link', { name: 'https://example.com/a' })).toBeInTheDocument();
     });
 
+    it('leaves a quoted note unpreviewed, however many links it carries', async () => {
+      stubEndpoint({ title: 'A title' });
+
+      const { container } = render(EventCard, {
+        props: {
+          event: makeEvent({ content: `見て https://example.com/a nostr:${NOTE}` }),
+          embeds: new Map([
+            [
+              NOTE_HEX,
+              {
+                status: 'ready' as const,
+                event: makeEvent({ content: '引用元 https://example.com/quoted' }),
+              },
+            ],
+          ]),
+          onEmbedRequest: () => {},
+          ogpEndpoint: 'https://ogp.example/api',
+        },
+      });
+
+      await screen.findByText('A title');
+      // The quote card renders its own body, but a preview per nesting level is
+      // one external request per level.
+      expect(container.querySelectorAll('[part="ogp"]')).toHaveLength(1);
+    });
+
     it('leaves an attachment to the media renderer', async () => {
       const fetchMock = stubEndpoint({ title: 'A title' });
 

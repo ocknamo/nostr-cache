@@ -2,8 +2,9 @@
 // fake-indexeddb backs the DexieStorage the widget boots on mount.
 import 'fake-indexeddb/auto';
 import type { NostrEvent } from '@nostr-cache/shared';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { EventActionDetail } from './lib/event-actions.ts';
+import { resetOgpCache } from './lib/ogp.ts';
 import { acquireRelayHost, getRelayHostRefCount } from './lib/relay-host.ts';
 import { makeEvent, seedValidated } from './test-fixtures.ts';
 
@@ -31,6 +32,8 @@ describe('<nostr-post> custom element', () => {
   afterEach(async () => {
     document.body.innerHTML = '';
     await waitFor(() => getRelayHostRefCount() === 0, 'the relay host to be released');
+    vi.unstubAllGlobals();
+    resetOgpCache();
   });
 
   async function seed(dbName: string, events: NostrEvent[]): Promise<void> {
@@ -88,6 +91,36 @@ describe('<nostr-post> custom element', () => {
     await waitFor(
       () => element.shadowRoot?.querySelectorAll('.chip').length === 2,
       'the reaction chips'
+    );
+  });
+
+  it('forwards ogp-endpoint, so the post can preview a link', async () => {
+    const dbName = `post-${crypto.randomUUID()}`;
+    await seed(dbName, [
+      makeEvent({ id: POST_ID, pubkey: ALICE, content: '詳細 https://example.com/a' }),
+    ]);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        text: async () => JSON.stringify({ title: 'リンク先の見出し' }),
+      }))
+    );
+
+    const element = mount({
+      'event-id': POST_ID,
+      'db-name': dbName,
+      'ogp-endpoint': 'https://ogp.example/api',
+    });
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('[part="ogp-title"]')),
+      'the link preview card'
+    );
+    expect(element.shadowRoot?.querySelector('[part="ogp-title"]')?.textContent).toBe(
+      'リンク先の見出し'
     );
   });
 

@@ -90,6 +90,49 @@ describe('OgpCard', () => {
     expect(container.querySelector('a')).toBeNull();
   });
 
+  it('renders nothing for a link that is not http(s)', async () => {
+    const fetchMock = stubEndpoint({ title: 'A title' });
+    const { container } = render(OgpCard, {
+      props: { endpoint: ENDPOINT, url: 'javascript:alert(1)' },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector('a')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('lets a late answer for the previous link blank the card it moved to', async () => {
+    // The reuse case in `<nostr-post>`: the first lookup is still in flight when
+    // the card moves on, and resolves after the second one has already rendered.
+    const pending = new Map<string, (body: unknown) => void>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (request: string) =>
+          new Promise<Response>((resolve) => {
+            pending.set(request.includes('%2Fa') ? 'a' : 'b', (body) =>
+              resolve(jsonResponse(body))
+            );
+          })
+      )
+    );
+
+    const { rerender } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+    await rerender({ endpoint: ENDPOINT, url: 'https://example.com/b' });
+
+    pending.get('b')?.({ title: 'Second' });
+    expect(await screen.findByText('Second')).toBeInTheDocument();
+
+    pending.get('a')?.({ title: 'First' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.getByText('Second')).toBeInTheDocument();
+    expect(screen.queryByText('First')).not.toBeInTheDocument();
+  });
+
   it('drops the previous preview when the card moves to another link', async () => {
     const fetchMock = vi.fn(async (request: string) =>
       jsonResponse({ title: request.includes('%2Fa') ? 'First' : 'Second' })

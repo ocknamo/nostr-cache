@@ -14,7 +14,7 @@
  * mislabel a link but cannot redirect it.
  */
 
-import type { ContentPart } from './content-parts.ts';
+import { type ContentPart, mediaKind } from './content-parts.ts';
 import { safeImageUrl, safeText } from './profile.ts';
 
 /** Abandon a request that has not answered by then; the card stays absent. */
@@ -35,7 +35,7 @@ const MAX_RESPONSE_LENGTH = 64 * 1024;
  * Previews kept for the page. Failures are kept too — an endpoint that is down
  * should cost one request, not one per card that scrolls past.
  */
-const MAX_CACHED = 200;
+export const MAX_CACHED_PREVIEWS = 200;
 
 /**
  * Requests in flight at once, as in the profile lookups: a fast scroll through
@@ -57,12 +57,14 @@ export interface OgpData {
 /**
  * The link to preview: the first ordinary one in the body.
  *
- * Media is already rendered as an attachment and a `nostr:` entity as a quote
- * card, so neither is a candidate.
+ * A `nostr:` entity is a quote card and an attachment is already rendered from
+ * the URL itself, so neither is a candidate. The extension is re-checked rather
+ * than trusting the part kind, because a media URL past the per-note attachment
+ * cap comes through as an ordinary link.
  */
 export function previewTarget(parts: ContentPart[]): string | undefined {
   for (const part of parts) {
-    if (part.kind === 'link') {
+    if (part.kind === 'link' && mediaKind(part.href) === undefined) {
       return part.href;
     }
   }
@@ -179,6 +181,9 @@ async function fetchOgp(request: string, target: string): Promise<OgpData | unde
   try {
     const response = await fetch(request, {
       credentials: 'omit',
+      // As on the thumbnail: the endpoint is told which URL to look up, not
+      // which page the widget is embedded in.
+      referrerPolicy: 'no-referrer',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
@@ -243,7 +248,7 @@ export function requestOgp(endpoint: string, target: string): Promise<OgpData | 
     request === undefined ? Promise.resolve(undefined) : withSlot(() => fetchOgp(request, target));
   cache.set(key, pending);
 
-  if (cache.size > MAX_CACHED) {
+  if (cache.size > MAX_CACHED_PREVIEWS) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) {
       cache.delete(oldest);
@@ -252,7 +257,10 @@ export function requestOgp(endpoint: string, target: string): Promise<OgpData | 
   return pending;
 }
 
-/** Empties the page-scoped cache. For tests; nothing in the widget calls it. */
+/**
+ * Empties the page-scoped cache. Nothing in the widget calls it — it is here
+ * for tests, and for a consumer driving the components directly.
+ */
 export function resetOgpCache(): void {
   cache.clear();
 }

@@ -223,7 +223,12 @@ export async function startEmbedSiteServer(
     if (path === OGP_PATH) {
       const target = new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('url') ?? '';
       const origin = `${options.tls ? 'https' : 'http'}://${req.headers.host}`;
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        // A real endpoint is on another origin than the embedding page, so
+        // without this the widget's fetch never gets to read the answer.
+        'access-control-allow-origin': '*',
+      });
       res.end(
         JSON.stringify({
           title: `プレビュー: ${target}`,

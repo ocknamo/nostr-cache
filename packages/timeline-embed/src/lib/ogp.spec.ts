@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseContent } from './content-parts.ts';
 import {
+  MAX_CACHED_PREVIEWS,
   OGP_TIMEOUT_MS,
   ogpRequestUrl,
   parseOgpResponse,
@@ -37,6 +38,16 @@ describe('previewTarget', () => {
   it('skips media, which is already rendered as an attachment', () => {
     const parts = parseContent('https://cdn.example.com/a.jpg then https://example.com/page');
 
+    expect(previewTarget(parts)).toBe('https://example.com/page');
+  });
+
+  it('skips a media URL that spilled past the attachment cap', () => {
+    // Past MAX_MEDIA the parser emits an image URL as an ordinary link, and a
+    // preview service has nothing to say about a .jpg.
+    const images = Array.from({ length: 9 }, (_, index) => `https://cdn.example.com/${index}.jpg`);
+    const parts = parseContent(`${images.join(' ')} https://example.com/page`);
+
+    expect(parts.some((part) => part.kind === 'link')).toBe(true);
     expect(previewTarget(parts)).toBe('https://example.com/page');
   });
 
@@ -256,6 +267,22 @@ describe('requestOgp', () => {
     await vi.advanceTimersByTimeAsync(OGP_TIMEOUT_MS);
 
     await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('drops the oldest preview once the page has collected too many', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ title: 'A title' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = 'https://example.com/0';
+    await requestOgp(ENDPOINT, first);
+    for (let index = 1; index <= MAX_CACHED_PREVIEWS; index++) {
+      await requestOgp(ENDPOINT, `https://example.com/${index}`);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_CACHED_PREVIEWS + 1);
+
+    // The first URL has been evicted, so asking again costs another request.
+    await requestOgp(ENDPOINT, first);
+    expect(fetchMock).toHaveBeenCalledTimes(MAX_CACHED_PREVIEWS + 2);
   });
 
   it('never asks when the endpoint is unusable', async () => {

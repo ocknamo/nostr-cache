@@ -1,15 +1,23 @@
 <script lang="ts">
+  import { readUrl } from '../lib/content-parts.ts';
   import { type OgpData, requestOgp } from '../lib/ogp.ts';
   import { whenVisible } from '../lib/when-visible.ts';
 
   interface Props {
     /** Where to ask for the metadata; see `lib/ogp.ts`. */
     endpoint: string;
-    /** The link to preview. Already validated as `http(s)` by the parser. */
+    /** The link to preview. */
     url: string;
   }
 
   const { endpoint, url }: Props = $props();
+
+  /**
+   * Re-validated here rather than trusted from the caller: this component is
+   * exported, so `href` gets the same check at the sink that every other URL in
+   * the package does. Nothing renders and nothing is fetched without one.
+   */
+  const href = $derived(readUrl(url)?.href);
 
   /**
    * Keyed by URL, as in `MediaAttachment.svelte`: `<nostr-post>` reuses one card
@@ -18,23 +26,32 @@
   let loaded = $state<{ url: string; data?: OgpData } | undefined>();
   let imageFailedUrl = $state<string | undefined>();
 
-  const data = $derived(loaded?.url === url ? loaded.data : undefined);
-  const image = $derived(imageFailedUrl === url ? undefined : data?.image);
+  const data = $derived(loaded && loaded.url === href ? loaded.data : undefined);
+  const image = $derived(href !== undefined && imageFailedUrl === href ? undefined : data?.image);
 
   const load = () => {
-    const target = url;
+    const target = href;
+    if (target === undefined) {
+      return;
+    }
     requestOgp(endpoint, target).then((result) => {
+      // A slow answer for the post this card used to show must not land on the
+      // one it shows now — it would blank a card that had already resolved.
+      if (target !== href) {
+        return;
+      }
       loaded = { url: target, data: result };
     });
   };
 </script>
 
-<!-- Keyed so the lookup runs again for a new URL: `whenVisible` reports once
-     per element, and would otherwise stay spent from the previous post. -->
-{#key url}
+<!-- Keyed so the lookup runs again for a new link: `whenVisible` reports once
+     per element, and would otherwise stay spent from the previous post. The
+     endpoint is in the key too, since it decides what the answer is. -->
+{#key `${endpoint}\n${href}`}
   <div use:whenVisible={load}>
-    {#if data}
-      <a class="ogp" part="ogp" href={url} target="_blank" rel="noopener noreferrer nofollow">
+    {#if data && href}
+      <a class="ogp" part="ogp" {href} target="_blank" rel="noopener noreferrer nofollow">
         {#if image}
           <!-- `alt=""`: the title beside it is the link's accessible name, so a
                second description of the same link only repeats it. -->
@@ -47,7 +64,7 @@
             decoding="async"
             referrerpolicy="no-referrer"
             onerror={() => {
-              imageFailedUrl = url;
+              imageFailedUrl = href;
             }}
           />
         {/if}

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import type { NostrEvent } from '@nostr-cache/shared';
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EventAction } from '../lib/event-actions.ts';
+import { resetOgpCache } from '../lib/ogp.ts';
 import { parsePostTarget } from '../lib/post-target.ts';
 import type { TimelineState } from '../lib/timeline-controller.ts';
 import { makeEvent } from '../test-fixtures.ts';
@@ -260,6 +261,63 @@ describe('PostView', () => {
       });
 
       expect(screen.getByText(/返信先が取得できなかった投稿が 1 件あります/)).toBeInTheDocument();
+    });
+  });
+
+  describe('link previews', () => {
+    const ENDPOINT = 'https://ogp.example/api';
+    /** A post and a reply that both carry an ordinary link. */
+    const LINKED = makeEvent({
+      id: POST_ID,
+      pubkey: ALICE,
+      content: 'the post https://example.com/post',
+    });
+    const LINKED_THREAD = new Map([
+      [POST_ID, [reply(REPLY_ID, POST_ID, 'a reply https://example.com/reply')]],
+    ]);
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      resetOgpCache();
+    });
+
+    function stubEndpoint() {
+      const fetchMock = vi.fn(async (request: string) => ({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        text: async () => JSON.stringify({ title: `リンク先の見出し (${request})` }),
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    it('previews the post itself but leaves the thread alone', async () => {
+      const fetchMock = stubEndpoint();
+      const { container } = render(PostView, {
+        props: {
+          state: state({ events: [LINKED], replies: LINKED_THREAD }),
+          target: TARGET,
+          ogpEndpoint: ENDPOINT,
+        },
+      });
+
+      expect(await screen.findByText(/リンク先の見出し/)).toBeInTheDocument();
+      // One card, for the post — a reply's links are context, and previewing
+      // each of them would cost one request per reply.
+      expect(container.querySelectorAll('[part="ogp"]')).toHaveLength(1);
+      const asked = fetchMock.mock.calls.map(([request]) => String(request));
+      expect(asked.some((request) => request.includes('%2Freply'))).toBe(false);
+    });
+
+    it('asks nobody anything without an endpoint', async () => {
+      const fetchMock = stubEndpoint();
+      const { container } = render(PostView, {
+        props: { state: state({ events: [LINKED], replies: LINKED_THREAD }), target: TARGET },
+      });
+      await Promise.resolve();
+
+      expect(container.querySelector('[part="ogp"]')).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 

@@ -29,6 +29,10 @@ describe('<nostr-timeline> custom element', () => {
     document.body.innerHTML = '';
     await waitFor(() => getRelayHostRefCount() === 0, 'the relay host to be released');
     globalThis.WebSocket = originalWebSocket;
+    // Here rather than at the end of the test that stubs it: a failed wait
+    // throws, and a leaked `fetch` would follow it into the next test.
+    vi.unstubAllGlobals();
+    resetOgpCache();
   });
 
   it('registers the element', () => {
@@ -244,7 +248,6 @@ describe('<nostr-timeline> custom element', () => {
       text: async () => JSON.stringify({ title: 'リンク先の見出し' }),
     }));
     vi.stubGlobal('fetch', fetchMock);
-    resetOgpCache();
 
     const element = document.createElement('nostr-timeline');
     element.setAttribute('db-name', dbName);
@@ -259,7 +262,6 @@ describe('<nostr-timeline> custom element', () => {
     expect(element.shadowRoot?.querySelector('[part="ogp-title"]')?.textContent).toBe(
       'リンク先の見出し'
     );
-    vi.unstubAllGlobals();
   });
 });
 

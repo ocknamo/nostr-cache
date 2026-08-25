@@ -838,6 +838,9 @@ nostr-timeline {
 - 値に `{url}` が含まれる場合は、そこに対象 URL を percent-encode して差し込みます
   （`https://ogp.example.com/api/{url}` のようなパス型のプロキシ用）
 - 相対パス（`/ogp` など）も書けます。埋め込み先ページの URL を基準に解決します
+- **エンドポイントは `Access-Control-Allow-Origin` を返す必要があります。** 埋め込み先と
+  別オリジンに置くのが普通なので、これが無いと応答を読めずカードが出ません
+  （リクエストは `Accept` だけを付けた単純リクエストなので、プリフライトは発生しません）
 
 期待する応答は JSON オブジェクト 1 つです。`title` / `description` / `image` /
 `siteName` を読み、`og:title` / `og:description` / `og:image` / `og:site_name` という
@@ -867,7 +870,7 @@ nostr-timeline {
   カードの数だけ問い合わせることはありません）。リロードすると取り直します
 - タイトル 200 文字・説明 400 文字を超える分は切り詰め、制御文字と bidi override は
   本文と同じく除去します。`image` は `http(s)` のみ（`data:` は拒否）
-- 応答が JSON でない・5 秒以内に返らない・64KB を超える、といった場合はカードを出さずに
+- 応答が JSON でない・5 秒以内に返らない・64K 文字を超える、といった場合はカードを出さずに
   終わります（本文のリンクはそのまま残ります）
 - 入れ子の引用カードと `<nostr-post>` の返信ツリーには**出しません**。1 画面あたりの
   外部リクエストが投稿数に比例して増えるのを避けるためです
@@ -1230,7 +1233,9 @@ window.addEventListener('message', (event) => {
   任意の URL を取りに行かせる以上、**SSRF 対策（内部ネットワーク・リダイレクト・
   スキーム・応答サイズの制限）とレート制限、キャッシュはそちら側の責任**です。
   ウィジェットは既定のエンドポイントを持たず、属性が無ければ何も問い合わせません。
-  取得したサムネイルは `referrerpolicy="no-referrer"` と遅延読み込みで読みますが、
+  問い合わせ自体は `referrerPolicy: 'no-referrer'` で行うので**埋め込み先ページの URL は
+  送りません**が、IP アドレスは避けられません。
+  取得したサムネイルも `referrerpolicy="no-referrer"` と遅延読み込みで読みますが、
   **画像の配信元にも閲覧者の IP は渡ります**。埋め込み先ページの CSP
   （`connect-src` と `img-src`）にも通す必要があります
 - **NIP-05 は検証していません。** kind 0 の `nip05` はパースしますが、`.well-known/nostr.json`
@@ -1308,11 +1313,11 @@ import {
 | `parseProfileContent` / `authorName` / `authorHandle` / `stripUnrenderable` | kind 0 の防御的パースと表示名の決定。`stripUnrenderable` は 1 行に描くテキストから制御文字・bidi 上書きを落とす |
 | `parseRefs` / `replyParentId` / `replyParentAddress` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方）。後ろ 2 つは「この投稿の親はどれか」だけを返す |
 | `buildReplyTree` / `acceptsReply` / `MAX_REPLY_DEPTH` / `MAX_REPLIES` | 生の kind 1 からリプライツリーを組む純粋関数。ルートから降りるので循環は到達不能になり、`#e` の任意位置マッチで届く別の枝は繋がらないものとして落ちる |
-| `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
+| `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `mediaKind` / `readUrl` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
 | `notePreview` / `eventPreview` / `mentionLabel` / `PREVIEW_MAX_LENGTH` | 本文を 1 行の文字列へ畳む（チップのプレビュー用。添付は `[画像]`、URL はホスト名、言及は `@名前`）。`eventPreview` は本文を持たない kind を空文字で返す |
 | `selectEmbeds` / `embedTarget` / `eventIdTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで。`eventIdTarget` は生の id（`e` タグ）から同じキーの取得を作る |
 | `noteSegments` / `segmentMedia` / `segmentKey` | 本文をテキスト区間と入れ子カードの並びに分割し(引用の展開位置を決める本体)、添付の重複排除をその区間をまたいで通す。`segmentKey` は描画時のキー |
-| `previewTarget` / `requestOgp` / `parseOgpResponse` / `ogpRequestUrl` / `resetOgpCache` | リンクの OGP カード（[上記](#リンクの-ogp-カード)）。本文からカード化する 1 件を選び、エンドポイントに問い合わせ、応答を検証する。結果はページ内メモリにだけ残る |
+| `previewTarget` / `requestOgp` / `parseOgpResponse` / `ogpRequestUrl` / `resetOgpCache` / `OGP_TIMEOUT_MS` / `MAX_CACHED_PREVIEWS` / `OgpData` | リンクの OGP カード（[上記](#リンクの-ogp-カード)）。本文からカード化する 1 件を選び、エンドポイントに問い合わせ、応答を検証する。結果はページ内メモリにだけ残る |
 | `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィール・引用・返信先プレビューの取得トリガ） |
 | `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `OgpCard` / `Avatar` / `PostView` / `ReactionBar` / `ReplyTree` | 表示コンポーネント |
 | `parseFreshness` / `parseDebug` / `parseShowOriginAlias` / `parseOgpEndpoint` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |

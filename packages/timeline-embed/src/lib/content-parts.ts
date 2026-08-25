@@ -174,10 +174,13 @@ export type ContentPart = TextPart | LinkPart | MediaPart | EntityPart;
 /**
  * Parse a URL and keep it only if it is safe to put in an `href`.
  *
+ * Exported for `ogp.ts`, which renders a link of its own around a URL it was
+ * handed rather than one it parsed out of a body.
+ *
  * @returns The parsed URL, or undefined when it is malformed, too long, or not
  *   an `http(s)` one
  */
-function readUrl(raw: string): URL | undefined {
+export function readUrl(raw: string): URL | undefined {
   if (raw.length > MAX_URL_LENGTH) {
     return undefined;
   }
@@ -237,6 +240,17 @@ function classifyMedia(url: URL): MediaKind | undefined {
     return undefined;
   }
   return MEDIA_EXTENSIONS.get(path.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * {@link classifyMedia} for a URL that has already been parsed once.
+ *
+ * Exported because a media URL past {@link MAX_MEDIA} is emitted as an ordinary
+ * link, and `ogp.ts` must not ask a preview service about a `.jpg`.
+ */
+export function mediaKind(href: string): MediaKind | undefined {
+  const url = readUrl(href);
+  return url && classifyMedia(url);
 }
 
 /**

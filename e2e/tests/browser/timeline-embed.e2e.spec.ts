@@ -434,7 +434,7 @@ describe('Embeddable timeline E2E', () => {
         await page.waitForSelector('nostr-timeline .content a', { timeout: TIMEOUT });
 
         expect(await page.$$('nostr-timeline [part="ogp"]')).toHaveLength(0);
-        expect(asked.filter((url) => url.startsWith(site.ogpEndpointUrl))).toEqual([]);
+        expect(asked.filter((url) => new URL(url).pathname === '/ogp')).toEqual([]);
       } finally {
         await disposable.close();
       }
@@ -478,6 +478,31 @@ describe('Embeddable timeline E2E', () => {
         expect(hrefs).toEqual(['https://example.com/a']);
       } finally {
         await disposable.close();
+      }
+    });
+
+    it('reads a preview from an endpoint on another origin', async () => {
+      // How this is actually deployed: the OGP service is not the site the
+      // widget is served from, so the answer only arrives if CORS allows it.
+      const [disposable, elsewhere] = await Promise.all([
+        startRichUpstream(),
+        startEmbedSiteServer(),
+      ]);
+      try {
+        expect(new URL(elsewhere.ogpEndpointUrl).origin).not.toBe(new URL(site.baseUrl).origin);
+
+        page = await browser.newPage();
+        await page.goto(
+          embedUrl({ relays: disposable.url, 'ogp-endpoint': elsewhere.ogpEndpointUrl })
+        );
+        await waitForEventCount(page, 1);
+
+        const title = await page.waitForSelector('nostr-timeline [part="ogp-title"]', {
+          timeout: TIMEOUT,
+        });
+        expect(await title.textContent()).toBe('プレビュー: https://example.com/a');
+      } finally {
+        await Promise.all([disposable.close(), elsewhere.close()]);
       }
     });
 
