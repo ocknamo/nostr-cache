@@ -19,7 +19,6 @@ import {
 } from './event-actions.ts';
 import { parseFilterList, toPubkeyHex } from './filter-json.ts';
 import { type MaterialVariant, parseMaterialVariant } from './material-symbols.ts';
-import { DEFAULT_OGP_PROXY } from './ogp.ts';
 import { MAX_REACTIONS } from './reactions.ts';
 import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 
@@ -146,25 +145,27 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
  * Parse the CORS proxy (`ogp-proxy`) the link previews are fetched through.
  *
  * Absent — the default — leaves the feature off entirely, so nothing about a
- * reader reaches a third party unless the embedder asked for it. A bare
- * attribute opts in at {@link DEFAULT_OGP_PROXY}; a URL names another proxy, or
- * the same one carrying an API key.
+ * reader reaches a third party unless the embedder asked for it. The value has
+ * to be the proxy's URL: there is no default to fall back to, since a shared
+ * one would carry nobody's API key and spend a quota nobody owns.
  *
  * @returns The proxy URL to send the lookups to, or undefined to leave the
  *   previews off
  */
 export function parseOgpProxy(value: string | boolean | null | undefined): string | undefined {
-  if (value === null || value === undefined) {
+  if (value === null || value === undefined || value === false) {
     return undefined;
   }
-  if (typeof value === 'boolean') {
-    return value ? DEFAULT_OGP_PROXY : undefined;
-  }
-  const proxy = value.trim();
-  if (proxy === '' || proxy === 'true' || proxy === '1') {
-    return DEFAULT_OGP_PROXY;
-  }
+  // `true` arrives from a Svelte parent setting the property; it names no proxy
+  // either, so it lands on the same warning a bare attribute does.
+  const proxy = value === true ? '' : value.trim();
   if (proxy === 'false' || proxy === '0') {
+    return undefined;
+  }
+  if (proxy === '' || proxy === 'true' || proxy === '1') {
+    console.warn(
+      '[nostr-timeline] Ignoring ogp-proxy without a URL: it needs the proxy to fetch through, e.g. ogp-proxy="https://corsproxy.io/?key=YOUR_API_KEY".'
+    );
     return undefined;
   }
   // Checked before parsing, because `new URL` would resolve a typo like `off`

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AUTHOR_LABEL, DEFAULT_NOTE_LABEL } from './event-actions.ts';
-import { DEFAULT_OGP_PROXY } from './ogp.ts';
 import { MAX_REACTIONS } from './reactions.ts';
 import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 import {
@@ -426,9 +425,6 @@ describe('configFromSearchParams', () => {
       configFromSearchParams(new URLSearchParams('ogp-proxy=https://corsproxy.io/?key=abc'))
         .ogpProxy
     ).toBe('https://corsproxy.io/?key=abc');
-    expect(configFromSearchParams(new URLSearchParams('ogp-proxy')).ogpProxy).toBe(
-      DEFAULT_OGP_PROXY
-    );
     expect(configFromSearchParams(new URLSearchParams('')).ogpProxy).toBeUndefined();
     expect(followConfigFromSearchParams(new URLSearchParams('')).ogpProxy).toBeUndefined();
   });
@@ -573,20 +569,28 @@ describe('parseOgpProxy', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opts in at the default proxy for a bare attribute', () => {
-    expect(parseOgpProxy('')).toBe(DEFAULT_OGP_PROXY);
-    expect(parseOgpProxy('   ')).toBe(DEFAULT_OGP_PROXY);
-    expect(parseOgpProxy('true')).toBe(DEFAULT_OGP_PROXY);
-    expect(parseOgpProxy(true)).toBe(DEFAULT_OGP_PROXY);
+  it('leaves previews off, loudly, when no proxy URL was named', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // There is no default to fall back to: a shared proxy URL would carry
+    // nobody's API key.
+    expect(parseOgpProxy('')).toBeUndefined();
+    expect(parseOgpProxy('   ')).toBeUndefined();
+    expect(parseOgpProxy('true')).toBeUndefined();
+    expect(parseOgpProxy(true)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(4);
   });
 
   it('keeps a named proxy, API key and all', () => {
     expect(parseOgpProxy('https://corsproxy.io/?key=abc')).toBe('https://corsproxy.io/?key=abc');
   });
 
-  it('leaves previews off when they are turned off', () => {
+  it('says nothing when previews are explicitly turned off', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
     expect(parseOgpProxy('false')).toBeUndefined();
     expect(parseOgpProxy(false)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('resolves a path against the embedding page, once', () => {

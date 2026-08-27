@@ -2,7 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseContent } from './content-parts.ts';
 import {
-  DEFAULT_OGP_PROXY,
   MAX_CACHED_PREVIEWS,
   OGP_TIMEOUT_MS,
   ogpRequestUrl,
@@ -72,7 +71,7 @@ describe('previewTarget', () => {
 
 describe('ogpRequestUrl', () => {
   it('adds the target as a percent-encoded `url` parameter', () => {
-    expect(ogpRequestUrl(DEFAULT_OGP_PROXY, 'https://example.com/a?b=1')).toBe(
+    expect(ogpRequestUrl('https://corsproxy.io/', 'https://example.com/a?b=1')).toBe(
       'https://corsproxy.io/?url=https%3A%2F%2Fexample.com%2Fa%3Fb%3D1'
     );
   });
@@ -84,7 +83,7 @@ describe('ogpRequestUrl', () => {
   });
 
   it('encodes a space as %20 rather than +', () => {
-    expect(ogpRequestUrl(DEFAULT_OGP_PROXY, 'https://example.com/a b')).toBe(
+    expect(ogpRequestUrl('https://corsproxy.io/', 'https://example.com/a b')).toBe(
       'https://corsproxy.io/?url=https%3A%2F%2Fexample.com%2Fa%20b'
     );
   });

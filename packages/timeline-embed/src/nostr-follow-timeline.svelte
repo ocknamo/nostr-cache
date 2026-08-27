@@ -116,13 +116,13 @@
      */
     showEmbeds?: string;
     /**
-     * Turns the link previews (OGP) on, fetching the linked page through
-     * corsproxy.io — a bare attribute uses `https://corsproxy.io/`, and a URL
-     * (e.g. `"https://corsproxy.io/?key=…"`) names the proxy to use instead.
-     * **Unset means no previews and no requests**; see the README for what the
-     * proxy gets to see.
+     * URL of the CORS proxy the link previews (OGP) are fetched through, e.g.
+     * `"https://corsproxy.io/?key=…"` — the linked page is requested through
+     * it and its `og:` tags are read here. There is no default: **unset (or
+     * set without a URL) means no previews and no requests**; see the README
+     * for what the proxy gets to see.
      */
-    ogpProxy?: string | boolean;
+    ogpProxy?: string;
     /**
      * The embedder's buttons under every card, exactly as on
      * `<nostr-timeline>`: a JSON array from an attribute, or the array itself

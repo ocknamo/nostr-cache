@@ -91,7 +91,6 @@ export {
 } from './note-embeds.ts';
 export type { EmbedStatus, EmbedTarget, EmbeddedEvent, NoteSegment } from './note-embeds.ts';
 export {
-  DEFAULT_OGP_PROXY,
   MAX_CACHED_PREVIEWS,
   OGP_TIMEOUT_MS,
   ogpRequestUrl,

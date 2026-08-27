@@ -2,12 +2,12 @@
  * Link previews (OGP) for the ordinary links in a note.
  *
  * A browser cannot read another origin's HTML, so the page is fetched through a
- * CORS proxy — corsproxy.io by default — which returns the page with
- * `Access-Control-Allow-Origin` on it, and the `og:` meta tags are read here.
- * The embedder writes `ogp-proxy` to turn previews on, and may point it at
- * their own corsproxy.io URL so the requests carry their API key. Without that
- * attribute nothing here runs — the widget will not hand a reader's IP and
- * reading history to a third-party service by default, the same stance
+ * CORS proxy, which returns it with `Access-Control-Allow-Origin` on it, and
+ * the `og:` meta tags are read here. The embedder names that proxy in
+ * `ogp-proxy` — a corsproxy.io URL carrying their own API key, or any proxy
+ * taking the target in a `url` parameter. There is no default: without the
+ * attribute nothing here runs, and the widget will not hand a reader's IP and
+ * reading history to a third-party service on its own, the same stance
  * `show-media` takes.
  *
  * The page is treated as hostile: it is whatever a stranger's link points at.
@@ -20,9 +20,6 @@
 
 import { type ContentPart, mediaKind } from './content-parts.ts';
 import { safeImageUrl, safeText } from './profile.ts';
-
-/** The proxy used unless the embedder names another. */
-export const DEFAULT_OGP_PROXY = 'https://corsproxy.io/';
 
 /** Abandon a request that has not answered by then; the card stays absent. */
 export const OGP_TIMEOUT_MS = 5000;

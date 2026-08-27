@@ -178,7 +178,7 @@ npm パッケージを入れられない構成のための入口です。
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
 | `show-embeds` | `false` で本文中の `nostr:` 参照の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
-| `ogp-proxy` | 付けると本文の最初のリンクの OGP カードを表示する（取得は corsproxy.io 経由）。値に `https://corsproxy.io/?key=…` のような URL を書けばそちらを使う。**付けなければカードを出さず、どこにも問い合わせません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
+| `ogp-proxy` | 本文の最初のリンクの OGP カードを取得する CORS プロキシの URL（`https://corsproxy.io/?key=…` など）。**指定しなければカードを出さず、どこにも問い合わせません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 | `author-action` | 指定するとアイコン・表示名が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する（[下記](#著者アイコン表示名の押下)） | なし（押せない・従来どおり） |
 | `author-action-label` | その押下の説明（アクセシブル名）。`author-action` が無いときは効きません | `プロフィールを開く` |
@@ -825,15 +825,11 @@ nostr-timeline {
 
 ### リンクの OGP カード
 
-`ogp-proxy` を付けると、**本文の最初の普通のリンク 1 件**について OGP
-（Open Graph Protocol）のカードを本文の下に表示します。**既定では表示せず、
+`ogp-proxy` に CORS プロキシの URL を渡すと、**本文の最初の普通のリンク 1 件**について
+OGP（Open Graph Protocol）のカードを本文の下に表示します。**既定では表示せず、
 どこにも問い合わせません。**
 
 ```html
-<!-- corsproxy.io の無料枠（キー無し）で試す -->
-<nostr-timeline relays="wss://nos.lol" ogp-proxy></nostr-timeline>
-
-<!-- 本番。自分の API キー付きの URL を渡す -->
 <nostr-timeline
   relays="wss://nos.lol"
   ogp-proxy="https://corsproxy.io/?key=YOUR_API_KEY"
@@ -841,16 +837,18 @@ nostr-timeline {
 ```
 
 ブラウザからは CORS のため他所のページの HTML を読めないので、**取得は
-[corsproxy.io](https://corsproxy.io/) 経由で行います**。リンク先の HTML をそのまま
-受け取り、`<meta property="og:…">` の読み取りは**ウィジェット側**で行います
+[corsproxy.io](https://corsproxy.io/) のような CORS プロキシ経由で行います**。
+リンク先の HTML をそのまま受け取り、`<meta property="og:…">` の読み取りは
+**ウィジェット側**で行います
 （`DOMParser` で解析するだけなので、取得したページのスクリプトは動かず、
 そのページの画像なども読み込まれません）。
 
 - 問い合わせは `GET {ogp-proxy}?url=<対象URLをencodeURIComponentしたもの>` の 1 本です。
   `Accept` だけを付けた単純リクエストなので、プリフライトは発生しません
-- 属性を**値なしで付けた**場合（`true` / `1` も同じ）は `https://corsproxy.io/` を使います。
-  corsproxy.io はキー無しでも試せますが、**本番利用は API キー付きの URL**
-  （無料枠は 10,000 リクエスト/月）を渡してください。キーは属性の URL にそのまま書きます
+- **値は必須です。** 値なし（`true` / `1` も同じ）で付けた場合は警告を出して無効にします。
+  既定のプロキシは持ちません（誰の API キーも載っていない URL では本番運用できないため）。
+  corsproxy.io の API キー（無料枠は 10,000 リクエスト/月）は、この属性の URL に
+  `?key=…` としてそのまま書きます
 - `url` パラメータを同じ形で受け取り、`Access-Control-Allow-Origin` を返す CORS プロキシなら
   corsproxy.io 以外（自前のものを含む）でも動きます。埋め込み先と同じオリジンに置くなら
   `/cors` のようなパスも書けます。プロキシ自身のクエリ文字列は保持するので、`?key=…` は
@@ -858,7 +856,7 @@ nostr-timeline {
 - `false` / `0` を渡すと明示的にオフです（既定と同じ）
 - **`http(s)://` で始まる URL か `/` で始まるパス以外は受け付けません**（`off` のような
   書き間違いは埋め込み先の相対 URL として解決されてしまうため、警告を出して無効にします）
-- **埋め込み先ページの CSP** では、プロキシのオリジン（既定なら `https://corsproxy.io`）を
+- **埋め込み先ページの CSP** では、プロキシのオリジン（`https://corsproxy.io` など）を
   `connect-src` に、サムネイルの配信元を `img-src` に通す必要があります
 
 読み取るタグは次の順で、最初に見つかったものを使います。
@@ -1245,7 +1243,7 @@ window.addEventListener('message', (event) => {
   （`preload="none"` なので、**再生ボタンを押すまで通信は発生しません**）。
   避けたい場合は `show-media="false"` を指定してください。URL はリンクとして残るので、
   閲覧者が自分で開くことは引き続きできます
-- **`ogp-proxy` を付けると、閲覧者の情報が corsproxy.io（または指定したプロキシ）に
+- **`ogp-proxy` を指定すると、閲覧者の情報がそのプロキシ（corsproxy.io など）に
   渡ります。** リクエストには**閲覧者の IP アドレスと、その人が読んでいる投稿に含まれる
   URL** が乗り、プロキシはその URL のページを代わりに取得します。ウィジェットは既定で
   この属性を持たず、**付けなければ何も問い合わせません**。問い合わせ自体は

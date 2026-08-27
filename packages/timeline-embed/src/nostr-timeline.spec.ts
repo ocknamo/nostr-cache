@@ -228,7 +228,7 @@ describe('<nostr-timeline> custom element', () => {
     expect(presses[0].pubkey).toBe(author);
   });
 
-  it('forwards a bare ogp-proxy, so a card can preview a link', async () => {
+  it('forwards ogp-proxy, so a card can preview a link', async () => {
     const dbName = `timeline-${crypto.randomUUID()}`;
     const seeding = await acquireRelayHost({ dbName });
     try {
@@ -254,7 +254,7 @@ describe('<nostr-timeline> custom element', () => {
 
     const element = document.createElement('nostr-timeline');
     element.setAttribute('db-name', dbName);
-    element.setAttribute('ogp-proxy', '');
+    element.setAttribute('ogp-proxy', 'https://corsproxy.io/?key=abc');
     document.body.appendChild(element);
 
     await waitFor(
@@ -265,9 +265,9 @@ describe('<nostr-timeline> custom element', () => {
     expect(element.shadowRoot?.querySelector('[part="ogp-title"]')?.textContent).toBe(
       'リンク先の見出し'
     );
-    // The bare attribute opts in at corsproxy.io, with the link as its target.
+    // The proxy is asked for the link, with its own query string kept.
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://corsproxy.io/?url=https%3A%2F%2Fexample.com%2Fa',
+      'https://corsproxy.io/?key=abc&url=https%3A%2F%2Fexample.com%2Fa',
       expect.anything()
     );
   });
