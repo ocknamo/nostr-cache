@@ -95,6 +95,18 @@ describe('ogpRequestUrl', () => {
     );
   });
 
+  it('drops a fragment on the proxy, which would swallow the parameter', () => {
+    expect(ogpRequestUrl('https://corsproxy.io/#frag', 'https://example.com/a')).toBe(
+      'https://corsproxy.io/?url=https%3A%2F%2Fexample.com%2Fa'
+    );
+  });
+
+  it('does not double the separator on a proxy written with a trailing ?', () => {
+    expect(ogpRequestUrl('https://corsproxy.io/?', 'https://example.com/a')).toBe(
+      'https://corsproxy.io/?url=https%3A%2F%2Fexample.com%2Fa'
+    );
+  });
+
   it('refuses a proxy that is not http(s)', () => {
     expect(ogpRequestUrl('javascript:alert(1)', 'https://example.com/a')).toBeUndefined();
     expect(ogpRequestUrl('data:text/plain,x', 'https://example.com/a')).toBeUndefined();
@@ -143,6 +155,41 @@ describe('parseOgpHtml', () => {
     expect(parseOgpHtml(page({ 'og:title': 'A', 'og:image': '/og.png' }), url)?.image).toBe(
       'https://example.com/og.png'
     );
+  });
+
+  it('reads the alternate image spellings', () => {
+    expect(
+      parseOgpHtml(
+        page({ 'og:title': 'A', 'og:image:secure_url': 'https://cdn.example.com/s.png' }),
+        url
+      )?.image
+    ).toBe('https://cdn.example.com/s.png');
+    expect(
+      parseOgpHtml(page({ 'og:title': 'A', 'og:image:url': 'https://cdn.example.com/u.png' }), url)
+        ?.image
+    ).toBe('https://cdn.example.com/u.png');
+    const twitter = `<!doctype html><html><head>
+      <meta property="og:title" content="A" />
+      <meta name="twitter:image:src" content="https://cdn.example.com/t.png" />
+      <meta name="application-name" content="Example" />
+      </head></html>`;
+    expect(parseOgpHtml(twitter, url)?.image).toBe('https://cdn.example.com/t.png');
+    expect(parseOgpHtml(twitter, url)?.siteName).toBe('Example');
+  });
+
+  it('falls through an empty tag to the next spelling of the same field', () => {
+    const html = `<!doctype html><html><head>
+      <title>Document title</title>
+      <meta property="og:title" content="" />
+      <meta property="og:image" content="  " />
+      <meta name="twitter:image" content="https://cdn.example.com/t.png" />
+      </head></html>`;
+
+    expect(parseOgpHtml(html, url)).toEqual({
+      url,
+      title: 'Document title',
+      image: 'https://cdn.example.com/t.png',
+    });
   });
 
   it('keeps the first of a repeated tag', () => {
@@ -246,6 +293,17 @@ describe('requestOgp', () => {
     );
   });
 
+  it('sends a simple request, which needs no preflight', async () => {
+    const fetchMock = vi.fn(async () => htmlResponse(page({ 'og:title': 'A title' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await requestOgp(PROXY, 'https://example.com/a');
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.headers).toEqual({ Accept: 'text/html' });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('reads a page in the encoding it declares', async () => {
     // Shift_JIS is still out there, and `Response.text()` would decode it as
     // UTF-8 and leave the title as mojibake.
@@ -268,6 +326,93 @@ describe('requestOgp', () => {
     await expect(requestOgp(PROXY, 'https://example.com/a')).resolves.toMatchObject({
       title: 'テスト',
     });
+  });
+
+  it('reads the encoding from the response header too', async () => {
+    const body = new Uint8Array([
+      ...new TextEncoder().encode('<html><head><meta property="og:title" content="'),
+      0x83,
+      0x65,
+      0x83,
+      0x58,
+      0x83,
+      0x67,
+      ...new TextEncoder().encode('"></head></html>'),
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'text/html; charset=Shift_JIS' },
+        arrayBuffer: async () => body.buffer,
+      }))
+    );
+
+    await expect(requestOgp(PROXY, 'https://example.com/a')).resolves.toMatchObject({
+      title: 'テスト',
+    });
+  });
+
+  it('falls back to UTF-8 when the page declares an encoding that is not one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        htmlResponse(page({ 'og:title': '見出し' }), { contentType: 'text/html; charset=nonsense' })
+      )
+    );
+
+    await expect(requestOgp(PROXY, 'https://example.com/a')).resolves.toMatchObject({
+      title: '見出し',
+    });
+  });
+
+  it('stops reading at the byte ceiling, and stops the download with it', async () => {
+    // A page whose metadata sits past the ceiling: the card is worth less than
+    // the bandwidth it would take to reach it.
+    const padding = new TextEncoder().encode(
+      `<!doctype html><html><head>${'<!--x-->'.repeat(40_000)}`
+    );
+    const tail = new TextEncoder().encode(
+      '<meta property="og:title" content="Too far in" /></head></html>'
+    );
+    expect(padding.length).toBeGreaterThan(256 * 1024);
+
+    let cancelled = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => 'text/html' },
+        body: {
+          getReader: () => {
+            const chunks = [padding, tail];
+            let index = 0;
+            return {
+              read: async () =>
+                index < chunks.length
+                  ? { done: false, value: chunks[index++] }
+                  : { done: true, value: undefined },
+              cancel: async () => {
+                cancelled = true;
+              },
+            };
+          },
+        },
+      }))
+    );
+
+    await expect(requestOgp(PROXY, 'https://example.com/a')).resolves.toBeUndefined();
+    expect(cancelled).toBe(true);
+  });
+
+  it('renders nothing where there is no DOM to parse with', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => htmlResponse(page({ 'og:title': 'A title' })))
+    );
+    vi.stubGlobal('DOMParser', undefined);
+
+    await expect(requestOgp(PROXY, 'https://example.com/a')).resolves.toBeUndefined();
   });
 
   it('asks once per URL, however many cards want it', async () => {
@@ -304,7 +449,7 @@ describe('requestOgp', () => {
     await expect(requestOgp(PROXY, 'https://example.com/a')).resolves.toBeUndefined();
   });
 
-  it('reads the metadata out of a page far past the byte ceiling', async () => {
+  it('reads the metadata out of a page that goes on long past its head', async () => {
     const head = page({ 'og:title': 'A title' });
     vi.stubGlobal(
       'fetch',

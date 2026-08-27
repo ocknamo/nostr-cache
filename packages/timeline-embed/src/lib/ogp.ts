@@ -120,7 +120,10 @@ export function ogpRequestUrl(proxy: string, target: string): string | undefined
     return undefined;
   }
   url.hash = '';
-  return `${url.href}${url.search ? '&' : '?'}url=${encodeURIComponent(target)}`;
+  // A proxy written with a bare trailing `?` keeps it in `href` while `search`
+  // reports none, which would otherwise spell the parameter `?&url=`.
+  const base = url.href.endsWith('?') ? url.href.slice(0, -1) : url.href;
+  return `${base}${url.search ? '&' : '?'}url=${encodeURIComponent(target)}`;
 }
 
 /** Read one field, then clip it to what the card renders. */
@@ -154,8 +157,10 @@ function readMetaTags(doc: Document): Map<string, string> {
   const tags = new Map<string, string>();
   for (const meta of doc.querySelectorAll('meta')) {
     const key = (meta.getAttribute('property') ?? meta.getAttribute('name'))?.trim().toLowerCase();
-    const content = meta.getAttribute('content');
-    if (key && content !== null && !tags.has(key)) {
+    // An empty tag counts as absent, so a page that spells `og:title` that way
+    // still falls through to the next spelling of the same field.
+    const content = meta.getAttribute('content')?.trim();
+    if (key && content && !tags.has(key)) {
       tags.set(key, content);
     }
   }
@@ -246,20 +251,39 @@ const CHARSET_PATTERN = /charset\s*=\s*["']?\s*([a-z0-9_\-:]+)/i;
  * response header, or from the `<meta charset>` in the ASCII-compatible head.
  */
 function decodeHtml(bytes: Uint8Array, contentType: string): string {
-  const utf8 = new TextDecoder().decode(bytes);
-  const label = (
-    CHARSET_PATTERN.exec(contentType)?.[1] ??
-    CHARSET_PATTERN.exec(utf8.slice(0, MAX_CHARSET_SCAN))?.[1] ??
-    'utf-8'
-  ).toLowerCase();
-  if (label === 'utf-8' || label === 'utf8') {
-    return utf8;
-  }
+  const head = new TextDecoder().decode(bytes.subarray(0, MAX_CHARSET_SCAN));
+  const label =
+    CHARSET_PATTERN.exec(contentType)?.[1] ?? CHARSET_PATTERN.exec(head)?.[1] ?? 'utf-8';
   try {
     return new TextDecoder(label).decode(bytes);
   } catch {
-    return utf8;
+    return new TextDecoder().decode(bytes);
   }
+}
+
+/**
+ * The page's first {@link MAX_HTML_BYTES}, stopping the download there rather
+ * than reading it all and slicing: the metadata is in `<head>`, and the rest is
+ * bandwidth the reader pays for and nothing reads.
+ */
+async function readCappedBytes(response: Response): Promise<Uint8Array> {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    return new Uint8Array(await response.arrayBuffer()).slice(0, MAX_HTML_BYTES);
+  }
+  const bytes = new Uint8Array(MAX_HTML_BYTES);
+  let size = 0;
+  while (size < MAX_HTML_BYTES) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    const room = Math.min(value.length, MAX_HTML_BYTES - size);
+    bytes.set(value.subarray(0, room), size);
+    size += room;
+  }
+  await reader.cancel().catch(() => {});
+  return bytes.subarray(0, size);
 }
 
 async function fetchOgp(request: string, target: string): Promise<OgpData | undefined> {
@@ -282,9 +306,8 @@ async function fetchOgp(request: string, target: string): Promise<OgpData | unde
       return undefined;
     }
     // The abort above covers this read, so a page that never stops arriving
-    // costs the timeout rather than the memory.
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return parseOgpHtml(decodeHtml(bytes.slice(0, MAX_HTML_BYTES), contentType), target);
+    // costs the timeout rather than the wait.
+    return parseOgpHtml(decodeHtml(await readCappedBytes(response), contentType), target);
   } catch {
     return undefined;
   } finally {

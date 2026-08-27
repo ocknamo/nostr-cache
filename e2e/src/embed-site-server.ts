@@ -84,6 +84,20 @@ const TALL_PNG = buildTallPng();
  */
 const OGP_PATH = '/cors';
 
+/**
+ * Paths the stub proxy's page references from a `<script>` and an `<img>`.
+ *
+ * Nothing serves them: a request for either is the failure the test watches
+ * for, and a 404 records it just as well as a real file would.
+ */
+const PAGE_SCRIPT_PATH = '/linked-page.js';
+const PAGE_IMAGE_PATH = '/linked-page.png';
+
+/** Escape a value going into an HTML attribute in the stub page below. */
+function escapeAttribute(value: string): string {
+  return value.split('&').join('&amp;').split('"').join('&quot;').split('<').join('&lt;');
+}
+
 /** Path of the bare host page. See {@link EmbedSiteServer.scriptOnlyUrl}. */
 const SCRIPT_ONLY_PATH = '/script-only/';
 /**
@@ -129,6 +143,8 @@ export interface EmbedSiteServer {
   photoUrl: string;
   /** URL of a stub CORS proxy, for the `ogp-proxy` attribute. */
   ogpProxyUrl: string;
+  /** Paths the page that proxy answers with references, and nothing serves. */
+  linkedPageSubresourcePaths: string[];
   close: () => Promise<void>;
 }
 
@@ -220,9 +236,13 @@ export async function startEmbedSiteServer(
     }
     // Answers with a page about whichever URL it is asked for, so a test can
     // assert that the card shows what the page said rather than anything the
-    // note carried.
+    // note carried. The page also carries a script and an image of its own,
+    // which the widget must never load: it reads the metadata out of an inert
+    // document, it does not render the page.
     if (path === OGP_PATH) {
-      const target = new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('url') ?? '';
+      const target = escapeAttribute(
+        new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('url') ?? ''
+      );
       const origin = `${options.tls ? 'https' : 'http'}://${req.headers.host}`;
       res.writeHead(200, {
         'content-type': 'text/html; charset=utf-8',
@@ -239,8 +259,9 @@ export async function startEmbedSiteServer(
     <meta property="og:description" content="リンク先の説明文" />
     <meta property="og:site_name" content="example.com" />
     <meta property="og:image" content="${origin}${AVATAR_PATH}" />
+    <script src="${origin}${PAGE_SCRIPT_PATH}"></script>
   </head>
-  <body>リンク先の本文</body>
+  <body>リンク先の本文<img src="${origin}${PAGE_IMAGE_PATH}" alt="" /></body>
 </html>
 `
       );
@@ -270,6 +291,7 @@ export async function startEmbedSiteServer(
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     photoUrl: `${baseUrl}${PHOTO_PATH}`,
     ogpProxyUrl: `${baseUrl}${OGP_PATH}`,
+    linkedPageSubresourcePaths: [PAGE_SCRIPT_PATH, PAGE_IMAGE_PATH],
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };
 }

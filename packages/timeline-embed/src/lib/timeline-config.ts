@@ -167,6 +167,14 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
   if (proxy === 'false' || proxy === '0') {
     return undefined;
   }
+  // Checked before parsing, because `new URL` would resolve a typo like `off`
+  // against the embedding page and hand back a URL that looks usable.
+  if (!/^https?:\/\//i.test(proxy) && !proxy.startsWith('/')) {
+    console.warn(
+      `[nostr-timeline] Ignoring ogp-proxy (expected an https:// URL, or a path on this origin): ${value}`
+    );
+    return undefined;
+  }
   let url: URL;
   try {
     url = new URL(proxy, typeof location === 'undefined' ? undefined : location.href);
@@ -176,6 +184,12 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     console.warn(`[nostr-timeline] Ignoring non-http(s) ogp-proxy: ${value}`);
+    return undefined;
+  }
+  if (url.username || url.password) {
+    console.warn(
+      `[nostr-timeline] Ignoring ogp-proxy with credentials in it, which a CORS request cannot carry: ${value}`
+    );
     return undefined;
   }
   if (
@@ -188,7 +202,9 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
     );
     return undefined;
   }
-  return proxy;
+  // The resolved URL rather than what was written, so a path is resolved once
+  // here instead of again per request.
+  return url.href;
 }
 
 /**

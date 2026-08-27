@@ -481,6 +481,29 @@ describe('Embeddable timeline E2E', () => {
       }
     });
 
+    it('reads the linked page without running any of it', async () => {
+      // The whole safety story of reading the HTML in the browser: the page is
+      // parsed into an inert document, so its own script and images stay
+      // unfetched.
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        const asked: string[] = [];
+        page.on('request', (request) => {
+          asked.push(new URL(request.url()).pathname);
+        });
+        await page.goto(embedUrl({ relays: disposable.url, 'ogp-proxy': site.ogpProxyUrl }));
+        await waitForEventCount(page, 1);
+        await page.waitForSelector('nostr-timeline [part="ogp-image"]', { timeout: TIMEOUT });
+
+        for (const path of site.linkedPageSubresourcePaths) {
+          expect(asked).not.toContain(path);
+        }
+      } finally {
+        await disposable.close();
+      }
+    });
+
     it('reads a preview through a proxy on another origin', async () => {
       // How this is actually deployed: the proxy is not the site the widget is
       // served from, so the answer only arrives if CORS allows it.

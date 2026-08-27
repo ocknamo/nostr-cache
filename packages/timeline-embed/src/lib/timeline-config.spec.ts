@@ -564,13 +564,23 @@ describe('parseMaxEvents', () => {
 });
 
 describe('parseOgpProxy', () => {
+  /** Stand in for an embedding page, which is what the widget actually runs on. */
+  function onPage(href: string) {
+    vi.stubGlobal('location', new URL(href));
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('opts in at the default proxy for a bare attribute', () => {
     expect(parseOgpProxy('')).toBe(DEFAULT_OGP_PROXY);
+    expect(parseOgpProxy('   ')).toBe(DEFAULT_OGP_PROXY);
     expect(parseOgpProxy('true')).toBe(DEFAULT_OGP_PROXY);
     expect(parseOgpProxy(true)).toBe(DEFAULT_OGP_PROXY);
   });
 
-  it('keeps a named proxy as it was written, API key and all', () => {
+  it('keeps a named proxy, API key and all', () => {
     expect(parseOgpProxy('https://corsproxy.io/?key=abc')).toBe('https://corsproxy.io/?key=abc');
   });
 
@@ -579,11 +589,30 @@ describe('parseOgpProxy', () => {
     expect(parseOgpProxy(false)).toBeUndefined();
   });
 
-  it('leaves previews off for anything that is not an http(s) URL', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('resolves a path against the embedding page, once', () => {
+    onPage('https://embed.example/posts/index.html');
 
-    expect(parseOgpProxy('javascript:alert(1)')).toBeUndefined();
+    expect(parseOgpProxy('/cors')).toBe('https://embed.example/cors');
+  });
+
+  it('leaves previews off for anything that is not an http(s) URL or a path', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    onPage('https://embed.example/');
+
+    // On a page these would resolve as relative URLs and look usable, so they
+    // are rejected before `new URL` ever sees them.
+    expect(parseOgpProxy('off')).toBeUndefined();
     expect(parseOgpProxy('not a url')).toBeUndefined();
+    expect(parseOgpProxy('javascript:alert(1)')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('leaves previews off for a proxy an https page cannot reach', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    onPage('https://embed.example/');
+
+    expect(parseOgpProxy('http://corsproxy.example/')).toBeUndefined();
+    expect(parseOgpProxy('https://user:pw@corsproxy.example/')).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
