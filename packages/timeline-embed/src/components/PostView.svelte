@@ -240,6 +240,10 @@
 
   .post {
     display: block;
+    /* The post is the top of the widget, so the date tooltip opening above the
+       header has nothing but the page to open into. 18px is what it takes to
+       clear: a 26px tooltip 2px over a header that sits 10px into the card. */
+    padding-top: var(--nt-post-padding-top, 18px);
     /* A card in a feed scrolls its body past this height so one long post
        cannot push the others off screen; a detail view is the post, and an
        inner scrollbar inside a scrolling embed is the worst of both. Embeds
