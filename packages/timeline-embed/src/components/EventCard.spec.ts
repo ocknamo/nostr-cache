@@ -7,6 +7,8 @@ import EventCard from './EventCard.svelte';
 
 const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
 const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
+const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
+const NPUB_HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
 /** Three more references, to put a body over the cap a nested quote has. */
 const MORE_NOTES = [
   'note1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqskcx45n',
@@ -923,6 +925,45 @@ describe('EventCard', () => {
 
       await fireEvent.click(avatar as HTMLElement);
       expect(onAction).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a mention in the body as a press on the person mentioned', async () => {
+      const event = makeEvent({ content: `hi nostr:${NPUB}` });
+      const onAction = vi.fn();
+      render(EventCard, {
+        props: { event, status: 'validated', authorAction: AUTHOR, onAction },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: /npub10elf/ }));
+
+      // The card's own event, with the mentioned person rather than its author.
+      expect(onAction).toHaveBeenCalledWith(AUTHOR, {
+        event,
+        status: 'validated',
+        pubkey: NPUB_HEX,
+      });
+    });
+
+    it('reaches the header of a quote in the body', async () => {
+      const quoted = makeEvent({ id: NOTE_HEX, pubkey: 'f'.repeat(64), content: 'quoted' });
+      const onAction = vi.fn();
+      render(EventCard, {
+        props: {
+          event: makeEvent({ content: `see nostr:${NOTE}` }),
+          embeds: new Map([[NOTE_HEX, { status: 'ready' as const, event: quoted }]]),
+          authorAction: AUTHOR,
+          onAction,
+        },
+      });
+
+      const presses = screen.getAllByRole('button', { name: /プロフィールを開く/ });
+      // The card's own author, and the quoted one.
+      expect(presses).toHaveLength(2);
+      await fireEvent.click(presses[1]);
+
+      const [, context] = onAction.mock.calls[0];
+      expect(context.pubkey).toBe('f'.repeat(64));
+      expect(context.event.id).toBe(NOTE_HEX);
     });
 
     it('exposes both targets as parts, for styling from outside', () => {

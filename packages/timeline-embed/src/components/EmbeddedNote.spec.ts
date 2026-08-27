@@ -10,6 +10,7 @@ import EmbeddedNote from './EmbeddedNote.svelte';
 const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
 const NOTE_HEX = '5c04292b1080052d593c4b5f4e6f3ca0e0e0e5b76e5b3d0e0dcd4bcb1b6a7f11';
 const NPUB = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
+const NPUB_HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
 /** A second quotable event, so a quote can quote something. */
 const OTHER_NOTE = 'note1424242424242424242424242424242424242424242424242424qv3q9y6';
 const OTHER_NOTE_HEX = 'aa'.repeat(32);
@@ -346,6 +347,115 @@ describe('EmbeddedNote', () => {
     });
 
     expect(screen.getByRole('button', { name: '投稿を開く: たけし' })).toBeInTheDocument();
+  });
+
+  describe('author press', () => {
+    const AUTHOR = { id: 'open-profile', label: 'プロフィールを開く' };
+    const QUOTED = 'f'.repeat(64);
+    const NOTE_ACTION = { id: 'open-post', label: '投稿を開く' };
+
+    /** A quote of `content`, written by QUOTED. */
+    function quoted(content: string): Map<string, EmbeddedEvent> {
+      return new Map<string, EmbeddedEvent>([
+        [
+          NOTE_HEX,
+          { status: 'ready', event: makeEvent({ id: NOTE_HEX, pubkey: QUOTED, content }) },
+        ],
+      ]);
+    }
+
+    it('leaves the header plain until an embedder asks for the press', () => {
+      const { container } = render(EmbeddedNote, {
+        props: { entity: entityOf(`nostr:${NOTE}`), depth: 1, embeds: quoted('quoted body') },
+      });
+
+      expect(container.querySelector('.quote-author')).toBeNull();
+    });
+
+    it('reports the quoted author, with the quoted post as the event', async () => {
+      const onAction = vi.fn();
+      render(EmbeddedNote, {
+        props: {
+          entity: entityOf(`nostr:${NOTE}`),
+          depth: 1,
+          embeds: quoted('quoted body'),
+          profiles: new Map<string, Profile>([[QUOTED, { displayName: 'たけし' }]]),
+          validationStatuses: new Map([[NOTE_HEX, 'validated' as const]]),
+          authorAction: AUTHOR,
+          onAction,
+        },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'プロフィールを開く: たけし' }));
+
+      expect(onAction).toHaveBeenCalledTimes(1);
+      const [action, context] = onAction.mock.calls[0];
+      expect(action).toEqual(AUTHOR);
+      expect(context.pubkey).toBe(QUOTED);
+      expect(context.event.id).toBe(NOTE_HEX);
+      expect(context.status).toBe('validated');
+    });
+
+    it('keeps the header out of the frame press, so each opens its own thing', async () => {
+      const onAction = vi.fn();
+      const { container } = render(EmbeddedNote, {
+        props: {
+          entity: entityOf(`nostr:${NOTE}`),
+          depth: 1,
+          embeds: quoted('quoted body'),
+          authorAction: AUTHOR,
+          noteAction: NOTE_ACTION,
+          onAction,
+        },
+      });
+
+      expect(container.querySelector('.quote-avatar')).not.toBeNull();
+      await fireEvent.click(screen.getByRole('button', { name: /プロフィールを開く/ }));
+      await fireEvent.click(screen.getByRole('button', { name: /投稿を開く/ }));
+
+      expect(onAction.mock.calls.map(([action]) => action.id)).toEqual([
+        'open-profile',
+        'open-post',
+      ]);
+      expect(onAction.mock.calls[0][1].pubkey).toBe(QUOTED);
+      // A post was pressed, not a person.
+      expect(onAction.mock.calls[1][1].pubkey).toBeUndefined();
+    });
+
+    it('keeps the avatar out of the tab order, as the card does', () => {
+      const { container } = render(EmbeddedNote, {
+        props: {
+          entity: entityOf(`nostr:${NOTE}`),
+          depth: 1,
+          embeds: quoted('quoted body'),
+          authorAction: AUTHOR,
+        },
+      });
+
+      const avatar = container.querySelector('.quote-avatar');
+      expect(avatar).toHaveAttribute('tabindex', '-1');
+      expect(avatar).toHaveAttribute('aria-hidden', 'true');
+    });
+
+    it('reports a mention in the quoted body with the quote as the event', async () => {
+      const onAction = vi.fn();
+      render(EmbeddedNote, {
+        props: {
+          entity: entityOf(`nostr:${NOTE}`),
+          depth: 1,
+          embeds: quoted(`hi nostr:${NPUB}`),
+          authorAction: AUTHOR,
+          onAction,
+        },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: /npub10elf/ }));
+
+      const [, context] = onAction.mock.calls[0];
+      // The person mentioned, on the post that mentions them.
+      expect(context.pubkey).toBe(NPUB_HEX);
+      expect(context.event.id).toBe(NOTE_HEX);
+    });
   });
 
   it('renders a chip for a reference that names a person', () => {

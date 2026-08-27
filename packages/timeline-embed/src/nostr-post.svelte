@@ -169,9 +169,11 @@
      */
     actions?: string | EventAction[];
     /**
-     * Makes the author's avatar and display name pressable, reported as the
+     * Makes the people on screen pressable — the author, a quoted note's
+     * header, a `nostr:` mention in a body, a reactor's row — reported as the
      * same `nostr-timeline:action` event under this id, with the `pubkey` of
-     * whoever was pressed in the detail.
+     * whoever was pressed in the detail. That is not `detail.event.pubkey`
+     * outside the author; see `EventActionContext.pubkey`.
      *
      * Unlike `actions`, this reaches the replies as well as the post: it adds
      * no row to a card, and a thread is mostly other people.

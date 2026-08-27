@@ -1,18 +1,22 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { Profile } from '../lib/profile.ts';
 import type { Reaction } from '../lib/reactions.ts';
+import { makeEvent } from '../test-fixtures.ts';
 import ReactionList from './ReactionList.svelte';
 
 const ALICE = 'aa0000000000000000000000000000000000000000000000000000000000000a';
 const BOB = 'bb0000000000000000000000000000000000000000000000000000000000000b';
 
 function reactor(overrides: Partial<Reaction> = {}): Reaction {
+  const id = overrides.id ?? 'r1';
+  const pubkey = overrides.pubkey ?? ALICE;
   return {
-    id: 'r1',
-    pubkey: ALICE,
+    id,
+    pubkey,
     createdAt: 1000,
+    event: makeEvent({ id, pubkey, kind: 7, content: '🔥' }),
     kind: 'emoji',
     key: '🔥',
     label: '🔥',
@@ -46,6 +50,42 @@ describe('ReactionList', () => {
     });
 
     expect(screen.getByRole('img', { name: ':x:' })).toHaveAttribute('src', 'https://e.test/x.png');
+  });
+
+  describe('reactor press', () => {
+    const AUTHOR = { id: 'open-profile', label: 'プロフィールを開く' };
+
+    it('leaves the row plain until an embedder asks for the press', () => {
+      const { container } = render(ReactionList, {
+        props: { reactors: [reactor()], onAuthorPress: vi.fn() },
+      });
+
+      expect(container.querySelector('button')).toBeNull();
+    });
+
+    it('reports the reactor and the kind 7 their row stands for', async () => {
+      const onAuthorPress = vi.fn();
+      const profiles = new Map<string, Profile>([[ALICE, { displayName: 'Alice' }]]);
+      render(ReactionList, {
+        props: { reactors: [reactor()], profiles, authorAction: AUTHOR, onAuthorPress },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'プロフィールを開く: Alice' }));
+
+      expect(onAuthorPress).toHaveBeenCalledTimes(1);
+      const [pubkey, event] = onAuthorPress.mock.calls[0];
+      expect(pubkey).toBe(ALICE);
+      expect(event).toMatchObject({ id: 'r1', kind: 7 });
+    });
+
+    it('leaves the glyph outside the press: it is not somewhere to go', () => {
+      const { container } = render(ReactionList, {
+        props: { reactors: [reactor()], authorAction: AUTHOR, onAuthorPress: vi.fn() },
+      });
+
+      expect(container.querySelector('.reactor-author .glyph')).toBeNull();
+      expect(container.querySelector('.reactor > .glyph')).not.toBeNull();
+    });
   });
 
   it('asks for a reactor profile when their row appears', () => {

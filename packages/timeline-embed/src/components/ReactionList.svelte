@@ -7,6 +7,8 @@
    * lookups the reader will never scroll to.
    */
 
+  import type { NostrEvent } from '@nostr-cache/shared';
+  import type { AuthorAction } from '../lib/event-actions.ts';
   import { type Profile, authorName } from '../lib/profile.ts';
   import type { Reaction } from '../lib/reactions.ts';
   import { whenVisible } from '../lib/when-visible.ts';
@@ -27,6 +29,14 @@
     showAvatars?: boolean;
     /** Called the first time a reactor's row appears. */
     onReactorVisible?: (pubkey: string) => void;
+    /** Makes each reactor's avatar and name pressable, under this id. */
+    authorAction?: AuthorAction;
+    /**
+     * Called on that press, with who was pressed and the kind 7 their row stands
+     * for — snapshotted rather than handed over as the widget's own reactive
+     * proxy (see `select` in `EventCard.svelte`).
+     */
+    onAuthorPress?: (pubkey: string, reaction: NostrEvent) => void;
   }
 
   const {
@@ -35,7 +45,16 @@
     profiles = new Map(),
     showAvatars = true,
     onReactorVisible,
+    authorAction,
+    onAuthorPress,
   }: Props = $props();
+
+  /** See `press` in `NoteContent.svelte`: both halves, or no press target. */
+  const press = $derived(
+    authorAction && onAuthorPress
+      ? { label: authorAction.label, report: onAuthorPress }
+      : undefined
+  );
 </script>
 
 <ul {id} class="reactors" part="reactors">
@@ -45,14 +64,31 @@
       part="reactor"
       use:whenVisible={onReactorVisible && (() => onReactorVisible(reactor.pubkey))}
     >
-      {#if showAvatars}
-        <Avatar
-          pubkey={reactor.pubkey}
-          profile={profiles.get(reactor.pubkey)}
-          name={authorName(reactor.pubkey, profiles.get(reactor.pubkey))}
-        />
+      {#snippet identity()}
+        {#if showAvatars}
+          <Avatar
+            pubkey={reactor.pubkey}
+            profile={profiles.get(reactor.pubkey)}
+            name={authorName(reactor.pubkey, profiles.get(reactor.pubkey))}
+          />
+        {/if}
+        <span class="name">{authorName(reactor.pubkey, profiles.get(reactor.pubkey))}</span>
+      {/snippet}
+      {#if press}
+        <!-- The glyph stays outside it: that is what this person sent, not
+             somewhere to go. -->
+        <button
+          type="button"
+          class="reactor-author"
+          part="reactor-author"
+          aria-label={`${press.label}: ${authorName(reactor.pubkey, profiles.get(reactor.pubkey))}`}
+          onclick={() => press.report(reactor.pubkey, $state.snapshot(reactor.event))}
+        >
+          {@render identity()}
+        </button>
+      {:else}
+        {@render identity()}
       {/if}
-      <span class="name">{authorName(reactor.pubkey, profiles.get(reactor.pubkey))}</span>
       {#if reactor.url}
         <!-- Same hardening as an avatar; `safeImageUrl` has already refused
              everything but http(s). -->
@@ -95,6 +131,38 @@
        cascade. */
     --nt-avatar-size: var(--nt-reactor-avatar-size, 24px);
     --nt-avatar-radius: var(--nt-reactor-avatar-radius, 999px);
+  }
+
+  /* Reset to the row it wraps: the layout is the same either way. */
+  .reactor-author {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    gap: var(--nt-reactor-gap, 8px);
+    /* Out to the glyph: the space after a short name is part of the target. */
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .reactor-author:hover .name,
+  .reactor-author:focus-visible .name {
+    text-decoration: underline;
+  }
+
+  /* Inside the box: the list scrolls, so a ring around an end row is clipped. */
+  .reactor-author:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: -2px;
+    border-radius: 4px;
   }
 
   .name {

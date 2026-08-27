@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseContent } from '../lib/content-parts.ts';
 import type { Profile } from '../lib/profile.ts';
 import NoteContent from './NoteContent.svelte';
@@ -115,6 +115,66 @@ describe('NoteContent', () => {
     const { container } = render(NoteContent, { props: { content: `nostr:${NPUB}` } });
 
     expect(container.querySelector('a')).toBeNull();
+  });
+
+  describe('mention press', () => {
+    const AUTHOR = { id: 'open-profile', label: 'プロフィールを開く' };
+    /** An event reference, which is not a person. */
+    const NOTE = 'note1tszzj2cssqzj6kfufd05umeu5rswpedhdedn6rsde49ukxm20ugsx4elrl';
+
+    it('leaves a mention plain until an embedder asks for the press', () => {
+      const { container } = render(NoteContent, {
+        props: { content: `hi nostr:${NPUB}`, onAuthorPress: vi.fn() },
+      });
+
+      expect(container.querySelector('button')).toBeNull();
+    });
+
+    it('names the press and who it is on', () => {
+      const profiles = new Map<string, Profile>([[NPUB_HEX, { displayName: 'たけし' }]]);
+      render(NoteContent, {
+        props: {
+          content: `hi nostr:${NPUB}`,
+          profiles,
+          authorAction: AUTHOR,
+          onAuthorPress: vi.fn(),
+        },
+      });
+
+      expect(screen.getByRole('button', { name: 'プロフィールを開く: @たけし' })).toHaveTextContent(
+        '@たけし'
+      );
+    });
+
+    it('reports the mentioned pubkey, not the one written in the body', async () => {
+      const onAuthorPress = vi.fn();
+      render(NoteContent, {
+        props: { content: `hi nostr:${NPUB}`, authorAction: AUTHOR, onAuthorPress },
+      });
+
+      await fireEvent.click(screen.getByRole('button'));
+
+      expect(onAuthorPress).toHaveBeenCalledWith(NPUB_HEX);
+    });
+
+    it('presses someone it has no name for, as the abbreviated npub it shows', () => {
+      render(NoteContent, {
+        props: { content: `hi nostr:${NPUB}`, authorAction: AUTHOR, onAuthorPress: vi.fn() },
+      });
+
+      expect(
+        screen.getByRole('button', { name: 'プロフィールを開く: npub10elf…jptg' })
+      ).toBeInTheDocument();
+    });
+
+    it('leaves a reference to an event alone: it is not a person', () => {
+      const { container } = render(NoteContent, {
+        props: { content: `see nostr:${NOTE}`, authorAction: AUTHOR, onAuthorPress: vi.fn() },
+      });
+
+      expect(container.querySelector('button')).toBeNull();
+      expect(screen.getByTitle(`nostr:${NOTE}`)).toHaveTextContent('note1tszz…elrl');
+    });
   });
 
   it('renders no paragraph for a note that is only an attachment', () => {

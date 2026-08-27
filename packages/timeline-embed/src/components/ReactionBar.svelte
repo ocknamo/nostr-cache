@@ -16,6 +16,8 @@
    * and never publishes (`lib/event-actions.ts`).
    */
 
+  import type { NostrEvent } from '@nostr-cache/shared';
+  import type { AuthorAction } from '../lib/event-actions.ts';
   import type { Profile } from '../lib/profile.ts';
   import type { ReactionSummary } from '../lib/reactions.ts';
   import ReactionList from './ReactionList.svelte';
@@ -32,6 +34,10 @@
      */
     defaultOpen?: boolean;
     onReactorVisible?: (pubkey: string) => void;
+    /** Makes each reactor pressable in the list below the chips. */
+    authorAction?: AuthorAction;
+    /** Called on that press; see `ReactionList`. */
+    onAuthorPress?: (pubkey: string, reaction: NostrEvent) => void;
   }
 
   const {
@@ -40,6 +46,8 @@
     showAvatars = true,
     defaultOpen = false,
     onReactorVisible,
+    authorAction,
+    onAuthorPress,
   }: Props = $props();
 
   // Seeded from the prop rather than derived: the reader owns it afterwards, so
@@ -111,6 +119,8 @@
         {profiles}
         {showAvatars}
         {onReactorVisible}
+        {authorAction}
+        {onAuthorPress}
       />
     {/if}
   </section>

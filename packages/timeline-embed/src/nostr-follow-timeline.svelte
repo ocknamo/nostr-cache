@@ -131,9 +131,10 @@
      */
     actions?: string | EventAction[];
     /**
-     * Makes the author's avatar and display name on every card pressable,
-     * reported as the same `nostr-timeline:action` event under this id, with
-     * the author's `pubkey` in the detail. Exactly as on `<nostr-timeline>`.
+     * Makes the people on every card pressable — the author, a quoted note's
+     * header, a `nostr:` mention — reported as the same `nostr-timeline:action`
+     * event under this id, with the pressed person in `detail.pubkey`. Exactly
+     * as on `<nostr-timeline>`.
      */
     authorAction?: string;
     /**

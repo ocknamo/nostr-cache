@@ -26,6 +26,8 @@ import {
 } from '../../src/test-events.js';
 
 const TIMEOUT = 20000;
+/** Someone mentioned in a quoted body, who is on no timeline here. */
+const MENTIONED = 'npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg';
 /** Matches MAX_EMBED_DEPTH in packages/timeline-embed/src/lib/note-embeds.ts. */
 const MAX_EMBED_DEPTH = 5;
 
@@ -92,7 +94,7 @@ describe('Nested quotes E2E', () => {
     const linked = await createTestEvent(seckey, {
       created_at: 1_700_003_000,
       tags: [],
-      content: 'see https://example.com/inside for more',
+      content: `see https://example.com/inside for more, cc nostr:${MENTIONED}`,
     });
     linkQuote = await createTestEvent(seckey, {
       created_at: 1_700_003_100,
@@ -370,6 +372,29 @@ describe('Nested quotes E2E', () => {
   );
 
   it(
+    'leaves the quoted author reachable under the press on the card',
+    async () => {
+      // A paint-order question, so a real browser: with both presses declared,
+      // the header has to sit above the overlay covering the frame.
+      page = await browser.newPage();
+      await page.goto(embedUrl({ 'note-action': 'open-post', 'author-action': 'open-profile' }));
+      const header = 'nostr-timeline .quote:not(.loading) > .quote-header > .quote-author';
+      await page.waitForSelector(header, { timeout: TIMEOUT });
+
+      const ownsItself = await page.$eval(header, (author) => {
+        const box = author.getBoundingClientRect();
+        const root = author.getRootNode() as ShadowRoot;
+        // The name inside the button answers for it; the overlay does not.
+        const at = root.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+        return at !== null && author.contains(at);
+      });
+
+      expect(ownsItself).toBe(true);
+    },
+    TIMEOUT
+  );
+
+  it(
     'leaves a link in the quoted body reachable under the press',
     async () => {
       page = await browser.newPage();
@@ -392,6 +417,34 @@ describe('Nested quotes E2E', () => {
           );
         }
       );
+
+      expect(ownsItself).toBe(true);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'leaves a mention in the quoted body reachable under the press',
+    async () => {
+      // Same hit test as the link above: the mention is a press of its own.
+      page = await browser.newPage();
+      await page.goto(
+        embedUrl({
+          filters: JSON.stringify([{ ids: [linkQuote.id] }]),
+          'note-action': 'open-post',
+          'author-action': 'open-profile',
+        })
+      );
+      const mention = 'nostr-timeline .quote:not(.loading) .content button.mention';
+      await page.waitForSelector(mention, { timeout: TIMEOUT });
+
+      const ownsItself = await page.$eval(mention, (button) => {
+        const box = button.getBoundingClientRect();
+        const root = button.getRootNode() as ShadowRoot;
+        return (
+          root.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2) === button
+        );
+      });
 
       expect(ownsItself).toBe(true);
     },

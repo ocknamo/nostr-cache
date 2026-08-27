@@ -148,18 +148,19 @@
      */
     actions?: string | EventAction[];
     /**
-     * Makes the author's avatar and display name on every card pressable,
-     * reporting the press as the same `nostr-timeline:action` event under this
-     * id — with the author's `pubkey` in the detail.
+     * Makes the people on a card pressable — its author, a quoted note's
+     * header, a `nostr:` mention in a body — reporting the press as the same
+     * `nostr-timeline:action` event under this id, with the pressed person in
+     * `detail.pubkey`. That is not `detail.event.pubkey` outside the author;
+     * see `EventActionContext.pubkey` in `lib/event-actions.ts`.
      *
      * The widget navigates nowhere itself: an embed's profile screen is the
      * embedding page's, and only that page holds the router. Without this
-     * attribute the avatar and the name stay the plain image and text they have
-     * always been.
+     * attribute all three stay the plain images and text they have always been.
      */
     authorAction?: string;
     /**
-     * What pressing the author does, as the accessible name of that target.
+     * What pressing a person does, as the accessible name of that target.
      * Defaults to 「プロフィールを開く」 — set it when the press leads
      * somewhere else.
      */

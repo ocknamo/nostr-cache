@@ -13,6 +13,7 @@
    * back is `onBack` rather than a second post on screen.
    */
 
+  import type { NostrEvent } from '@nostr-cache/shared';
   import type {
     AuthorAction,
     EventAction,
@@ -62,9 +63,9 @@
     /** The embedder's buttons, rendered under the post as on a card. */
     actions?: EventAction[];
     /**
-     * Makes the author's avatar and name pressable — on the post and on every
-     * reply under it, unlike `actions`: this adds no row of its own, and the
-     * author of a reply is exactly the person a reader would want to look up.
+     * Makes the people on screen pressable — every card's author, a quoted
+     * note's header, a `nostr:` mention, a reactor's row. Unlike `actions` it
+     * reaches the whole thread: it adds no row of its own.
      */
     authorAction?: AuthorAction;
     /**
@@ -136,6 +137,23 @@
       : undefined
   );
 
+  /**
+   * A press on a reactor's row. The kind 7 rather than the post: `pubkey` says
+   * who was pressed, the event is what that press rode in on. Its `status` is
+   * always undefined — only what is drawn as a card is verified — which is the
+   * "no verdict yet" every listener already handles.
+   */
+  function pressReactor(pubkey: string, reaction: NostrEvent): void {
+    if (!authorAction) {
+      return;
+    }
+    onAction?.(authorAction, {
+      event: reaction,
+      status: state.validationStatuses.get(reaction.id),
+      pubkey,
+    });
+  }
+
   const notice = $derived(
     target === undefined
       ? '表示する投稿が指定されていません'
@@ -195,6 +213,8 @@
             {showAvatars}
             defaultOpen={reactionsOpen}
             onReactorVisible={onAuthorVisible}
+            {authorAction}
+            onAuthorPress={pressReactor}
           />
         {/if}
         {#if tree}

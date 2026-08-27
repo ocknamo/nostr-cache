@@ -16,7 +16,7 @@
    */
 
   import { type EntityPart, embedKey, parseContent } from '../lib/content-parts.ts';
-  import type { EventActionContext, NoteAction } from '../lib/event-actions.ts';
+  import type { AuthorAction, EventActionContext, NoteAction } from '../lib/event-actions.ts';
   import {
     type EmbedTarget,
     type EmbeddedEvent,
@@ -65,8 +65,14 @@
      * embedding page's post screen is.
      */
     noteAction?: NoteAction;
-    /** Called on that press, with the quoted event as the context. */
-    onAction?: (action: NoteAction, context: EventActionContext) => void;
+    /**
+     * Makes the header and any `nostr:` mention in the body pressable, under
+     * this id — the other half of `noteAction`: the frame opens the post, the
+     * header opens whoever wrote it.
+     */
+    authorAction?: AuthorAction;
+    /** Called on either press; `context.event` is this quoted event either way. */
+    onAction?: (action: NoteAction | AuthorAction, context: EventActionContext) => void;
   }
 
   const {
@@ -80,6 +86,7 @@
     ancestorUnverified = false,
     onEmbedRequest,
     noteAction,
+    authorAction,
     onAction,
   }: Props = $props();
 
@@ -142,16 +149,18 @@
     onEmbedRequest(target);
   }
 
-  function openPost(): void {
-    if (!noteAction || !event) {
+  /** @param pubkey Who was pressed, for a press on a person rather than the frame. */
+  function select(action: NoteAction | AuthorAction, pubkey?: string): void {
+    if (!event) {
       return;
     }
     // A snapshot for the same reason the card's own press takes one: what is
     // handed out must not be the widget's reactive proxy — see `select` in
     // `EventCard.svelte`.
-    onAction?.(noteAction, {
+    onAction?.(action, {
       event: $state.snapshot(event),
       status: validationStatuses?.get(event.id),
+      ...(pubkey ? { pubkey } : {}),
     });
   }
 </script>
@@ -175,19 +184,51 @@
         class="open"
         part="quote-open"
         aria-label={`${noteAction.label}: ${name}`}
-        onclick={openPost}
+        onclick={() => select(noteAction)}
       ></button>
     {/if}
     <header class="quote-header">
       {#if showAvatar}
-        <Avatar pubkey={event.pubkey} {profile} {name} />
+        {#if authorAction}
+          <!-- Out of the tab order and the accessibility tree, as the card's own
+               avatar is: the name beside it is the same press. -->
+          <button
+            type="button"
+            class="quote-avatar"
+            part="quote-author-avatar"
+            tabindex="-1"
+            aria-hidden="true"
+            onpointerdown={(pointer) => pointer.preventDefault()}
+            onclick={() => select(authorAction, event.pubkey)}
+          >
+            <Avatar pubkey={event.pubkey} {profile} {name} />
+          </button>
+        {:else}
+          <Avatar pubkey={event.pubkey} {profile} {name} />
+        {/if}
       {/if}
-      <span class="identity" title={event.pubkey}>
+      {#snippet identity()}
         <span class="name">{name}</span>
         {#if handle}
           <span class="handle">@{handle}</span>
         {/if}
-      </span>
+      {/snippet}
+      {#if authorAction}
+        <button
+          type="button"
+          class="identity quote-author"
+          part="quote-author"
+          title={event.pubkey}
+          aria-label={`${authorAction.label}: ${name}${handle ? ` @${handle}` : ''}`}
+          onclick={() => select(authorAction, event.pubkey)}
+        >
+          {@render identity()}
+        </button>
+      {:else}
+        <span class="identity" title={event.pubkey}>
+          {@render identity()}
+        </span>
+      {/if}
       <!-- Not the tooltip button the timeline card carries: a quote can be five
            deep, and five nested popovers inside one scrolling note is more
            chrome than the date is worth. The full date stays in the `title` —
@@ -206,6 +247,8 @@
             {showMedia}
             {profiles}
             media={segmentMediaLists[index]}
+            {authorAction}
+            onAuthorPress={authorAction && ((pubkey) => select(authorAction, pubkey))}
           />
         {:else}
           <div class="embed">
@@ -220,6 +263,7 @@
               ancestorUnverified={ancestorUnverified || unverified}
               {onEmbedRequest}
               {noteAction}
+              {authorAction}
               {onAction}
             />
           </div>
@@ -295,6 +339,40 @@
     overflow: hidden;
   }
 
+  /* Reset to the text and image they wrap: the header looks the same either way. */
+  .quote-avatar,
+  .quote-author {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    /* A button centres its contents; this is the start of a text row. */
+    text-align: start;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .quote-avatar {
+    display: flex;
+    flex: none;
+  }
+
+  .quote-author:hover .name,
+  .quote-author:focus-visible .name {
+    text-decoration: underline;
+  }
+
+  /* Inside the box: `.quote-header` clips its overflow, so a ring around the
+     button is clipped away (as in `EventCard.svelte`). */
+  .quote-author:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: -2px;
+    border-radius: 4px;
+  }
+
   .name {
     font-weight: 700;
     color: var(--nt-name-fg, inherit);
@@ -352,13 +430,17 @@
     outline-offset: -2px;
   }
 
-  /* Above the overlay, so what a reader could already act on keeps working: a
-     link, a video's controls, and a nested quote's own press. Each nested card
-     is then its own stacking context, so its overlay covers exactly its own
-     frame. Scoped to a pressable card, because a z-index is not free: it also
-     orders these against the card's date tooltip. */
+  /* Above the overlay, so what a reader could already act on keeps working: the
+     header's author press, a link, a mention's press, a video's controls, and a
+     nested quote's own press. Each nested card is then its own stacking
+     context, so its overlay covers exactly its own frame. Scoped to a pressable
+     card, because a z-index is not free: it also orders these against the
+     card's date tooltip. */
+  .pressable > .quote-header > .quote-avatar,
+  .pressable > .quote-header > .quote-author,
   .pressable > .quote-body > .embed,
   .pressable > .quote-body :global(a),
+  .pressable > .quote-body :global(button.mention),
   .pressable > .quote-body :global(video),
   .pressable > .quote-body :global(audio) {
     position: relative;
