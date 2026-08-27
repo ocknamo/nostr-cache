@@ -94,7 +94,7 @@ describe('<nostr-post> custom element', () => {
     );
   });
 
-  it('forwards ogp-endpoint, so the post can preview a link', async () => {
+  it('forwards ogp-proxy, so the post can preview a link', async () => {
     const dbName = `post-${crypto.randomUUID()}`;
     await seed(dbName, [
       makeEvent({ id: POST_ID, pubkey: ALICE, content: '詳細 https://example.com/a' }),
@@ -104,15 +104,18 @@ describe('<nostr-post> custom element', () => {
       'fetch',
       vi.fn(async () => ({
         ok: true,
-        headers: { get: () => 'application/json' },
-        text: async () => JSON.stringify({ title: 'リンク先の見出し' }),
+        headers: { get: () => 'text/html; charset=utf-8' },
+        arrayBuffer: async () =>
+          new TextEncoder().encode(
+            `<!doctype html><html><head><meta property="og:title" content="リンク先の見出し" /></head></html>`
+          ).buffer,
       }))
     );
 
     const element = mount({
       'event-id': POST_ID,
       'db-name': dbName,
-      'ogp-endpoint': 'https://ogp.example/api',
+      'ogp-proxy': 'https://corsproxy.io/?key=abc',
     });
 
     await waitFor(

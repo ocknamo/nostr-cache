@@ -1067,19 +1067,22 @@ describe('EventCard', () => {
       resetOgpCache();
     });
 
-    /** Answer every request with the same metadata. */
-    function stubEndpoint(body: unknown) {
+    /** Answer every request with a page carrying the same title. */
+    function stubProxy(title: string) {
       const fetchMock = vi.fn(async () => ({
         ok: true,
-        headers: { get: () => 'application/json' },
-        text: async () => JSON.stringify(body),
+        headers: { get: () => 'text/html; charset=utf-8' },
+        arrayBuffer: async () =>
+          new TextEncoder().encode(
+            `<!doctype html><html><head><meta property="og:title" content="${title}" /></head></html>`
+          ).buffer,
       }));
       vi.stubGlobal('fetch', fetchMock);
       return fetchMock;
     }
 
-    it('asks nobody anything without an endpoint', async () => {
-      const fetchMock = stubEndpoint({ title: 'A title' });
+    it('asks nobody anything without a proxy', async () => {
+      const fetchMock = stubProxy('A title');
 
       render(EventCard, {
         props: { event: makeEvent({ content: 'see https://example.com/a' }) },
@@ -1090,12 +1093,12 @@ describe('EventCard', () => {
     });
 
     it('previews the first link and leaves the URL in the text', async () => {
-      stubEndpoint({ title: 'A title' });
+      stubProxy('A title');
 
       render(EventCard, {
         props: {
           event: makeEvent({ content: 'see https://example.com/a and https://example.com/b' }),
-          ogpEndpoint: 'https://ogp.example/api',
+          ogpProxy: 'https://corsproxy.io/',
         },
       });
 
@@ -1106,7 +1109,7 @@ describe('EventCard', () => {
     });
 
     it('leaves a quoted note unpreviewed, however many links it carries', async () => {
-      stubEndpoint({ title: 'A title' });
+      stubProxy('A title');
 
       const { container } = render(EventCard, {
         props: {
@@ -1121,7 +1124,7 @@ describe('EventCard', () => {
             ],
           ]),
           onEmbedRequest: () => {},
-          ogpEndpoint: 'https://ogp.example/api',
+          ogpProxy: 'https://corsproxy.io/',
         },
       });
 
@@ -1132,12 +1135,12 @@ describe('EventCard', () => {
     });
 
     it('leaves an attachment to the media renderer', async () => {
-      const fetchMock = stubEndpoint({ title: 'A title' });
+      const fetchMock = stubProxy('A title');
 
       render(EventCard, {
         props: {
           event: makeEvent({ content: 'https://cdn.example.com/a.jpg' }),
-          ogpEndpoint: 'https://ogp.example/api',
+          ogpProxy: 'https://corsproxy.io/',
         },
       });
       await Promise.resolve();

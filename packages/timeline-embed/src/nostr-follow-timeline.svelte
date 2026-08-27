@@ -17,7 +17,7 @@
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
-      ogpEndpoint: { attribute: 'ogp-endpoint' },
+      ogpProxy: { attribute: 'ogp-proxy' },
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },
@@ -60,7 +60,7 @@
     parseLimit,
     parseMaxEvents,
     parseMaxFollows,
-    parseOgpEndpoint,
+    parseOgpProxy,
     parsePubkey,
     parseRelays,
     parseSinceDays,
@@ -116,13 +116,13 @@
      */
     showEmbeds?: string;
     /**
-     * Endpoint the link previews (OGP) are fetched from, e.g.
-     * `"https://ogp.example/api"` — the target URL is added as a `url` query
-     * parameter, or substituted for a `{url}` placeholder when the value has
-     * one. **Unset means no previews and no requests**; see the README for
-     * what the endpoint has to return and what it gets to see.
+     * Turns the link previews (OGP) on, fetching the linked page through
+     * corsproxy.io — a bare attribute uses `https://corsproxy.io/`, and a URL
+     * (e.g. `"https://corsproxy.io/?key=…"`) names the proxy to use instead.
+     * **Unset means no previews and no requests**; see the README for what the
+     * proxy gets to see.
      */
-    ogpEndpoint?: string;
+    ogpProxy?: string | boolean;
     /**
      * The embedder's buttons under every card, exactly as on
      * `<nostr-timeline>`: a JSON array from an attribute, or the array itself
@@ -188,7 +188,7 @@
     showAvatars,
     showMedia,
     showEmbeds,
-    ogpEndpoint,
+    ogpProxy,
     actions,
     authorAction,
     authorActionLabel,
@@ -198,7 +198,7 @@
     materialIconsFont,
   }: Props = $props();
 
-  const ogpTarget = $derived(parseOgpEndpoint(ogpEndpoint));
+  const ogpProxyUrl = $derived(parseOgpProxy(ogpProxy));
 
   // The element itself, so a press reaches a page that only wrote HTML.
   const hostElement = $host();
@@ -293,7 +293,7 @@
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
-  ogpEndpoint={ogpTarget}
+  ogpProxy={ogpProxyUrl}
   actions={normalizeActions(actions)}
   authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
   noteAction={normalizeNoteAction(noteAction, noteActionLabel)}

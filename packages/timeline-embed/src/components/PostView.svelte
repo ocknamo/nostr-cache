@@ -39,11 +39,11 @@
     showMedia?: boolean;
     showEmbeds?: boolean;
     /**
-     * Link preview endpoint for the post itself. The thread does not get one:
-     * a reply's links are context, and one endpoint request per reply is a
+     * Link preview proxy for the post itself. The thread does not get one:
+     * a reply's links are context, and one proxy request per reply is a
      * cost the reader did not ask for.
      */
-    ogpEndpoint?: string;
+    ogpProxy?: string;
     /** Off also stops the element opening the kind 7 subscription at all. */
     showReactions?: boolean;
     /** Open the reactor list on first render. */
@@ -93,7 +93,7 @@
     showAvatars = true,
     showMedia = true,
     showEmbeds = true,
-    ogpEndpoint,
+    ogpProxy,
     showReactions = true,
     reactionsOpen = false,
     showReplies = true,
@@ -178,7 +178,7 @@
           showAvatar={showAvatars}
           {showMedia}
           {showEmbeds}
-          {ogpEndpoint}
+          {ogpProxy}
           {actions}
           {authorAction}
           {noteAction}

@@ -76,13 +76,13 @@ function buildTallPng(width = 600, height = 1000): Buffer {
 const TALL_PNG = buildTallPng();
 
 /**
- * Path of the stub link-preview endpoint. See {@link EmbedSiteServer.ogpEndpointUrl}.
+ * Path of the stub CORS proxy. See {@link EmbedSiteServer.ogpProxyUrl}.
  *
- * The widget ships no endpoint of its own — `ogp-endpoint` names one the
- * embedder runs — so exercising the preview end to end needs a stand-in for
- * that service.
+ * The link previews go through corsproxy.io, which returns the linked page's
+ * own HTML — so exercising them end to end needs a stand-in that answers the
+ * same way, without reaching the real service.
  */
-const OGP_PATH = '/ogp';
+const OGP_PATH = '/cors';
 
 /** Path of the bare host page. See {@link EmbedSiteServer.scriptOnlyUrl}. */
 const SCRIPT_ONLY_PATH = '/script-only/';
@@ -127,8 +127,8 @@ export interface EmbedSiteServer {
   avatarUrl: string;
   /** URL of a tall image, for a note whose body is a photo. */
   photoUrl: string;
-  /** URL of a stub OGP service, for the `ogp-endpoint` attribute. */
-  ogpEndpointUrl: string;
+  /** URL of a stub CORS proxy, for the `ogp-proxy` attribute. */
+  ogpProxyUrl: string;
   close: () => Promise<void>;
 }
 
@@ -218,24 +218,31 @@ export async function startEmbedSiteServer(
       res.end(TALL_PNG);
       return;
     }
-    // Answers about any URL it is asked about, so a test can assert that the
-    // card shows what the endpoint said rather than anything the note carried.
+    // Answers with a page about whichever URL it is asked for, so a test can
+    // assert that the card shows what the page said rather than anything the
+    // note carried.
     if (path === OGP_PATH) {
       const target = new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('url') ?? '';
       const origin = `${options.tls ? 'https' : 'http'}://${req.headers.host}`;
       res.writeHead(200, {
-        'content-type': 'application/json; charset=utf-8',
-        // A real endpoint is on another origin than the embedding page, so
-        // without this the widget's fetch never gets to read the answer.
+        'content-type': 'text/html; charset=utf-8',
+        // A real proxy is on another origin than the embedding page, so without
+        // this the widget's fetch never gets to read the answer.
         'access-control-allow-origin': '*',
       });
       res.end(
-        JSON.stringify({
-          title: `プレビュー: ${target}`,
-          description: 'リンク先の説明文',
-          siteName: 'example.com',
-          image: `${origin}${AVATAR_PATH}`,
-        })
+        `<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta property="og:title" content="プレビュー: ${target}" />
+    <meta property="og:description" content="リンク先の説明文" />
+    <meta property="og:site_name" content="example.com" />
+    <meta property="og:image" content="${origin}${AVATAR_PATH}" />
+  </head>
+  <body>リンク先の本文</body>
+</html>
+`
       );
       return;
     }
@@ -262,7 +269,7 @@ export async function startEmbedSiteServer(
     postEmbedUrl: `${baseUrl}/embed/post/`,
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     photoUrl: `${baseUrl}${PHOTO_PATH}`,
-    ogpEndpointUrl: `${baseUrl}${OGP_PATH}`,
+    ogpProxyUrl: `${baseUrl}${OGP_PATH}`,
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };
 }

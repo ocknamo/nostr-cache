@@ -1,21 +1,28 @@
 /**
  * Link previews (OGP) for the ordinary links in a note.
  *
- * A browser cannot read another origin's HTML, so the metadata has to come from
- * somewhere else: the embedder names an endpoint (`ogp-endpoint`) and this
- * module asks it for one URL at a time. Without that attribute nothing here
- * runs — the widget will not hand a reader's IP and reading history to a
- * third-party service by default, the same stance `show-media` takes.
+ * A browser cannot read another origin's HTML, so the page is fetched through a
+ * CORS proxy — corsproxy.io by default — which returns the page with
+ * `Access-Control-Allow-Origin` on it, and the `og:` meta tags are read here.
+ * The embedder writes `ogp-proxy` to turn previews on, and may point it at
+ * their own corsproxy.io URL so the requests carry their API key. Without that
+ * attribute nothing here runs — the widget will not hand a reader's IP and
+ * reading history to a third-party service by default, the same stance
+ * `show-media` takes.
  *
- * The response is treated as hostile: it is whatever the endpoint chose to
- * return about a URL a stranger wrote. Every field goes through the same
- * validators kind 0 does (`profile.ts`), and the card's `href` is always the
- * URL we asked about rather than one the response named — so an endpoint can
- * mislabel a link but cannot redirect it.
+ * The page is treated as hostile: it is whatever a stranger's link points at.
+ * It is read with `DOMParser`, which builds an inert document — no script runs
+ * and no subresource is fetched — every field goes through the same validators
+ * kind 0 does (`profile.ts`), and the card's `href` is always the URL we asked
+ * about rather than one the page names, so a page can mislabel a link but
+ * cannot redirect it.
  */
 
 import { type ContentPart, mediaKind } from './content-parts.ts';
 import { safeImageUrl, safeText } from './profile.ts';
+
+/** The proxy used unless the embedder names another. */
+export const DEFAULT_OGP_PROXY = 'https://corsproxy.io/';
 
 /** Abandon a request that has not answered by then; the card stays absent. */
 export const OGP_TIMEOUT_MS = 5000;
@@ -36,11 +43,14 @@ const MAX_FIELD_LENGTH = 4096;
  */
 const MAX_IMAGE_URL_LENGTH = 2048;
 
-/** Response bodies longer than this are dropped unparsed. */
-const MAX_RESPONSE_LENGTH = 64 * 1024;
+/** Bytes of the page read; the metadata is in `<head>`, so the rest is waste. */
+const MAX_HTML_BYTES = 256 * 1024;
+
+/** How far into the page a `<meta charset>` is still believed. */
+const MAX_CHARSET_SCAN = 2048;
 
 /**
- * Previews kept for the page. Failures are kept too — an endpoint that is down
+ * Previews kept for the page. Failures are kept too — a proxy that is down
  * should cost one request, not one per card that scrolls past.
  */
 export const MAX_CACHED_PREVIEWS = 200;
@@ -79,8 +89,8 @@ export function previewTarget(parts: ContentPart[]): string | undefined {
   return undefined;
 }
 
-/** Parse an endpoint, resolving a relative one against the embedding page. */
-function readEndpoint(value: string): URL | undefined {
+/** Parse a proxy URL, resolving a relative one against the embedding page. */
+function readProxy(value: string): URL | undefined {
   let url: URL;
   try {
     url = new URL(value, typeof location === 'undefined' ? undefined : location.href);
@@ -94,25 +104,23 @@ function readEndpoint(value: string): URL | undefined {
 }
 
 /**
- * Build the request for one target URL.
+ * Build the request for one target URL: the proxy with the target added as a
+ * `url` parameter, which is how corsproxy.io takes it.
  *
- * `{url}` in the endpoint is substituted (percent-encoded) for the proxies that
- * take the target in their path; otherwise the target goes in a `url` query
- * parameter, set rather than appended so an endpoint that carries an API key in
- * its own query string keeps it.
+ * The parameter is appended rather than set through `searchParams`, which
+ * spells a space `+`; corsproxy.io asks for `encodeURIComponent`. Whatever
+ * query string the proxy URL already carries survives, so an API key on it
+ * keeps working.
  *
- * @returns undefined when the endpoint is not a usable `http(s)` URL
+ * @returns undefined when the proxy is not a usable `http(s)` URL
  */
-export function ogpRequestUrl(endpoint: string, target: string): string | undefined {
-  if (endpoint.includes('{url}')) {
-    return readEndpoint(endpoint.replaceAll('{url}', encodeURIComponent(target)))?.href;
-  }
-  const url = readEndpoint(endpoint);
+export function ogpRequestUrl(proxy: string, target: string): string | undefined {
+  const url = readProxy(proxy);
   if (!url) {
     return undefined;
   }
-  url.searchParams.set('url', target);
-  return url.href;
+  url.hash = '';
+  return `${url.href}${url.search ? '&' : '?'}url=${encodeURIComponent(target)}`;
 }
 
 /** Read one field, then clip it to what the card renders. */
@@ -124,52 +132,97 @@ function readField(value: unknown, max: number): string | undefined {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-/**
- * The first of these keys the response carries a value for.
- *
- * `null` counts as absent, so a service that spells a missing field that way
- * still falls through to its other spelling of the same field.
- */
-function pick(record: Record<string, unknown>, keys: string[]): unknown {
+/** The first of these keys the page carries a value for. */
+function pick(tags: Map<string, string>, keys: string[]): string | undefined {
   for (const key of keys) {
-    if (record[key] !== undefined && record[key] !== null) {
-      return record[key];
+    const value = tags.get(key);
+    if (value !== undefined) {
+      return value;
     }
   }
   return undefined;
 }
 
 /**
- * Validate an endpoint's answer.
+ * Index the `<meta>` tags by `property` (how OGP spells it) or `name` (how
+ * Twitter cards and the plain description do).
  *
- * Both the plain (`title`) and the OG-prefixed (`og:title`) spellings are read,
- * because both are common in the wild and the difference is not one an embedder
- * should have to write an adapter for.
+ * The first of a repeated key wins: a page listing several `og:image` means the
+ * first one for the preview.
+ */
+function readMetaTags(doc: Document): Map<string, string> {
+  const tags = new Map<string, string>();
+  for (const meta of doc.querySelectorAll('meta')) {
+    const key = (meta.getAttribute('property') ?? meta.getAttribute('name'))?.trim().toLowerCase();
+    const content = meta.getAttribute('content');
+    if (key && content !== null && !tags.has(key)) {
+      tags.set(key, content);
+    }
+  }
+  return tags;
+}
+
+/** Resolve against the page it came from, since `og:image` may be a path. */
+function absoluteUrl(value: string | undefined, base: string): string | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  try {
+    return new URL(value.trim(), base).href;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the metadata out of a fetched page.
+ *
+ * The Twitter card spellings and the plain `<title>` / `<meta name`
+ * `="description">` are read as fallbacks, because plenty of pages carry one
+ * set and not the other.
  *
  * @param url The URL that was asked about; the card links here
  * @returns undefined when there is nothing worth rendering
  */
-export function parseOgpResponse(payload: unknown, url: string): OgpData | undefined {
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+export function parseOgpHtml(html: string, url: string): OgpData | undefined {
+  if (typeof DOMParser === 'undefined') {
     return undefined;
   }
-  const record = payload as Record<string, unknown>;
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(html, 'text/html');
+  } catch {
+    return undefined;
+  }
+  const tags = readMetaTags(doc);
 
-  const title = readField(pick(record, ['title', 'og:title', 'ogTitle']), MAX_TITLE_LENGTH);
+  const title = readField(pick(tags, ['og:title', 'twitter:title']) ?? doc.title, MAX_TITLE_LENGTH);
   if (!title) {
     return undefined;
   }
 
   const data: OgpData = { url, title };
   const description = readField(
-    pick(record, ['description', 'og:description', 'ogDescription']),
+    pick(tags, ['og:description', 'twitter:description', 'description']),
     MAX_DESCRIPTION_LENGTH
   );
   const siteName = readField(
-    pick(record, ['siteName', 'site_name', 'og:site_name', 'ogSiteName']),
+    pick(tags, ['og:site_name', 'application-name']),
     MAX_SITE_NAME_LENGTH
   );
-  const image = safeImageUrl(pick(record, ['image', 'og:image', 'ogImage']), MAX_IMAGE_URL_LENGTH);
+  const image = safeImageUrl(
+    absoluteUrl(
+      pick(tags, [
+        'og:image',
+        'og:image:secure_url',
+        'og:image:url',
+        'twitter:image',
+        'twitter:image:src',
+      ]),
+      url
+    ),
+    MAX_IMAGE_URL_LENGTH
+  );
 
   if (description) {
     data.description = description;
@@ -183,31 +236,55 @@ export function parseOgpResponse(payload: unknown, url: string): OgpData | undef
   return data;
 }
 
+const CHARSET_PATTERN = /charset\s*=\s*["']?\s*([a-z0-9_\-:]+)/i;
+
+/**
+ * Decode the page's bytes.
+ *
+ * `Response.text()` is UTF-8 whatever the page says, which would leave a
+ * Shift_JIS title as mojibake, so the declared encoding is honoured — from the
+ * response header, or from the `<meta charset>` in the ASCII-compatible head.
+ */
+function decodeHtml(bytes: Uint8Array, contentType: string): string {
+  const utf8 = new TextDecoder().decode(bytes);
+  const label = (
+    CHARSET_PATTERN.exec(contentType)?.[1] ??
+    CHARSET_PATTERN.exec(utf8.slice(0, MAX_CHARSET_SCAN))?.[1] ??
+    'utf-8'
+  ).toLowerCase();
+  if (label === 'utf-8' || label === 'utf8') {
+    return utf8;
+  }
+  try {
+    return new TextDecoder(label).decode(bytes);
+  } catch {
+    return utf8;
+  }
+}
+
 async function fetchOgp(request: string, target: string): Promise<OgpData | undefined> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OGP_TIMEOUT_MS);
   try {
     const response = await fetch(request, {
       credentials: 'omit',
-      // As on the thumbnail: the endpoint is told which URL to look up, not
-      // which page the widget is embedded in.
+      // As on the thumbnail: the proxy is told which URL to look up, not which
+      // page the widget is embedded in.
       referrerPolicy: 'no-referrer',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'text/html' },
       signal: controller.signal,
     });
     if (!response.ok) {
       return undefined;
     }
-    if (!(response.headers.get('content-type') ?? '').includes('json')) {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.includes('html')) {
       return undefined;
     }
-    // Read as text first so an endpoint answering with a huge body costs a
-    // string rather than a parsed object graph.
-    const body = await response.text();
-    if (body.length > MAX_RESPONSE_LENGTH) {
-      return undefined;
-    }
-    return parseOgpResponse(JSON.parse(body), target);
+    // The abort above covers this read, so a page that never stops arriving
+    // costs the timeout rather than the memory.
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return parseOgpHtml(decodeHtml(bytes.slice(0, MAX_HTML_BYTES), contentType), target);
   } catch {
     return undefined;
   } finally {
@@ -240,18 +317,18 @@ const cache = new Map<string, Promise<OgpData | undefined>>();
 /**
  * The preview for one link, fetching it the first time it is asked for.
  *
- * @returns undefined for anything that did not produce a card — a bad endpoint,
- *   a failed request, a response with no title. The caller renders nothing, and
- *   the link is still in the body where the author wrote it.
+ * @returns undefined for anything that did not produce a card — a bad proxy, a
+ *   failed request, a page with no title. The caller renders nothing, and the
+ *   link is still in the body where the author wrote it.
  */
-export function requestOgp(endpoint: string, target: string): Promise<OgpData | undefined> {
-  const key = `${endpoint}\n${target}`;
+export function requestOgp(proxy: string, target: string): Promise<OgpData | undefined> {
+  const key = `${proxy}\n${target}`;
   const cached = cache.get(key);
   if (cached) {
     return cached;
   }
 
-  const request = ogpRequestUrl(endpoint, target);
+  const request = ogpRequestUrl(proxy, target);
   const pending =
     request === undefined ? Promise.resolve(undefined) : withSlot(() => fetchOgp(request, target));
   cache.set(key, pending);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AUTHOR_LABEL, DEFAULT_NOTE_LABEL } from './event-actions.ts';
+import { DEFAULT_OGP_PROXY } from './ogp.ts';
 import { MAX_REACTIONS } from './reactions.ts';
 import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 import {
@@ -17,7 +18,7 @@ import {
   parseLimit,
   parseMaxEvents,
   parseMaxFollows,
-  parseOgpEndpoint,
+  parseOgpProxy,
   parsePubkey,
   parseReactionsLimit,
   parseRelays,
@@ -420,13 +421,16 @@ describe('configFromSearchParams', () => {
     ]);
   });
 
-  it('reads the link preview endpoint, and leaves it unset by default', () => {
+  it('reads the link preview proxy, and leaves it unset by default', () => {
     expect(
-      configFromSearchParams(new URLSearchParams('ogp-endpoint=https://ogp.example/api'))
-        .ogpEndpoint
-    ).toBe('https://ogp.example/api');
-    expect(configFromSearchParams(new URLSearchParams('')).ogpEndpoint).toBeUndefined();
-    expect(followConfigFromSearchParams(new URLSearchParams('')).ogpEndpoint).toBeUndefined();
+      configFromSearchParams(new URLSearchParams('ogp-proxy=https://corsproxy.io/?key=abc'))
+        .ogpProxy
+    ).toBe('https://corsproxy.io/?key=abc');
+    expect(configFromSearchParams(new URLSearchParams('ogp-proxy')).ogpProxy).toBe(
+      DEFAULT_OGP_PROXY
+    );
+    expect(configFromSearchParams(new URLSearchParams('')).ogpProxy).toBeUndefined();
+    expect(followConfigFromSearchParams(new URLSearchParams('')).ogpProxy).toBeUndefined();
   });
 
   it('turns media off only when asked', () => {
@@ -559,30 +563,35 @@ describe('parseMaxEvents', () => {
   });
 });
 
-describe('parseOgpEndpoint', () => {
-  it('keeps a usable endpoint as it was written', () => {
-    expect(parseOgpEndpoint('https://ogp.example/api?key=abc')).toBe(
-      'https://ogp.example/api?key=abc'
-    );
+describe('parseOgpProxy', () => {
+  it('opts in at the default proxy for a bare attribute', () => {
+    expect(parseOgpProxy('')).toBe(DEFAULT_OGP_PROXY);
+    expect(parseOgpProxy('true')).toBe(DEFAULT_OGP_PROXY);
+    expect(parseOgpProxy(true)).toBe(DEFAULT_OGP_PROXY);
   });
 
-  it('keeps the {url} placeholder rather than resolving it away', () => {
-    expect(parseOgpEndpoint('https://ogp.example/p/{url}')).toBe('https://ogp.example/p/{url}');
+  it('keeps a named proxy as it was written, API key and all', () => {
+    expect(parseOgpProxy('https://corsproxy.io/?key=abc')).toBe('https://corsproxy.io/?key=abc');
   });
 
-  it('leaves previews off for anything that is not an http(s) endpoint', () => {
+  it('leaves previews off when they are turned off', () => {
+    expect(parseOgpProxy('false')).toBeUndefined();
+    expect(parseOgpProxy(false)).toBeUndefined();
+  });
+
+  it('leaves previews off for anything that is not an http(s) URL', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(parseOgpEndpoint('javascript:alert(1)')).toBeUndefined();
-    expect(parseOgpEndpoint('not a url')).toBeUndefined();
+    expect(parseOgpProxy('javascript:alert(1)')).toBeUndefined();
+    expect(parseOgpProxy('not a url')).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it('says nothing when the attribute is simply absent', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(parseOgpEndpoint(undefined)).toBeUndefined();
-    expect(parseOgpEndpoint('  ')).toBeUndefined();
+    expect(parseOgpProxy(undefined)).toBeUndefined();
+    expect(parseOgpProxy(null)).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
   });
 });
