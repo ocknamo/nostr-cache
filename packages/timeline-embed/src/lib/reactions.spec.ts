@@ -145,10 +145,13 @@ describe('parseReaction', () => {
 
 /** A parsed reaction, for the grouping tests that do not care about events. */
 function made(overrides: Partial<Reaction> = {}): Reaction {
+  const id = overrides.id ?? `r${Math.random()}`;
+  const pubkey = overrides.pubkey ?? 'pk1';
   return {
-    id: `r${Math.random()}`,
-    pubkey: 'pk1',
+    id,
+    pubkey,
     createdAt: 1000,
+    event: makeEvent({ id, pubkey, kind: 7, content: '🔥' }),
     kind: 'emoji',
     key: '🔥',
     label: '🔥',

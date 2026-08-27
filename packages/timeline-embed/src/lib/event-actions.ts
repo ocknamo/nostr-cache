@@ -26,16 +26,13 @@ export interface EventActionContext {
   /** The event whose card the pressed button sits under. */
   event: NostrEvent;
   /**
-   * Who was pressed, when the press was on a person rather than on a button:
-   * the author's avatar or display name (see {@link AuthorAction}). Absent for
-   * a button in the action bar.
+   * Who was pressed, when the press was on a person rather than on a button
+   * (see {@link AuthorAction}). Absent for a button in the action bar.
    *
-   * Redundant with `event.pubkey` on a card — and deliberately so. The same
-   * affordance belongs on a reactor's row, on a quoted note's header and on a
-   * `nostr:` mention in a body, where the person pressed is *not* the author of
-   * the event that came with them. A listener that reads this field keeps
-   * working when it lands there; one that reads `event.pubkey` would quietly
-   * navigate to the wrong person.
+   * Redundant with `event.pubkey` on a card — and deliberately so. On a
+   * reactor's row, a quoted note's header and a `nostr:` mention, the event
+   * that comes with the press is the kind 7 they sent, the post quoted, the
+   * note it was written in: `event.pubkey` there is the wrong person.
    */
   pubkey?: string;
   /**
@@ -94,21 +91,23 @@ export interface EventAction {
 }
 
 /**
- * The author's avatar and display name as a press target.
+ * A person as a press target — the card's author, a reactor's row, a quoted
+ * note's header, or a `nostr:` mention in a body.
  *
  * Same `id` + `label` contract as a button, and the same `nostr-timeline:action`
  * event, because it is the same mechanism: a card in a timeline still has
  * nowhere of its own to navigate to, and the page that knows where its profile
- * screen lives is the one holding the router.
+ * screen lives is the one holding the router. One id covers all four: where
+ * the name was read off the screen does not change the destination.
  *
  * The id is the embedder's rather than one this module reserves. A fixed
  * `"author"` would be indistinguishable from a button an embedder had already
  * declared under that id — {@link normalizeActions} dedupes within the declared
  * list, and cannot see an id the widget injects afterwards.
  *
- * Its presence is also what makes the avatar and the name pressable at all:
- * without it they stay the plain image and text they have always been, so an
- * embed that wires no listener never shows a target that does nothing.
+ * Its presence is also what makes those four pressable at all: without it they
+ * stay the plain images and text they have always been, so an embed that wires
+ * no listener never shows a target that does nothing.
  */
 export interface AuthorAction {
   /** Travels as `actionId`, exactly as a button's does. */
@@ -116,8 +115,8 @@ export interface AuthorAction {
   /**
    * What pressing does, as the accessible name of the target — the widget
    * cannot know where the embedder's id leads, so it cannot write this itself.
-   * The author's name is appended for a screen reader moving through a list of
-   * cards.
+   * The pressed person's name is appended for a screen reader moving through a
+   * list of cards, or of reactors.
    */
   label: string;
 }
@@ -174,9 +173,9 @@ export interface EventActionDetail {
   /** The relay's verdict for it — see {@link EventActionContext.status}. */
   status?: ValidationStatus;
   /**
-   * Who was pressed, on an author press — see {@link EventActionContext.pubkey}
-   * for why this is here rather than left to `event.pubkey`. Absent for a
-   * button in the action bar.
+   * Who was pressed, on a press on a person — see
+   * {@link EventActionContext.pubkey} for why this is here rather than left to
+   * `event.pubkey`. Absent for a button in the action bar.
    */
   pubkey?: string;
 }

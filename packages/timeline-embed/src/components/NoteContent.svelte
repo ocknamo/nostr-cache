@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     type ContentPart,
+    type EntityPart,
     type MediaPart,
     inlineParts,
     mediaAsLinks,
@@ -8,6 +9,7 @@
     parseContent,
   } from '../lib/content-parts.ts';
   import { mentionLabel } from '../lib/content-preview.ts';
+  import type { AuthorAction } from '../lib/event-actions.ts';
   import type { Profile } from '../lib/profile.ts';
   import MediaAttachment from './MediaAttachment.svelte';
 
@@ -47,6 +49,14 @@
      * every caller has to remember to apply to what it passes.
      */
     media?: MediaPart[];
+    /**
+     * Makes a `nostr:` mention of a person pressable, under this id. Only the
+     * label reaches here: the event a press reports is the body's, which the
+     * caller has and this component does not.
+     */
+    authorAction?: AuthorAction;
+    /** Called on that press, with the mentioned person. */
+    onAuthorPress?: (pubkey: string) => void;
   }
 
   type Props =
@@ -72,6 +82,8 @@
     showMedia = true,
     profiles,
     media: givenMedia,
+    authorAction,
+    onAuthorPress,
   }: Props = $props();
 
   const parts = $derived(given ?? parseContent(content ?? ''));
@@ -79,6 +91,19 @@
     showMedia ? inlineParts(parts, embedded) : mediaAsLinks(parts, embedded)
   );
   const media = $derived(showMedia ? (givenMedia ?? mediaParts(parts)) : []);
+
+  /** The pubkey a mention points at, or undefined for a reference to an event. */
+  function mentionPubkey(part: EntityPart): string | undefined {
+    const { entity } = part;
+    return entity.type === 'npub' || entity.type === 'nprofile' ? entity.pubkey : undefined;
+  }
+
+  /** Both halves or none: the packed markup below tests one value, not two. */
+  const press = $derived(
+    authorAction && onAuthorPress
+      ? { label: authorAction.label, report: onAuthorPress }
+      : undefined
+  );
 </script>
 
 <!-- The markup below is deliberately packed onto as few lines as it can be:
@@ -88,9 +113,15 @@
   <p class="content">{#each inline as part, index (index)}{#if part.kind === 'text'}{part.text}{:else if part.kind === 'link'}<a
           href={part.href}
           target="_blank"
-          rel="noopener noreferrer nofollow">{part.label}</a>{:else if part.kind === 'entity'}<span
+          rel="noopener noreferrer nofollow">{part.label}</a>{:else if part.kind === 'entity'}{@const pubkey = mentionPubkey(part)}{#if press && pubkey}<button
+          type="button"
           class="mention"
-          title={part.raw}>{mentionLabel(part, profiles)}</span>{/if}{/each}</p>
+          part="mention"
+          title={part.raw}
+          aria-label={`${press.label}: ${mentionLabel(part, profiles)}`}
+          onclick={() => press.report(pubkey)}>{mentionLabel(part, profiles)}</button>{:else}<span
+          class="mention"
+          title={part.raw}>{mentionLabel(part, profiles)}</span>{/if}{/if}{/each}</p>
 {/if}
 
 {#if media.length > 0}
@@ -122,12 +153,38 @@
     text-decoration: underline;
   }
 
-  /* Not a link by design — the widget has no client to send a reader to — so it
-     never picks up the hover underline that marks the real links beside it. */
+  /* Not a link by design — the widget has no client to send a reader to — so a
+     plain mention never picks up the hover underline that marks the real links
+     beside it. */
   .mention {
     color: var(--nt-mention-fg, #1d9bf0);
     background: var(--nt-mention-bg, transparent);
     word-break: break-all;
+  }
+
+  /* The same chip, pressable. A button is one box, so unlike the span it
+     replaces it cannot break across lines: a mention too long for the line it is
+     on moves to the next one whole. */
+  button.mention {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button.mention:hover,
+  button.mention:focus-visible {
+    text-decoration: underline;
+  }
+
+  button.mention:focus-visible {
+    outline: 2px solid var(--nt-focus, #1d9bf0);
+    outline-offset: 1px;
   }
 
   .media {

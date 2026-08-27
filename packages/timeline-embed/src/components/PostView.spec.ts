@@ -140,6 +140,34 @@ describe('PostView', () => {
     expect(screen.getByRole('button', { name: /🔥 1 件/ })).toBeInTheDocument();
   });
 
+  it('reports a press on a reactor with the kind 7 they sent', async () => {
+    const onAction = vi.fn();
+    const author = { id: 'open-profile', label: 'プロフィールを開く' };
+    render(PostView, {
+      props: {
+        state: state({
+          events: [POST],
+          reactions: new Map([[POST_ID, [reaction(ALICE, '🔥', 'r1')]]]),
+        }),
+        target: TARGET,
+        reactionsOpen: true,
+        authorAction: author,
+        onAction,
+      },
+    });
+
+    // The post's own author carries the same press; this one is the row's.
+    const [, reactor] = screen.getAllByRole('button', { name: /プロフィールを開く/ });
+    await fireEvent.click(reactor);
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    const [action, context] = onAction.mock.calls[0];
+    expect(action).toEqual(author);
+    // The reactor, not the post's author — and the reaction, not the post.
+    expect(context.pubkey).toBe(ALICE);
+    expect(context.event).toMatchObject({ id: 'r1', kind: 7 });
+  });
+
   it('hides the reaction bar when the element turned reactions off', () => {
     render(PostView, {
       props: {

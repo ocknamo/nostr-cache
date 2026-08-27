@@ -531,6 +531,8 @@
             {showMedia}
             {profiles}
             media={segmentMediaLists[index]}
+            {authorAction}
+            onAuthorPress={authorAction && ((pubkey) => select(authorAction, pubkey))}
           />
         {:else}
           <div class="embed">
@@ -545,6 +547,7 @@
               ancestorUnverified={unverified}
               {onEmbedRequest}
               {noteAction}
+              {authorAction}
               {onAction}
             />
           </div>

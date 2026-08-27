@@ -51,6 +51,8 @@ export interface Reaction {
   id: string;
   pubkey: string;
   createdAt: number;
+  /** Kept so a press on the reactor's row can report the reaction it rode in on. */
+  event: NostrEvent;
   kind: ReactionKind;
   /**
    * Deliberately the same value as {@link label}, so NIP-25's `+` and a literal
@@ -138,7 +140,7 @@ export function parseReaction(event: NostrEvent, match: PostTargetMatch): Reacti
     return undefined;
   }
 
-  const base = { id: event.id, pubkey: event.pubkey, createdAt: event.created_at };
+  const base = { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, event };
 
   // NIP-25: empty content means `+`. Trimmed first so whitespace-only lands
   // here rather than on the length test below.

@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import type { Profile } from '../lib/profile.ts';
 import { type ReactionSummary, summarizeReactions } from '../lib/reactions.ts';
+import { makeEvent } from '../test-fixtures.ts';
 import ReactionBar from './ReactionBar.svelte';
 
 const ALICE = 'aa0000000000000000000000000000000000000000000000000000000000000a';
@@ -17,6 +18,7 @@ function summary(
       id: `r${index}`,
       pubkey: entry.pubkey,
       createdAt: 1000 + index,
+      event: makeEvent({ id: `r${index}`, pubkey: entry.pubkey, kind: 7, content: entry.key }),
       kind: 'emoji' as const,
       key: entry.key,
       label: entry.label ?? entry.key,
