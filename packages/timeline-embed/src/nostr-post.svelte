@@ -15,7 +15,7 @@
       showAvatars: { attribute: 'show-avatars' },
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
-      ogpEndpoint: { attribute: 'ogp-endpoint' },
+      ogpProxy: { attribute: 'ogp-proxy' },
       showReactions: { attribute: 'show-reactions' },
       reactionsLimit: { attribute: 'reactions-limit' },
       reactionsOpen: { attribute: 'reactions-open' },
@@ -72,7 +72,7 @@
     parseFlag,
     parseFreshness,
     parseMaxEvents,
-    parseOgpEndpoint,
+    parseOgpProxy,
     parseReactionsLimit,
     parseRelays,
     parseRepliesDepth,
@@ -132,13 +132,13 @@
     /** `"false"` leaves a `nostr:` reference as a chip instead of a card. */
     showEmbeds?: string;
     /**
-     * Endpoint the link previews (OGP) are fetched from, e.g.
-     * `"https://ogp.example/api"` — the target URL is added as a `url` query
-     * parameter, or substituted for a `{url}` placeholder when the value has
-     * one. **Unset means no previews and no requests**; see the README for
-     * what the endpoint has to return and what it gets to see.
+     * URL of the CORS proxy the link previews (OGP) are fetched through, e.g.
+     * `"https://corsproxy.io/?key=…"` — the linked page is requested through
+     * it and its `og:` tags are read here. There is no default: **unset (or
+     * set without a URL) means no previews and no requests**; see the README
+     * for what the proxy gets to see.
      */
-    ogpEndpoint?: string;
+    ogpProxy?: string;
     /** `"false"` also stops the kind 7 subscription being opened at all. */
     showReactions?: string | boolean;
     /** Backfill size. Defaults to 200, capped at 500; more may arrive live. */
@@ -221,7 +221,7 @@
     showAvatars,
     showMedia,
     showEmbeds,
-    ogpEndpoint,
+    ogpProxy,
     showReactions,
     reactionsLimit,
     reactionsOpen,
@@ -237,7 +237,7 @@
     materialIconsFont,
   }: Props = $props();
 
-  const ogpTarget = $derived(parseOgpEndpoint(ogpEndpoint));
+  const ogpProxyUrl = $derived(parseOgpProxy(ogpProxy));
 
   // So a press can be announced to a page that wrote HTML rather than JS and
   // has no callback to receive it.
@@ -430,7 +430,7 @@
   showAvatars={showAvatars !== 'false'}
   showMedia={showMedia !== 'false'}
   showEmbeds={showEmbeds !== 'false'}
-  ogpEndpoint={ogpTarget}
+  ogpProxy={ogpProxyUrl}
   showReactions={wantsReactions}
   reactionsOpen={parseFlag(reactionsOpen)}
   showReplies={wantsReplies}

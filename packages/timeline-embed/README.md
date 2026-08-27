@@ -178,7 +178,7 @@ npm パッケージを入れられない構成のための入口です。
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
 | `show-embeds` | `false` で本文中の `nostr:` 参照の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
-| `ogp-endpoint` | 本文の最初のリンクの OGP カードを取得する先。**指定しなければカードを出さず、どこにも問い合わせません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
+| `ogp-proxy` | 本文の最初のリンクの OGP カードを取得する CORS プロキシの URL（`https://corsproxy.io/?key=…` など）。**指定しなければカードを出さず、どこにも問い合わせません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 | `author-action` | 指定するとアイコン・表示名が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する（[下記](#著者アイコン表示名の押下)） | なし（押せない・従来どおり） |
 | `author-action-label` | その押下の説明（アクセシブル名）。`author-action` が無いときは効きません | `プロフィールを開く` |
@@ -293,7 +293,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
 | `since-days` | 直近 N 日の投稿だけを対象にする | なし（無効） |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `3600`（1 時間） |
-| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `ogp-endpoint` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `ogp-proxy` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -520,7 +520,7 @@ level 3  …
 | `show-avatars` | `"false"` でアバターを出さない（著者・リアクター両方） | オン |
 | `show-media` | `"false"` で本文中のメディアを描画しない | オン |
 | `show-embeds` | `"false"` で `nostr:` 参照を入れ子カードにしない | オン |
-| `ogp-endpoint` | 本文の最初のリンクの OGP カードを取得する先。**投稿本体だけに効き、返信ツリーには出しません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
+| `ogp-proxy` | 本文の最初のリンクの OGP カードを表示する（`<nostr-timeline>` と同じ）。**投稿本体だけに効き、返信ツリーには出しません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
 | `show-reactions` | `"false"` でリアクション欄ごと出さない（kind 7 の購読も張らない） | オン |
 | `reactions-limit` | リアクションの初回取得件数（上限 500） | `200` |
 | `reactions-open` | 付けるとリアクションしたユーザの一覧を最初から開く | オフ |
@@ -742,7 +742,7 @@ nostr-timeline {
   --nt-embed-gap: 8px;          /* 本文と引用カードの間隔、引用カード同士の間隔 */
   --nt-quote-hover-bg: rgb(255 255 255 / 6%); /* note-action 指定時、引用カードのホバー。既定は rgb(15 20 25 / 4%) */
 
-  /* リンクの OGP カード（ogp-endpoint 指定時） */
+  /* リンクの OGP カード（ogp-proxy 指定時） */
   --nt-ogp-border: #30363d;     /* 既定は --nt-border */
   --nt-ogp-bg: transparent;
   --nt-ogp-radius: 10px;        /* 既定は --nt-radius */
@@ -806,7 +806,7 @@ nostr-timeline {
 | 音声 URL（`.mp3` `.ogg` `.oga` `.wav` `.m4a`） | `<audio controls preload="none">` |
 | `nostr:npub1…` / `nprofile`（`nostr:` 無しの裸の形も可） | 短縮表示のチップ。**リンクにはしません** |
 | `nostr:note1…` / `nevent` / `naddr`（同上） | 参照先のイベントを取得し、**入れ子のカード**として本文中の元の位置に展開（[下記](#入れ子の投稿引用)） |
-| 最初の普通のリンク（`ogp-endpoint` 指定時のみ） | リンク先の **OGP カード**を本文の下に表示（[下記](#リンクの-ogp-カード)） |
+| 最初の普通のリンク（`ogp-proxy` 指定時のみ） | リンク先の **OGP カード**を本文の下に表示（[下記](#リンクの-ogp-カード)） |
 
 **HTML は一切組み立てません。** 解析結果は「元の文字列のどの範囲が何か」というトークン列で、
 描画は Svelte の通常の補間だけで行います（`{@html}` も `innerHTML` もこのパッケージには
@@ -825,58 +825,69 @@ nostr-timeline {
 
 ### リンクの OGP カード
 
-`ogp-endpoint` を指定すると、**本文の最初の普通のリンク 1 件**について OGP
-（Open Graph Protocol）のカードを本文の下に表示します。**既定では表示せず、
+`ogp-proxy` に CORS プロキシの URL を渡すと、**本文の最初の普通のリンク 1 件**について
+OGP（Open Graph Protocol）のカードを本文の下に表示します。**既定では表示せず、
 どこにも問い合わせません。**
 
 ```html
-<nostr-timeline relays="wss://nos.lol" ogp-endpoint="https://ogp.example.com/api"></nostr-timeline>
+<nostr-timeline
+  relays="wss://nos.lol"
+  ogp-proxy="https://corsproxy.io/?key=YOUR_API_KEY"
+></nostr-timeline>
 ```
 
-ブラウザからは CORS のため他所のページの HTML を読めないので、**取得は埋め込む側が
-用意したエンドポイントに委譲します**。ウィジェットは次のように問い合わせます。
+ブラウザからは CORS のため他所のページの HTML を読めないので、**取得は
+[corsproxy.io](https://corsproxy.io/) のような CORS プロキシ経由で行います**。
+リンク先の HTML をそのまま受け取り、`<meta property="og:…">` の読み取りは
+**ウィジェット側**で行います
+（`DOMParser` で解析するだけなので、取得したページのスクリプトは動かず、
+そのページの画像なども読み込まれません）。
 
-- `GET {ogp-endpoint}?url=<対象URLをエンコードしたもの>`
-  （エンドポイント自身のクエリ文字列は保持するので、`?key=…` を付けたままにできます）
-- 値に `{url}` が含まれる場合は、そこに対象 URL を percent-encode して差し込みます
-  （`https://ogp.example.com/api/{url}` のようなパス型のプロキシ用）
-- 相対パス（`/ogp` など）も書けます。埋め込み先ページの URL を基準に解決します
-- **エンドポイントは `Access-Control-Allow-Origin` を返す必要があります。** 埋め込み先と
-  別オリジンに置くのが普通なので、これが無いと応答を読めずカードが出ません
-  （リクエストは `Accept` だけを付けた単純リクエストなので、プリフライトは発生しません）
+- 問い合わせは `GET {ogp-proxy}?url=<対象URLをencodeURIComponentしたもの>` の 1 本です。
+  `Accept` だけを付けた単純リクエストなので、プリフライトは発生しません
+- **値は必須です。** 値なし（`true` / `1` も同じ）で付けた場合は警告を出して無効にします。
+  既定のプロキシは持ちません（誰の API キーも載っていない URL では本番運用できないため）。
+  corsproxy.io の API キー（無料枠は 10,000 リクエスト/月）は、この属性の URL に
+  `?key=…` としてそのまま書きます
+- `url` パラメータを同じ形で受け取り、`Access-Control-Allow-Origin` を返す CORS プロキシなら
+  corsproxy.io 以外（自前のものを含む）でも動きます。埋め込み先と同じオリジンに置くなら
+  `/cors` のようなパスも書けます。プロキシ自身のクエリ文字列は保持するので、`?key=…` は
+  そのまま残ります
+- `false` / `0` を渡すと明示的にオフです（既定と同じ）
+- **`http(s)://` で始まる URL か `/` で始まるパス以外は受け付けません**（`off` のような
+  書き間違いは埋め込み先の相対 URL として解決されてしまうため、警告を出して無効にします）
+- **埋め込み先ページの CSP** では、プロキシのオリジン（`https://corsproxy.io` など）を
+  `connect-src` に、サムネイルの配信元を `img-src` に通す必要があります
 
-期待する応答は JSON オブジェクト 1 つです。`title` / `description` / `image` /
-`siteName` を読み、`og:title` / `og:description` / `og:image` / `og:site_name` という
-綴りも同じように受け付けます。
+読み取るタグは次の順で、最初に見つかったものを使います。
 
-```json
-{
-  "title": "ページのタイトル",
-  "description": "ページの説明",
-  "image": "https://example.com/ogp.png",
-  "siteName": "Example"
-}
-```
+| 項目 | 読む順番 |
+|---|---|
+| タイトル | `og:title` → `twitter:title` → `<title>` |
+| 説明 | `og:description` → `twitter:description` → `<meta name="description">` |
+| 画像 | `og:image` → `og:image:secure_url` → `og:image:url` → `twitter:image` → `twitter:image:src` |
+| サイト名 | `og:site_name` → `application-name` |
 
 動作の細部:
 
-- **`title` が取れなければカードは出ません。** 画像だけのカードはリンク以上のことを
+- **タイトルが取れなければカードは出ません。** 画像だけのカードはリンク以上のことを
   何も言わないためです
-- カードの `href` は**投稿に書かれていた URL** です。応答が別の `url` を名乗っても
-  そちらへは飛びません（エンドポイントはラベルを偽れても、行き先は変えられません）
+- カードの `href` は**投稿に書かれていた URL** です。ページが別の `og:url` を名乗っても
+  そちらへは飛びません（ページはラベルを偽れても、行き先は変えられません）
 - **リンクは本文からも消えません。** カードは非同期に出るので、先に URL を消して
   しまうと取得に失敗したときに情報ごと失われます
 - 画像・動画・音声の URL は添付として描画済みなので対象外です。`nostr:` 参照も同様
 - 取得はカードが画面に入ってから（`IntersectionObserver`・200px 手前）行い、
   同時に走るのは 4 本まで。結果は**同じページを開いている間だけメモリに保持**します
-  （同じ URL は 1 回しか取りに行かず、失敗も覚えるので、落ちているエンドポイントに
+  （同じ URL は 1 回しか取りに行かず、失敗も覚えるので、落ちているプロキシに
   カードの数だけ問い合わせることはありません）。リロードすると取り直します
 - タイトル 200 文字・説明 400 文字を超える分は切り詰め、制御文字と bidi override は
-  本文と同じく除去します。`image` は `http(s)` のみ（`data:` は拒否）で、2048 文字まで
+  本文と同じく除去します。画像 URL は `http(s)` のみ（`data:` は拒否）で、2048 文字まで
   受け付けます（署名やタイトルをクエリに載せた生成画像 URL のため。アバターの上限は
-  512 文字のままです）
-- 応答が JSON でない・5 秒以内に返らない・64K 文字を超える、といった場合はカードを出さずに
-  終わります（本文のリンクはそのまま残ります）
+  512 文字のままです）。相対パスの `og:image` はリンク先ページを基準に解決します
+- 応答が HTML でない・5 秒以内に返らない場合はカードを出さずに終わります
+  （本文のリンクはそのまま残ります）。ページ本体は先頭 256KB を読んだ時点で受信を打ち切り、
+  `Content-Type` や `<meta charset>` が UTF-8 以外を名乗ればその文字コードで解釈します
 - 入れ子の引用カードと `<nostr-post>` の返信ツリーには**出しません**。1 画面あたりの
   外部リクエストが投稿数に比例して増えるのを避けるためです
 
@@ -1232,14 +1243,14 @@ window.addEventListener('message', (event) => {
   （`preload="none"` なので、**再生ボタンを押すまで通信は発生しません**）。
   避けたい場合は `show-media="false"` を指定してください。URL はリンクとして残るので、
   閲覧者が自分で開くことは引き続きできます
-- **`ogp-endpoint` を指定すると、閲覧者の情報がそのエンドポイントに渡ります。**
-  リクエストには**閲覧者の IP アドレスと、その人が読んでいる投稿に含まれる URL** が
-  乗ります。エンドポイントは**埋め込む側が用意して運用するもの**で、投稿者が書いた
-  任意の URL を取りに行かせる以上、**SSRF 対策（内部ネットワーク・リダイレクト・
-  スキーム・応答サイズの制限）とレート制限、キャッシュはそちら側の責任**です。
-  ウィジェットは既定のエンドポイントを持たず、属性が無ければ何も問い合わせません。
-  問い合わせ自体は `referrerPolicy: 'no-referrer'` で行うので**埋め込み先ページの URL は
-  送りません**が、IP アドレスは避けられません。
+- **`ogp-proxy` を指定すると、閲覧者の情報がそのプロキシ（corsproxy.io など）に
+  渡ります。** リクエストには**閲覧者の IP アドレスと、その人が読んでいる投稿に含まれる
+  URL** が乗り、プロキシはその URL のページを代わりに取得します。ウィジェットは既定で
+  この属性を持たず、**付けなければ何も問い合わせません**。問い合わせ自体は
+  `referrerPolicy: 'no-referrer'` で行うので**埋め込み先ページの URL は送りません**が、
+  IP アドレスは避けられません。第三者に渡したくない場合は、同じ `url` パラメータを取る
+  CORS プロキシを自前で用意して `ogp-proxy` に指定してください（投稿者が書いた任意の URL を
+  取りに行かせる以上、**SSRF 対策とレート制限はそちら側の責任**です）。
   取得したサムネイルも `referrerpolicy="no-referrer"` と遅延読み込みで読みますが、
   **画像の配信元にも閲覧者の IP は渡ります**。埋め込み先ページの CSP
   （`connect-src` と `img-src`）にも通す必要があります
@@ -1322,10 +1333,10 @@ import {
 | `notePreview` / `eventPreview` / `mentionLabel` / `PREVIEW_MAX_LENGTH` | 本文を 1 行の文字列へ畳む（チップのプレビュー用。添付は `[画像]`、URL はホスト名、言及は `@名前`）。`eventPreview` は本文を持たない kind を空文字で返す |
 | `selectEmbeds` / `embedTarget` / `eventIdTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで。`eventIdTarget` は生の id（`e` タグ）から同じキーの取得を作る |
 | `noteSegments` / `segmentMedia` / `segmentKey` | 本文をテキスト区間と入れ子カードの並びに分割し(引用の展開位置を決める本体)、添付の重複排除をその区間をまたいで通す。`segmentKey` は描画時のキー |
-| `previewTarget` / `requestOgp` / `parseOgpResponse` / `ogpRequestUrl` / `resetOgpCache` / `OGP_TIMEOUT_MS` / `MAX_CACHED_PREVIEWS` / `OgpData` | リンクの OGP カード（[上記](#リンクの-ogp-カード)）。本文からカード化する 1 件を選び、エンドポイントに問い合わせ、応答を検証する。結果はページ内メモリにだけ残る |
+| `previewTarget` / `requestOgp` / `parseOgpHtml` / `ogpRequestUrl` / `resetOgpCache` / `DEFAULT_OGP_PROXY` / `OGP_TIMEOUT_MS` / `MAX_CACHED_PREVIEWS` / `OgpData` | リンクの OGP カード（[上記](#リンクの-ogp-カード)）。本文からカード化する 1 件を選び、CORS プロキシ経由でページを取得し、`og:` タグを検証して読む。結果はページ内メモリにだけ残る |
 | `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィール・引用・返信先プレビューの取得トリガ） |
 | `Timeline` / `EventCard` / `NoteContent` / `EmbeddedNote` / `MediaAttachment` / `OgpCard` / `Avatar` / `PostView` / `ReactionBar` / `ReplyTree` | 表示コンポーネント |
-| `parseFreshness` / `parseDebug` / `parseShowOriginAlias` / `parseOgpEndpoint` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
+| `parseFreshness` / `parseDebug` / `parseShowOriginAlias` / `parseOgpProxy` | 属性・クエリパラメータの解釈（ウィジェットと同じ判定） |
 | `parseFilters` / `parseFilter` / `parseFilterList` | 購読フィルタの組み立て。`parseFilters` が `filters` JSON とカンマ区切り属性の優先順位を裁く |
 | `normalizeActions` / `dispatchActionEvent` / `ACTION_EVENT` / `MAX_ACTIONS` | 投稿下ボタンの定義解釈と押下通知（`EventAction` 型付き） |
 | `parseMaterialVariant` / `ensureMaterialSymbols` / `materialFontFamily` / `materialFontHref` | Material Symbols の変種解釈と、document へのフォント登録 |

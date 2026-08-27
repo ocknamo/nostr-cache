@@ -421,7 +421,7 @@ describe('Embeddable timeline E2E', () => {
       }
     });
 
-    it('leaves links unpreviewed until an ogp-endpoint is named', async () => {
+    it('leaves links unpreviewed until ogp-proxy is set', async () => {
       const disposable = await startRichUpstream();
       try {
         page = await browser.newPage();
@@ -434,23 +434,23 @@ describe('Embeddable timeline E2E', () => {
         await page.waitForSelector('nostr-timeline .content a', { timeout: TIMEOUT });
 
         expect(await page.$$('nostr-timeline [part="ogp"]')).toHaveLength(0);
-        expect(asked.filter((url) => new URL(url).pathname === '/ogp')).toEqual([]);
+        expect(asked.filter((url) => new URL(url).pathname === '/cors')).toEqual([]);
       } finally {
         await disposable.close();
       }
     });
 
-    it('previews the first link through the endpoint the embedder named', async () => {
+    it('previews the first link through the proxy the embedder named', async () => {
       const disposable = await startRichUpstream();
       try {
         page = await browser.newPage();
-        await page.goto(embedUrl({ relays: disposable.url, 'ogp-endpoint': site.ogpEndpointUrl }));
+        await page.goto(embedUrl({ relays: disposable.url, 'ogp-proxy': site.ogpProxyUrl }));
         await waitForEventCount(page, 1);
 
         const card = await page.waitForSelector('nostr-timeline [part="ogp"]', {
           timeout: TIMEOUT,
         });
-        // The card opens the URL the author wrote, whatever the endpoint said.
+        // The card opens the URL the author wrote, whatever the page said.
         expect(await card.getAttribute('href')).toBe('https://example.com/a');
         expect(await card.getAttribute('rel')).toBe('noopener noreferrer nofollow');
 
@@ -481,20 +481,41 @@ describe('Embeddable timeline E2E', () => {
       }
     });
 
-    it('reads a preview from an endpoint on another origin', async () => {
-      // How this is actually deployed: the OGP service is not the site the
-      // widget is served from, so the answer only arrives if CORS allows it.
+    it('reads the linked page without running any of it', async () => {
+      // The whole safety story of reading the HTML in the browser: the page is
+      // parsed into an inert document, so its own script and images stay
+      // unfetched.
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        const asked: string[] = [];
+        page.on('request', (request) => {
+          asked.push(new URL(request.url()).pathname);
+        });
+        await page.goto(embedUrl({ relays: disposable.url, 'ogp-proxy': site.ogpProxyUrl }));
+        await waitForEventCount(page, 1);
+        await page.waitForSelector('nostr-timeline [part="ogp-image"]', { timeout: TIMEOUT });
+
+        for (const path of site.linkedPageSubresourcePaths) {
+          expect(asked).not.toContain(path);
+        }
+      } finally {
+        await disposable.close();
+      }
+    });
+
+    it('reads a preview through a proxy on another origin', async () => {
+      // How this is actually deployed: the proxy is not the site the widget is
+      // served from, so the answer only arrives if CORS allows it.
       const [disposable, elsewhere] = await Promise.all([
         startRichUpstream(),
         startEmbedSiteServer(),
       ]);
       try {
-        expect(new URL(elsewhere.ogpEndpointUrl).origin).not.toBe(new URL(site.baseUrl).origin);
+        expect(new URL(elsewhere.ogpProxyUrl).origin).not.toBe(new URL(site.baseUrl).origin);
 
         page = await browser.newPage();
-        await page.goto(
-          embedUrl({ relays: disposable.url, 'ogp-endpoint': elsewhere.ogpEndpointUrl })
-        );
+        await page.goto(embedUrl({ relays: disposable.url, 'ogp-proxy': elsewhere.ogpProxyUrl }));
         await waitForEventCount(page, 1);
 
         const title = await page.waitForSelector('nostr-timeline [part="ogp-title"]', {

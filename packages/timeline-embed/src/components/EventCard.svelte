@@ -62,11 +62,11 @@
      */
     showEmbeds?: boolean;
     /**
-     * Where to fetch a link preview (OGP) for the first ordinary link in the
-     * body. Undefined — the default — renders no preview and asks nobody
-     * anything; see `lib/ogp.ts`.
+     * CORS proxy the link preview (OGP) for the first ordinary link in the
+     * body is fetched through. Undefined — the default — renders no preview
+     * and asks nobody anything; see `lib/ogp.ts`.
      */
-    ogpEndpoint?: string;
+    ogpProxy?: string;
     /**
      * Which way the date tooltip opens.
      *
@@ -140,7 +140,7 @@
     showAvatar = true,
     showMedia = true,
     showEmbeds = true,
-    ogpEndpoint,
+    ogpProxy,
     datePlacement = 'above',
     actions = [],
     authorAction,
@@ -190,7 +190,7 @@
    */
   const segmentMediaLists = $derived(showMedia ? segmentMedia(segments) : []);
 
-  const ogpUrl = $derived(ogpEndpoint ? previewTarget(parts) : undefined);
+  const ogpUrl = $derived(ogpProxy ? previewTarget(parts) : undefined);
 
   /**
    * A quote is normally written twice — as a `nostr:` code in the body (NIP-27)
@@ -554,8 +554,8 @@
            arrives after the text has been read, and the link itself stays in
            the text — a preview that fails to load must not take the URL with
            it. -->
-      {#if ogpEndpoint && ogpUrl}
-        <OgpCard endpoint={ogpEndpoint} url={ogpUrl} />
+      {#if ogpProxy && ogpUrl}
+        <OgpCard proxy={ogpProxy} url={ogpUrl} />
       {/if}
     </div>
   </div>

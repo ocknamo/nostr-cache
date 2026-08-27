@@ -265,7 +265,7 @@ describe('PostView', () => {
   });
 
   describe('link previews', () => {
-    const ENDPOINT = 'https://ogp.example/api';
+    const PROXY = 'https://corsproxy.io/';
     /** A post and a reply that both carry an ordinary link. */
     const LINKED = makeEvent({
       id: POST_ID,
@@ -281,23 +281,26 @@ describe('PostView', () => {
       resetOgpCache();
     });
 
-    function stubEndpoint() {
+    function stubProxy() {
       const fetchMock = vi.fn(async (request: string) => ({
         ok: true,
-        headers: { get: () => 'application/json' },
-        text: async () => JSON.stringify({ title: `リンク先の見出し (${request})` }),
+        headers: { get: () => 'text/html; charset=utf-8' },
+        arrayBuffer: async () =>
+          new TextEncoder().encode(
+            `<!doctype html><html><head><meta property="og:title" content="リンク先の見出し (${request})" /></head></html>`
+          ).buffer,
       }));
       vi.stubGlobal('fetch', fetchMock);
       return fetchMock;
     }
 
     it('previews the post itself but leaves the thread alone', async () => {
-      const fetchMock = stubEndpoint();
+      const fetchMock = stubProxy();
       const { container } = render(PostView, {
         props: {
           state: state({ events: [LINKED], replies: LINKED_THREAD }),
           target: TARGET,
-          ogpEndpoint: ENDPOINT,
+          ogpProxy: PROXY,
         },
       });
 
@@ -309,8 +312,8 @@ describe('PostView', () => {
       expect(asked.some((request) => request.includes('%2Freply'))).toBe(false);
     });
 
-    it('asks nobody anything without an endpoint', async () => {
-      const fetchMock = stubEndpoint();
+    it('asks nobody anything without a proxy', async () => {
+      const fetchMock = stubProxy();
       const { container } = render(PostView, {
         props: { state: state({ events: [LINKED], replies: LINKED_THREAD }), target: TARGET },
       });

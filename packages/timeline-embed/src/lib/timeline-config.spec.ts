@@ -17,7 +17,7 @@ import {
   parseLimit,
   parseMaxEvents,
   parseMaxFollows,
-  parseOgpEndpoint,
+  parseOgpProxy,
   parsePubkey,
   parseReactionsLimit,
   parseRelays,
@@ -420,13 +420,13 @@ describe('configFromSearchParams', () => {
     ]);
   });
 
-  it('reads the link preview endpoint, and leaves it unset by default', () => {
+  it('reads the link preview proxy, and leaves it unset by default', () => {
     expect(
-      configFromSearchParams(new URLSearchParams('ogp-endpoint=https://ogp.example/api'))
-        .ogpEndpoint
-    ).toBe('https://ogp.example/api');
-    expect(configFromSearchParams(new URLSearchParams('')).ogpEndpoint).toBeUndefined();
-    expect(followConfigFromSearchParams(new URLSearchParams('')).ogpEndpoint).toBeUndefined();
+      configFromSearchParams(new URLSearchParams('ogp-proxy=https://corsproxy.io/?key=abc'))
+        .ogpProxy
+    ).toBe('https://corsproxy.io/?key=abc');
+    expect(configFromSearchParams(new URLSearchParams('')).ogpProxy).toBeUndefined();
+    expect(followConfigFromSearchParams(new URLSearchParams('')).ogpProxy).toBeUndefined();
   });
 
   it('turns media off only when asked', () => {
@@ -559,30 +559,72 @@ describe('parseMaxEvents', () => {
   });
 });
 
-describe('parseOgpEndpoint', () => {
-  it('keeps a usable endpoint as it was written', () => {
-    expect(parseOgpEndpoint('https://ogp.example/api?key=abc')).toBe(
-      'https://ogp.example/api?key=abc'
-    );
+describe('parseOgpProxy', () => {
+  /** Stand in for an embedding page, which is what the widget actually runs on. */
+  function onPage(href: string) {
+    vi.stubGlobal('location', new URL(href));
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it('keeps the {url} placeholder rather than resolving it away', () => {
-    expect(parseOgpEndpoint('https://ogp.example/p/{url}')).toBe('https://ogp.example/p/{url}');
-  });
-
-  it('leaves previews off for anything that is not an http(s) endpoint', () => {
+  it('leaves previews off, loudly, when no proxy URL was named', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(parseOgpEndpoint('javascript:alert(1)')).toBeUndefined();
-    expect(parseOgpEndpoint('not a url')).toBeUndefined();
+    // There is no default to fall back to: a shared proxy URL would carry
+    // nobody's API key.
+    expect(parseOgpProxy('')).toBeUndefined();
+    expect(parseOgpProxy('   ')).toBeUndefined();
+    expect(parseOgpProxy('true')).toBeUndefined();
+    expect(parseOgpProxy(true)).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps a named proxy, API key and all', () => {
+    expect(parseOgpProxy('https://corsproxy.io/?key=abc')).toBe('https://corsproxy.io/?key=abc');
+  });
+
+  it('says nothing when previews are explicitly turned off', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseOgpProxy('false')).toBeUndefined();
+    expect(parseOgpProxy(false)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('resolves a path against the embedding page, once', () => {
+    onPage('https://embed.example/posts/index.html');
+
+    expect(parseOgpProxy('/cors')).toBe('https://embed.example/cors');
+  });
+
+  it('leaves previews off for anything that is not an http(s) URL or a path', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    onPage('https://embed.example/');
+
+    // On a page these would resolve as relative URLs and look usable, so they
+    // are rejected before `new URL` ever sees them.
+    expect(parseOgpProxy('off')).toBeUndefined();
+    expect(parseOgpProxy('not a url')).toBeUndefined();
+    expect(parseOgpProxy('javascript:alert(1)')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('leaves previews off for a proxy an https page cannot reach', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    onPage('https://embed.example/');
+
+    expect(parseOgpProxy('http://corsproxy.example/')).toBeUndefined();
+    expect(parseOgpProxy('https://user:pw@corsproxy.example/')).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it('says nothing when the attribute is simply absent', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(parseOgpEndpoint(undefined)).toBeUndefined();
-    expect(parseOgpEndpoint('  ')).toBeUndefined();
+    expect(parseOgpProxy(undefined)).toBeUndefined();
+    expect(parseOgpProxy(null)).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
   });
 });

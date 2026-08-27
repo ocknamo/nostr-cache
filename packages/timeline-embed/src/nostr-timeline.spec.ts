@@ -228,7 +228,7 @@ describe('<nostr-timeline> custom element', () => {
     expect(presses[0].pubkey).toBe(author);
   });
 
-  it('forwards ogp-endpoint, so a card can preview a link', async () => {
+  it('forwards ogp-proxy, so a card can preview a link', async () => {
     const dbName = `timeline-${crypto.randomUUID()}`;
     const seeding = await acquireRelayHost({ dbName });
     try {
@@ -244,14 +244,17 @@ describe('<nostr-timeline> custom element', () => {
 
     const fetchMock = vi.fn(async () => ({
       ok: true,
-      headers: { get: () => 'application/json' },
-      text: async () => JSON.stringify({ title: 'リンク先の見出し' }),
+      headers: { get: () => 'text/html; charset=utf-8' },
+      arrayBuffer: async () =>
+        new TextEncoder().encode(
+          `<!doctype html><html><head><meta property="og:title" content="リンク先の見出し" /></head></html>`
+        ).buffer,
     }));
     vi.stubGlobal('fetch', fetchMock);
 
     const element = document.createElement('nostr-timeline');
     element.setAttribute('db-name', dbName);
-    element.setAttribute('ogp-endpoint', 'https://ogp.example/api');
+    element.setAttribute('ogp-proxy', 'https://corsproxy.io/?key=abc');
     document.body.appendChild(element);
 
     await waitFor(
@@ -261,6 +264,11 @@ describe('<nostr-timeline> custom element', () => {
 
     expect(element.shadowRoot?.querySelector('[part="ogp-title"]')?.textContent).toBe(
       'リンク先の見出し'
+    );
+    // The proxy is asked for the link, with its own query string kept.
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://corsproxy.io/?key=abc&url=https%3A%2F%2Fexample.com%2Fa',
+      expect.anything()
     );
   });
 });

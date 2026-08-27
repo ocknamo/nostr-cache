@@ -142,33 +142,55 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
 }
 
 /**
- * Parse the OGP endpoint (`ogp-endpoint`) the link previews are fetched from.
+ * Parse the CORS proxy (`ogp-proxy`) the link previews are fetched through.
  *
  * Absent — the default — leaves the feature off entirely, so nothing about a
- * reader reaches a third party unless the embedder named one.
+ * reader reaches a third party unless the embedder asked for it. The value has
+ * to be the proxy's URL: there is no default to fall back to, since a shared
+ * one would carry nobody's API key and spend a quota nobody owns.
  *
- * @returns The endpoint as written (the `{url}` placeholder has to survive), or
- *   undefined when it is not a usable `http(s)` URL
+ * @returns The proxy URL to send the lookups to, or undefined to leave the
+ *   previews off
  */
-export function parseOgpEndpoint(value: string | null | undefined): string | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
+export function parseOgpProxy(value: string | boolean | null | undefined): string | undefined {
+  if (value === null || value === undefined || value === false) {
     return undefined;
   }
-  const endpoint = value.trim();
+  // `true` arrives from a Svelte parent setting the property; it names no proxy
+  // either, so it lands on the same warning a bare attribute does.
+  const proxy = value === true ? '' : value.trim();
+  if (proxy === 'false' || proxy === '0') {
+    return undefined;
+  }
+  if (proxy === '' || proxy === 'true' || proxy === '1') {
+    console.warn(
+      '[nostr-timeline] Ignoring ogp-proxy without a URL: it needs the proxy to fetch through, e.g. ogp-proxy="https://corsproxy.io/?key=YOUR_API_KEY".'
+    );
+    return undefined;
+  }
+  // Checked before parsing, because `new URL` would resolve a typo like `off`
+  // against the embedding page and hand back a URL that looks usable.
+  if (!/^https?:\/\//i.test(proxy) && !proxy.startsWith('/')) {
+    console.warn(
+      `[nostr-timeline] Ignoring ogp-proxy (expected an https:// URL, or a path on this origin): ${value}`
+    );
+    return undefined;
+  }
   let url: URL;
   try {
-    // The placeholder is not valid in a URL, so it is stood in for while the
-    // rest is checked.
-    url = new URL(
-      endpoint.replaceAll('{url}', 'x'),
-      typeof location === 'undefined' ? undefined : location.href
-    );
+    url = new URL(proxy, typeof location === 'undefined' ? undefined : location.href);
   } catch {
-    console.warn(`[nostr-timeline] Ignoring malformed ogp-endpoint: ${value}`);
+    console.warn(`[nostr-timeline] Ignoring malformed ogp-proxy: ${value}`);
     return undefined;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    console.warn(`[nostr-timeline] Ignoring non-http(s) ogp-endpoint: ${value}`);
+    console.warn(`[nostr-timeline] Ignoring non-http(s) ogp-proxy: ${value}`);
+    return undefined;
+  }
+  if (url.username || url.password) {
+    console.warn(
+      `[nostr-timeline] Ignoring ogp-proxy with credentials in it, which a CORS request cannot carry: ${value}`
+    );
     return undefined;
   }
   if (
@@ -177,11 +199,13 @@ export function parseOgpEndpoint(value: string | null | undefined): string | und
     url.protocol === 'http:'
   ) {
     console.warn(
-      `[nostr-timeline] Ignoring ${value}: an https page cannot fetch from an http:// endpoint (mixed content). Use https://.`
+      `[nostr-timeline] Ignoring ${value}: an https page cannot fetch from an http:// proxy (mixed content). Use https://.`
     );
     return undefined;
   }
-  return endpoint;
+  // The resolved URL rather than what was written, so a path is resolved once
+  // here instead of again per request.
+  return url.href;
 }
 
 /**
@@ -476,8 +500,8 @@ export function configFromSearchParams(params: URLSearchParams): {
   showMedia: boolean;
   /** Whether to render `nostr:` references in a body as nested cards. */
   showEmbeds: boolean;
-  /** Where link previews are fetched from; `undefined` leaves them off. */
-  ogpEndpoint: string | undefined;
+  /** Proxy the link previews are fetched through; `undefined` leaves them off. */
+  ogpProxy: string | undefined;
   /**
    * The embedder's buttons under each card. A query string carries no
    * functions, so these are declarative only — a press is reported by event.
@@ -514,7 +538,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
-    ogpEndpoint: parseOgpEndpoint(params.get('ogp-endpoint')),
+    ogpProxy: parseOgpProxy(params.get('ogp-proxy')),
     actions: normalizeActions(params.get('actions')),
     authorAction: normalizeAuthorAction(
       params.get('author-action'),
@@ -548,8 +572,8 @@ export interface FollowTimelineConfig {
   showAvatars: boolean;
   showMedia: boolean;
   showEmbeds: boolean;
-  /** Link preview endpoint; see {@link configFromSearchParams}. */
-  ogpEndpoint: string | undefined;
+  /** Link preview proxy; see {@link configFromSearchParams}. */
+  ogpProxy: string | undefined;
   /** Declarative action buttons; see {@link configFromSearchParams}. */
   actions: EventAction[];
   /** The author press; see {@link configFromSearchParams}. */
@@ -587,7 +611,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
-    ogpEndpoint: parseOgpEndpoint(params.get('ogp-endpoint')),
+    ogpProxy: parseOgpProxy(params.get('ogp-proxy')),
     actions: normalizeActions(params.get('actions')),
     authorAction: normalizeAuthorAction(
       params.get('author-action'),

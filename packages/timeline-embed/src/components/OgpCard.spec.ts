@@ -4,20 +4,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetOgpCache } from '../lib/ogp.ts';
 import OgpCard from './OgpCard.svelte';
 
-const ENDPOINT = 'https://ogp.example/api';
+const PROXY = 'https://corsproxy.io/';
 const URL_A = 'https://example.com/a';
 
-function jsonResponse(body: unknown): Response {
+/** A page carrying the given `og:` tags. */
+function page(tags: Record<string, string>): string {
+  const meta = Object.entries(tags)
+    .map(([key, value]) => `<meta property="og:${key}" content="${value}" />`)
+    .join('');
+  return `<!doctype html><html><head>${meta}</head><body></body></html>`;
+}
+
+function htmlResponse(body: string): Response {
   return {
     ok: true,
-    headers: { get: () => 'application/json' },
-    text: async () => JSON.stringify(body),
+    headers: { get: () => 'text/html; charset=utf-8' },
+    arrayBuffer: async () => new TextEncoder().encode(body).buffer,
   } as unknown as Response;
 }
 
-/** Answer every request with the same metadata. */
-function stubEndpoint(body: unknown) {
-  const fetchMock = vi.fn(async () => jsonResponse(body));
+/** Answer every request with the same page. */
+function stubProxy(tags: Record<string, string>) {
+  const fetchMock = vi.fn(async () => htmlResponse(page(tags)));
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
@@ -31,14 +39,14 @@ describe('OgpCard', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders the preview once the endpoint answers', async () => {
-    stubEndpoint({
+  it('renders the preview once the page arrives', async () => {
+    stubProxy({
       title: 'A title',
       description: 'A description',
-      siteName: 'Example',
+      site_name: 'Example',
       image: 'https://cdn.example.com/a.png',
     });
-    const { container } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+    const { container } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
 
     expect(await screen.findByText('A title')).toBeInTheDocument();
     expect(screen.getByText('A description')).toBeInTheDocument();
@@ -47,8 +55,8 @@ describe('OgpCard', () => {
   });
 
   it('opens the link the author wrote, without a window or a referrer', async () => {
-    stubEndpoint({ title: 'A title' });
-    render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+    stubProxy({ title: 'A title' });
+    render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
 
     const link = await screen.findByRole('link');
     expect(link).toHaveAttribute('href', URL_A);
@@ -57,8 +65,8 @@ describe('OgpCard', () => {
   });
 
   it('does not tell the image host which page the widget is embedded in', async () => {
-    stubEndpoint({ title: 'A title', image: 'https://cdn.example.com/a.png' });
-    const { container } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+    stubProxy({ title: 'A title', image: 'https://cdn.example.com/a.png' });
+    const { container } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
 
     await screen.findByText('A title');
     const image = container.querySelector('img');
@@ -69,8 +77,8 @@ describe('OgpCard', () => {
   });
 
   it('keeps the card when the thumbnail fails to load', async () => {
-    stubEndpoint({ title: 'A title', image: 'https://cdn.example.com/gone.png' });
-    const { container } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+    stubProxy({ title: 'A title', image: 'https://cdn.example.com/gone.png' });
+    const { container } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
 
     await screen.findByText('A title');
     await fireEvent.error(container.querySelector('img') as HTMLImageElement);
@@ -79,9 +87,9 @@ describe('OgpCard', () => {
     expect(screen.getByText('A title')).toBeInTheDocument();
   });
 
-  it('renders nothing when the endpoint has no title to show', async () => {
-    stubEndpoint({ description: 'A description' });
-    const { container } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+  it('renders nothing when the page has no title to show', async () => {
+    stubProxy({ description: 'A description' });
+    const { container } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
 
     // One microtask past the request, which is all a rendered card would need.
     await Promise.resolve();
@@ -91,9 +99,9 @@ describe('OgpCard', () => {
   });
 
   it('renders nothing for a link that is not http(s)', async () => {
-    const fetchMock = stubEndpoint({ title: 'A title' });
+    const fetchMock = stubProxy({ title: 'A title' });
     const { container } = render(OgpCard, {
-      props: { endpoint: ENDPOINT, url: 'javascript:alert(1)' },
+      props: { proxy: PROXY, url: 'javascript:alert(1)' },
     });
 
     await Promise.resolve();
@@ -106,21 +114,21 @@ describe('OgpCard', () => {
   it('lets a late answer for the previous link blank the card it moved to', async () => {
     // The reuse case in `<nostr-post>`: the first lookup is still in flight when
     // the card moves on, and resolves after the second one has already rendered.
-    const pending = new Map<string, (body: unknown) => void>();
+    const pending = new Map<string, (tags: Record<string, string>) => void>();
     vi.stubGlobal(
       'fetch',
       vi.fn(
         (request: string) =>
           new Promise<Response>((resolve) => {
-            pending.set(request.includes('%2Fa') ? 'a' : 'b', (body) =>
-              resolve(jsonResponse(body))
+            pending.set(request.includes('%2Fa') ? 'a' : 'b', (tags) =>
+              resolve(htmlResponse(page(tags)))
             );
           })
       )
     );
 
-    const { rerender } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
-    await rerender({ endpoint: ENDPOINT, url: 'https://example.com/b' });
+    const { rerender } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
+    await rerender({ proxy: PROXY, url: 'https://example.com/b' });
 
     pending.get('b')?.({ title: 'Second' });
     expect(await screen.findByText('Second')).toBeInTheDocument();
@@ -135,14 +143,14 @@ describe('OgpCard', () => {
 
   it('drops the previous preview when the card moves to another link', async () => {
     const fetchMock = vi.fn(async (request: string) =>
-      jsonResponse({ title: request.includes('%2Fa') ? 'First' : 'Second' })
+      htmlResponse(page({ title: request.includes('%2Fa') ? 'First' : 'Second' }))
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const { rerender } = render(OgpCard, { props: { endpoint: ENDPOINT, url: URL_A } });
+    const { rerender } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });
     expect(await screen.findByText('First')).toBeInTheDocument();
 
-    await rerender({ endpoint: ENDPOINT, url: 'https://example.com/b' });
+    await rerender({ proxy: PROXY, url: 'https://example.com/b' });
 
     expect(await screen.findByText('Second')).toBeInTheDocument();
     expect(screen.queryByText('First')).not.toBeInTheDocument();

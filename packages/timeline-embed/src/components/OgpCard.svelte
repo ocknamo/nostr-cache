@@ -4,13 +4,13 @@
   import { whenVisible } from '../lib/when-visible.ts';
 
   interface Props {
-    /** Where to ask for the metadata; see `lib/ogp.ts`. */
-    endpoint: string;
+    /** CORS proxy the page is fetched through; see `lib/ogp.ts`. */
+    proxy: string;
     /** The link to preview. */
     url: string;
   }
 
-  const { endpoint, url }: Props = $props();
+  const { proxy, url }: Props = $props();
 
   /**
    * Re-validated here rather than trusted from the caller: this component is
@@ -34,7 +34,7 @@
     if (target === undefined) {
       return;
     }
-    requestOgp(endpoint, target).then((result) => {
+    requestOgp(proxy, target).then((result) => {
       // A slow answer for the post this card used to show must not land on the
       // one it shows now — it would blank a card that had already resolved.
       if (target !== href) {
@@ -47,8 +47,8 @@
 
 <!-- Keyed so the lookup runs again for a new link: `whenVisible` reports once
      per element, and would otherwise stay spent from the previous post. The
-     endpoint is in the key too, since it decides what the answer is. -->
-{#key `${endpoint}\n${href}`}
+     proxy is in the key too, since it decides what the answer is. -->
+{#key `${proxy}\n${href}`}
   <div use:whenVisible={load}>
     {#if data && href}
       <a class="ogp" part="ogp" {href} target="_blank" rel="noopener noreferrer nofollow">
@@ -127,8 +127,8 @@
     color: var(--nt-muted, #657786);
   }
 
-  /* Two lines each: the card is a hint about the link, and an endpoint is free
-     to return an entire article's worth of description. */
+  /* Two lines each: the card is a hint about the link, and a page is free to
+     carry an entire article's worth of description. */
   .title,
   .description {
     display: -webkit-box;
