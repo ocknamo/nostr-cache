@@ -90,6 +90,24 @@ describe('TimelineController', () => {
     return profileSubscriptions(controller)[0];
   }
 
+  interface LookupInternals {
+    subs?: Map<string, unknown>;
+    inFlight?: number;
+    queue: { requested: Set<string>; pending: unknown[] };
+  }
+
+  /**
+   * The lookup helpers behind the controller, reached through their private
+   * fields: what these tests assert — the in-flight budget and the
+   * de-duplication set — is deliberately not on any public surface.
+   */
+  function lookups(controller: TimelineController): {
+    profiles: LookupInternals;
+    embeds: LookupInternals;
+  } {
+    return controller as unknown as { profiles: LookupInternals; embeds: LookupInternals };
+  }
+
   /**
    * Lookups holding one of the controller's in-flight slots.
    *
@@ -98,7 +116,7 @@ describe('TimelineController', () => {
    * REQ itself a microtask later, through a queue that consults NIP-11 limits.
    */
   function inFlightProfiles(controller: TimelineController): number {
-    return (controller as unknown as { profileSubs: Map<string, unknown> }).profileSubs.size;
+    return lookups(controller).profiles.subs?.size ?? 0;
   }
 
   /**
@@ -779,7 +797,7 @@ describe('TimelineController', () => {
 
     /** Embed keys the controller has already started a lookup for. */
     function requestedEmbeds(controller: TimelineController): Set<string> {
-      return (controller as unknown as { requestedEmbeds: Set<string> }).requestedEmbeds;
+      return lookups(controller).embeds.queue.requested;
     }
 
     it('resolves a quote out of the cache and looks its author up', async () => {
@@ -802,9 +820,7 @@ describe('TimelineController', () => {
       // The nested card names its author, so the kind 0 has to be asked for too.
       // Read from the controller rather than the relay: a lookup with no grace
       // closes on EOSE, so the subscription is gone before this can see it.
-      const requestedProfiles = (controller as unknown as { requestedProfiles: Set<string> })
-        .requestedProfiles;
-      expect(requestedProfiles.has('alice')).toBe(true);
+      expect(lookups(controller).profiles.queue.requested.has('alice')).toBe(true);
     });
 
     it('reports a quote nothing answered for as missing', async () => {
@@ -843,10 +859,9 @@ describe('TimelineController', () => {
 
       // The relay caps a client at 20 subscriptions and the timeline's own REQ
       // plus four profile lookups already share that budget.
-      const inFlight = (controller as unknown as { embedsInFlight: number }).embedsInFlight;
-      const queued = (controller as unknown as { pendingEmbeds: unknown[] }).pendingEmbeds;
+      const { inFlight = 0, queue } = lookups(controller).embeds;
       expect(inFlight).toBeLessThanOrEqual(2);
-      expect(inFlight + queued.length).toBe(6);
+      expect(inFlight + queue.pending.length).toBe(6);
     });
 
     it('polls the relay for the quoted events verdicts too', async () => {
