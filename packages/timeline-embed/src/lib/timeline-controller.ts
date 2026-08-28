@@ -3,14 +3,14 @@
  * speaks NIP-01 to it over an emulated WebSocket, and publishes a snapshot of
  * the resulting state to a listener.
  *
- * Keeping this out of the Svelte component is what lets the custom element, the
- * iframe page and the demo site all render the exact same behaviour, and lets
- * the interesting parts be tested without a DOM.
+ * Living outside the Svelte component is what lets the custom element, the
+ * iframe page and the demo site render the same behaviour, and lets the
+ * interesting parts be tested without a DOM.
  *
- * The lookups the widget opens for itself — author profiles, quoted events,
- * reactions and threads — live in `timeline/`, each owning its subscriptions
- * and its slice of {@link TimelineState}. What is left here is the timeline's
- * own subscription and the lifecycle the four share.
+ * The lookups the widget opens for itself — profiles, quoted events, reactions
+ * and threads — live in `timeline/`, each owning its subscriptions and its
+ * slice of {@link TimelineState}. What is left here is the timeline's own
+ * subscription and the lifecycle the four share.
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
@@ -48,10 +48,9 @@ export interface FollowsState {
 /**
  * Everything a {@link FilterSource} is given to resolve its filters with.
  *
- * Deliberately narrow: the controller hands over a connection and a way to
- * report progress, and stays ignorant of what the source is fetching or how it
- * interprets it. Teaching the controller about NIP-02 instead would mean every
- * test of follow-list parsing had to boot a relay first.
+ * Deliberately narrow: the controller stays ignorant of what the source fetches
+ * or how it reads it. Teaching it NIP-02 instead would mean every test of
+ * follow-list parsing had to boot a relay first.
  */
 export interface FilterSourceContext {
   connection: RelayConnection;
@@ -67,12 +66,12 @@ export interface FilterSourceContext {
 }
 
 /**
- * Filters resolved at runtime, from data only a relay can supply.
+ * Filters resolved at runtime, from data only a relay can supply. Runs between
+ * connect and subscribe, the only point where a REQ can be issued to work out
+ * what the real REQ should be.
  *
- * Sits between connect and subscribe, which is the only point where a REQ can
- * be issued to work out what the real REQ should be. Returning an empty array
- * means "do not subscribe at all" — the caller has decided there is nothing
- * safe to ask for, and the controller must not invent a fallback filter.
+ * An empty array means "do not subscribe at all": the caller found nothing safe
+ * to ask for, and the controller must not invent a fallback filter.
  */
 export type FilterSource = (context: FilterSourceContext) => Promise<Filter[]>;
 
@@ -123,10 +122,8 @@ export class TimelineController {
   private readonly replies: ReplyWatcher;
   private readonly validation: ValidationTracker;
   /**
-   * Which post the post-scoped watches belong to, as a counter.
-   *
-   * Only {@link startPost} reads it, and only to find out whether the post it
-   * was booting for is still the one on screen — see there.
+   * Which post the post-scoped watches belong to. Only {@link startPost} reads
+   * it, to find out whether the post it was booting for is still on screen.
    */
   private postGeneration = 0;
   private readonly timer = new RequestTimer();
@@ -145,14 +142,11 @@ export class TimelineController {
   private currentSubId: string | null = null;
   private subSeq = 0;
   /**
-   * Cancels an in-flight {@link FilterSource}.
+   * Cancels an in-flight {@link FilterSource}, which blocks for up to its own
+   * watchdog (5s) and opens subscriptions nothing else here would close.
    *
-   * A source blocks for up to its own watchdog (5s) and `stop()` can land at
-   * any point in there. The subscriptions a source opens are its own, outside
-   * this class's bookkeeping, so nothing else would close them.
-   *
-   * Replaced rather than reused after a `suspend()`, so a controller that is
-   * resumed with {@link applyFilter} is not left permanently aborted.
+   * Replaced rather than reused after a `suspend()`, so a resumed controller is
+   * not left permanently aborted.
    */
   private filterSourceAbort = new AbortController();
   private stopped = false;
@@ -173,21 +167,18 @@ export class TimelineController {
       onStatusChange: (status) => {
         this.patch({ status });
         if (status === 'connected') {
-          // A reconnect gives the queues somewhere to drain to again. The
-          // timeline REQ needs no help — rx-nostr re-sends the subscriptions it
-          // was holding — but the lookups below are opened one at a time by
-          // this class, so the ones parked while the socket was down have to be
-          // started from here.
+          // rx-nostr re-sends the timeline REQ itself, but the lookups below
+          // are opened one at a time by this class, so the ones parked while
+          // the socket was down have to be started from here.
           this.patch({ error: undefined });
           this.profiles.pump();
           this.embeds.pump();
           this.reactions.pump();
           this.replies.pump();
         } else if (status === 'error' && this.connectedOnce) {
-          // Reconnection gave up. Say so, or the widget goes on showing a
-          // timeline that stopped updating some minutes ago with nothing to
-          // suggest anything is wrong. A failed *first* connection is not this
-          // case: start() reports that one with the reason it failed for.
+          // Reconnection gave up; without this the widget goes on showing a
+          // timeline that stopped updating with nothing to say so. A failed
+          // *first* connection is start()'s to report, with its reason.
           this.patch({
             error: 'リレーとの接続が切れました。ページを再読み込みしてください',
           });
@@ -301,9 +292,9 @@ export class TimelineController {
           this.validation.watch(eventId, this.filterSourceAbort.signal, onDropped),
       });
     } catch (error) {
-      // `follows` goes with it: a source that threw is not going to report
-      // again, so leaving it on `resolving` would stack "取得しています…" and
-      // "読み込み中…" underneath an error banner that has already said it failed.
+      // `follows` goes with it: a source that threw will not report again, so
+      // `resolving` would stack "取得しています…" and "読み込み中…" under an
+      // error banner that has already said it failed.
       this.patch({
         error: `購読フィルタの解決に失敗しました: ${message(error)}`,
         follows: this.state.follows && { status: 'missing', count: 0, truncated: 0 },
@@ -323,34 +314,27 @@ export class TimelineController {
   }
 
   /**
-   * Boot for a single post: open its own REQ first, then the watches around it.
+   * Boot for a single post: its own REQ first, then the watches around it.
    *
    * The order is why this exists rather than a `start()` with a
-   * {@link watchPost} beside it. The post itself is one primary-key lookup; the
-   * two watches read every row carrying the post's id in an `e` tag, so what
-   * they cost grows with how much the post was answered. The relay reads for
-   * both on the page's own thread, so the REQ that arrives first is served
-   * first — and the one the reader is waiting to see is the post.
-   *
-   * The filter shape of the watches matters more than their place in the queue
-   * — see `storage.md` §4.1.1.
+   * {@link watchPost} beside it. The post is one primary-key lookup; the two
+   * watches read every row carrying its id in an `e` tag. The relay serves both
+   * on the page's own thread, first REQ first — and the reader is waiting on
+   * the post. (Their filter shape matters more still; see `storage.md` §4.1.1.)
    */
   async startPost(target: PostTarget, wants: PostWatches = {}): Promise<void> {
     this.postGeneration += 1;
     const generation = this.postGeneration;
     await this.start([target.filter]);
-    // The boot takes as long as the relay does, and the element can be pointed
-    // somewhere else in that window — a page setting `event-id` from script, or
-    // turning `show-replies` off. A later {@link showPost} has already closed
-    // the watches by then, and opening these would leave the *previous* post's
-    // kind 7 and kind 1 subscriptions running with nothing to close them.
+    // The element can be pointed elsewhere while the relay boots. A later
+    // {@link showPost} has closed its watches by then, so opening these would
+    // leave the previous post's subscriptions running with nothing to end them.
     if (generation !== this.postGeneration) {
       return;
     }
-    // Nothing was asked of the relay (it failed to boot, or the socket is
-    // down), so there is no post for these to be about — and the watches
-    // remember what they have been asked for, so queueing them here would make
-    // the omission permanent.
+    // Nothing was asked of the relay, so there is no post for these to be
+    // about — and the watches spend a key on whatever they are asked for, so
+    // queueing here would make the omission permanent.
     if (!this.currentSubId) {
       return;
     }
@@ -375,12 +359,10 @@ export class TimelineController {
       this.currentSubId = null;
     }
     this.suspended = true;
-    // A filter source that is still resolving holds a subscription of its own,
-    // which would go on reading through to upstream and refilling the cache the
-    // caller is about to measure cold. Aborting also ends its validation watch,
-    // and drops the resolution state with it — leaving `resolving` on screen
-    // would strand the widget on "フォローリストを取得しています…" for good,
-    // because the source it was waiting for is never going to report again.
+    // A resolving filter source holds a subscription of its own, which would
+    // refill the cache the caller is about to measure cold. The resolution
+    // state goes with it: `resolving` would strand the widget on
+    // "フォローリストを取得しています…", the source never reporting again.
     this.filterSourceAbort.abort();
     this.patch({ follows: undefined });
     this.closeLookups();
@@ -407,10 +389,7 @@ export class TimelineController {
     await host?.release();
   }
 
-  /**
-   * A live lookup of any kind keeps reading through to upstream and refilling
-   * the very cache a `suspend()` is about to measure cold.
-   */
+  /** A live lookup would refill the cache a `suspend()` measures cold. */
   private closeLookups(): void {
     this.profiles.close();
     this.embeds.close();
@@ -432,11 +411,10 @@ export class TimelineController {
     }
     this.profiles.reset();
     this.embeds.reset();
-    // Reactions and replies deliberately survive a re-subscribe. Unlike
-    // profiles and quoted events they are not derived from what is on screen —
-    // the caller named the post — so a new filter says nothing about whether
-    // they are still wanted. {@link showPost} is the caller that does know.
-    // Timings are per subscription id and never revisited once replaced.
+    // Reactions and replies survive a re-subscribe: unlike profiles and quotes
+    // they are not derived from what is on screen — the caller named the post —
+    // so a new filter says nothing about whether they are still wanted.
+    // {@link showPost} is the caller that does know.
     this.timer.clear();
     this.patch({
       events: [],
@@ -508,12 +486,11 @@ export class TimelineController {
   /**
    * Point the widget at a different post, keeping the relay and the connection.
    *
-   * Not {@link applyFilter}: the reactions and the thread belong to the post
-   * rather than to the timeline, so leaving them open would leak up to
-   * `MAX_REPLY_DEPTH + 1` subscriptions per hop — a few steps up a thread and
-   * the reader is over the relay's per-client cap. Their collected events go
-   * with them, because the alternative is a map that grows with every post
-   * visited and the cache answers the way back from IndexedDB anyway.
+   * Not {@link applyFilter}: the reactions and the thread belong to the post,
+   * so leaving them open would leak up to `MAX_REPLY_DEPTH + 1` subscriptions
+   * per hop and put the reader over the relay's per-client cap. Their events go
+   * too — the alternative grows with every post visited, and the cache answers
+   * the way back from IndexedDB anyway.
    */
   showPost(target: PostTarget, wants: PostWatches = {}): void {
     // Supersedes a {@link startPost} still waiting on the relay, whose watches
@@ -547,10 +524,9 @@ export class TimelineController {
   /**
    * Publish what a {@link FilterSource} reported about its resolution.
    *
-   * `dropped` is acted on rather than merely displayed: the subscription is
-   * asking for a population the cache can no longer vouch for, and since the
-   * follow list is fetched once and never re-read, leaving it running would
-   * keep that timeline on screen — and refilling with it — until unmount.
+   * `dropped` is acted on rather than displayed: the subscription asks for a
+   * population the cache can no longer vouch for, and the follow list is
+   * fetched once and never re-read, so it would run until unmount.
    */
   private applyFollows(follows: FollowsState): void {
     if (follows.status !== 'dropped') {
@@ -571,9 +547,9 @@ export class TimelineController {
   }
 
   /**
-   * Every id the widget has rendered a card for. Quoted events and replies
-   * count: they are faded until the relay vouches for them, so a timeline that
-   * is still empty but has already resolved a quote has something to ask about.
+   * Every id the widget has rendered a card for. Quotes and replies count —
+   * they are faded until the relay vouches for them, so a timeline that is
+   * still empty but has resolved a quote has something to ask about.
    */
   private renderedEventIds(): Set<string> {
     const ids = new Set(this.state.events.map((event) => event.id));
@@ -591,12 +567,9 @@ export class TimelineController {
   }
 
   /**
-   * Whether the socket is down but on its way back.
-   *
-   * A REQ issued now is not lost — rx-nostr holds it and sends it once the
-   * connection returns — so a filter change mid-reconnect should go through
-   * quietly rather than being refused with an error the reader would be stuck
-   * on after the connection recovered.
+   * Whether the socket is down but on its way back. rx-nostr holds a REQ issued
+   * now and sends it on reconnect, so a filter change here must go through
+   * rather than leave an error the reader is stuck on afterwards.
    */
   private isRecovering(): boolean {
     return this.state.status === 'connecting' || this.state.status === 'reconnecting';

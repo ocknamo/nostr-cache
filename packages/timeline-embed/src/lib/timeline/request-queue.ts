@@ -1,16 +1,14 @@
 /**
- * De-duplicated work queue shared by the lookups the timeline opens for itself.
- *
- * They all have the same shape: a key that must not be asked for twice, a queue
- * that only drains while the socket is up, and a budget of concurrent requests
- * small enough for the relay's per-client `maxSubscriptions` to hold.
+ * De-duplicated work queue shared by the lookups the timeline opens for itself:
+ * one key is asked about once, the queue drains only while the socket is up,
+ * and concurrency stays inside the relay's per-client `maxSubscriptions`.
  */
 
 export interface RequestQueueOptions<T> {
   key(item: T): string;
   /** False while the socket is down, or the caller is stopped or suspended. */
   canStart(): boolean;
-  /** False once the concurrency budget is spent; constant `true` is unbounded. */
+  /** Constant `true` for an unbounded queue. */
   hasCapacity(): boolean;
   start(item: T): void;
 }
@@ -22,9 +20,8 @@ export class RequestQueue<T> {
   constructor(private readonly options: RequestQueueOptions<T>) {}
 
   /**
-   * @returns Whether the item was new. A repeat is ignored, which is request
-   *   de-duplication — the same card scrolls in and out — and not a second
-   *   cache in front of the relay's.
+   * @returns Whether the item was new. Ignoring a repeat is de-duplication —
+   *   the same card scrolls in and out — not a cache in front of the relay's.
    */
   request(item: T): boolean {
     const key = this.options.key(item);
@@ -37,7 +34,6 @@ export class RequestQueue<T> {
     return true;
   }
 
-  /** Start as many queued items as the budget allows. */
   pump(): void {
     if (!this.options.canStart()) {
       return;
@@ -50,7 +46,6 @@ export class RequestQueue<T> {
     }
   }
 
-  /** Let one key be asked for again. */
   release(key: string): void {
     this.requested.delete(key);
   }

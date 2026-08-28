@@ -96,12 +96,10 @@ describe('TimelineController', () => {
   }
 
   /**
-   * The lookup helpers behind the controller, reached through their private
-   * fields: what these tests assert — the in-flight budget and the
-   * de-duplication set — is deliberately not on any public surface.
-   *
-   * Every field is required rather than optional, so a rename breaks these
-   * tests loudly instead of reading as "nothing in flight".
+   * The lookup helpers, reached through their private fields: the in-flight
+   * budget and the de-duplication set are deliberately not on any public
+   * surface. No field is optional, so a rename fails loudly rather than reading
+   * as "nothing in flight".
    */
   function lookups(controller: TimelineController): {
     profiles: { subs: Map<string, unknown>; queue: QueueInternals };
@@ -1528,21 +1526,18 @@ describe('TimelineController', () => {
   });
 
   /**
-   * The snapshot stream is the controller's whole public output, and a widget
-   * re-renders once per emit. Splitting the lookups out moved four slices of
-   * state into classes of their own, so what is pinned here is that each path
-   * still publishes the same number of snapshots, in the same order, touching
-   * the same keys.
+   * The snapshot stream is the controller's whole output and a widget re-renders
+   * once per emit, so each path is pinned to the number of snapshots it
+   * publishes, in order, and the keys each one touches.
    */
   describe('published snapshots', () => {
     const POST_ID = 'cc00000000000000000000000000000000000000000000000000000000000001';
     const OTHER_ID = 'cc00000000000000000000000000000000000000000000000000000000000002';
 
     /**
-     * The keys whose value changed on each snapshot published since `from`.
-     *
-     * Identity rather than deep equality, which is the contract the views rely
-     * on: every slice is replaced wholesale so a `$derived` re-runs.
+     * The keys whose value changed on each snapshot published since `from`, by
+     * identity — the contract views rely on, every slice being replaced
+     * wholesale so a `$derived` re-runs.
      */
     function changesSince(states: TimelineState[], from: number): (keyof TimelineState)[][] {
       return states.slice(from).map((state, index) => {
@@ -1560,9 +1555,9 @@ describe('TimelineController', () => {
 
       controller.suspend();
 
-      // Closing four sets of lookups must not emit four times. (The one
-      // snapshot changes nothing here: `follows` is only ever set by a filter
-      // source, and this timeline was started from plain filters.)
+      // Closing four sets of lookups must not emit four times. The one snapshot
+      // changes nothing: `follows` is only set by a filter source, and this
+      // timeline was started from plain filters.
       expect(changesSince(states, before)).toEqual([[]]);
       expect(states.at(-1)?.follows).toBeUndefined();
     });
@@ -1575,7 +1570,7 @@ describe('TimelineController', () => {
       controller.applyFilter([{ kinds: [1], limit: 5 }]);
 
       // `embeds` is dropped in the same snapshot the timeline is cleared in,
-      // rather than in one of its own from the loader.
+      // not in one of the loader's own.
       expect(changesSince(states, before)).toEqual([
         ['embeds', 'events', 'origins', 'validationStatuses'],
       ]);
@@ -1606,8 +1601,7 @@ describe('TimelineController', () => {
 
       await controller.stop();
 
-      // The socket closing is the one thing a stop has to say; the lookups it
-      // tears down publish nothing of their own.
+      // The lookups a stop tears down publish nothing of their own.
       expect(changesSince(states, before)).toEqual([['status']]);
       expect(states.at(-1)?.status).toBe('disconnected');
     });

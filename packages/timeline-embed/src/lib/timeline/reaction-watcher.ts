@@ -9,11 +9,7 @@ import { insertEvent } from '../timeline-utils.ts';
 import type { LookupContext } from './lookup-context.ts';
 import { RequestQueue } from './request-queue.ts';
 
-/**
- * Backfill size for one REQ. Well under {@link MAX_REACTIONS}, which is where
- * the ones already received stop accumulating; a live subscription goes on
- * delivering past it.
- */
+/** Backfill size for one REQ; the open subscription delivers past it. */
 const DEFAULT_LIMIT = 200;
 
 interface ReactionRequest {
@@ -28,16 +24,11 @@ export interface ReactionWatcherOptions {
 
 export class ReactionWatcher {
   /**
-   * Reactions collected so far, keyed by {@link PostTarget.key} and newest
-   * first. Raw events rather than a summary, so a view re-deriving through
-   * `reactions.ts` stays correct as more arrive.
+   * Keyed by {@link PostTarget.key}, newest first. Raw events rather than a
+   * summary, so a view re-deriving through `reactions.ts` stays correct.
    */
   private reactions = new Map<string, NostrEvent[]>();
-  /**
-   * Open subscriptions, by {@link PostTarget.key}. One REQ per post, which fits
-   * the relay's per-client cap of 20 alongside the timeline REQ, four profile
-   * lookups and two embed lookups.
-   */
+  /** Open subscriptions, by {@link PostTarget.key}: one REQ per post. */
   private readonly subs = new Map<string, string>();
   private seq = 0;
   private readonly queue: RequestQueue<ReactionRequest>;
@@ -45,9 +36,8 @@ export class ReactionWatcher {
   constructor(private readonly options: ReactionWatcherOptions) {
     this.queue = new RequestQueue({
       key: (request) => request.target.key,
-      // Nothing is opened while the socket is down. rx-nostr would buffer the
-      // REQ, but going through the queue keeps one rule for every lookup the
-      // widget opens itself.
+      // rx-nostr would buffer a REQ issued while the socket is down, but going
+      // through the queue keeps one rule for every lookup the widget opens.
       canStart: () => this.options.ctx.isActive() && this.options.ctx.connection.isConnected,
       hasCapacity: () => true,
       start: (request) => this.open(request),
@@ -59,16 +49,11 @@ export class ReactionWatcher {
   }
 
   /**
-   * Watch one post's reactions.
+   * Watch one post's reactions. For `<nostr-post>`, never a timeline — that
+   * would be one REQ per card. The subscription stays open, so a reaction that
+   * lands while the reader is on the page needs no reload.
    *
-   * For `<nostr-post>`, never a timeline — that would be one REQ per card. Not
-   * viewport-triggered like a profile or embed lookup: the post it names is the
-   * whole reason the widget exists.
-   *
-   * The subscription stays open, so a reaction that lands while the reader is
-   * on the page appears without a reload.
-   *
-   * @param limit How many reactions to backfill; more may arrive live.
+   * @param limit How many to backfill; more may arrive live.
    */
   request(target: PostTarget, limit: number = DEFAULT_LIMIT): void {
     if (!this.options.ctx.isActive()) {
@@ -77,16 +62,14 @@ export class ReactionWatcher {
     this.queue.request({ target, limit });
   }
 
-  /** Open whatever is queued; call after a reconnect. */
   pump(): void {
     this.queue.pump();
   }
 
   /**
-   * The subscriptions go and every key is released, so a resumed controller can
-   * be asked again — by the original caller, since nothing here re-issues it.
-   * What arrived stays: blanking the chips would look like the reactions went
-   * away.
+   * Keys are released so the original caller can ask again; nothing here
+   * re-issues. What arrived stays — blanking the chips would look like the
+   * reactions went away.
    */
   close(): void {
     this.queue.reset();
@@ -97,10 +80,8 @@ export class ReactionWatcher {
   }
 
   /**
-   * Drop the collected reactions, for a widget pointed at a different post.
-   *
-   * Nothing is published here: the caller patches {@link reactionMap} into the
-   * snapshot it is already building.
+   * For a widget pointed at a different post. Publishes nothing: the caller
+   * patches {@link reactionMap} into the snapshot it is already building.
    */
   clearEvents(): void {
     this.reactions = new Map();
@@ -121,28 +102,26 @@ export class ReactionWatcher {
     this.options.ctx.connection.subscribe(subId, [filter], {
       onEvent: (event) => this.ingest(target, event),
       onEose: () => {
-        // Nothing to do — the subscription stays open on purpose. Handled
-        // explicitly so nobody goes looking for the close that is not here.
+        // The subscription stays open on purpose; handled so nobody goes
+        // looking for the close that is not here.
       },
       onClosed: (reason) => {
-        // Not the widget's `error`: the post is still on screen and still
-        // correct, and a banner over it would say the post failed when only its
-        // reaction count stopped updating.
+        // Not the widget's `error`: a banner would say the post failed when
+        // only its reaction count stopped updating.
         console.warn(`[nostr-post] reaction subscription closed${reason ? `: ${reason}` : ''}`);
         this.subs.delete(target.key);
-        // Released so a caller can ask again; without this the de-duplication
-        // would make the closure permanent. Not re-queued here — a relay that
-        // refused this REQ would refuse the replacement, and the queue is
-        // pumped synchronously, so that would spin.
+        // Released so a caller can ask again, but not re-queued: a relay that
+        // refused this REQ would refuse the replacement, and the queue pumps
+        // synchronously, so that would spin.
         this.queue.release(target.key);
       },
     });
   }
 
   /**
-   * Filtered here rather than in the view because the cap is here: a relay
-   * matches `#e` against any `e` tag, so under a busy thread the reactions to
-   * *replies* would fill {@link MAX_REACTIONS} and push out this post's own.
+   * Filtered here because the cap is here: a relay matches `#e` against any `e`
+   * tag, so reactions to *replies* would fill {@link MAX_REACTIONS} and push
+   * out this post's own.
    */
   private ingest(target: PostTarget, event: NostrEvent): void {
     if (!parseReaction(event, target.match)) {

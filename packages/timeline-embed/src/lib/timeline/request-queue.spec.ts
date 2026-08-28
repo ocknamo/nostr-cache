@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RequestQueue } from './request-queue.ts';
 
-/**
- * The rules every lookup in `timeline/` inherits: a key is asked about once, a
- * queue that only drains while the socket is up, and a budget the relay's
- * per-client subscription cap has to hold.
- */
+/** The rules every lookup in `timeline/` inherits. */
 describe('RequestQueue', () => {
   function createQueue(canStart: () => boolean = () => true): {
     queue: RequestQueue<string>;
@@ -51,7 +47,7 @@ describe('RequestQueue', () => {
   });
 
   it('starts only as many as the budget allows, and the rest when it frees up', () => {
-    // Every start takes a slot, as an in-flight subscription does.
+    // A start takes a slot, as an in-flight subscription does.
     let inFlight = 0;
     const started: string[] = [];
     const queue = new RequestQueue<string>({
@@ -95,7 +91,7 @@ describe('RequestQueue', () => {
     queue.pump();
 
     expect(started).toEqual([]);
-    // The key was asked about once; clear() is not an invitation to retry.
+    // clear() is not an invitation to retry.
     expect(queue.request('alice')).toBe(false);
   });
 
