@@ -90,22 +90,24 @@ describe('TimelineController', () => {
     return profileSubscriptions(controller)[0];
   }
 
-  interface LookupInternals {
-    subs?: Map<string, unknown>;
-    inFlight?: number;
-    queue: { requested: Set<string>; pending: unknown[] };
+  interface QueueInternals {
+    requested: Set<string>;
+    pending: unknown[];
   }
 
   /**
    * The lookup helpers behind the controller, reached through their private
    * fields: what these tests assert — the in-flight budget and the
    * de-duplication set — is deliberately not on any public surface.
+   *
+   * Every field is required rather than optional, so a rename breaks these
+   * tests loudly instead of reading as "nothing in flight".
    */
   function lookups(controller: TimelineController): {
-    profiles: LookupInternals;
-    embeds: LookupInternals;
+    profiles: { subs: Map<string, unknown>; queue: QueueInternals };
+    embeds: { inFlight: number; queue: QueueInternals };
   } {
-    return controller as unknown as { profiles: LookupInternals; embeds: LookupInternals };
+    return controller as unknown as ReturnType<typeof lookups>;
   }
 
   /**
@@ -116,7 +118,7 @@ describe('TimelineController', () => {
    * REQ itself a microtask later, through a queue that consults NIP-11 limits.
    */
   function inFlightProfiles(controller: TimelineController): number {
-    return lookups(controller).profiles.subs?.size ?? 0;
+    return lookups(controller).profiles.subs.size;
   }
 
   /**
@@ -859,7 +861,7 @@ describe('TimelineController', () => {
 
       // The relay caps a client at 20 subscriptions and the timeline's own REQ
       // plus four profile lookups already share that budget.
-      const { inFlight = 0, queue } = lookups(controller).embeds;
+      const { inFlight, queue } = lookups(controller).embeds;
       expect(inFlight).toBeLessThanOrEqual(2);
       expect(inFlight + queue.pending.length).toBe(6);
     });
@@ -1522,6 +1524,92 @@ describe('TimelineController', () => {
         .flatMap((sub) => sub.filters);
       expect(filters).toHaveLength(2);
       expect(JSON.stringify(filters)).not.toContain(POST_ID);
+    });
+  });
+
+  /**
+   * The snapshot stream is the controller's whole public output, and a widget
+   * re-renders once per emit. Splitting the lookups out moved four slices of
+   * state into classes of their own, so what is pinned here is that each path
+   * still publishes the same number of snapshots, in the same order, touching
+   * the same keys.
+   */
+  describe('published snapshots', () => {
+    const POST_ID = 'cc00000000000000000000000000000000000000000000000000000000000001';
+    const OTHER_ID = 'cc00000000000000000000000000000000000000000000000000000000000002';
+
+    /**
+     * The keys whose value changed on each snapshot published since `from`.
+     *
+     * Identity rather than deep equality, which is the contract the views rely
+     * on: every slice is replaced wholesale so a `$derived` re-runs.
+     */
+    function changesSince(states: TimelineState[], from: number): (keyof TimelineState)[][] {
+      return states.slice(from).map((state, index) => {
+        const previous = states[from + index - 1];
+        return (Object.keys(state) as (keyof TimelineState)[])
+          .filter((key) => state[key] !== previous?.[key])
+          .sort();
+      });
+    }
+
+    it('publishes one snapshot for a suspend, however many lookups it closes', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      const before = states.length;
+
+      controller.suspend();
+
+      // Closing four sets of lookups must not emit four times. (The one
+      // snapshot changes nothing here: `follows` is only ever set by a filter
+      // source, and this timeline was started from plain filters.)
+      expect(changesSince(states, before)).toEqual([[]]);
+      expect(states.at(-1)?.follows).toBeUndefined();
+    });
+
+    it('publishes one snapshot for a filter change, clearing the timeline in it', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      const before = states.length;
+
+      controller.applyFilter([{ kinds: [1], limit: 5 }]);
+
+      // `embeds` is dropped in the same snapshot the timeline is cleared in,
+      // rather than in one of its own from the loader.
+      expect(changesSince(states, before)).toEqual([
+        ['embeds', 'events', 'origins', 'validationStatuses'],
+      ]);
+    });
+
+    it('publishes two snapshots for a showPost: the new filter, then the post-scoped state', async () => {
+      const post = parsePostTarget({ eventId: POST_ID });
+      const other = parsePostTarget({ eventId: OTHER_ID });
+      if (!post || !other) {
+        throw new Error('fixture targets should parse');
+      }
+      const { controller, states } = createController();
+      await controller.startPost(post, { reactions: {}, replies: {} });
+      const before = states.length;
+
+      controller.showPost(other, { reactions: {}, replies: {} });
+
+      expect(changesSince(states, before)).toEqual([
+        ['embeds', 'events', 'origins', 'validationStatuses'],
+        ['reactions', 'replies'],
+      ]);
+    });
+
+    it('publishes only the dropped connection for a stop', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      const before = states.length;
+
+      await controller.stop();
+
+      // The socket closing is the one thing a stop has to say; the lookups it
+      // tears down publish nothing of their own.
+      expect(changesSince(states, before)).toEqual([['status']]);
+      expect(states.at(-1)?.status).toBe('disconnected');
     });
   });
 });

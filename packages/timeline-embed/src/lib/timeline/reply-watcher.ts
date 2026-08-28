@@ -136,7 +136,12 @@ export class ReplyWatcher {
     }
   }
 
-  /** Drop the collected replies, for a widget pointed at a different post. */
+  /**
+   * Drop the collected replies, for a widget pointed at a different post.
+   *
+   * Nothing is published here: the caller patches {@link replyMap} into the
+   * snapshot it is already building.
+   */
   clearEvents(): void {
     this.replies = new Map();
   }

@@ -108,7 +108,7 @@ export interface TimelineControllerOptions {
   maxEvents?: number;
   /** How long a profile lookup stays open after EOSE; see `profile-loader.ts`. */
   profileEoseGraceMs?: number;
-  /** Seconds between validation re-checks, as milliseconds. */
+  /** How often a follow list's validation watch re-checks, as milliseconds. */
   validationPollIntervalMs?: number;
   /** Called with a fresh snapshot whenever anything changes. */
   onChange: (state: TimelineState) => void;
@@ -332,9 +332,8 @@ export class TimelineController {
    * both on the page's own thread, so the REQ that arrives first is served
    * first — and the one the reader is waiting to see is the post.
    *
-   * The measured effect is modest on its own; what made this page slow was the
-   * filter shape of the watches rather than their place in the queue (see
-   * `storage.md` §4.1.1).
+   * The filter shape of the watches matters more than their place in the queue
+   * — see `storage.md` §4.1.1.
    */
   async startPost(target: PostTarget, wants: PostWatches = {}): Promise<void> {
     this.postGeneration += 1;

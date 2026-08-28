@@ -37,9 +37,10 @@ export interface ValidationTrackerOptions {
   /**
    * Seconds between re-checks, as milliseconds.
    *
-   * Paired with the relay's own `lazyValidateInterval`: a caller that speeds
-   * verification up wants the widget to notice at the same rate. Specs use it to
-   * avoid spending {@link WATCH_MAX_MISSES} real poll intervals.
+   * Applies to {@link watch} only; see {@link refresh}. Paired with the relay's
+   * own `lazyValidateInterval`: a caller that speeds verification up wants the
+   * watch to notice at the same rate. Specs use it to avoid spending
+   * {@link WATCH_MAX_MISSES} real poll intervals.
    */
   pollIntervalMs?: number;
   onChange(statuses: Map<string, ValidationStatus>): void;
@@ -172,6 +173,9 @@ export class ValidationTracker {
     clearTimeout(this.pollTimer);
     this.pollTimer = undefined;
     if (hasPending(statuses)) {
+      // The constant rather than {@link pollInterval}: the option exists to
+      // speed a `watch` up, and a caller that shortened it does not thereby ask
+      // the whole timeline to be re-read that often.
       this.pollTimer = setTimeout(() => {
         this.pollTimer = undefined;
         void this.refresh();

@@ -21,10 +21,9 @@ const MAX_CONCURRENT_REQUESTS = 4;
  *
  * Zero: the relay orders EOSE after the events it has accepted
  * (`UpstreamCoordinator.flushEose` waits for its ingest chain), so there is
- * nothing left in flight to wait for. This was 500ms while that was untrue, and
- * every visible author's card paid it on a cold cache.
+ * nothing left in flight to wait for.
  */
-export const PROFILE_EOSE_GRACE_MS = 0;
+const EOSE_GRACE_MS = 0;
 
 /**
  * Hard deadline on a single lookup.
@@ -45,7 +44,7 @@ export interface ProfileLoaderOptions {
   /**
    * How long a lookup stays open after EOSE, in milliseconds.
    *
-   * Zero by default — see {@link PROFILE_EOSE_GRACE_MS}. Raise it when talking
+   * Zero by default — see {@link EOSE_GRACE_MS}. Raise it when talking
    * to a relay that releases EOSE before the events it has accepted; specs also
    * use it to give themselves a subscription they can observe.
    */
@@ -77,10 +76,6 @@ export class ProfileLoader {
     });
   }
 
-  profileMap(): Map<string, Profile> {
-    return this.profiles;
-  }
-
   /**
    * Fetch one author's profile. Called by the view when their card scrolls into
    * the viewport, so a timeline of 500 events only looks up the handful of
@@ -98,8 +93,7 @@ export class ProfileLoader {
     // `isActive` matters because the trigger lives in the DOM now: the cards
     // stay on screen while the demo benchmarks a cold cache, and one scrolling
     // into view would read through to upstream and refill the very cache being
-    // measured. Nothing else stops it — unlike the old design, where lookups
-    // could only be triggered by timeline events that suspending had cut off.
+    // measured.
     if (!this.options.ctx.isActive()) {
       return;
     }
@@ -117,6 +111,10 @@ export class ProfileLoader {
    * Called from every path that stops the timeline. It matters most for
    * suspending: a live profile subscription keeps reading through to upstream
    * and refilling the very cache the caller is about to measure cold.
+   *
+   * The authors already asked for are kept, unlike every other lookup here: a
+   * resumed widget renders the same cards, and asking again would re-fetch a
+   * kind 0 that nothing has invalidated. {@link reset} is what releases them.
    */
   close(): void {
     this.queue.clear();
@@ -184,10 +182,7 @@ export class ProfileLoader {
     if (!sub || sub.timer) {
       return;
     }
-    sub.timer = setTimeout(
-      () => this.finish(subId),
-      this.options.eoseGraceMs ?? PROFILE_EOSE_GRACE_MS
-    );
+    sub.timer = setTimeout(() => this.finish(subId), this.options.eoseGraceMs ?? EOSE_GRACE_MS);
   }
 
   /** Close a finished lookup and let the next queued one start. */

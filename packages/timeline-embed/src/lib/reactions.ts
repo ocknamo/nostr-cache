@@ -2,7 +2,7 @@
  * Reads kind 7 reactions (NIP-25) into the chips a post detail shows.
  *
  * Pure, so every rule below can be tested without booting a relay; the
- * subscription that feeds it lives in `timeline-controller.ts`. Same split as
+ * subscription that feeds it lives in `timeline/reaction-watcher.ts`. Same split as
  * NIP-02 (`follow-list.ts`) and NIP-27 (`note-embeds.ts`).
  *
  * `content` is an arbitrary string from an arbitrary stranger and may not have

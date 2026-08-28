@@ -96,7 +96,12 @@ export class ReactionWatcher {
     }
   }
 
-  /** Drop the collected reactions, for a widget pointed at a different post. */
+  /**
+   * Drop the collected reactions, for a widget pointed at a different post.
+   *
+   * Nothing is published here: the caller patches {@link reactionMap} into the
+   * snapshot it is already building.
+   */
   clearEvents(): void {
     this.reactions = new Map();
   }

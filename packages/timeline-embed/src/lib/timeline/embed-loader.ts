@@ -80,14 +80,20 @@ export class EmbedLoader {
   /**
    * Cancel the in-flight lookups and let every key be asked for again: the
    * cards that asked are being torn down, and a resumed widget must be able to
-   * ask again.
+   * ask again. A profile lookup keeps its keys instead — the author of a card
+   * outlives the body that quoted something.
    */
   close(): void {
     this.queue.reset();
     this.abort.abort();
   }
 
-  /** Close, then re-arm for a widget that is being pointed somewhere new. */
+  /**
+   * Close, then re-arm for a widget that is being pointed somewhere new.
+   *
+   * Nothing is published here: the caller patches {@link embedMap} into the
+   * same snapshot it clears the timeline with.
+   */
   reset(): void {
     this.close();
     this.abort = new AbortController();
@@ -121,7 +127,7 @@ export class EmbedLoader {
     } finally {
       this.inFlight -= 1;
     }
-    if (signal.aborted) {
+    if (signal.aborted || !this.options.ctx.isActive()) {
       return;
     }
     if (!event) {
