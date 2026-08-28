@@ -1,6 +1,4 @@
-/**
- * Live subscription to one post's reactions (NIP-25 kind 7).
- */
+/** Live subscription to one post's reactions (NIP-25 kind 7). */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { PostTarget } from '../post-target.ts';
@@ -23,12 +21,9 @@ export interface ReactionWatcherOptions {
 }
 
 export class ReactionWatcher {
-  /**
-   * Keyed by {@link PostTarget.key}, newest first. Raw events rather than a
-   * summary, so a view re-deriving through `reactions.ts` stays correct.
-   */
+  /** Raw events, so a view re-deriving through `reactions.ts` stays correct. */
   private reactions = new Map<string, NostrEvent[]>();
-  /** Open subscriptions, by {@link PostTarget.key}: one REQ per post. */
+  /** One REQ per post, by {@link PostTarget.key}. */
   private readonly subs = new Map<string, string>();
   private seq = 0;
   private readonly queue: RequestQueue<ReactionRequest>;
@@ -36,8 +31,7 @@ export class ReactionWatcher {
   constructor(private readonly options: ReactionWatcherOptions) {
     this.queue = new RequestQueue({
       key: (request) => request.target.key,
-      // rx-nostr would buffer a REQ issued while the socket is down, but going
-      // through the queue keeps one rule for every lookup the widget opens.
+      // rx-nostr would buffer it, but the queue keeps one rule for every lookup.
       canStart: () => this.options.ctx.isActive() && this.options.ctx.connection.isConnected,
       hasCapacity: () => true,
       start: (request) => this.open(request),
@@ -49,9 +43,8 @@ export class ReactionWatcher {
   }
 
   /**
-   * Watch one post's reactions. For `<nostr-post>`, never a timeline — that
-   * would be one REQ per card. The subscription stays open, so a reaction that
-   * lands while the reader is on the page needs no reload.
+   * For `<nostr-post>`, never a timeline — that would be one REQ per card. The
+   * subscription stays open, so a reaction landing later needs no reload.
    *
    * @param limit How many to backfill; more may arrive live.
    */
@@ -67,9 +60,8 @@ export class ReactionWatcher {
   }
 
   /**
-   * Keys are released so the original caller can ask again; nothing here
-   * re-issues. What arrived stays — blanking the chips would look like the
-   * reactions went away.
+   * Keys are released so the caller can ask again; nothing here re-issues. What
+   * arrived stays — blanking the chips would look like a deletion.
    */
   close(): void {
     this.queue.reset();
@@ -79,10 +71,7 @@ export class ReactionWatcher {
     }
   }
 
-  /**
-   * For a widget pointed at a different post. Publishes nothing: the caller
-   * patches {@link reactionMap} into the snapshot it is already building.
-   */
+  /** Publishes nothing: the caller patches {@link reactionMap} into its own snapshot. */
   clearEvents(): void {
     this.reactions = new Map();
   }
@@ -102,26 +91,22 @@ export class ReactionWatcher {
     this.options.ctx.connection.subscribe(subId, [filter], {
       onEvent: (event) => this.ingest(target, event),
       onEose: () => {
-        // The subscription stays open on purpose; handled so nobody goes
-        // looking for the close that is not here.
+        // Stays open on purpose; handled so nobody hunts for the missing close.
       },
       onClosed: (reason) => {
-        // Not the widget's `error`: a banner would say the post failed when
-        // only its reaction count stopped updating.
+        // Not the widget's `error`: only the reaction count stopped updating.
         console.warn(`[nostr-post] reaction subscription closed${reason ? `: ${reason}` : ''}`);
         this.subs.delete(target.key);
-        // Released so a caller can ask again, but not re-queued: a relay that
-        // refused this REQ would refuse the replacement, and the queue pumps
-        // synchronously, so that would spin.
+        // Released but not re-queued: a relay that refused this REQ would
+        // refuse the replacement, and the queue pumps synchronously.
         this.queue.release(target.key);
       },
     });
   }
 
   /**
-   * Filtered here because the cap is here: a relay matches `#e` against any `e`
-   * tag, so reactions to *replies* would fill {@link MAX_REACTIONS} and push
-   * out this post's own.
+   * Filtered here because the cap is: a relay matches `#e` against any `e` tag,
+   * so reactions to *replies* would fill {@link MAX_REACTIONS}.
    */
   private ingest(target: PostTarget, event: NostrEvent): void {
     if (!parseReaction(event, target.match)) {

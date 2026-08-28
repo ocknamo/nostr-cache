@@ -1,12 +1,11 @@
 /**
- * De-duplicated work queue shared by the lookups the timeline opens for itself:
- * one key is asked about once, the queue drains only while the socket is up,
- * and concurrency stays inside the relay's per-client `maxSubscriptions`.
+ * De-duplicated work queue shared by the lookups in this directory: a key is
+ * asked about once, the queue drains only while the socket is up, and
+ * concurrency stays inside the relay's per-client `maxSubscriptions`.
  */
 
 export interface RequestQueueOptions<T> {
   key(item: T): string;
-  /** False while the socket is down, or the caller is stopped or suspended. */
   canStart(): boolean;
   /** Constant `true` for an unbounded queue. */
   hasCapacity(): boolean;
@@ -19,10 +18,7 @@ export class RequestQueue<T> {
 
   constructor(private readonly options: RequestQueueOptions<T>) {}
 
-  /**
-   * @returns Whether the item was new. Ignoring a repeat is de-duplication —
-   *   the same card scrolls in and out — not a cache in front of the relay's.
-   */
+  /** @returns Whether the item was new; a repeat is ignored. */
   request(item: T): boolean {
     const key = this.options.key(item);
     if (this.requested.has(key)) {

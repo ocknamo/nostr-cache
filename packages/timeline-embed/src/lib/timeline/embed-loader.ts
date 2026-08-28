@@ -1,6 +1,4 @@
-/**
- * Lookups for events quoted by a `nostr:` reference (NIP-27).
- */
+/** Lookups for events quoted by a `nostr:` reference (NIP-27). */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import type { EmbedTarget, EmbeddedEvent } from '../note-embeds.ts';
@@ -9,16 +7,15 @@ import type { LookupContext } from './lookup-context.ts';
 import { RequestQueue } from './request-queue.ts';
 
 /**
- * Kept low because a nested card that failed for want of a subscription slot is
- * indistinguishable from one whose event does not exist. The widget's ceiling
- * is thirteen of the relay's twenty: this, the timeline REQ, four profile
- * lookups, and on a post detail a reaction REQ plus one per thread level.
+ * Kept low: a nested card that failed for want of a slot looks exactly like one
+ * whose event does not exist. The widget's ceiling is thirteen of the relay's
+ * twenty, the timeline REQ and the other lookups included.
  */
 const MAX_CONCURRENT_REQUESTS = 2;
 
 export interface EmbedLoaderOptions {
   ctx: LookupContext;
-  /** A resolved quote names an author, and is a card awaiting a verdict. */
+  /** A resolved quote names an author and is a card awaiting a verdict. */
   onResolved(event: NostrEvent): void;
   onChange(embeds: Map<string, EmbeddedEvent>): void;
 }
@@ -34,7 +31,7 @@ export class EmbedLoader {
     this.queue = new RequestQueue({
       key: (target) => target.key,
       // `fetchOnce` runs its own deadline, so one issued into a dead socket
-      // would report the quote missing — permanently, the key being spent.
+      // reports the quote missing — permanently, the key being spent.
       canStart: () => this.options.ctx.isActive() && this.options.ctx.connection.isConnected,
       hasCapacity: () => this.inFlight < MAX_CONCURRENT_REQUESTS,
       start: (target) => void this.open(target),
@@ -45,10 +42,7 @@ export class EmbedLoader {
     return this.embeds;
   }
 
-  /**
-   * Fetch an event quoted by a `nostr:` reference, as its card scrolls into
-   * view. Nesting is bounded by the caller — see `note-embeds.ts`.
-   */
+  /** Nesting is bounded by the caller; see `note-embeds.ts`. */
   request(target: EmbedTarget): void {
     if (!this.options.ctx.isActive() || !this.queue.request(target)) {
       return;
@@ -61,19 +55,13 @@ export class EmbedLoader {
     this.queue.pump();
   }
 
-  /**
-   * Every key is released, unlike a profile lookup's: an author outlives the
-   * body that quoted something, a quote does not.
-   */
+  /** Keys are released, unlike a profile lookup's: a quote outlives nothing. */
   close(): void {
     this.queue.reset();
     this.abort.abort();
   }
 
-  /**
-   * Re-arm for a widget pointed somewhere new. Publishes nothing: the caller
-   * patches {@link embedMap} into the snapshot it clears the timeline with.
-   */
+  /** Publishes nothing: the caller patches {@link embedMap} into its own snapshot. */
   reset(): void {
     this.close();
     this.abort = new AbortController();
@@ -82,12 +70,8 @@ export class EmbedLoader {
   }
 
   /**
-   * A one-shot REQ: `fetchOnce` completes on EOSE, carries its own timeout and
-   * sends the CLOSE on every path, {@link abort} included.
-   *
-   * Nothing here may throw. `fetchLatestReplaceable` compares versions through
-   * another package's `supersedes`, and a throw would strand the queue — the
-   * pump below would never run.
+   * Nothing here may throw: `fetchLatestReplaceable` compares versions through
+   * another package's `supersedes`, and a throw would strand the queue.
    */
   private async open(target: EmbedTarget): Promise<void> {
     this.inFlight += 1;
@@ -107,8 +91,8 @@ export class EmbedLoader {
       return;
     }
     if (!event) {
-      // Not published, not upstream, or never answered — indistinguishable from
-      // here, and all rendered as the abbreviated chip.
+      // Not published, not upstream, or never answered — indistinguishable, and
+      // all rendered as the abbreviated chip.
       this.set(target.key, { status: 'missing' });
       this.queue.pump();
       return;

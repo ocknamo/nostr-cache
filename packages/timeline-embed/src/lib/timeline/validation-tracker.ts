@@ -1,7 +1,4 @@
-/**
- * Reads the relay's lazy-validation verdicts for the events on screen. Nothing
- * is verified here — the widget does no crypto.
- */
+/** Reads the relay's lazy-validation verdicts; the widget does no crypto. */
 
 import type { NostrCacheRelay } from '@nostr-cache/cache-relay/browser';
 import {
@@ -12,26 +9,22 @@ import {
 
 /** Batches the lookups triggered by a burst of incoming events. */
 const FETCH_DEBOUNCE_MS = 200;
-/** Lazy validation runs in the background, so re-poll while anything is pending. */
 const POLL_INTERVAL_MS = 5000;
 /**
- * Polls a watch waits before concluding the cache does not hold the event. The
- * retries cover an ingest still in flight, and give a storage read error time
- * to clear before it is read as an absence.
+ * Retries before a watch concludes the cache does not hold the event: they
+ * cover an ingest still in flight, and a storage read error that may clear.
  */
 const WATCH_MAX_MISSES = 4;
 
 export interface ValidationTrackerOptions {
-  /** The relay to read verdicts from; absent until it has booted. */
+  /** Absent until the relay has booted. */
   relay(): NostrCacheRelay | undefined;
-  /** Every id currently on screen — timeline cards, quotes and replies. */
+  /** Every id on screen — timeline cards, quotes and replies. */
   ids(): Set<string>;
-  /** False once the controller is stopped. */
   isRunning(): boolean;
   /**
-   * Applies to {@link watch} only. Paired with the relay's own
-   * `lazyValidateInterval`: a caller that speeds verification up wants the
-   * watch to notice at the same rate.
+   * Applies to {@link watch} only. Pairs with the relay's own
+   * `lazyValidateInterval`, so speeding verification up speeds the watch up.
    */
   pollIntervalMs?: number;
   onChange(statuses: Map<string, ValidationStatus>): void;
@@ -40,10 +33,7 @@ export interface ValidationTrackerOptions {
 export class ValidationTracker {
   private fetchTimer?: ReturnType<typeof setTimeout>;
   private pollTimer?: ReturnType<typeof setTimeout>;
-  /**
-   * Not tied to the current subscription, so {@link clearTimers} leaves it
-   * alone; it is bounded by the caller's abort signal instead.
-   */
+  /** Bounded by the caller's abort signal, not by {@link clearTimers}. */
   private watchTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly options: ValidationTrackerOptions) {}
@@ -56,7 +46,7 @@ export class ValidationTracker {
     }, FETCH_DEBOUNCE_MS);
   }
 
-  /** Drop the subscription-scoped timers, leaving any {@link watch} running. */
+  /** Leaves any {@link watch} running. */
   clearTimers(): void {
     clearTimeout(this.fetchTimer);
     clearTimeout(this.pollTimer);
@@ -65,19 +55,14 @@ export class ValidationTracker {
   }
 
   /**
-   * Poll until the cache either vouches for one event or stops holding it.
-   *
    * **`unknown` does not prove forgery.** The relay reports it for any id with
-   * no row: deleted as invalid, deleted by NIP-09, evicted, never ingested, or
-   * a broken IndexedDB (a read failure comes back as `unknown` throughout). So
-   * `onDropped` means "the cache no longer holds it", and the caller must say
-   * that rather than naming a cause it cannot know.
+   * no row — deleted as invalid, deleted by NIP-09, evicted, never ingested, or
+   * a broken IndexedDB. So `onDropped` means only "the cache no longer holds
+   * it", and the caller must not name a cause it cannot know.
    *
-   * An event that never appears is reported too, after
-   * {@link WATCH_MAX_MISSES} tries. Waiting for a `pending` sighting first
-   * would lose the case that matters most: validation can delete a forged event
-   * before the first poll, leaving `unknown` from the outset and a timeline
-   * built on it running for the rest of the session.
+   * An event that never appears is reported too. Waiting for a `pending`
+   * sighting first would lose the case that matters most: validation can delete
+   * a forged event before the first poll, leaving `unknown` from the outset.
    */
   watch(eventId: string, signal: AbortSignal, onDropped: () => void): void {
     let misses = 0;
@@ -103,7 +88,6 @@ export class ValidationTracker {
         return;
       }
       if (status === 'pending') {
-        // Still queued for verification, so the verdict is still to come.
         misses = 0;
         schedule();
         return;
@@ -150,8 +134,7 @@ export class ValidationTracker {
     }
     this.options.onChange(statuses);
 
-    // Only `pending` can still change: `unknown` is terminal (never stored,
-    // deleted as invalid, or evicted), so it must not keep polling alive.
+    // Only `pending` can still change; `unknown` is terminal.
     clearTimeout(this.pollTimer);
     this.pollTimer = undefined;
     if (hasPending(statuses)) {

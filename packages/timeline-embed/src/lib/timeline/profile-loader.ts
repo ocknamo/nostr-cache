@@ -1,22 +1,14 @@
-/**
- * Author profile (kind 0) lookups for the cards currently on screen.
- */
+/** Author profile (kind 0) lookups for the cards on screen. */
 
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type Profile, parseProfileContent } from '../profile.ts';
 import type { LookupContext } from './lookup-context.ts';
 import { RequestQueue } from './request-queue.ts';
 
-/**
- * Well under the relay's `maxSubscriptions` (20). It counts per client and the
- * emulator gives every socket its own id, so the budget is per widget.
- */
+/** Well under the relay's per-client `maxSubscriptions` (20). */
 const MAX_CONCURRENT_REQUESTS = 4;
 
-/**
- * Zero because the relay orders EOSE after the events it has accepted
- * (`UpstreamCoordinator.flushEose` waits for its ingest chain).
- */
+/** Zero: the relay orders EOSE after the events it has accepted. */
 const EOSE_GRACE_MS = 0;
 
 /** Covers the relay's upstream EOSE timeout (3s) with room to spare. */
@@ -29,10 +21,7 @@ interface ProfileSub {
 
 export interface ProfileLoaderOptions {
   ctx: LookupContext;
-  /**
-   * Raise it for a relay that releases EOSE before the events it has accepted;
-   * specs also use it to give themselves a subscription they can observe.
-   */
+  /** Raise it for a relay that releases EOSE before the events it accepted. */
   eoseGraceMs?: number;
   onChange(profiles: Map<string, Profile>): void;
 }
@@ -48,9 +37,8 @@ export class ProfileLoader {
   constructor(private readonly options: ProfileLoaderOptions) {
     this.queue = new RequestQueue({
       key: (pubkey) => pubkey,
-      // A REQ rx-nostr merely buffers while the socket is down still burns a
-      // slot and runs down its watchdog, so a slow reconnect would time the
-      // whole budget out. Authors wait in the queue instead.
+      // A REQ rx-nostr merely buffers still burns a slot and runs down its
+      // watchdog, so a slow reconnect would time the whole budget out.
       canStart: () => this.options.ctx.isActive() && this.options.ctx.connection.isConnected,
       hasCapacity: () => this.subs.size < MAX_CONCURRENT_REQUESTS,
       start: (pubkey) => this.open(pubkey),
@@ -58,15 +46,12 @@ export class ProfileLoader {
   }
 
   /**
-   * Fetch one author's profile, as their card scrolls into view.
-   *
-   * One author per REQ is what makes the relay's `upstreamFreshness` window
-   * work per author: coverage is judged per filter, so a filter naming many
-   * authors goes upstream in full as soon as one of them is missing — and an
-   * author who has never published a kind 0 is missing forever.
+   * One author per REQ is what makes `upstreamFreshness` work per author:
+   * coverage is judged per filter, so a filter naming many goes upstream in
+   * full as soon as one is missing — and an author with no kind 0 always is.
    */
   request(pubkey: string): void {
-    // The trigger lives in the DOM, so a card scrolling into view during the
+    // The trigger lives in the DOM: a card scrolling into view during the
     // demo's cold benchmark would refill the cache being measured.
     if (!this.options.ctx.isActive()) {
       return;
@@ -79,9 +64,6 @@ export class ProfileLoader {
   }
 
   /**
-   * Close every in-flight lookup and drop the queue. It matters most for a
-   * suspend: a live subscription keeps refilling the cache being measured cold.
-   *
    * The authors asked for are kept, unlike the other three lookups: a resumed
    * widget renders the same cards. {@link reset} is what releases them.
    */
@@ -95,37 +77,31 @@ export class ProfileLoader {
     }
   }
 
-  /**
-   * Close, and let every author be asked for again — new filters bring their
-   * own. Parsed profiles stay, so nobody flickers back to a pubkey.
-   */
+  /** New filters bring their own authors. Parsed profiles stay, so no card flickers. */
   reset(): void {
     this.close();
     this.queue.reset();
   }
 
-  /**
-   * kind 0 is replaceable, so there is exactly one event to wait for and EOSE
-   * frees the slot for the next queued author.
-   */
+  /** kind 0 is replaceable, so EOSE frees the slot for the next author. */
   private open(pubkey: string): void {
     this.seq += 1;
     const subId = `profile-${this.seq}`;
     this.subs.set(subId, {
-      // A REQ the relay refuses answers with neither EOSE nor CLOSED (it logs a
-      // NOTICE and returns), so nothing else would give the slot back.
+      // A refused REQ answers with neither EOSE nor CLOSED (just a NOTICE), so
+      // nothing else would give the slot back.
       watchdog: setTimeout(() => this.finish(subId), REQUEST_TIMEOUT_MS),
     });
     this.options.ctx.connection.subscribe(subId, [{ kinds: [0], authors: [pubkey] }], {
-      // Not closed on the first event: two upstream relays can each answer with
-      // their own copy, and the first to land is not necessarily the newest.
+      // Not closed on the first event: two relays can each answer with their
+      // own copy, and the first to land is not the newest.
       onEvent: (event) => this.ingest(event),
       onEose: () => this.finishAfterEose(subId),
       onClosed: () => this.finish(subId),
     });
   }
 
-  /** Deferred by a task so a delivery already queued on the transport lands. */
+  /** Deferred a task so a delivery already queued on the transport lands. */
   private finishAfterEose(subId: string): void {
     const sub = this.subs.get(subId);
     if (!sub || sub.timer) {
@@ -152,8 +128,7 @@ export class ProfileLoader {
     }
     this.options.ctx.classifyDelivered(event.id);
 
-    // Two upstream relays can each deliver their copy, so the last to arrive is
-    // not necessarily the newest.
+    // The last copy to arrive is not necessarily the newest.
     const seenAt = this.seenAt.get(event.pubkey);
     if (seenAt !== undefined && seenAt >= event.created_at) {
       return;
