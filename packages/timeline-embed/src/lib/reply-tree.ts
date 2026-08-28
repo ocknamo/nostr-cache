@@ -2,7 +2,7 @@
  * Arranges the kind 1 events collected for a post into the thread under it.
  *
  * Pure, like `reactions.ts`: every rule below is testable without booting a
- * relay, and the subscriptions that feed it live in `timeline-controller.ts`.
+ * relay, and the subscriptions that feed it live in `timeline/reply-watcher.ts`.
  *
  * The tree is grown **downwards from the root**, and only onto events already
  * placed. That direction is the whole design:

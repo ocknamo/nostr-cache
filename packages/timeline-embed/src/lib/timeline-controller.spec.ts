@@ -90,6 +90,23 @@ describe('TimelineController', () => {
     return profileSubscriptions(controller)[0];
   }
 
+  interface QueueInternals {
+    requested: Set<string>;
+    pending: unknown[];
+  }
+
+  /**
+   * Reached through private fields: the in-flight budget and the de-duplication
+   * set are not on any public surface. No field is optional, so a rename fails
+   * loudly rather than reading as "nothing in flight".
+   */
+  function lookups(controller: TimelineController): {
+    profiles: { subs: Map<string, unknown>; queue: QueueInternals };
+    embeds: { inFlight: number; queue: QueueInternals };
+  } {
+    return controller as unknown as ReturnType<typeof lookups>;
+  }
+
   /**
    * Lookups holding one of the controller's in-flight slots.
    *
@@ -98,7 +115,7 @@ describe('TimelineController', () => {
    * REQ itself a microtask later, through a queue that consults NIP-11 limits.
    */
   function inFlightProfiles(controller: TimelineController): number {
-    return (controller as unknown as { profileSubs: Map<string, unknown> }).profileSubs.size;
+    return lookups(controller).profiles.subs.size;
   }
 
   /**
@@ -779,7 +796,7 @@ describe('TimelineController', () => {
 
     /** Embed keys the controller has already started a lookup for. */
     function requestedEmbeds(controller: TimelineController): Set<string> {
-      return (controller as unknown as { requestedEmbeds: Set<string> }).requestedEmbeds;
+      return lookups(controller).embeds.queue.requested;
     }
 
     it('resolves a quote out of the cache and looks its author up', async () => {
@@ -802,9 +819,7 @@ describe('TimelineController', () => {
       // The nested card names its author, so the kind 0 has to be asked for too.
       // Read from the controller rather than the relay: a lookup with no grace
       // closes on EOSE, so the subscription is gone before this can see it.
-      const requestedProfiles = (controller as unknown as { requestedProfiles: Set<string> })
-        .requestedProfiles;
-      expect(requestedProfiles.has('alice')).toBe(true);
+      expect(lookups(controller).profiles.queue.requested.has('alice')).toBe(true);
     });
 
     it('reports a quote nothing answered for as missing', async () => {
@@ -843,10 +858,9 @@ describe('TimelineController', () => {
 
       // The relay caps a client at 20 subscriptions and the timeline's own REQ
       // plus four profile lookups already share that budget.
-      const inFlight = (controller as unknown as { embedsInFlight: number }).embedsInFlight;
-      const queued = (controller as unknown as { pendingEmbeds: unknown[] }).pendingEmbeds;
+      const { inFlight, queue } = lookups(controller).embeds;
       expect(inFlight).toBeLessThanOrEqual(2);
-      expect(inFlight + queued.length).toBe(6);
+      expect(inFlight + queue.pending.length).toBe(6);
     });
 
     it('polls the relay for the quoted events verdicts too', async () => {
@@ -1507,6 +1521,81 @@ describe('TimelineController', () => {
         .flatMap((sub) => sub.filters);
       expect(filters).toHaveLength(2);
       expect(JSON.stringify(filters)).not.toContain(POST_ID);
+    });
+  });
+
+  /**
+   * A widget re-renders once per emit, so each path is pinned to the number of
+   * snapshots it publishes, in order, and the keys each one touches.
+   */
+  describe('published snapshots', () => {
+    const POST_ID = 'cc00000000000000000000000000000000000000000000000000000000000001';
+    const OTHER_ID = 'cc00000000000000000000000000000000000000000000000000000000000002';
+
+    /** Changed by identity — the contract views rely on to re-run a `$derived`. */
+    function changesSince(states: TimelineState[], from: number): (keyof TimelineState)[][] {
+      return states.slice(from).map((state, index) => {
+        const previous = states[from + index - 1];
+        return (Object.keys(state) as (keyof TimelineState)[])
+          .filter((key) => state[key] !== previous?.[key])
+          .sort();
+      });
+    }
+
+    it('publishes one snapshot for a suspend, however many lookups it closes', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      const before = states.length;
+
+      controller.suspend();
+
+      // Closing four sets of lookups must not emit four times. Nothing changes
+      // in that snapshot: `follows` is only ever set by a filter source.
+      expect(changesSince(states, before)).toEqual([[]]);
+      expect(states.at(-1)?.follows).toBeUndefined();
+    });
+
+    it('publishes one snapshot for a filter change, clearing the timeline in it', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      const before = states.length;
+
+      controller.applyFilter([{ kinds: [1], limit: 5 }]);
+
+      // `embeds` is dropped in the same snapshot, not one of the loader's own.
+      expect(changesSince(states, before)).toEqual([
+        ['embeds', 'events', 'origins', 'validationStatuses'],
+      ]);
+    });
+
+    it('publishes two snapshots for a showPost: the new filter, then the post-scoped state', async () => {
+      const post = parsePostTarget({ eventId: POST_ID });
+      const other = parsePostTarget({ eventId: OTHER_ID });
+      if (!post || !other) {
+        throw new Error('fixture targets should parse');
+      }
+      const { controller, states } = createController();
+      await controller.startPost(post, { reactions: {}, replies: {} });
+      const before = states.length;
+
+      controller.showPost(other, { reactions: {}, replies: {} });
+
+      expect(changesSince(states, before)).toEqual([
+        ['embeds', 'events', 'origins', 'validationStatuses'],
+        ['reactions', 'replies'],
+      ]);
+    });
+
+    it('publishes only the dropped connection for a stop', async () => {
+      const { controller, states } = createController();
+      await controller.start([{ kinds: [1], limit: 10 }]);
+      const before = states.length;
+
+      await controller.stop();
+
+      // The lookups a stop tears down publish nothing of their own.
+      expect(changesSince(states, before)).toEqual([['status']]);
+      expect(states.at(-1)?.status).toBe('disconnected');
     });
   });
 });
