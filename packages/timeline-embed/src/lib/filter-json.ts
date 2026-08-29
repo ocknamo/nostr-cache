@@ -16,6 +16,7 @@
  * the relay will accept.
  */
 
+import { filterUtils } from '@nostr-cache/cache-relay/browser';
 import { type Filter, decodeNip19 } from '@nostr-cache/shared';
 
 /**
@@ -32,11 +33,6 @@ const INTEGER_FIELDS = ['since', 'until', 'limit'] as const;
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-/** NIP-01 tag filters are `#` plus a single letter — `#t`, `#e`, `#p`, … */
-function isTagKey(key: string): boolean {
-  return key.length === 2 && key.startsWith('#') && /^[a-zA-Z]$/.test(key[1]);
 }
 
 function isHex64(value: string): boolean {
@@ -142,7 +138,7 @@ function sanitizeFilter(input: unknown, index: number): Filter | undefined {
       continue;
     }
 
-    if (key === 'authors' || key === 'ids' || isTagKey(key)) {
+    if (key === 'authors' || key === 'ids' || filterUtils.isSingleLetterTagKey(key)) {
       if (!isStringArray(value)) {
         console.warn(`[nostr-timeline] Ignoring ${label}: "${key}" must be an array of strings`);
         return undefined;

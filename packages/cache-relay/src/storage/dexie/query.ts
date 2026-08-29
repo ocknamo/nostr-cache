@@ -9,7 +9,12 @@
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { Dexie } from 'dexie';
-import { capEvents, eventMatchesFilter, normalizeLimit } from '../../utils/filter-utils.js';
+import {
+  capEvents,
+  eventMatchesFilter,
+  normalizeLimit,
+  rejectsEveryRow,
+} from '../../utils/filter-utils.js';
 import { type NostrEventTable, rowToEvent } from './schema.js';
 import { getIndexedTagValues } from './tag-index.js';
 
@@ -259,30 +264,6 @@ export function planQuery(table: Dexie.Table<NostrEventTable, string>, filter: F
 }
 
 /**
- * Whether a filter's tag conditions are ones no stored row can satisfy: a `#x`
- * key whose name is not a single letter, or whose values are not all non-empty
- * strings.
- *
- * Asked once before the query rather than per row: a descending plan would
- * otherwise walk its whole range to fill a `limit` that never can be.
- */
-export function rejectsEveryRow(filter: Filter): boolean {
-  for (const [key, values] of Object.entries(filter)) {
-    if (!key.startsWith('#')) {
-      continue;
-    }
-    const tagName = key.slice(1);
-    if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
-      return true;
-    }
-    if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Final per-row validation applied while the query's rows are read: the
  * conditions the index cannot express.
  *
@@ -348,6 +329,8 @@ export async function queryEvents(
   table: Dexie.Table<NostrEventTable, string>,
   filter: Filter
 ): Promise<NostrEvent[]> {
+  // 降順プランは満たされない `limit` を埋めようと範囲全体を走査してしまうため、
+  // 行ごとの判定に混ぜず先に弾く
   if (rejectsEveryRow(filter)) {
     return [];
   }

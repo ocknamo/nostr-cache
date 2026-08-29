@@ -41,34 +41,12 @@ interface BuiltFilterQuery {
 }
 
 /**
- * Stage A: reject filters whose tag conditions are malformed.
- *
- * Dexie 実装の `eventRowMatchesFilter` の追加検証と同じ条件:
- * `#x` のタグ名が単一英字でない、値が配列でない、または空・非文字列の値を
- * 含むフィルタは何にもマッチしない（結果は空）。
- */
-function hasInvalidTagFilter(filter: Filter): boolean {
-  for (const [key, values] of Object.entries(filter)) {
-    if (!key.startsWith('#')) continue;
-    const tagName = key.slice(1);
-    if (tagName.length !== 1 || !/^[a-zA-Z]$/.test(tagName)) {
-      return true;
-    }
-    if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Stage B: build the narrowing WHERE condition for a single (well-formed)
  * filter.
  *
  * 押し込む条件はすべて最終判定（`eventMatchesFilter`）と等価な完全一致 / 範囲
  * 条件のみ: `id IN` / `pubkey IN` / `kind IN` / `created_at >= since` /
- * `created_at <= until`（since / until は truthy のときのみ —
- * `eventMatchesFilter` の `filter.since &&` と同じ挙動）。
+ * `created_at <= until`。
  */
 function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltFilterQuery {
   const { ids, authors, kinds, since, until, ...rest } = filter;
@@ -148,7 +126,7 @@ function buildFilterQuery(db: NodeSQLiteDatabase, filter: Filter): BuiltFilterQu
  */
 export function queryEvents(db: NodeSQLiteDatabase, filter: Filter): NostrEvent[] {
   // Stage A: 不正なタグ条件を持つフィルタは何にもマッチしない
-  if (hasInvalidTagFilter(filter)) {
+  if (filterUtils.rejectsEveryRow(filter)) {
     return [];
   }
 
