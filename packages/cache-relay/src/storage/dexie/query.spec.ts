@@ -15,7 +15,6 @@ import {
   eventRowMatchesFilter,
   planQuery,
   readNewest,
-  rejectsEveryRow,
 } from './query.js';
 import type { NostrEventTable } from './schema.js';
 
@@ -253,21 +252,6 @@ describe('eventRowMatchesFilter', () => {
   it('does not match when a non-tag condition fails', () => {
     expect(eventRowMatchesFilter(makeRow(), { kinds: [2] })).toBe(false);
     expect(eventRowMatchesFilter(makeRow(), { authors: ['other'] })).toBe(false);
-  });
-});
-
-describe('rejectsEveryRow', () => {
-  it('rejects malformed tag filter names (not a single letter)', () => {
-    expect(rejectsEveryRow({ '#ee': ['evt1'] } as unknown as Filter)).toBe(true);
-  });
-
-  it('rejects tag filters whose values are not all non-empty strings', () => {
-    expect(rejectsEveryRow({ '#e': [123] } as unknown as Filter)).toBe(true);
-    expect(rejectsEveryRow({ '#e': [''] })).toBe(true);
-  });
-
-  it('accepts a well-formed filter', () => {
-    expect(rejectsEveryRow({ kinds: [1], '#e': ['evt1'] })).toBe(false);
   });
 });
 

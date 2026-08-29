@@ -198,17 +198,36 @@ export function isValidFilterShape(filter: Filter): boolean {
 }
 
 /**
- * Whether the filter carries a usable single-letter tag condition (`#e`, `#p`,
- * `#t`, …).
- *
- * NIP-01 defines the whole `#<single-letter>` family, not just `#e` and `#p`,
- * and both the storage query builder and {@link eventMatchesFilter} already
- * treat them generically — only this shape check used to stop at the two named
- * ones, so a `#t` hashtag filter was refused before it ever reached them.
+ * NIP-01 tag filter key: `#` plus a single letter (`#e`, `#p`, `#t`, …) — the
+ * whole family, not just the two named ones. Exported so the embed widget
+ * spells it the same way.
  */
+export function isSingleLetterTagKey(key: string): boolean {
+  return key.length === 2 && key.startsWith('#') && /^[a-zA-Z]$/.test(key[1]);
+}
+
+/**
+ * Whether a filter's tag conditions are ones no stored event can satisfy: a
+ * `#x` key that is not a single letter, or values that are not all non-empty
+ * strings. Both storage adapters ask this before querying, not per row.
+ */
+export function rejectsEveryRow(filter: Filter): boolean {
+  for (const [key, values] of Object.entries(filter)) {
+    if (!key.startsWith('#')) {
+      continue;
+    }
+    if (!isSingleLetterTagKey(key)) {
+      return true;
+    }
+    if (!Array.isArray(values) || values.some((v) => !v || typeof v !== 'string')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function hasTagCondition(filter: Filter): boolean {
   return Object.entries(filter).some(
-    ([key, value]) =>
-      key.length === 2 && key.startsWith('#') && /^[a-zA-Z]$/.test(key[1]) && Array.isArray(value)
+    ([key, value]) => isSingleLetterTagKey(key) && Array.isArray(value)
   );
 }

@@ -100,6 +100,13 @@ describe('parseFilterList', () => {
     expect(warn.mock.calls[0][0]).toContain('search');
   });
 
+  it('drops a tag key that is not a single letter', () => {
+    const warn = captureWarnings();
+
+    expect(parseFilterList('[{"kinds":[1],"#tag":["nostr"]}]')).toEqual([{ kinds: [1] }]);
+    expect(warn.mock.calls[0][0]).toContain('#tag');
+  });
+
   it('drops filters left with no condition to match on', () => {
     captureWarnings();
 

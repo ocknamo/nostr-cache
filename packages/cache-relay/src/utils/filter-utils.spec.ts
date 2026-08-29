@@ -9,6 +9,7 @@ import {
   mergeFilters,
   normalizeFilter,
   normalizeLimit,
+  rejectsEveryRow,
 } from './filter-utils.js';
 
 describe('filterUtils', () => {
@@ -418,6 +419,21 @@ describe('filterUtils', () => {
       expect(isValidFilterShape({ '#t': 'nostr' } as unknown as Filter)).toBe(false);
       // 1 文字でないタグキーは NIP-01 の定義外
       expect(isValidFilterShape({ '#tag': ['nostr'] } as unknown as Filter)).toBe(false);
+    });
+  });
+
+  describe('rejectsEveryRow', () => {
+    it('rejects malformed tag filter names (not a single letter)', () => {
+      expect(rejectsEveryRow({ '#ee': ['evt1'] } as unknown as Filter)).toBe(true);
+    });
+
+    it('rejects tag filters whose values are not all non-empty strings', () => {
+      expect(rejectsEveryRow({ '#e': [123] } as unknown as Filter)).toBe(true);
+      expect(rejectsEveryRow({ '#e': [''] })).toBe(true);
+    });
+
+    it('accepts a well-formed filter', () => {
+      expect(rejectsEveryRow({ kinds: [1], '#e': ['evt1'] })).toBe(false);
     });
   });
 });
