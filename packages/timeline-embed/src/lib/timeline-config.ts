@@ -85,14 +85,50 @@ function parseNumberList(value: string | null | undefined): number[] {
   return numbers;
 }
 
+interface WholeNumberSpec {
+  /** As the embedder spelled it, so the warning names what they wrote. */
+  attribute: string;
+  /** Completes "Ignoring invalid <attribute> (expected …)". */
+  expectation: string;
+  /**
+   * `0` only where the attribute spells "off" with it. Anything below the
+   * minimum is a typo either way — none of these read a negative as a setting.
+   */
+  min: 0 | 1;
+  /**
+   * Clamps rather than rejects: an embed asking for more than the widget can
+   * hold has said "as many as you can", and refusing the attribute would drop
+   * it to the smaller default instead.
+   */
+  max?: number;
+  /** Applied last, so `min` and `max` both read the attribute's own unit. */
+  scale?: number;
+  element: 'nostr-timeline' | 'nostr-post';
+}
+
 /**
- * Parse the kind 0 freshness window (`profile-freshness`) out of a string
- * input.
- *
- * Whole seconds; `0` turns the window off, so every profile lookup is forwarded
- * upstream. Anything unparseable is ignored with a warning, leaving the caller's
- * default (`DEFAULT_PROFILE_FRESHNESS`) in place — a typo in an embed URL should
- * cost the reader nothing more than the default behaviour.
+ * Read a whole-number attribute under the widget's house rule for bad input:
+ * warn on the console and leave the caller's default in place, rather than
+ * failing the embed over a typo.
+ */
+function parseWholeNumber(
+  value: string | null | undefined,
+  { attribute, expectation, min, max, scale = 1, element }: WholeNumberSpec
+): number | undefined {
+  if (value === null || value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min) {
+    console.warn(`[${element}] Ignoring invalid ${attribute} (expected ${expectation}): ${value}`);
+    return undefined;
+  }
+  return (max === undefined ? parsed : Math.min(parsed, max)) * scale;
+}
+
+/**
+ * Seconds a cached profile (kind 0) or follow list (kind 3) is used before the
+ * relay re-asks upstream.
  *
  * @param label Attribute this came from, so the warning names the one the
  *   embedder actually wrote — `follows-freshness` reaches here too
@@ -101,44 +137,28 @@ export function parseFreshness(
   value: string | null | undefined,
   label = 'profile-freshness'
 ): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  // Negatives are rejected rather than read as "off": the relay counts seconds,
-  // so a negative one is a mistake, and 0 already spells the disable case.
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    console.warn(
-      `[nostr-timeline] Ignoring invalid ${label} (expected whole seconds, 0 to disable): ${value}`
-    );
-    return undefined;
-  }
-  return parsed;
+  return parseWholeNumber(value, {
+    attribute: label,
+    expectation: 'whole seconds, 0 to disable',
+    min: 0,
+    element: 'nostr-timeline',
+  });
 }
 
 /**
- * Parse the cache ceiling (`max-events`); `0` turns eviction off.
- *
- * A typo should cost the reader the default ceiling, not an unbounded database,
- * so anything unparseable is warned about and ignored.
+ * The cache ceiling. The database it bounds lives on the embedding site's
+ * origin, so an unusable value has to fall back rather than go unbounded.
  *
  * @returns The requested ceiling, or `undefined` to leave the relay host's
  *   default (`DEFAULT_STORAGE_MAX_SIZE`) in place
  */
 export function parseMaxEvents(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  // 0 already spells "no limit", so a negative one is a typo — as in
-  // `parseFreshness`.
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    console.warn(
-      `[nostr-timeline] Ignoring invalid max-events (expected a whole number of events, 0 to disable): ${value}`
-    );
-    return undefined;
-  }
-  return parsed;
+  return parseWholeNumber(value, {
+    attribute: 'max-events',
+    expectation: 'a whole number of events, 0 to disable',
+    min: 0,
+    element: 'nostr-timeline',
+  });
 }
 
 /**
@@ -359,41 +379,31 @@ export function parseLimit(value: string | null | undefined): number {
 }
 
 /**
- * Parse `max-follows`, the cap on how many follow-list entries reach `authors`.
+ * The cap on how many follow-list entries reach `authors`. Zero is rejected
+ * rather than read as "follow nobody": that would leave the timeline with no
+ * authors at all, which is the one shape this widget must never subscribe with.
  *
  * @returns A positive count, or `undefined` when nothing usable was given —
  *   leaving the caller's default (`DEFAULT_MAX_FOLLOWS`) in place
  */
 export function parseMaxFollows(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  // Zero is rejected rather than read as "follow nobody": that would leave the
-  // timeline with no authors at all, which is the one shape this widget must
-  // never subscribe with.
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    console.warn(
-      `[nostr-timeline] Ignoring invalid max-follows (expected a positive whole number): ${value}`
-    );
-    return undefined;
-  }
-  return parsed;
+  return parseWholeNumber(value, {
+    attribute: 'max-follows',
+    expectation: 'a positive whole number',
+    min: 1,
+    element: 'nostr-timeline',
+  });
 }
 
-/** Parse `since-days`, the optional recency bound on a follow timeline. */
+/** The optional recency bound on a follow timeline, in seconds. */
 export function parseSinceDays(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    console.warn(
-      `[nostr-timeline] Ignoring invalid since-days (expected a positive whole number of days): ${value}`
-    );
-    return undefined;
-  }
-  return parsed * 86_400;
+  return parseWholeNumber(value, {
+    attribute: 'since-days',
+    expectation: 'a positive whole number of days',
+    min: 1,
+    scale: 86_400,
+    element: 'nostr-timeline',
+  });
 }
 
 /**
@@ -410,70 +420,44 @@ export function parseEnabled(value: string | boolean | null | undefined): boolea
   return value !== 'false';
 }
 
-/**
- * Clamped rather than rejected at the top end: an embed asking for more than
- * the widget can hold has said "as many as you can", and refusing the attribute
- * would drop it back to the smaller default instead.
- *
- * @returns A positive count, or `undefined` to leave the controller's default
- */
+/** Reactions to backfill for one post, clamped at what the widget can hold. */
 export function parseReactionsLimit(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    console.warn(
-      `[nostr-post] Ignoring invalid reactions-limit (expected a positive whole number): ${value}`
-    );
-    return undefined;
-  }
-  return Math.min(parsed, MAX_REACTIONS);
+  return parseWholeNumber(value, {
+    attribute: 'reactions-limit',
+    expectation: 'a positive whole number',
+    min: 1,
+    max: MAX_REACTIONS,
+    element: 'nostr-post',
+  });
 }
 
 /**
  * Backfill size for **one level** of a thread, not for the thread as a whole:
  * every level asks for its own, so a deep thread is allowed more than this.
- *
- * Clamped at the top like {@link parseReactionsLimit}, for the same reason.
- *
- * @returns A positive count, or `undefined` to leave the controller's default
  */
 export function parseRepliesLimit(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    console.warn(
-      `[nostr-post] Ignoring invalid replies-limit (expected a positive whole number): ${value}`
-    );
-    return undefined;
-  }
-  return Math.min(parsed, MAX_REPLIES);
+  return parseWholeNumber(value, {
+    attribute: 'replies-limit',
+    expectation: 'a positive whole number',
+    min: 1,
+    max: MAX_REPLIES,
+    element: 'nostr-post',
+  });
 }
 
 /**
- * Levels of the thread to open, counting the direct replies as one.
- *
- * The ceiling is not politeness: each level is a live subscription, and the
- * relay caps a client at 20 while the widget is already spending eight
- * elsewhere.
- *
- * @returns A depth within range, or `undefined` to leave the controller's default
+ * Levels to open, counting the direct replies as one. The ceiling is not
+ * politeness: each level is a live subscription, and the relay caps a client at
+ * 20 while the widget already spends eight elsewhere.
  */
 export function parseRepliesDepth(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || value.trim() === '') {
-    return undefined;
-  }
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    console.warn(
-      `[nostr-post] Ignoring invalid replies-depth (expected a positive whole number): ${value}`
-    );
-    return undefined;
-  }
-  return Math.min(parsed, MAX_REPLY_DEPTH);
+  return parseWholeNumber(value, {
+    attribute: 'replies-depth',
+    expectation: 'a positive whole number',
+    min: 1,
+    max: MAX_REPLY_DEPTH,
+    element: 'nostr-post',
+  });
 }
 
 /**

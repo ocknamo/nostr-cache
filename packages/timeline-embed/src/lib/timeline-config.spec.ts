@@ -726,3 +726,63 @@ describe('followConfigFromSearchParams', () => {
     expect(followConfigFromSearchParams(new URLSearchParams('show-origin=true')).debug).toBe(false);
   });
 });
+
+/**
+ * The console line is the whole of the feedback a mistyped attribute gets, and
+ * all seven are now assembled from one template — so a slip in it renames the
+ * attribute, or misattributes it to the wrong element, on every widget at once.
+ */
+describe('invalid-attribute warnings', () => {
+  const CASES: [string, () => unknown, string][] = [
+    [
+      'profile-freshness',
+      () => parseFreshness('-1'),
+      '[nostr-timeline] Ignoring invalid profile-freshness (expected whole seconds, 0 to disable): -1',
+    ],
+    [
+      'follows-freshness',
+      () => parseFreshness('-1', 'follows-freshness'),
+      '[nostr-timeline] Ignoring invalid follows-freshness (expected whole seconds, 0 to disable): -1',
+    ],
+    [
+      'max-events',
+      () => parseMaxEvents('-1'),
+      '[nostr-timeline] Ignoring invalid max-events (expected a whole number of events, 0 to disable): -1',
+    ],
+    [
+      'max-follows',
+      () => parseMaxFollows('0'),
+      '[nostr-timeline] Ignoring invalid max-follows (expected a positive whole number): 0',
+    ],
+    [
+      'since-days',
+      () => parseSinceDays('0'),
+      '[nostr-timeline] Ignoring invalid since-days (expected a positive whole number of days): 0',
+    ],
+    [
+      'reactions-limit',
+      () => parseReactionsLimit('0'),
+      '[nostr-post] Ignoring invalid reactions-limit (expected a positive whole number): 0',
+    ],
+    [
+      'replies-limit',
+      () => parseRepliesLimit('0'),
+      '[nostr-post] Ignoring invalid replies-limit (expected a positive whole number): 0',
+    ],
+    [
+      'replies-depth',
+      () => parseRepliesDepth('0'),
+      '[nostr-post] Ignoring invalid replies-depth (expected a positive whole number): 0',
+    ],
+  ];
+
+  for (const [attribute, parse, message] of CASES) {
+    it(`names ${attribute}, its element and what it expected`, () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      parse();
+
+      expect(warn).toHaveBeenCalledWith(message);
+    });
+  }
+});
