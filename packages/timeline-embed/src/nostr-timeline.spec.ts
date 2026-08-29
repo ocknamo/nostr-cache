@@ -32,6 +32,7 @@ describe('<nostr-timeline> custom element', () => {
     // Here rather than at the end of the test that stubs it: a failed wait
     // throws, and a leaked `fetch` would follow it into the next test.
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     resetOgpCache();
   });
 
@@ -226,6 +227,91 @@ describe('<nostr-timeline> custom element', () => {
     expect(presses).toHaveLength(1);
     expect(presses[0].actionId).toBe('open-profile');
     expect(presses[0].pubkey).toBe(author);
+  });
+
+  it('picks up a shared attribute set after mount', async () => {
+    // The attributes the three elements have in common reach the view as one
+    // object built in `embed-props.ts`; a read that stopped tracking them would
+    // show up nowhere else.
+    const dbName = `timeline-${crypto.randomUUID()}`;
+    const seeding = await acquireRelayHost({ dbName });
+    try {
+      await seedValidated(seeding.storage, [
+        makeEvent({
+          id: 'ff00000000000000000000000000000000000000000000000000000000000003',
+          content: 'ボタンが後から付く投稿',
+        }),
+      ]);
+    } finally {
+      await seeding.release();
+    }
+
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('db-name', dbName);
+    document.body.appendChild(element);
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('.event-card')),
+      'the seeded card'
+    );
+    expect(element.shadowRoot?.querySelector('[part="actions"]')).toBeNull();
+
+    element.setAttribute('actions', '[{"id":"like","label":"よい"}]');
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('button[part~="action"]')),
+      'the button the new attribute asks for'
+    );
+  });
+
+  it('reports a typo in a shared attribute once, having parsed it once', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('material-icons', 'outline');
+    document.body.appendChild(element);
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.querySelector('.timeline')),
+      'the timeline to render'
+    );
+
+    expect(
+      warn.mock.calls.filter(([message]) => String(message).includes('material-icons'))
+    ).toHaveLength(1);
+  });
+
+  it('rebuilds the relay when a shared attribute set after mount names another one', async () => {
+    // The other half of the shared wiring: `relayConfigFrom` is read inside the
+    // effect that owns the controller, not in the markup.
+    const first = `timeline-${crypto.randomUUID()}`;
+    const second = `timeline-${crypto.randomUUID()}`;
+    for (const [dbName, content] of [
+      [first, 'はじめの DB の投稿'],
+      [second, 'あとの DB の投稿'],
+    ]) {
+      const seeding = await acquireRelayHost({ dbName });
+      try {
+        await seedValidated(seeding.storage, [makeEvent({ content })]);
+      } finally {
+        await seeding.release();
+      }
+    }
+
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('db-name', first);
+    document.body.appendChild(element);
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.textContent?.includes('はじめの DB の投稿')),
+      'the first database'
+    );
+
+    element.setAttribute('db-name', second);
+
+    await waitFor(
+      () => Boolean(element.shadowRoot?.textContent?.includes('あとの DB の投稿')),
+      'the second database'
+    );
   });
 
   it('forwards ogp-proxy, so a card can preview a link', async () => {
