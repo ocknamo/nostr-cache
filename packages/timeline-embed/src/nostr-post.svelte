@@ -53,13 +53,12 @@
   import { untrack } from 'svelte';
   import PostView from './components/PostView.svelte';
   import {
-    type EventAction,
-    dispatchActionEvent,
-    normalizeActions,
-    normalizeAuthorAction,
-    normalizeNoteAction,
-  } from './lib/event-actions.ts';
-  import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
+    type SharedEmbedProps,
+    ensureIconFont,
+    relayConfigFrom,
+    viewPropsFrom,
+  } from './lib/embed-props.ts';
+  import { dispatchActionEvent } from './lib/event-actions.ts';
   import { type PostTarget, parsePostTarget } from './lib/post-target.ts';
   import {
     type PostWatches,
@@ -70,16 +69,12 @@
     parseDebug,
     parseEnabled,
     parseFlag,
-    parseFreshness,
-    parseMaxEvents,
-    parseOgpProxy,
     parseReactionsLimit,
-    parseRelays,
     parseRepliesDepth,
     parseRepliesLimit,
   } from './lib/timeline-config.ts';
 
-  interface Props {
+  interface Props extends SharedEmbedProps {
     /**
      * The post to show: 64-character hex, or a NIP-19 `note1…` / `nevent1…` /
      * `naddr1…`.
@@ -98,47 +93,6 @@
     kind?: string;
     /** An absent one is the empty identifier, which NIP-01 allows. */
     identifier?: string;
-    /** Comma-separated upstream relay URLs. Empty = cache-only. */
-    relays?: string;
-    dbName?: string;
-    /**
-     * Defaults to a day; `0` re-asks on every lookup. Worth more here than on
-     * a timeline: a post with fifty reactors is fifty profile lookups, and this
-     * is what keeps them local on a second visit.
-     */
-    profileFreshness?: string;
-    /**
-     * Never used by this element. It exists so a page that also carries a
-     * `<nostr-follow-timeline>` can give both matching settings — they share
-     * one relay, and the first to mount configures it.
-     */
-    followsFreshness?: string;
-    /**
-     * Events the page-shared cache keeps before evicting the least recently
-     * read. Defaults to 5000; `0` lets it grow without a ceiling. Profiles and
-     * follow lists are evicted last, so the freshness windows keep working.
-     */
-    maxEvents?: string;
-    /**
-     * Renders the diagnostic cache/upstream badge. Typed as a boolean too
-     * because a Svelte parent's bare `debug` sets the property, not the
-     * attribute.
-     */
-    debug?: string | boolean;
-    /** `"false"` hides avatars — the author's and the reactors'. */
-    showAvatars?: string;
-    /** `"false"` leaves media in the body as links. */
-    showMedia?: string;
-    /** `"false"` leaves a `nostr:` reference as a chip instead of a card. */
-    showEmbeds?: string;
-    /**
-     * URL of the CORS proxy the link previews (OGP) are fetched through, e.g.
-     * `"https://corsproxy.io/?key=…"` — the linked page is requested through
-     * it and its `og:` tags are read here. There is no default: **unset (or
-     * set without a URL) means no previews and no requests**; see the README
-     * for what the proxy gets to see.
-     */
-    ogpProxy?: string;
     /** `"false"` also stops the kind 7 subscription being opened at all. */
     showReactions?: string | boolean;
     /** Backfill size. Defaults to 200, capped at 500; more may arrive live. */
@@ -161,52 +115,6 @@
      * and the relay allows one client 20.
      */
     repliesDepth?: string;
-    /**
-     * Buttons under the post, as a JSON array of `{"id","label","icon"}` — or,
-     * set as a property from JS, the array itself, whose entries may carry an
-     * `onSelect`. The same declaration and the same `nostr-timeline:action`
-     * event as under a timeline card.
-     */
-    actions?: string | EventAction[];
-    /**
-     * Makes the people on screen pressable — the author, a quoted note's
-     * header, a `nostr:` mention in a body, a reactor's row — reported as the
-     * same `nostr-timeline:action` event under this id, with the `pubkey` of
-     * whoever was pressed in the detail. That is not `detail.event.pubkey`
-     * outside the author; see `EventActionContext.pubkey`.
-     *
-     * Unlike `actions`, this reaches the replies as well as the post: it adds
-     * no row to a card, and a thread is mostly other people.
-     */
-    authorAction?: string;
-    /**
-     * The accessible name of that press. Defaults to 「プロフィールを開く」.
-     */
-    authorActionLabel?: string;
-    /**
-     * Makes the quote cards in a note's body pressable, reported as the same
-     * `nostr-timeline:action` event under this id — with the **quoted** post in
-     * `detail.event`. The way out of a quote, which carries no action row of
-     * its own; the widget still navigates nowhere itself.
-     */
-    noteAction?: string;
-    /**
-     * The label on that press, and its accessible name. Defaults to
-     * 「投稿を開く」.
-     */
-    noteActionLabel?: string;
-    /**
-     * Render action icons as Material Symbols ligature names
-     * (<https://fonts.google.com/icons>): `outlined` (the default for a bare
-     * attribute), `rounded`, `sharp`. Also loads the font from Google Fonts,
-     * because a shadow root cannot register one itself.
-     */
-    materialIcons?: string | boolean;
-    /**
-     * `google` (default) injects Google's stylesheet into `document.head`,
-     * exposing the reader's IP to Google. `none` leaves the font to the page.
-     */
-    materialIconsFont?: string;
   }
 
   const {
@@ -214,45 +122,23 @@
     author,
     kind,
     identifier,
-    relays,
-    dbName,
-    profileFreshness,
-    followsFreshness,
-    maxEvents,
-    debug,
-    showAvatars,
-    showMedia,
-    showEmbeds,
-    ogpProxy,
     showReactions,
     reactionsLimit,
     reactionsOpen,
     showReplies,
     repliesLimit,
     repliesDepth,
-    actions,
-    authorAction,
-    authorActionLabel,
-    noteAction,
-    noteActionLabel,
-    materialIcons,
-    materialIconsFont,
+    ...shared
   }: Props = $props();
 
-  const ogpProxyUrl = $derived(parseOgpProxy(ogpProxy));
+  const view = $derived(viewPropsFrom(shared));
 
   // So a press can be announced to a page that wrote HTML rather than JS and
   // has no callback to receive it.
   const hostElement = $host();
 
-  // The load is an effect rather than part of the derivation because it touches
-  // `document.head`; `ensureMaterialSymbols` is idempotent per variant anyway.
-  const iconVariant = $derived(parseMaterialVariant(materialIcons));
-
   $effect(() => {
-    if (iconVariant && materialIconsFont !== 'none') {
-      ensureMaterialSymbols(iconVariant);
-    }
+    ensureIconFont(view.materialIcons, shared.materialIconsFont);
   });
 
   /** The post the attributes name — the root of any walk up the thread. */
@@ -343,15 +229,7 @@
     }
 
     const active = new TimelineController({
-      host: {
-        upstreamRelays: parseRelays(relays),
-        dbName: dbName || undefined,
-        // Left undefined when unset so the host keeps its own default, and two
-        // widgets that both omit it do not look like conflicting configurations.
-        profileFreshness: parseFreshness(profileFreshness),
-        followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
-        storageMaxSize: parseMaxEvents(maxEvents),
-      },
+      host: relayConfigFrom(shared),
       onChange: (next) => {
         snapshot = next;
       },
@@ -428,19 +306,12 @@
   state={snapshot}
   {target}
   {fatal}
-  showOrigin={parseDebug(debug)}
-  showAvatars={showAvatars !== 'false'}
-  showMedia={showMedia !== 'false'}
-  showEmbeds={showEmbeds !== 'false'}
-  ogpProxy={ogpProxyUrl}
+  showOrigin={parseDebug(shared.debug)}
+  {...view}
   showReactions={wantsReactions}
   reactionsOpen={parseFlag(reactionsOpen)}
   showReplies={wantsReplies}
   repliesDepth={parseRepliesDepth(repliesDepth)}
-  actions={normalizeActions(actions)}
-  authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
-  noteAction={normalizeNoteAction(noteAction, noteActionLabel)}
-  materialIcons={iconVariant}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   onEmbedRequest={(embed) => controller?.requestEmbed(embed)}

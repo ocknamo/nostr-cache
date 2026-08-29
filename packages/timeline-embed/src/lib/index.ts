@@ -37,6 +37,8 @@ export {
   notePreview,
 } from './content-preview.ts';
 export type { PreviewOptions } from './content-preview.ts';
+export { ensureIconFont, relayConfigFrom, viewPropsFrom } from './embed-props.ts';
+export type { SharedEmbedProps, SharedViewProps } from './embed-props.ts';
 export {
   ACTION_EVENT,
   DEFAULT_AUTHOR_LABEL,

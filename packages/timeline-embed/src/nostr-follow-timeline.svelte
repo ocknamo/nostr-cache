@@ -43,30 +43,25 @@
 
   import TimelineView from './components/TimelineView.svelte';
   import {
-    type EventAction,
-    dispatchActionEvent,
-    normalizeActions,
-    normalizeAuthorAction,
-    normalizeNoteAction,
-  } from './lib/event-actions.ts';
-  import { ensureMaterialSymbols, parseMaterialVariant } from './lib/material-symbols.ts';
+    type SharedEmbedProps,
+    ensureIconFont,
+    relayConfigFrom,
+    viewPropsFrom,
+  } from './lib/embed-props.ts';
+  import { dispatchActionEvent } from './lib/event-actions.ts';
   import { DEFAULT_MAX_FOLLOWS, followFilterSource } from './lib/follow-list.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
   import {
     parseDebug,
     parseEnabled,
-    parseFreshness,
     parseKinds,
     parseLimit,
-    parseMaxEvents,
     parseMaxFollows,
-    parseOgpProxy,
     parsePubkey,
-    parseRelays,
     parseSinceDays,
   } from './lib/timeline-config.ts';
 
-  interface Props {
+  interface Props extends SharedEmbedProps {
     /**
      * Whose follow list to walk. hex, `npub` or `nprofile`.
      *
@@ -74,8 +69,6 @@
      * back to that would not mean asking upstream for the global feed.
      */
     pubkey?: string;
-    /** Comma-separated upstream relay URLs. Empty = cache-only. */
-    relays?: string;
     /**
      * Comma-separated event kinds. Defaults to `1`.
      *
@@ -94,132 +87,19 @@
      * way for the reader to tell that from "nobody posted".
      */
     sinceDays?: string;
-    /** Defaults to an hour; `0` re-asks upstream on every load. */
-    followsFreshness?: string;
-    /**
-     * Events the page-shared cache keeps before evicting the least recently
-     * read. Defaults to 5000; `0` lets it grow without a ceiling. Profiles and
-     * follow lists are evicted last, so the freshness windows keep working.
-     */
-    maxEvents?: string;
-    dbName?: string;
-    /** Defaults to a day; `0` re-asks upstream on every lookup. */
-    profileFreshness?: string;
-    /** Renders the cache/upstream badges and the follow-truncation notice. */
-    debug?: string | boolean;
-    showAvatars?: string;
-    showMedia?: string;
-    /**
-     * Set to "false" to leave a `nostr:` reference in a note's body as a chip
-     * rather than fetching what it points at and rendering it nested, exactly
-     * as on `<nostr-timeline>`.
-     */
-    showEmbeds?: string;
-    /**
-     * URL of the CORS proxy the link previews (OGP) are fetched through, e.g.
-     * `"https://corsproxy.io/?key=…"` — the linked page is requested through
-     * it and its `og:` tags are read here. There is no default: **unset (or
-     * set without a URL) means no previews and no requests**; see the README
-     * for what the proxy gets to see.
-     */
-    ogpProxy?: string;
-    /**
-     * The embedder's buttons under every card, exactly as on
-     * `<nostr-timeline>`: a JSON array from an attribute, or the array itself
-     * (with `onSelect` functions) when set as a property. A press raises
-     * `nostr-timeline:action` on this element.
-     */
-    actions?: string | EventAction[];
-    /**
-     * Makes the people on every card pressable — the author, a quoted note's
-     * header, a `nostr:` mention — reported as the same `nostr-timeline:action`
-     * event under this id, with the pressed person in `detail.pubkey`. Exactly
-     * as on `<nostr-timeline>`.
-     */
-    authorAction?: string;
-    /**
-     * The accessible name of that press. Defaults to 「プロフィールを開く」.
-     */
-    authorActionLabel?: string;
-    /**
-     * Makes the quote cards in a note's body pressable, reported as the same
-     * `nostr-timeline:action` event under this id — with the **quoted** post in
-     * `detail.event`. The way out of a quote, which carries no action row of
-     * its own; the widget still navigates nowhere itself.
-     */
-    noteAction?: string;
-    /**
-     * The label on that press, and its accessible name. Defaults to
-     * 「投稿を開く」.
-     */
-    noteActionLabel?: string;
-    /**
-     * Render the action icons as Material Symbols
-     * (<https://fonts.google.com/icons>): each `icon` is then a ligature name
-     * such as `favorite`, not literal text. Values: `outlined` (the default for
-     * a bare attribute), `rounded`, `sharp`.
-     *
-     * Setting this also loads the font from Google Fonts into the page, because
-     * a shadow root cannot register one itself — set
-     * `material-icons-font="none"` when the page provides the font already.
-     */
-    materialIcons?: string | boolean;
-    /**
-     * Where the Material Symbols font comes from: `google` (default) injects
-     * Google's stylesheet into `document.head`, which is a third-party request
-     * exposing the reader's IP to Google. `none` loads nothing and leaves the
-     * font to the embedding page.
-     */
-    materialIconsFont?: string;
   }
 
-  const {
-    pubkey,
-    relays,
-    kinds,
-    limit,
-    maxFollows,
-    includeSelf,
-    sinceDays,
-    followsFreshness,
-    maxEvents,
-    dbName,
-    profileFreshness,
-    debug,
-    showAvatars,
-    showMedia,
-    showEmbeds,
-    ogpProxy,
-    actions,
-    authorAction,
-    authorActionLabel,
-    noteAction,
-    noteActionLabel,
-    materialIcons,
-    materialIconsFont,
-  }: Props = $props();
+  const { pubkey, kinds, limit, maxFollows, includeSelf, sinceDays, ...shared }: Props =
+    $props();
 
-  const ogpProxyUrl = $derived(parseOgpProxy(ogpProxy));
+  const view = $derived(viewPropsFrom(shared));
 
   // The element itself, so a press reaches a page that only wrote HTML.
   const hostElement = $host();
 
-  /**
-   * The Material Symbols variant to render icons with, and the font to back it.
-   *
-   * The load is an effect rather than part of the derivation because it touches
-   * `document.head`: deriving it would inject a stylesheet as a side effect of
-   * reading a value, and once per re-render at that. `ensureMaterialSymbols` is
-   * idempotent per variant regardless.
-   */
-  const iconVariant = $derived(parseMaterialVariant(materialIcons));
-
   $effect(() => {
-    if (iconVariant && materialIconsFont !== 'none') {
-      ensureMaterialSymbols(iconVariant);
-    }
+    ensureIconFont(view.materialIcons, shared.materialIconsFont);
   });
-
 
   let state = $state<TimelineState>({
     status: 'disconnected',
@@ -252,16 +132,7 @@
     }
 
     const active = new TimelineController({
-      host: {
-        upstreamRelays: parseRelays(relays),
-        dbName: dbName || undefined,
-        // Left undefined when unset so the host keeps its own default rather
-        // than this widget pinning one — which also keeps two widgets that both
-        // omit the attribute from looking like conflicting configurations.
-        profileFreshness: parseFreshness(profileFreshness),
-        followsFreshness: parseFreshness(followsFreshness, 'follows-freshness'),
-        storageMaxSize: parseMaxEvents(maxEvents),
-      },
+      host: relayConfigFrom(shared),
       onChange: (next) => {
         state = next;
       },
@@ -289,16 +160,9 @@
 <TimelineView
   {state}
   fatal={subject ? undefined : 'pubkey が不正です（hex / npub / nprofile を指定してください）'}
-  showOrigin={parseDebug(debug)}
-  debug={parseDebug(debug)}
-  showAvatars={showAvatars !== 'false'}
-  showMedia={showMedia !== 'false'}
-  showEmbeds={showEmbeds !== 'false'}
-  ogpProxy={ogpProxyUrl}
-  actions={normalizeActions(actions)}
-  authorAction={normalizeAuthorAction(authorAction, authorActionLabel)}
-  noteAction={normalizeNoteAction(noteAction, noteActionLabel)}
-  materialIcons={iconVariant}
+  showOrigin={parseDebug(shared.debug)}
+  debug={parseDebug(shared.debug)}
+  {...view}
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(key) => controller?.requestProfile(key)}
   onEmbedRequest={(target) => controller?.requestEmbed(target)}
