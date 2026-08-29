@@ -85,7 +85,6 @@ function parseNumberList(value: string | null | undefined): number[] {
   return numbers;
 }
 
-/** How one whole-number attribute is read; see {@link parseWholeNumber}. */
 interface WholeNumberSpec {
   /** As the embedder spelled it, so the warning names what they wrote. */
   attribute: string;
@@ -102,10 +101,9 @@ interface WholeNumberSpec {
    * it to the smaller default instead.
    */
   max?: number;
-  /** Applied after the range check, for a value written in a coarser unit. */
+  /** Applied last, so `min` and `max` both read the attribute's own unit. */
   scale?: number;
-  /** The element the attribute belongs to, when it is not the timeline. */
-  element?: 'nostr-timeline' | 'nostr-post';
+  element: 'nostr-timeline' | 'nostr-post';
 }
 
 /**
@@ -115,7 +113,7 @@ interface WholeNumberSpec {
  */
 function parseWholeNumber(
   value: string | null | undefined,
-  { attribute, expectation, min, max, scale = 1, element = 'nostr-timeline' }: WholeNumberSpec
+  { attribute, expectation, min, max, scale = 1, element }: WholeNumberSpec
 ): number | undefined {
   if (value === null || value === undefined || value.trim() === '') {
     return undefined;
@@ -143,12 +141,13 @@ export function parseFreshness(
     attribute: label,
     expectation: 'whole seconds, 0 to disable',
     min: 0,
+    element: 'nostr-timeline',
   });
 }
 
 /**
- * The cache ceiling. A typo must cost the reader the default, not an unbounded
- * database on the embedding site's origin.
+ * The cache ceiling. The database it bounds lives on the embedding site's
+ * origin, so an unusable value has to fall back rather than go unbounded.
  *
  * @returns The requested ceiling, or `undefined` to leave the relay host's
  *   default (`DEFAULT_STORAGE_MAX_SIZE`) in place
@@ -158,6 +157,7 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
     attribute: 'max-events',
     expectation: 'a whole number of events, 0 to disable',
     min: 0,
+    element: 'nostr-timeline',
   });
 }
 
@@ -391,6 +391,7 @@ export function parseMaxFollows(value: string | null | undefined): number | unde
     attribute: 'max-follows',
     expectation: 'a positive whole number',
     min: 1,
+    element: 'nostr-timeline',
   });
 }
 
@@ -401,6 +402,7 @@ export function parseSinceDays(value: string | null | undefined): number | undef
     expectation: 'a positive whole number of days',
     min: 1,
     scale: 86_400,
+    element: 'nostr-timeline',
   });
 }
 
@@ -418,6 +420,7 @@ export function parseEnabled(value: string | boolean | null | undefined): boolea
   return value !== 'false';
 }
 
+/** Reactions to backfill for one post, clamped at what the widget can hold. */
 export function parseReactionsLimit(value: string | null | undefined): number | undefined {
   return parseWholeNumber(value, {
     attribute: 'reactions-limit',
