@@ -119,6 +119,7 @@ export {
   MAX_LISTED_REACTORS,
   MAX_REACTIONS,
   MAX_REACTION_GROUPS,
+  eventBody,
   parseReaction,
   summarizeReactionEvents,
   summarizeReactions,

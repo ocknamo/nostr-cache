@@ -23,6 +23,7 @@
   } from '../lib/note-embeds.ts';
   import { previewTarget } from '../lib/ogp.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
+  import { eventBody } from '../lib/reactions.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
@@ -172,7 +173,7 @@
   const name = $derived(authorName(event.pubkey, profile));
   const handle = $derived(authorHandle(event.pubkey, profile));
 
-  const parts = $derived(parseContent(event.content));
+  const parts = $derived(parseContent(eventBody(event)));
   /**
    * Without either a way to fetch (`onEmbedRequest`) or events already resolved
    * for it (`embeds`), lifting a reference out of the text would leave nothing

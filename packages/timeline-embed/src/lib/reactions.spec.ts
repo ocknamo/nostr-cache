@@ -5,6 +5,7 @@ import {
   MAX_LISTED_REACTORS,
   MAX_REACTION_GROUPS,
   type Reaction,
+  eventBody,
   parseReaction,
   summarizeReactionEvents,
   summarizeReactions,
@@ -23,6 +24,35 @@ function reaction(content: string, overrides: Parameters<typeof makeEvent>[0] = 
     ...overrides,
   });
 }
+
+describe('eventBody', () => {
+  it('draws the NIP-25 spellings as the labels the chips use', () => {
+    expect(eventBody(reaction('+'))).toBe('⭐');
+    expect(eventBody(reaction(''))).toBe('⭐');
+    expect(eventBody(reaction('   '))).toBe('⭐');
+    expect(eventBody(reaction('-'))).toBe('👎');
+  });
+
+  it('leaves a glyph the author wrote as they wrote it', () => {
+    expect(eventBody(reaction('🔥'))).toBe('🔥');
+    expect(eventBody(reaction(':soapstone:'))).toBe(':soapstone:');
+    // Past what a chip would carry, and still the body it is: the caps in
+    // `parseReaction` are about grouping, not about rendering.
+    const long = 'x'.repeat(33);
+    expect(eventBody(reaction(long))).toBe(long);
+  });
+
+  it('leaves every other kind alone, `+` included', () => {
+    expect(eventBody(makeEvent({ content: '+' }))).toBe('+');
+    expect(eventBody(makeEvent({ kind: 6, content: '' }))).toBe('');
+  });
+
+  it('agrees with what the same reaction is counted as', () => {
+    for (const content of ['+', '', '   ', '-']) {
+      expect(eventBody(reaction(content))).toBe(parseReaction(reaction(content), BY_ID)?.label);
+    }
+  });
+});
 
 describe('parseReaction', () => {
   it('reads `+` as a like', () => {

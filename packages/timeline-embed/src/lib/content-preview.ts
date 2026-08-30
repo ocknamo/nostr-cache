@@ -11,6 +11,7 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import { type EntityPart, type MediaKind, parseContent } from './content-parts.ts';
 import { type Profile, stripUnrenderable } from './profile.ts';
+import { eventBody } from './reactions.ts';
 
 /**
  * Code points kept before the ellipsis.
@@ -140,10 +141,13 @@ export function notePreview(content: string, options: PreviewOptions = {}): stri
  * A repost carries the reposted event's JSON in `content`, which flattens to a
  * line of punctuation and field names. Better to show nothing and let the
  * caller fall back to whatever it shows for an unresolved reference.
+ *
+ * A kind 7 previews as the glyph a card would draw for it, so the two
+ * spellings of a reaction never read differently on one screen.
  */
 export function eventPreview(event: NostrEvent, options: PreviewOptions = {}): string {
   if (OPAQUE_KINDS.has(event.kind)) {
     return '';
   }
-  return notePreview(event.content, options);
+  return notePreview(eventBody(event), options);
 }
