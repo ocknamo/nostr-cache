@@ -113,4 +113,9 @@ describe('eventPreview', () => {
   it('is empty for an encrypted message, whose content is ciphertext', () => {
     expect(eventPreview(makeEvent({ kind: 4, content: 'AbC123==?iv=xyz==' }))).toBe('');
   });
+
+  it('previews a reaction as the glyph its card draws, not as `+`', () => {
+    expect(eventPreview(makeEvent({ kind: 7, content: '+' }))).toBe('⭐');
+    expect(eventPreview(makeEvent({ kind: 7, content: '🔥' }))).toBe('🔥');
+  });
 });

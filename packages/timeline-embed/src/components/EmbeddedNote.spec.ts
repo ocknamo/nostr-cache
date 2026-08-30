@@ -94,6 +94,17 @@ describe('EmbeddedNote', () => {
     expect(container.querySelector('.content')).toHaveTextContent('quoted body');
   });
 
+  it('draws a quoted reaction as its glyph, like the card it was quoted from', () => {
+    const embeds = new Map([
+      [NOTE_HEX, { status: 'ready', event: makeEvent({ id: NOTE_HEX, kind: 7, content: '+' }) }],
+    ] as const);
+    const { container } = render(EmbeddedNote, {
+      props: { entity: entityOf(`nostr:${NOTE}`), depth: 1, embeds },
+    });
+
+    expect(container.querySelector('.content')).toHaveTextContent(/^⭐$/);
+  });
+
   it('renders a hostile quoted body as inert text', () => {
     // The quoted event is upstream-controlled and arrives through a different
     // path from the timeline's own, so pin it to the same guarantee: markup is

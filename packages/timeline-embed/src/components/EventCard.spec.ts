@@ -385,35 +385,35 @@ describe('EventCard', () => {
     const event = makeEvent({ kind: 7, content: '+' });
     const { container } = render(EventCard, { props: { event, showAvatar: false } });
 
-    expect(container.querySelector('.content')).toHaveTextContent('⭐');
+    expect(container.querySelector('.content')).toHaveTextContent(/^⭐$/);
   });
 
   it('draws an empty kind 7 body, which NIP-25 also means as a like', () => {
     const event = makeEvent({ kind: 7, content: '' });
     const { container } = render(EventCard, { props: { event, showAvatar: false } });
 
-    expect(container.querySelector('.content')).toHaveTextContent('⭐');
+    expect(container.querySelector('.content')).toHaveTextContent(/^⭐$/);
   });
 
   it('draws a NIP-25 dislike as 👎', () => {
     const event = makeEvent({ kind: 7, content: '-' });
     const { container } = render(EventCard, { props: { event, showAvatar: false } });
 
-    expect(container.querySelector('.content')).toHaveTextContent('👎');
+    expect(container.querySelector('.content')).toHaveTextContent(/^👎$/);
   });
 
   it('leaves a kind 7 body the author actually wrote alone', () => {
     const event = makeEvent({ kind: 7, content: '🔥' });
     const { container } = render(EventCard, { props: { event, showAvatar: false } });
 
-    expect(container.querySelector('.content')).toHaveTextContent('🔥');
+    expect(container.querySelector('.content')).toHaveTextContent(/^🔥$/);
   });
 
   it('leaves `+` in an ordinary note as the character it is', () => {
     const event = makeEvent({ content: '+' });
     const { container } = render(EventCard, { props: { event, showAvatar: false } });
 
-    expect(container.querySelector('.content')).toHaveTextContent('+');
+    expect(container.querySelector('.content')).toHaveTextContent(/^\+$/);
   });
 
   it('passes showMedia down to the body', () => {

@@ -5,8 +5,8 @@ import {
   MAX_LISTED_REACTORS,
   MAX_REACTION_GROUPS,
   type Reaction,
+  eventBody,
   parseReaction,
-  reactionGlyph,
   summarizeReactionEvents,
   summarizeReactions,
 } from './reactions.ts';
@@ -25,22 +25,31 @@ function reaction(content: string, overrides: Parameters<typeof makeEvent>[0] = 
   });
 }
 
-describe('reactionGlyph', () => {
+describe('eventBody', () => {
   it('draws the NIP-25 spellings as the labels the chips use', () => {
-    expect(reactionGlyph('+')).toBe('⭐');
-    expect(reactionGlyph('')).toBe('⭐');
-    expect(reactionGlyph('   ')).toBe('⭐');
-    expect(reactionGlyph('-')).toBe('👎');
+    expect(eventBody(reaction('+'))).toBe('⭐');
+    expect(eventBody(reaction(''))).toBe('⭐');
+    expect(eventBody(reaction('   '))).toBe('⭐');
+    expect(eventBody(reaction('-'))).toBe('👎');
   });
 
-  it('leaves anything the author wrote themselves to the caller', () => {
-    expect(reactionGlyph('🔥')).toBeUndefined();
-    expect(reactionGlyph(':soapstone:')).toBeUndefined();
+  it('leaves a glyph the author wrote as they wrote it', () => {
+    expect(eventBody(reaction('🔥'))).toBe('🔥');
+    expect(eventBody(reaction(':soapstone:'))).toBe(':soapstone:');
+    // Past what a chip would carry, and still the body it is: the caps in
+    // `parseReaction` are about grouping, not about rendering.
+    const long = 'x'.repeat(33);
+    expect(eventBody(reaction(long))).toBe(long);
   });
 
-  it('agrees with what the same content is counted as', () => {
-    for (const content of ['+', '', '-']) {
-      expect(reactionGlyph(content)).toBe(parseReaction(reaction(content), BY_ID)?.label);
+  it('leaves every other kind alone, `+` included', () => {
+    expect(eventBody(makeEvent({ content: '+' }))).toBe('+');
+    expect(eventBody(makeEvent({ kind: 6, content: '' }))).toBe('');
+  });
+
+  it('agrees with what the same reaction is counted as', () => {
+    for (const content of ['+', '', '   ', '-']) {
+      expect(eventBody(reaction(content))).toBe(parseReaction(reaction(content), BY_ID)?.label);
     }
   });
 });

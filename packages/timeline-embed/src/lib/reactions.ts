@@ -1,5 +1,6 @@
 /**
- * Reads kind 7 reactions (NIP-25) into the chips a post detail shows.
+ * Reads kind 7 reactions (NIP-25): into the chips a post detail shows, and
+ * into the glyph a card draws when the reaction is itself the event on screen.
  *
  * Pure, so every rule below can be tested without booting a relay; the
  * subscription that feeds it lives in `timeline/reaction-watcher.ts`. Same split as
@@ -132,10 +133,6 @@ function emojiUrl(event: NostrEvent, shortcode: string): string | undefined {
   return undefined;
 }
 
-/**
- * NIP-25 reserves `+`, `-` and an empty `content`; the glyph each is drawn as
- * is this widget's choice.
- */
 function reservedReaction(raw: string): { kind: 'like' | 'dislike'; label: string } | undefined {
   if (raw === '' || raw === '+') {
     return { kind: 'like', label: LIKE_LABEL };
@@ -147,14 +144,16 @@ function reservedReaction(raw: string): { kind: 'like' | 'dislike'; label: strin
 }
 
 /**
- * The glyph a kind 7 body reads as, for a card rendering the reaction itself
- * rather than counting it into a chip.
- *
- * @returns `undefined` when the author sent a glyph of their own, which is
- *   rendered as it was written
+ * The text to draw for an event: a kind 7's reserved spelling becomes the glyph
+ * its chip would carry. Only those spellings — anything else is a body like any
+ * other, without the length cap and sanitising a chip puts on it.
  */
-export function reactionGlyph(content: string): string | undefined {
-  return reservedReaction(typeof content === 'string' ? content.trim() : '')?.label;
+export function eventBody(event: NostrEvent): string {
+  if (event.kind !== 7) {
+    return event.content;
+  }
+  const raw = typeof event.content === 'string' ? event.content.trim() : '';
+  return reservedReaction(raw)?.label ?? event.content;
 }
 
 /**

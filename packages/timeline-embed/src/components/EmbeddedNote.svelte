@@ -28,6 +28,7 @@
     selectEmbeds,
   } from '../lib/note-embeds.ts';
   import { type Profile, authorHandle, authorName } from '../lib/profile.ts';
+  import { eventBody } from '../lib/reactions.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
@@ -108,7 +109,7 @@
   );
   const fade = $derived(unverified && !ancestorUnverified);
 
-  const parts = $derived(event ? parseContent(event.content) : []);
+  const parts = $derived(event ? parseContent(eventBody(event)) : []);
   /** See `resolvable` in `EventCard.svelte`. */
   const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
   const nested = $derived(resolvable ? selectEmbeds(parts, depth) : []);
