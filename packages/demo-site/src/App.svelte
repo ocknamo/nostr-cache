@@ -22,7 +22,7 @@
 
   const DEFAULT_SETTINGS = {
     relays: 'wss://yabu.me',
-    kinds: '1',
+    kinds: '1,6',
     limit: '50',
     /** Seconds a cached kind 0 is served for — the widget's own default. */
     profileFreshness: String(DEFAULT_PROFILE_FRESHNESS),

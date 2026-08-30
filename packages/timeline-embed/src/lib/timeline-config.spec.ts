@@ -32,6 +32,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('DEFAULT_KINDS', () => {
+  // Pinned as a literal: every other expectation reads the constant, so the
+  // default itself would follow a change rather than catch one.
+  it('asks for notes and reposts', () => {
+    expect(DEFAULT_KINDS).toEqual([1, 6]);
+  });
+});
+
 describe('parseRelays', () => {
   it('splits, trims and de-duplicates a comma-separated list', () => {
     expect(parseRelays(' wss://a.example , wss://b.example ,wss://a.example')).toEqual([

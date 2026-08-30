@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { NostrEvent } from '@nostr-cache/shared';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resetOgpCache } from '../lib/ogp.ts';
@@ -1222,6 +1223,125 @@ describe('EventCard', () => {
       await Promise.resolve();
 
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reposts (NIP-18)', () => {
+    const REPOSTED_ID = 'f'.repeat(64);
+    /** What a repost carries in `content`: a copy of the reposted event. */
+    const REPOSTED_JSON = JSON.stringify(makeEvent({ id: REPOSTED_ID, content: 'もとの投稿' }));
+
+    function repost(overrides: Partial<NostrEvent> = {}): NostrEvent {
+      return makeEvent({
+        kind: 6,
+        content: REPOSTED_JSON,
+        tags: [
+          ['e', REPOSTED_ID, 'wss://relay.example'],
+          ['p', 'a'.repeat(64)],
+        ],
+        ...overrides,
+      });
+    }
+
+    it('renders the label instead of the serialized event, and no 返信先 chip', () => {
+      const { container } = render(EventCard, { props: { event: repost() } });
+
+      expect(screen.getByText('リポスト')).toBeInTheDocument();
+      expect(container.querySelector('.note')).not.toHaveTextContent('"kind"');
+      expect(screen.queryByText('返信先')).not.toBeInTheDocument();
+    });
+
+    it('asks for the reposted event by id rather than reading the copy', () => {
+      const onEmbedRequest = vi.fn();
+      render(EventCard, { props: { event: repost(), onEmbedRequest } });
+
+      expect(onEmbedRequest).toHaveBeenCalledWith({
+        key: REPOSTED_ID,
+        filter: { ids: [REPOSTED_ID] },
+        replaceable: false,
+      });
+    });
+
+    it('renders the reposted event as a quote card once it is here', () => {
+      const { container } = render(EventCard, {
+        props: {
+          event: repost(),
+          embeds: new Map([
+            [
+              REPOSTED_ID,
+              {
+                status: 'ready' as const,
+                event: makeEvent({ id: REPOSTED_ID, content: 'もとの投稿' }),
+              },
+            ],
+          ]),
+        },
+      });
+
+      expect(container.querySelector('.quote .content')).toHaveTextContent('もとの投稿');
+    });
+
+    it('falls back to the abbreviated id when nothing resolves it', () => {
+      const { container } = render(EventCard, {
+        props: {
+          event: repost(),
+          embeds: new Map([[REPOSTED_ID, { status: 'missing' as const }]]),
+        },
+      });
+
+      expect(container.querySelector('.quote')).toBeNull();
+      expect(screen.getByTitle(REPOSTED_ID)).toHaveTextContent('ffffffff…ffffffff');
+    });
+
+    it('leaves the reference a chip when the embedder asked for no nested cards', () => {
+      const onEmbedRequest = vi.fn();
+      const { container } = render(EventCard, {
+        props: { event: repost(), showEmbeds: false, onEmbedRequest },
+      });
+
+      expect(container.querySelector('.quote')).toBeNull();
+      expect(screen.getByTitle(REPOSTED_ID)).toHaveTextContent('ffffffff…ffffffff');
+      expect(onEmbedRequest).not.toHaveBeenCalled();
+    });
+
+    it('keeps the label alone for a repost that names no event', () => {
+      const onEmbedRequest = vi.fn();
+      const { container } = render(EventCard, {
+        props: { event: repost({ tags: [['p', 'a'.repeat(64)]] }), onEmbedRequest },
+      });
+
+      expect(screen.getByText('リポスト')).toBeInTheDocument();
+      expect(container.querySelector('.quote')).toBeNull();
+      expect(onEmbedRequest).not.toHaveBeenCalled();
+    });
+
+    it('hands a press the repost itself, not the event it carries', async () => {
+      const event = repost();
+      const onAction = vi.fn();
+      render(EventCard, {
+        props: { event, actions: [{ id: 'zap', label: 'Zap' }], onAction },
+      });
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Zap' }));
+
+      expect(onAction.mock.calls[0][1].event).toEqual(event);
+    });
+
+    it('treats a generic repost (kind 16) the same', () => {
+      const { container } = render(EventCard, {
+        props: {
+          event: repost({
+            kind: 16,
+            tags: [
+              ['e', REPOSTED_ID],
+              ['k', '30023'],
+            ],
+          }),
+        },
+      });
+
+      expect(screen.getByText('リポスト')).toBeInTheDocument();
+      expect(container.querySelector('.note')).not.toHaveTextContent('"kind"');
     });
   });
 });

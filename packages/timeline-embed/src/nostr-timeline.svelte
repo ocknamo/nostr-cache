@@ -51,7 +51,7 @@
      * three when it parses to at least one usable filter.
      */
     filters?: string;
-    /** Comma-separated event kinds. Ignored when `filters` is set. Defaults to `1`. */
+    /** Comma-separated event kinds. Ignored when `filters` is set. Defaults to `1,6`. */
     kinds?: string;
     /** Comma-separated author pubkeys (hex). Ignored when `filters` is set. */
     authors?: string;

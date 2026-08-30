@@ -23,7 +23,8 @@ import { MAX_REACTIONS } from './reactions.ts';
 import { MAX_REPLIES, MAX_REPLY_DEPTH } from './reply-tree.ts';
 
 export const DEFAULT_LIMIT = 50;
-export const DEFAULT_KINDS = [1];
+/** Reposts included: a real client's home timeline is notes and reposts. */
+export const DEFAULT_KINDS = [1, 6];
 
 function splitList(value: string | null | undefined): string[] {
   if (!value) {
@@ -298,8 +299,8 @@ export interface FilterInput {
 /**
  * Build the NIP-01 filter for the timeline subscription.
  *
- * Omitted or unparseable inputs fall back to the defaults (kind 1, 50 events)
- * so a bare `<nostr-timeline>` still shows something.
+ * Omitted or unparseable inputs fall back to the defaults (kinds 1 and 6,
+ * 50 events) so a bare `<nostr-timeline>` still shows something.
  */
 export function parseFilter(input: FilterInput): Filter {
   const kinds = parseNumberList(input.kinds);

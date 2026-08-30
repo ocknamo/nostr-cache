@@ -161,7 +161,7 @@ describe('Follow timeline E2E', () => {
     const rendered = await contents(page);
     expect(rendered).toContain('a post by a follow');
     expect(rendered).toContain('a post by the subject');
-    // The stranger's note is in the same upstream and matches `{"kinds":[1]}`.
+    // The stranger's note is in the same upstream and matches the same `kinds`.
     // Its absence is the whole point: the timeline asked for authors, not for
     // the global feed.
     expect(rendered).not.toContain('a post by a stranger');

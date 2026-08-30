@@ -34,7 +34,7 @@ export interface EventRef {
   id: string;
 }
 
-function isEventId(value: unknown): value is string {
+export function isEventId(value: unknown): value is string {
   return typeof value === 'string' && EVENT_ID_PATTERN.test(value);
 }
 

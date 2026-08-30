@@ -11,6 +11,8 @@ import {
   segmentKey,
   segmentMedia,
   selectEmbeds,
+  sourceKey,
+  sourceTarget,
 } from './note-embeds.ts';
 
 const NPUB_HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e';
@@ -54,6 +56,19 @@ function entityOf(content: string): EntityPart {
 describe('eventIdTarget', () => {
   it('keys a bare id the way the entity for the same event is keyed', () => {
     expect(eventIdTarget(NOTE_HEX)).toEqual(embedTarget(entityOf(NOTE).entity));
+  });
+});
+
+describe('sourceTarget', () => {
+  it('resolves an id and the entity for the same event alike', () => {
+    const entity = { kind: 'entity', part: entityOf(NOTE) } as const;
+
+    expect(sourceTarget({ kind: 'id', id: NOTE_HEX })).toEqual(sourceTarget(entity));
+    expect(sourceKey({ kind: 'id', id: NOTE_HEX })).toBe(sourceKey(entity));
+  });
+
+  it('has nothing to resolve for a person', () => {
+    expect(sourceTarget({ kind: 'entity', part: entityOf(NPUB) })).toBeUndefined();
   });
 });
 

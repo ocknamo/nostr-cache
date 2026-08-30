@@ -24,6 +24,7 @@
   import { previewTarget } from '../lib/ogp.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import { eventBody } from '../lib/reactions.ts';
+  import { isRepost, repostTargetId } from '../lib/reposts.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
@@ -57,9 +58,9 @@
     showMedia?: boolean;
     /**
      * Render the events a `nostr:` reference in the body points at, as nested
-     * cards (NIP-27). With this off — or with neither an `onEmbedRequest` to
-     * fetch through nor `embeds` already resolved — a reference stays the
-     * abbreviated chip it has always been.
+     * cards (NIP-27), and the event a repost carries (NIP-18). With this off —
+     * or with neither an `onEmbedRequest` to fetch through nor `embeds` already
+     * resolved — a reference stays the abbreviated chip it has always been.
      */
     showEmbeds?: boolean;
     /**
@@ -173,7 +174,11 @@
   const name = $derived(authorName(event.pubkey, profile));
   const handle = $derived(authorHandle(event.pubkey, profile));
 
-  const parts = $derived(parseContent(eventBody(event)));
+  /** A repost's `content` is a copy of the reposted event, not a body — see `reposts.ts`. */
+  const repost = $derived(isRepost(event));
+  const repostId = $derived(repost ? repostTargetId(event) : undefined);
+
+  const parts = $derived(repost ? [] : parseContent(eventBody(event)));
   /**
    * Without either a way to fetch (`onEmbedRequest`) or events already resolved
    * for it (`embeds`), lifting a reference out of the text would leave nothing
@@ -199,11 +204,16 @@
    * would otherwise also show as a chip pointing at the same event. The reply
    * chip stays whatever the body does: a reply's parent is context the author
    * did not choose to quote, and "返信先" says something the quote card does not.
+   *
+   * A repost has neither: its unmarked `e` tag names what it reposts, which
+   * `parseRefs` would otherwise read as a NIP-10 parent and label 「返信先」.
    */
   const refs = $derived(
-    parseRefs(event).filter((ref) =>
-      ref.kind === 'quote' ? !embeddedKeys.has(ref.id) : showReplyRef
-    )
+    repost
+      ? []
+      : parseRefs(event).filter((ref) =>
+          ref.kind === 'quote' ? !embeddedKeys.has(ref.id) : showReplyRef
+        )
   );
 
   const REF_LABELS: Record<'reply' | 'quote', string> = {
@@ -520,6 +530,31 @@
       readable by mouse and touch.
     -->
     <div class="note" part="note">
+      {#if repost}
+        <!-- The reposter is already the card's author, so the label says what
+             the card is rather than repeating who. -->
+        <p class="repost" part="repost">リポスト</p>
+        {#if repostId}
+          <!-- Gated on `showEmbeds` for the reasons `replyResolved` gives above;
+               without it the reference falls back to its chip. -->
+          <div class="embed">
+            <EmbeddedNote
+              source={{ kind: 'id', id: repostId }}
+              depth={1}
+              embeds={showEmbeds ? embeds : undefined}
+              {profiles}
+              {validationStatuses}
+              {showAvatar}
+              {showMedia}
+              ancestorUnverified={unverified}
+              onEmbedRequest={showEmbeds ? onEmbedRequest : undefined}
+              {noteAction}
+              {authorAction}
+              {onAction}
+            />
+          </div>
+        {/if}
+      {/if}
       <!-- Inside the scrolling box on purpose: a chain of quotes then grows the
            scroll rather than the card, keeping the height cap. Cards render
            where the author's own `nostr:` reference sat in the text, rather
@@ -538,7 +573,7 @@
         {:else}
           <div class="embed">
             <EmbeddedNote
-              entity={segment.part}
+              source={{ kind: 'entity', part: segment.part }}
               depth={1}
               {embeds}
               {profiles}
@@ -973,6 +1008,15 @@
 
   .embed:last-child {
     margin-bottom: 0;
+  }
+
+  /* A reference chip's label without the chip: nothing to press, and the card
+     below is the reference itself. */
+  .repost {
+    margin: 0 0 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--nt-muted, #657786);
   }
 
   .refs {

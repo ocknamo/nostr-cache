@@ -69,12 +69,7 @@
      * back to that would not mean asking upstream for the global feed.
      */
     pubkey?: string;
-    /**
-     * Comma-separated event kinds. Defaults to `1`.
-     *
-     * Adding `6` (reposts) renders badly: `EventCard` does not interpret them,
-     * so a repost arrives as an empty card or raw JSON. See the README.
-     */
+    /** Comma-separated event kinds. Defaults to `1,6` — notes and reposts. */
     kinds?: string;
     /** Defaults to 50. */
     limit?: string;

@@ -86,6 +86,12 @@ describe('acceptsReply', () => {
     expect(acceptsReply(reaction, AT_POST)).toBe(false);
   });
 
+  it('rejects a repost, which says nothing and would read as an empty reply', () => {
+    const repost = makeEvent({ id: id('rp1'), kind: 6, tags: [['e', POST]] });
+
+    expect(acceptsReply(repost, AT_POST)).toBe(false);
+  });
+
   it('rejects a note that only mentions the post', () => {
     const mention = makeEvent({ id: id('m1'), tags: [['e', POST, '', 'mention']] });
 

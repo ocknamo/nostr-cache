@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import { type EntityPart, parseContent } from '../lib/content-parts.ts';
-import type { EmbeddedEvent } from '../lib/note-embeds.ts';
+import { parseContent } from '../lib/content-parts.ts';
+import type { EmbedSource, EmbeddedEvent } from '../lib/note-embeds.ts';
 import type { Profile } from '../lib/profile.ts';
 import { makeEvent } from '../test-fixtures.ts';
 import EmbeddedNote from './EmbeddedNote.svelte';
@@ -15,13 +15,13 @@ const NPUB_HEX = '7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf
 const OTHER_NOTE = 'note1424242424242424242424242424242424242424242424242424qv3q9y6';
 const OTHER_NOTE_HEX = 'aa'.repeat(32);
 
-/** The entity a one-reference body parses to. */
-function entityOf(content: string): EntityPart {
+/** The card's source for a body holding one reference. */
+function sourceOf(content: string): EmbedSource {
   const part = parseContent(content).find((candidate) => candidate.kind === 'entity');
   if (!part) {
     throw new Error(`no entity in ${content}`);
   }
-  return part;
+  return { kind: 'entity', part };
 }
 
 /** A resolved quote of `content`, keyed the way the controller keys it. */
@@ -33,7 +33,7 @@ describe('EmbeddedNote', () => {
   it('asks for the referenced event when it appears', () => {
     const onEmbedRequest = vi.fn();
     render(EmbeddedNote, {
-      props: { entity: entityOf(`nostr:${NOTE}`), depth: 1, onEmbedRequest },
+      props: { source: sourceOf(`nostr:${NOTE}`), depth: 1, onEmbedRequest },
     });
 
     // jsdom has no IntersectionObserver, so `whenVisible` reports immediately.
@@ -47,7 +47,7 @@ describe('EmbeddedNote', () => {
   it('shows a placeholder while the lookup is in flight', () => {
     render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map<string, EmbeddedEvent>([[NOTE_HEX, { status: 'loading' }]]),
       },
@@ -59,7 +59,7 @@ describe('EmbeddedNote', () => {
   it('falls back to the abbreviated chip when nothing came back', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map<string, EmbeddedEvent>([[NOTE_HEX, { status: 'missing' }]]),
       },
@@ -70,11 +70,60 @@ describe('EmbeddedNote', () => {
     expect(screen.getByTitle(`nostr:${NOTE}`)).toHaveTextContent('note1tszz…elrl');
   });
 
+  it('renders an event named by an id alone, and abbreviates it while it is not here', () => {
+    const { container, rerender } = render(EmbeddedNote, {
+      props: {
+        source: { kind: 'id', id: NOTE_HEX } as const,
+        depth: 1,
+        embeds: new Map<string, EmbeddedEvent>([[NOTE_HEX, { status: 'missing' }]]),
+      },
+    });
+
+    expect(screen.getByTitle(NOTE_HEX)).toHaveTextContent('5c04292b…1b6a7f11');
+
+    rerender({ embeds: ready(NOTE_HEX, 'reposted body') });
+    expect(container.querySelector('.content')).toHaveTextContent('reposted body');
+  });
+
+  it('draws a quoted repost as its own label and card, never as the JSON it carries', () => {
+    const reposted = 'c'.repeat(64);
+    const onEmbedRequest = vi.fn();
+    const { container } = render(EmbeddedNote, {
+      props: {
+        source: sourceOf(`nostr:${NOTE}`),
+        depth: 1,
+        onEmbedRequest,
+        embeds: new Map<string, EmbeddedEvent>([
+          [
+            NOTE_HEX,
+            {
+              status: 'ready',
+              event: makeEvent({
+                id: NOTE_HEX,
+                kind: 6,
+                content: JSON.stringify(makeEvent({ id: reposted, content: 'もとの投稿' })),
+                tags: [['e', reposted]],
+              }),
+            },
+          ],
+          [
+            reposted,
+            { status: 'ready', event: makeEvent({ id: reposted, content: 'もとの投稿' }) },
+          ],
+        ]),
+      },
+    });
+
+    expect(container.querySelector('.quote-body')).not.toHaveTextContent('"kind"');
+    expect(screen.getByText('リポスト')).toBeInTheDocument();
+    expect(container.querySelector('.quote .quote .content')).toHaveTextContent('もとの投稿');
+  });
+
   it('shows the chip rather than a placeholder when nobody can fetch for it', () => {
     // No `onEmbedRequest`: the lookup is never going to happen, so a "loading"
     // frame would sit there for the life of the page.
     const { container } = render(EmbeddedNote, {
-      props: { entity: entityOf(`nostr:${NOTE}`), depth: 1 },
+      props: { source: sourceOf(`nostr:${NOTE}`), depth: 1 },
     });
 
     expect(container.querySelector('.quote')).toBeNull();
@@ -84,7 +133,7 @@ describe('EmbeddedNote', () => {
   it('renders the quoted body inside a frame', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, 'quoted body'),
       },
@@ -99,7 +148,7 @@ describe('EmbeddedNote', () => {
       [NOTE_HEX, { status: 'ready', event: makeEvent({ id: NOTE_HEX, kind: 7, content: '+' }) }],
     ] as const);
     const { container } = render(EmbeddedNote, {
-      props: { entity: entityOf(`nostr:${NOTE}`), depth: 1, embeds },
+      props: { source: sourceOf(`nostr:${NOTE}`), depth: 1, embeds },
     });
 
     expect(container.querySelector('.content')).toHaveTextContent(/^⭐$/);
@@ -112,7 +161,7 @@ describe('EmbeddedNote', () => {
     const hostile = '<img src=x onerror=alert(1)> javascript:alert(2) <script>alert(3)</script>';
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, hostile),
       },
@@ -127,7 +176,7 @@ describe('EmbeddedNote', () => {
   it('never gives a quoted attachment a non-http scheme', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, 'https://cdn.example.com/a.jpg data:text/html;base64,PHN2Zz4='),
       },
@@ -143,7 +192,7 @@ describe('EmbeddedNote', () => {
     // avatar, so nesting does not narrow it level by level.
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, 'quoted body'),
       },
@@ -159,7 +208,7 @@ describe('EmbeddedNote', () => {
     const profiles = new Map<string, Profile>([['f'.repeat(64), { displayName: 'たけし' }]]);
     render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map<string, EmbeddedEvent>([[NOTE_HEX, { status: 'ready', event }]]),
         profiles,
@@ -171,7 +220,7 @@ describe('EmbeddedNote', () => {
 
   it('fades a quote the relay has not vouched for, and stops once it has', () => {
     const props = {
-      entity: entityOf(`nostr:${NOTE}`),
+      source: sourceOf(`nostr:${NOTE}`),
       depth: 1,
       embeds: ready(NOTE_HEX, 'quoted body'),
     };
@@ -189,7 +238,7 @@ describe('EmbeddedNote', () => {
     // would come out under 8%, which is invisible rather than faded.
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         ancestorUnverified: true,
         embeds: ready(NOTE_HEX, 'quoted body'),
@@ -202,7 +251,7 @@ describe('EmbeddedNote', () => {
   it('does not fade a nested quote under one that is already faded', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map([
           ...ready(NOTE_HEX, `outer nostr:${OTHER_NOTE}`),
@@ -219,7 +268,7 @@ describe('EmbeddedNote', () => {
   it('nests a quote inside a quote', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map([
           ...ready(NOTE_HEX, `outer nostr:${OTHER_NOTE}`),
@@ -235,7 +284,7 @@ describe('EmbeddedNote', () => {
   it('places the nested card where its own reference sat in the quoted text', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map([
           ...ready(NOTE_HEX, `before ${OTHER_NOTE} after`),
@@ -263,7 +312,7 @@ describe('EmbeddedNote', () => {
       props: {
         // Depth 5 is the last card that is drawn, so its own references stay
         // in its text rather than opening a sixth level.
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 5,
         embeds: new Map([
           ...ready(NOTE_HEX, `outer nostr:${OTHER_NOTE}`),
@@ -279,7 +328,7 @@ describe('EmbeddedNote', () => {
   it('leaves the quote unpressable until a note action is declared', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, 'quoted body'),
       },
@@ -292,7 +341,7 @@ describe('EmbeddedNote', () => {
     const onAction = vi.fn();
     render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, 'quoted body'),
         validationStatuses: new Map([[NOTE_HEX, 'validated' as const]]),
@@ -314,7 +363,7 @@ describe('EmbeddedNote', () => {
   it('covers the whole frame with the press, so the card itself is the target', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: ready(NOTE_HEX, 'quoted body'),
         noteAction: { id: 'open-post', label: '投稿を開く' },
@@ -332,7 +381,7 @@ describe('EmbeddedNote', () => {
   it('offers the press on a nested quote too', () => {
     const { container } = render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map([
           ...ready(NOTE_HEX, `outer nostr:${OTHER_NOTE}`),
@@ -349,7 +398,7 @@ describe('EmbeddedNote', () => {
     const event = makeEvent({ id: NOTE_HEX, pubkey: 'f'.repeat(64), content: 'quoted' });
     render(EmbeddedNote, {
       props: {
-        entity: entityOf(`nostr:${NOTE}`),
+        source: sourceOf(`nostr:${NOTE}`),
         depth: 1,
         embeds: new Map<string, EmbeddedEvent>([[NOTE_HEX, { status: 'ready', event }]]),
         profiles: new Map<string, Profile>([['f'.repeat(64), { displayName: 'たけし' }]]),
@@ -377,7 +426,7 @@ describe('EmbeddedNote', () => {
 
     it('leaves the header plain until an embedder asks for the press', () => {
       const { container } = render(EmbeddedNote, {
-        props: { entity: entityOf(`nostr:${NOTE}`), depth: 1, embeds: quoted('quoted body') },
+        props: { source: sourceOf(`nostr:${NOTE}`), depth: 1, embeds: quoted('quoted body') },
       });
 
       expect(container.querySelector('.quote-author')).toBeNull();
@@ -387,7 +436,7 @@ describe('EmbeddedNote', () => {
       const onAction = vi.fn();
       render(EmbeddedNote, {
         props: {
-          entity: entityOf(`nostr:${NOTE}`),
+          source: sourceOf(`nostr:${NOTE}`),
           depth: 1,
           embeds: quoted('quoted body'),
           profiles: new Map<string, Profile>([[QUOTED, { displayName: 'たけし' }]]),
@@ -411,7 +460,7 @@ describe('EmbeddedNote', () => {
       const onAction = vi.fn();
       const { container } = render(EmbeddedNote, {
         props: {
-          entity: entityOf(`nostr:${NOTE}`),
+          source: sourceOf(`nostr:${NOTE}`),
           depth: 1,
           embeds: quoted('quoted body'),
           authorAction: AUTHOR,
@@ -436,7 +485,7 @@ describe('EmbeddedNote', () => {
     it('keeps the avatar out of the tab order, as the card does', () => {
       const { container } = render(EmbeddedNote, {
         props: {
-          entity: entityOf(`nostr:${NOTE}`),
+          source: sourceOf(`nostr:${NOTE}`),
           depth: 1,
           embeds: quoted('quoted body'),
           authorAction: AUTHOR,
@@ -452,7 +501,7 @@ describe('EmbeddedNote', () => {
       const onAction = vi.fn();
       render(EmbeddedNote, {
         props: {
-          entity: entityOf(`nostr:${NOTE}`),
+          source: sourceOf(`nostr:${NOTE}`),
           depth: 1,
           embeds: quoted(`hi nostr:${NPUB}`),
           authorAction: AUTHOR,
@@ -472,7 +521,7 @@ describe('EmbeddedNote', () => {
   it('renders a chip for a reference that names a person', () => {
     const onEmbedRequest = vi.fn();
     const { container } = render(EmbeddedNote, {
-      props: { entity: entityOf(`nostr:${NPUB}`), depth: 1, onEmbedRequest },
+      props: { source: sourceOf(`nostr:${NPUB}`), depth: 1, onEmbedRequest },
     });
 
     expect(container.querySelector('.quote')).toBeNull();

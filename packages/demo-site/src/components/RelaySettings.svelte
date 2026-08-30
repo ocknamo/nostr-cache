@@ -41,7 +41,7 @@
   </label>
   <label>
     <span>kinds</span>
-    <input bind:value={kinds} placeholder="1" spellcheck="false" />
+    <input bind:value={kinds} placeholder="1,6" spellcheck="false" />
   </label>
   <label>
     <span>limit</span>
