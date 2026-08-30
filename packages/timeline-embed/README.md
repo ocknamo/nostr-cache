@@ -419,7 +419,7 @@ iframe は**別のページ**（`embed/post/`）です:
 
 集計の規則:
 
-- `+` と空文字は「いいね」として ❤️、`-` は 👎（NIP-25）。**リテラルの ❤️ と `+` は
+- `+` と空文字は「いいね」として ⭐、`-` は 👎（NIP-25）。**リテラルの ⭐ と `+` は
   同じチップにまとめます** — 読者には区別が付かず、同じ絵文字のチップが 2 つ並ぶだけなので
 - `:shortcode:` は NIP-30 の `emoji` タグから画像を引きます。画像が無ければ文字のまま出します
 - **同じ人は 1 チップにつき 1 回だけ数えます**（最新のものを採用）。NIP-25 に取り消しの概念が
@@ -571,7 +571,7 @@ part は `::part(widget)` / `::part(error)` / `::part(reconnecting)` / `::part(e
 `::part(replies)` / `::part(replies-heading)` / `::part(reply)` / `::part(reply-more)` /
 `::part(replies-note)` / `::part(ref)` / `::part(ref-nav)` を公開しています。`reply-more` は
 「返信の下が切られた」ときと「直接の返信が切られた」ときの両方に付きます。`reaction-chip-<key>` の
-`<key>` は絵文字そのもの（`+` は `❤️` に寄せられます）で、空白を含むリアクションでは
+`<key>` は絵文字そのもの（`+` は `⭐` に寄せられます）で、空白を含むリアクションでは
 `part` が壊れるため付きません（`reaction-chip` は常に付きます）。カード内部の
 `::part(note)` / `::part(actions)` / `::part(action)` / `::part(avatar)` はタイムラインと共通です
 （`avatar` は「返信先」プレビューのアイコンにも当たります）。
@@ -1079,7 +1079,7 @@ window.addEventListener('message', (event) => {
   actions='[
     {"id":"reply","label":"返信","icon":"chat_bubble"},
     {"id":"repost","label":"リポスト","icon":"repeat"},
-    {"id":"like","label":"いいね","icon":"favorite"},
+    {"id":"like","label":"いいね","icon":"star"},
     {"id":"zap","label":"Zap","icon":"bolt"},
     {"id":"share","label":"共有","icon":"share"}
   ]'
@@ -1093,7 +1093,7 @@ window.addEventListener('message', (event) => {
   **この読み込みは Google への第三者リクエストで、閲覧者の IP アドレスが Google に渡ります。**
   埋め込み先ページが自前でフォントを読み込む場合（セルフホストを含む）は
   `material-icons-font="none"` を指定してください。
-- フォントが読み込まれるまでの間、アイコンは `favorite` のような**アイコン名の文字列として表示されます**。
+- フォントが読み込まれるまでの間、アイコンは `star` のような**アイコン名の文字列として表示されます**。
 - 絵文字と混ぜたい場合は、そのボタンだけ `"iconType":"text"` を指定します
   （逆に、全体が文字アイコンのときに 1 つだけ `"iconType":"material"` にもできます）。
 - `--nt-material-fill`（0/1）・`--nt-material-weight`（100〜700）で塗りと太さを変えられます。

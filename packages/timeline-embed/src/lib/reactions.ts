@@ -39,7 +39,7 @@ export const MAX_LISTED_REACTORS = 50;
 const MAX_REACTION_CONTENT = 32;
 
 /** NIP-25 defines `+` and `-`, not the glyphs they are drawn as. */
-const LIKE_LABEL = '❤️';
+const LIKE_LABEL = '⭐';
 const DISLIKE_LABEL = '👎';
 
 /** NIP-30 custom emoji reference. */
@@ -55,8 +55,8 @@ export interface Reaction {
   event: NostrEvent;
   kind: ReactionKind;
   /**
-   * Deliberately the same value as {@link label}, so NIP-25's `+` and a literal
-   * `❤️` share one chip rather than sitting side by side looking identical.
+   * The glyph as drawn, so a reaction spelled `+` and one carrying that same
+   * glyph literally share a chip instead of sitting side by side looking identical.
    */
   key: string;
   label: string;

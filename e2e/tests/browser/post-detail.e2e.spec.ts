@@ -105,8 +105,8 @@ describe('Post detail E2E', () => {
     const reactions = [
       namedReaction,
       // A different person, spelling the same thing the other way: `+` and a
-      // literal ❤️ share one chip.
-      await reactTo(post, '❤️'),
+      // literal ⭐ share one chip.
+      await reactTo(post, '⭐'),
       await reactTo(post, '🔥'),
       ...twice,
       // A reaction to the *reply*, carrying the post's id first as NIP-10
@@ -181,10 +181,10 @@ describe('Post detail E2E', () => {
         { timeout: TIMEOUT }
       );
 
-      // `+` and a literal ❤️ share a chip; the double reactor counts once; the
+      // `+` and a literal ⭐ share a chip; the double reactor counts once; the
       // reaction to the reply counts nowhere.
       expect(await chips(page)).toEqual([
-        ['❤️', '3'],
+        ['⭐', '3'],
         ['🔥', '1'],
       ]);
       // The chips carry the counts; nothing repeats them in prose.

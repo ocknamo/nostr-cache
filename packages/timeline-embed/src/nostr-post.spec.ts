@@ -45,7 +45,7 @@ describe('<nostr-post> custom element', () => {
     }
   }
 
-  /** The fixture post, plus a ❤️ and a 🔥 on it. */
+  /** The fixture post, plus a ⭐ and a 🔥 on it. */
   function postWithReactions(): NostrEvent[] {
     return [
       makeEvent({ id: POST_ID, pubkey: ALICE, content: '詳細に出る投稿' }),
