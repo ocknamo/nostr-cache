@@ -133,6 +133,31 @@ function emojiUrl(event: NostrEvent, shortcode: string): string | undefined {
 }
 
 /**
+ * NIP-25 reserves `+`, `-` and an empty `content`; the glyph each is drawn as
+ * is this widget's choice.
+ */
+function reservedReaction(raw: string): { kind: 'like' | 'dislike'; label: string } | undefined {
+  if (raw === '' || raw === '+') {
+    return { kind: 'like', label: LIKE_LABEL };
+  }
+  if (raw === '-') {
+    return { kind: 'dislike', label: DISLIKE_LABEL };
+  }
+  return undefined;
+}
+
+/**
+ * The glyph a kind 7 body reads as, for a card rendering the reaction itself
+ * rather than counting it into a chip.
+ *
+ * @returns `undefined` when the author sent a glyph of their own, which is
+ *   rendered as it was written
+ */
+export function reactionGlyph(content: string): string | undefined {
+  return reservedReaction(typeof content === 'string' ? content.trim() : '')?.label;
+}
+
+/**
  * @returns `undefined` for anything that is not a reaction to this post, or
  *   whose content is not something a chip can carry
  */
@@ -143,14 +168,12 @@ export function parseReaction(event: NostrEvent, match: PostTargetMatch): Reacti
 
   const base = { id: event.id, pubkey: event.pubkey, createdAt: event.created_at, event };
 
-  // NIP-25: empty content means `+`. Trimmed first so whitespace-only lands
-  // here rather than on the length test below.
+  // Trimmed first so whitespace-only lands on the reserved spellings rather
+  // than on the length test below.
   const raw = typeof event.content === 'string' ? event.content.trim() : '';
-  if (raw === '' || raw === '+') {
-    return { ...base, kind: 'like', key: LIKE_LABEL, label: LIKE_LABEL };
-  }
-  if (raw === '-') {
-    return { ...base, kind: 'dislike', key: DISLIKE_LABEL, label: DISLIKE_LABEL };
+  const reserved = reservedReaction(raw);
+  if (reserved) {
+    return { ...base, kind: reserved.kind, key: reserved.label, label: reserved.label };
   }
 
   const shortcode = SHORTCODE.exec(raw)?.[1];

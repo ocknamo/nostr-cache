@@ -23,6 +23,7 @@
   } from '../lib/note-embeds.ts';
   import { previewTarget } from '../lib/ogp.ts';
   import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
+  import { reactionGlyph } from '../lib/reactions.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
@@ -172,7 +173,15 @@
   const name = $derived(authorName(event.pubkey, profile));
   const handle = $derived(authorHandle(event.pubkey, profile));
 
-  const parts = $derived(parseContent(event.content));
+  /**
+   * `+` / `-` / empty is a NIP-25 spelling rather than something the author
+   * wrote, so a kind 7 card shows the glyph its chip would show.
+   */
+  const body = $derived(
+    event.kind === 7 ? (reactionGlyph(event.content) ?? event.content) : event.content
+  );
+
+  const parts = $derived(parseContent(body));
   /**
    * Without either a way to fetch (`onEmbedRequest`) or events already resolved
    * for it (`embeds`), lifting a reference out of the text would leave nothing

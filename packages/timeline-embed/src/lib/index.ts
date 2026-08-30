@@ -120,6 +120,7 @@ export {
   MAX_REACTIONS,
   MAX_REACTION_GROUPS,
   parseReaction,
+  reactionGlyph,
   summarizeReactionEvents,
   summarizeReactions,
 } from './reactions.ts';

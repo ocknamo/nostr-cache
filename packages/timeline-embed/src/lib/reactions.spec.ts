@@ -6,6 +6,7 @@ import {
   MAX_REACTION_GROUPS,
   type Reaction,
   parseReaction,
+  reactionGlyph,
   summarizeReactionEvents,
   summarizeReactions,
 } from './reactions.ts';
@@ -23,6 +24,26 @@ function reaction(content: string, overrides: Parameters<typeof makeEvent>[0] = 
     ...overrides,
   });
 }
+
+describe('reactionGlyph', () => {
+  it('draws the NIP-25 spellings as the labels the chips use', () => {
+    expect(reactionGlyph('+')).toBe('⭐');
+    expect(reactionGlyph('')).toBe('⭐');
+    expect(reactionGlyph('   ')).toBe('⭐');
+    expect(reactionGlyph('-')).toBe('👎');
+  });
+
+  it('leaves anything the author wrote themselves to the caller', () => {
+    expect(reactionGlyph('🔥')).toBeUndefined();
+    expect(reactionGlyph(':soapstone:')).toBeUndefined();
+  });
+
+  it('agrees with what the same content is counted as', () => {
+    for (const content of ['+', '', '-']) {
+      expect(reactionGlyph(content)).toBe(parseReaction(reaction(content), BY_ID)?.label);
+    }
+  });
+});
 
 describe('parseReaction', () => {
   it('reads `+` as a like', () => {
