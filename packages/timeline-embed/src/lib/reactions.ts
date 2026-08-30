@@ -55,8 +55,9 @@ export interface Reaction {
   event: NostrEvent;
   kind: ReactionKind;
   /**
-   * The glyph as drawn, so a reaction spelled `+` and one carrying that same
-   * glyph literally share a chip instead of sitting side by side looking identical.
+   * Deliberately the same value as {@link label}, so a reaction spelled `+` and
+   * one carrying that same glyph literally share a chip rather than sitting side
+   * by side looking identical.
    */
   key: string;
   label: string;

@@ -53,6 +53,12 @@ describe('parseReaction', () => {
     expect(plus?.key).toBe(star?.key);
   });
 
+  it('keeps a glyph whose variation selector is part of it, in its own chip', () => {
+    const heart = parseReaction(reaction('❤️'), BY_ID);
+    expect(heart).toMatchObject({ kind: 'emoji', label: '❤️' });
+    expect(heart?.key).not.toBe(parseReaction(reaction('+'), BY_ID)?.key);
+  });
+
   it('resolves a NIP-30 shortcode to its published image', () => {
     const event = reaction(':soapstone:', {
       tags: [
