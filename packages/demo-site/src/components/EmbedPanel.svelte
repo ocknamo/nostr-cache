@@ -49,7 +49,7 @@
   const DEMO_ACTIONS: EventAction[] = [
     { id: 'reply', label: '返信', icon: 'chat_bubble' },
     { id: 'repost', label: 'リポスト', icon: 'repeat' },
-    { id: 'like', label: 'いいね', icon: 'favorite' },
+    { id: 'like', label: 'いいね', icon: 'star' },
     { id: 'zap', label: 'Zap', icon: 'bolt' },
   ];
   /**
@@ -458,7 +458,7 @@
     2 回です。<strong>閲覧者の IP アドレスが Google に渡る第三者リクエスト</strong>なので、
     避けたい場合はフォントを自前で読み込んだうえで <code>material-icons-font="none"</code> を
     指定するか、<code>icon</code> に絵文字などの文字を書いて <code>material-icons</code>
-    を外してください。フォントが届くまでの間、アイコンは <code>favorite</code>
+    を外してください。フォントが届くまでの間、アイコンは <code>star</code>
     のようなアイコン名の文字列として表示されます
     （拡張機能や CSP で読み込みが遮断された場合は、その表示のままになります）。
   </p>

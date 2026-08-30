@@ -136,7 +136,7 @@ describe('PostView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /❤️ 2 件/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /⭐ 2 件/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /🔥 1 件/ })).toBeInTheDocument();
   });
 
@@ -180,7 +180,7 @@ describe('PostView', () => {
       },
     });
 
-    expect(screen.queryByRole('button', { name: /❤️/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /⭐/ })).not.toBeInTheDocument();
   });
 
   it('asks for the author profile when the post appears', () => {

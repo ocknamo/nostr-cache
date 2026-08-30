@@ -26,7 +26,7 @@ function reaction(content: string, overrides: Parameters<typeof makeEvent>[0] = 
 
 describe('parseReaction', () => {
   it('reads `+` as a like', () => {
-    expect(parseReaction(reaction('+'), BY_ID)).toMatchObject({ kind: 'like', label: '❤️' });
+    expect(parseReaction(reaction('+'), BY_ID)).toMatchObject({ kind: 'like', label: '⭐' });
   });
 
   it('reads empty content as a like, which is what NIP-25 says it means', () => {
@@ -47,10 +47,16 @@ describe('parseReaction', () => {
     });
   });
 
-  it('groups `+` with a literal heart, because a reader cannot tell them apart', () => {
+  it('groups `+` with a literal star, because a reader cannot tell them apart', () => {
     const plus = parseReaction(reaction('+'), BY_ID);
+    const star = parseReaction(reaction('⭐'), BY_ID);
+    expect(plus?.key).toBe(star?.key);
+  });
+
+  it('keeps a glyph whose variation selector is part of it, in its own chip', () => {
     const heart = parseReaction(reaction('❤️'), BY_ID);
-    expect(plus?.key).toBe(heart?.key);
+    expect(heart).toMatchObject({ kind: 'emoji', label: '❤️' });
+    expect(heart?.key).not.toBe(parseReaction(reaction('+'), BY_ID)?.key);
   });
 
   it('resolves a NIP-30 shortcode to its published image', () => {
@@ -133,7 +139,7 @@ describe('parseReaction', () => {
 
   it('drops content that is only unrenderable characters', () => {
     // Not read as a like: NIP-25's `+` is for an empty `content`, and this
-    // author sent something — counting it as a heart would credit them with a
+    // author sent something — counting it as a like would credit them with a
     // reaction they did not make.
     expect(parseReaction(reaction('‮‎'), BY_ID)).toBeUndefined();
   });
