@@ -51,9 +51,11 @@
         // Configures the shared relay rather than this widget; see the element.
         'follows-freshness',
         'max-events',
-        // Paging back as the reader reaches the end, and the ceiling it stops at.
-        // A parent that sizes this frame to its content leaves nothing to scroll,
-        // and the widget then does not page at all — see the README.
+        // Paging back as the reader reaches the end, and the ceiling it stops
+        // at. A parent that sizes this frame to its content turns paging off;
+        // the README section on 無限スクロール says why. (No apostrophes in
+        // here: `embed-page.spec.ts` reads this list with a quote-matching
+        // regex, and one would swallow the entries that follow it.)
         'infinite-scroll',
         'max-timeline-events',
         'debug',

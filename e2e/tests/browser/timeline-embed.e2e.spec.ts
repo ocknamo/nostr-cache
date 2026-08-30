@@ -1139,9 +1139,11 @@ describe('Embeddable timeline E2E', () => {
         .flat()
         .filter((filter) => filter.until !== undefined);
       expect(paged.length).toBeGreaterThan(0);
-      // Every page asks from strictly older than the one before it.
+      // Strictly older each time: a repeated cursor is the failure the `until`
+      // widening exists to prevent, and a merely-sorted list would hide it.
       const cursors = paged.map((filter) => filter.until as number);
       expect([...cursors]).toEqual([...cursors].sort((a, b) => b - a));
+      expect(new Set(cursors).size).toBe(cursors.length);
     });
 
     it('stays on the first page when the embedder turned it off', async () => {
@@ -1159,26 +1161,28 @@ describe('Embeddable timeline E2E', () => {
     });
 
     it('stays put inside a frame the embedding page sizes to its content', async () => {
-      // The README's height snippet leaves the frame with nothing to scroll, so
-      // the sentinel sits on screen from the first paint. Paging on that would
-      // walk back to the ceiling on load, for every embed using the snippet.
+      // The README's height snippet leaves the frame with nothing to scroll —
+      // the case both gates in `Timeline.svelte` exist for.
       page = await browser.newPage({ viewport: VIEWPORT });
       await page.goto(site.scriptOnlyUrl);
-      await page.evaluate((src) => {
-        const frame = document.createElement('iframe');
-        frame.src = src;
-        frame.style.cssText = 'display:block;width:100%;border:0;height:200px';
-        window.addEventListener('message', (message) => {
-          if (message.source !== frame.contentWindow) {
-            return;
-          }
-          const height = (message.data as { type?: string; height?: number })?.height;
-          if ((message.data as { type?: string })?.type === 'nostr-timeline:height' && height) {
-            frame.style.height = `${height}px`;
-          }
-        });
-        document.body.appendChild(frame);
-      }, embedUrl({ relays: feed.url, limit: String(PAGE_SIZE) }));
+      await page.evaluate(
+        (src) => {
+          const frame = document.createElement('iframe');
+          frame.src = src;
+          frame.style.cssText = 'display:block;width:100%;border:0;height:200px';
+          window.addEventListener('message', (message) => {
+            if (message.source !== frame.contentWindow) {
+              return;
+            }
+            const height = (message.data as { type?: string; height?: number })?.height;
+            if ((message.data as { type?: string })?.type === 'nostr-timeline:height' && height) {
+              frame.style.height = `${height}px`;
+            }
+          });
+          document.body.appendChild(frame);
+        },
+        embedUrl({ relays: feed.url, limit: String(PAGE_SIZE) })
+      );
 
       const framed = async (): Promise<number> => {
         const inner = page?.frames().find((candidate) => candidate.url().includes('/embed/'));

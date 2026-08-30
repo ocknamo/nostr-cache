@@ -163,12 +163,11 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
 }
 
 /**
- * The ceiling on how many events the timeline holds — and so how far the
- * infinite scroll can page back. Not to be confused with `max-events`, which
- * bounds the relay's IndexedDB rather than the screen.
+ * How many events the timeline holds — and so how far it can page back. Not
+ * `max-events`, which bounds the relay's IndexedDB rather than the screen.
  *
- * @returns The requested ceiling, `Infinity` for the documented `0`, or
- *   `undefined` to leave `DEFAULT_TIMELINE_CAP` in place
+ * @returns The ceiling, `Infinity` for the documented `0`, or `undefined` to
+ *   leave `DEFAULT_TIMELINE_CAP` in place
  */
 export function parseMaxTimelineEvents(value: string | null | undefined): number | undefined {
   const parsed = parseWholeNumber(value, {
@@ -495,7 +494,6 @@ export function configFromSearchParams(params: URLSearchParams): {
   followsFreshness: number | undefined;
   /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
-  /** Whether the timeline pages back as the reader reaches the end. */
   infiniteScroll: boolean;
   /** Ceiling on events held on screen; `undefined` keeps the default. */
   maxTimelineEvents: number | undefined;
@@ -577,7 +575,6 @@ export interface FollowTimelineConfig {
   followsFreshness: number | undefined;
   /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
-  /** Whether the timeline pages back as the reader reaches the end. */
   infiniteScroll: boolean;
   /** Ceiling on events held on screen; `undefined` keeps the default. */
   maxTimelineEvents: number | undefined;

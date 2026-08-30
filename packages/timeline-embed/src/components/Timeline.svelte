@@ -119,10 +119,9 @@
   let scrolled = $state(false);
 
   /**
-   * Whether the reader has scrolled here at all. Paging is a response to that,
-   * and `IntersectionObserver` cannot tell one apart from a sentinel that was
-   * on screen the whole time — which is what an iframe sized to its content
-   * leaves behind, on the first paint of every embed using the height protocol.
+   * Whether the reader has scrolled here at all. `IntersectionObserver` cannot
+   * tell that from a sentinel that was on screen the whole time — which is what
+   * an iframe sized to its content leaves behind on every first paint.
    */
   $effect(() => {
     if (!onReachEnd || scrolled) {

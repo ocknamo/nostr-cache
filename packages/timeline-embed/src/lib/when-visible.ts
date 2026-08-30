@@ -59,13 +59,10 @@ export function whenVisible(node: HTMLElement, callback?: () => void) {
 /**
  * Report whether the element is on screen, every time that changes.
  *
- * The paging sentinel it watches moves down the page as older events are
- * appended, so it has to report each time it comes back — which is exactly what
- * {@link whenVisible} disconnects to avoid.
- *
- * Where `IntersectionObserver` is missing this reports nothing at all, rather
- * than taking that one's "assume visible" fallback: an eager author lookup is a
- * good failure, a timeline that pages itself unprompted is not.
+ * The paging sentinel moves down the page as events are appended, so it has to
+ * report each time it comes back — what {@link whenVisible} disconnects to avoid.
+ * Without an `IntersectionObserver` it reports nothing, rather than taking that
+ * one's "assume visible": a timeline paging itself unprompted is no fallback.
  */
 export function whileVisible(node: HTMLElement, callback?: (visible: boolean) => void) {
   if (typeof IntersectionObserver === 'undefined') {
@@ -86,6 +83,11 @@ export function whileVisible(node: HTMLElement, callback?: (visible: boolean) =>
     update: (next?: (visible: boolean) => void) => {
       current = next;
     },
-    destroy: () => observer.disconnect(),
+    destroy: () => {
+      observer.disconnect();
+      // Otherwise the last "on screen" outlives the element, and a replacement
+      // mounted before its own observer reports acts on the old answer.
+      current?.(false);
+    },
   };
 }

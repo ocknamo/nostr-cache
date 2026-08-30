@@ -25,6 +25,19 @@ describe('hasScrollableAncestor', () => {
     expect(hasScrollableAncestor(node)).toBe(true);
   });
 
+  it('ignores a page that has locked its own scrolling', () => {
+    const node = document.createElement('div');
+    document.body.appendChild(node);
+    document.documentElement.style.overflowY = 'hidden';
+    stubSize(document.documentElement, { scrollHeight: 2000, clientHeight: 800 });
+
+    try {
+      expect(hasScrollableAncestor(node)).toBe(false);
+    } finally {
+      document.documentElement.style.overflowY = '';
+    }
+  });
+
   it('reports nothing scrollable when every box fits its content', () => {
     const node = document.createElement('div');
     document.body.appendChild(node);

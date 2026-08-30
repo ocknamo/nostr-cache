@@ -82,15 +82,14 @@ export interface TimelineState {
   error?: string;
   /** Set only by a {@link FilterSource} that reports one. */
   follows?: FollowsState;
-  /** A page of older events is in flight; see {@link TimelineController.loadOlder}. */
   loadingOlder?: boolean;
   /**
-   * A page brought nothing new, so no further one is asked for. Also covers a
-   * page that failed: an empty answer is the only thing a failure looks like
-   * from here (see `RelayConnection.fetchOnce`).
+   * A page brought nothing new, so no further one is asked for. A page that
+   * failed lands here too: an empty answer is all a failure looks like from
+   * here (see `RelayConnection.fetchOnce`).
    */
   exhausted?: boolean;
-  /** The timeline holds `maxEvents`; paging stops rather than evicting what it just read. */
+  /** At `maxEvents`: paging stops rather than evicting what it just read. */
   capped?: boolean;
 }
 
@@ -98,9 +97,9 @@ export interface TimelineControllerOptions {
   /** Relay settings. The first widget on a page wins — see `relay-host.ts`. */
   host?: RelayHostConfig;
   /**
-   * Events the timeline holds before the oldest are dropped, and the ceiling
-   * {@link TimelineController.loadOlder} stops at. Defaults to
-   * `DEFAULT_TIMELINE_CAP`; `Infinity` lifts it.
+   * Events held before the oldest are dropped, and the ceiling {@link
+   * TimelineController.loadOlder} stops at. Defaults to `DEFAULT_TIMELINE_CAP`;
+   * `Infinity` lifts it.
    */
   maxEvents?: number;
   /** See `profile-loader.ts`. */
@@ -228,6 +227,11 @@ export class TimelineController {
     return this.relayHost?.metrics;
   }
 
+  /** Events the timeline holds before {@link insertEvent} drops the oldest. */
+  private get ceiling(): number {
+    return this.options.maxEvents ?? DEFAULT_TIMELINE_CAP;
+  }
+
   durations(): RequestDurations | undefined {
     return this.currentSubId ? this.timer.durations(this.currentSubId) : undefined;
   }
@@ -331,8 +335,8 @@ export class TimelineController {
    *
    * A one-shot REQ rather than the live subscription: a page is a finite
    * backward query, and {@link applyFilter} would clear the screen to ask it.
-   * Safe to call on every scroll — everything that makes a page pointless
-   * (one in flight, nothing left, the cap reached) is checked here.
+   * Safe to call on every scroll; everything that makes a page pointless is
+   * checked here.
    */
   async loadOlder(): Promise<void> {
     const oldest = this.state.events[this.state.events.length - 1];
@@ -341,7 +345,9 @@ export class TimelineController {
       this.suspended ||
       this.state.loadingOlder ||
       this.state.exhausted ||
-      this.state.capped ||
+      // Read from the list rather than `capped`: the live subscription fills it
+      // to the ceiling too, and only this method ever sets that flag.
+      this.state.events.length >= this.ceiling ||
       // Before EOSE the first page is still arriving; asking now would spend a
       // second read-through on events that are already on their way.
       !this.state.eose ||
@@ -400,8 +406,11 @@ export class TimelineController {
       events,
       origins,
       loadingOlder: false,
-      exhausted: !added,
-      capped: events.length >= (this.options.maxEvents ?? DEFAULT_TIMELINE_CAP),
+      // A socket that went down mid-fetch answers exactly like a relay with
+      // nothing left. It is the one failure that is still tellable apart, so
+      // the timeline is left open for the reconnect rather than ended.
+      exhausted: !added && this.connection.isConnected,
+      capped: events.length >= this.ceiling,
     });
     if (added) {
       this.validation.schedule();

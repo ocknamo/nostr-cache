@@ -537,6 +537,12 @@ describe('TimelineController', () => {
   describe('loadOlder', () => {
     const AUTHOR = 'a'.repeat(64);
 
+    // Some of these stub the connection; the outer teardown stops controllers,
+    // which needs the real one back.
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     /** `n` notes one second apart, newest first, as a timeline holds them. */
     function notes(count: number, from = 1_700_000_000): NostrEvent[] {
       return Array.from({ length: count }, (_, index) =>
@@ -664,6 +670,30 @@ describe('TimelineController', () => {
       ]);
     });
 
+    it('runs one page at a time, however often the end is reported', async () => {
+      // The component's effect re-evaluates on every patch the controller makes
+      // — a profile arriving, a validation verdict — so this is called far more
+      // often than the reader scrolls.
+      const { controller, states } = await startPaged(notes(6));
+      let release: (events: NostrEvent[]) => void = () => {};
+      const fetchOnce = vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        })
+      );
+
+      const first = controller.loadOlder();
+      await controller.loadOlder();
+      await controller.loadOlder();
+      expect(fetchOnce).toHaveBeenCalledTimes(1);
+      expect(last(states).loadingOlder).toBe(true);
+
+      release([]);
+      await first;
+
+      expect(last(states).loadingOlder).toBe(false);
+    });
+
     it('stops asking once a page brings nothing new', async () => {
       const { controller, states } = await startPaged(notes(3));
 
@@ -675,6 +705,20 @@ describe('TimelineController', () => {
       const before = states.length;
       await controller.loadOlder();
       expect(states.length).toBe(before);
+    });
+
+    it('stays open when the socket went down instead of calling it the end', async () => {
+      const { controller, states } = await startPaged(notes(4));
+      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue([]);
+      // Connected on the way in, gone by the time the empty answer is read.
+      vi.spyOn(RelayConnection.prototype, 'isConnected', 'get')
+        .mockReturnValueOnce(true)
+        .mockReturnValue(false);
+
+      await controller.loadOlder();
+
+      expect(last(states).exhausted).toBe(false);
+      expect(last(states).loadingOlder).toBe(false);
     });
 
     it('stops at the ceiling rather than evicting the page it just read', async () => {

@@ -74,13 +74,16 @@ describe('whileVisible', () => {
     expect(next).toHaveBeenCalledWith(true);
   });
 
-  it('disconnects on destroy', () => {
+  it('disconnects on destroy, and takes back its last "on screen"', () => {
     const observer = stubObserver();
-    const action = whileVisible(document.createElement('div'), () => {});
+    const seen: boolean[] = [];
+    const action = whileVisible(document.createElement('div'), (visible) => seen.push(visible));
+    observer.report(true);
 
     action.destroy();
 
     expect(observer.last.disconnected).toBe(true);
+    expect(seen).toEqual([true, false]);
   });
 
   it('reports nothing at all without an IntersectionObserver', () => {

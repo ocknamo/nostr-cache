@@ -1,14 +1,9 @@
 /**
  * Whether anything between the node and the viewport can actually scroll.
  *
- * The paging sentinel is driven by `IntersectionObserver`, which reports an
- * element on screen whether or not the reader could ever have scrolled to it.
- * That difference matters for the iframe host page: it reports its height to the
- * embedding page (`embed-host.js`), and a parent that sizes the frame to its
- * content leaves the document with no scroll at all — so the sentinel sits
- * permanently in view and every page would load itself unprompted. A box that
- * cannot scroll is hiding nothing below the fold, which is the same reason a
- * short embedding page should not page either.
+ * A box that cannot scroll hides nothing below the fold, so the paging sentinel
+ * being on screen inside one says only that it always was — which is what an
+ * iframe sized to its content by the embedding page (`embed-host.js`) leaves.
  *
  * @param node Element to walk up from; shadow boundaries are crossed, since the
  *   widget renders inside one
@@ -35,11 +30,11 @@ function scrolls(element: Element, view: Window): boolean {
   if (element.scrollHeight - element.clientHeight <= 1) {
     return false;
   }
-  // The root scroller has no `overflow` to opt in with: it scrolls whenever its
-  // content is taller than the viewport.
-  if (element === element.ownerDocument.documentElement) {
-    return true;
-  }
   const overflow = view.getComputedStyle(element).overflowY;
-  return overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay';
+  // The root does not have to opt in — it scrolls unless it is stopped, which
+  // is how a page locks scrolling behind a modal.
+  if (element === element.ownerDocument.documentElement) {
+    return overflow !== 'hidden' && overflow !== 'clip';
+  }
+  return overflow === 'auto' || overflow === 'scroll';
 }
