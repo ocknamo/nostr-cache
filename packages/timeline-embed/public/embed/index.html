@@ -51,6 +51,11 @@
         // Configures the shared relay rather than this widget; see the element.
         'follows-freshness',
         'max-events',
+        // Paging back as the reader reaches the end, and the ceiling it stops at.
+        // A parent that sizes this frame to its content leaves nothing to scroll,
+        // and the widget then does not page at all — see the README.
+        'infinite-scroll',
+        'max-timeline-events',
         'debug',
         // Deprecated alias of `debug`; still forwarded so older embed URLs work.
         'show-origin',

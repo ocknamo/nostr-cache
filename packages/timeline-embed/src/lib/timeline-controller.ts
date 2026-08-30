@@ -16,7 +16,7 @@ import type { Profile } from './profile.ts';
 import { type ConnectionStatus, RelayConnection } from './relay-connection.ts';
 import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-host.ts';
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
-import { insertEvent } from './timeline-utils.ts';
+import { DEFAULT_TIMELINE_CAP, insertEvent } from './timeline-utils.ts';
 import { EmbedLoader } from './timeline/embed-loader.ts';
 import type { LookupContext } from './timeline/lookup-context.ts';
 import { ProfileLoader } from './timeline/profile-loader.ts';
@@ -82,11 +82,26 @@ export interface TimelineState {
   error?: string;
   /** Set only by a {@link FilterSource} that reports one. */
   follows?: FollowsState;
+  /** A page of older events is in flight; see {@link TimelineController.loadOlder}. */
+  loadingOlder?: boolean;
+  /**
+   * A page brought nothing new, so no further one is asked for. Also covers a
+   * page that failed: an empty answer is the only thing a failure looks like
+   * from here (see `RelayConnection.fetchOnce`).
+   */
+  exhausted?: boolean;
+  /** The timeline holds `maxEvents`; paging stops rather than evicting what it just read. */
+  capped?: boolean;
 }
 
 export interface TimelineControllerOptions {
   /** Relay settings. The first widget on a page wins — see `relay-host.ts`. */
   host?: RelayHostConfig;
+  /**
+   * Events the timeline holds before the oldest are dropped, and the ceiling
+   * {@link TimelineController.loadOlder} stops at. Defaults to
+   * `DEFAULT_TIMELINE_CAP`; `Infinity` lifts it.
+   */
   maxEvents?: number;
   /** See `profile-loader.ts`. */
   profileEoseGraceMs?: number;
@@ -120,6 +135,10 @@ export class TimelineController {
   };
   private currentSubId: string | null = null;
   private subSeq = 0;
+  /** What {@link loadOlder} builds its cursor filters from. */
+  private currentFilters: Filter[] = [];
+  /** Abandons a page in flight; replaced per subscription, like the one below. */
+  private pagingAbort = new AbortController();
   /**
    * Cancels an in-flight {@link FilterSource}, which blocks for up to 5s and
    * opens subscriptions nothing else here would close. Replaced rather than
@@ -308,6 +327,88 @@ export class TimelineController {
   }
 
   /**
+   * Append the page of events just older than the oldest one on screen.
+   *
+   * A one-shot REQ rather than the live subscription: a page is a finite
+   * backward query, and {@link applyFilter} would clear the screen to ask it.
+   * Safe to call on every scroll — everything that makes a page pointless
+   * (one in flight, nothing left, the cap reached) is checked here.
+   */
+  async loadOlder(): Promise<void> {
+    const oldest = this.state.events[this.state.events.length - 1];
+    if (
+      this.stopped ||
+      this.suspended ||
+      this.state.loadingOlder ||
+      this.state.exhausted ||
+      this.state.capped ||
+      // Before EOSE the first page is still arriving; asking now would spend a
+      // second read-through on events that are already on their way.
+      !this.state.eose ||
+      !oldest ||
+      this.currentFilters.length === 0 ||
+      // A fetch on a downed socket comes back empty, which reads as "nothing
+      // left" — so wait for the reconnect rather than ending the timeline.
+      !this.connection.isConnected
+    ) {
+      return;
+    }
+
+    // `until` is inclusive, so the cursor comes back with the page and is
+    // dropped by id. Asking from one second earlier would instead skip whatever
+    // shares that second, so the page is widened by what is already held at it.
+    const held = this.state.events.filter((event) => event.created_at === oldest.created_at).length;
+    const filters = this.currentFilters
+      // A filter the cursor has passed cannot match, and the relay would still
+      // forward it upstream — `since` puts it outside the freshness window.
+      .filter((filter) => filter.since === undefined || filter.since <= oldest.created_at)
+      .map((filter) => {
+        const page: Filter = { ...filter, until: oldest.created_at };
+        if (page.limit !== undefined) {
+          page.limit += held;
+        }
+        return page;
+      });
+    if (filters.length === 0) {
+      this.patch({ exhausted: true });
+      return;
+    }
+
+    const abort = this.pagingAbort;
+    this.patch({ loadingOlder: true });
+    const page = await this.connection.fetchOnce(filters, { signal: abort.signal });
+    if (abort.signal.aborted || this.stopped) {
+      return;
+    }
+
+    let events = this.state.events;
+    const origins = new Map(this.state.origins);
+    for (const event of page) {
+      const merged = insertEvent(events, event, this.options.maxEvents);
+      if (merged === events) {
+        continue;
+      }
+      events = merged;
+      const origin = this.relayHost?.metrics.classifyDelivered(event.id);
+      if (origin) {
+        origins.set(event.id, origin);
+      }
+    }
+
+    const added = events !== this.state.events;
+    this.patch({
+      events,
+      origins,
+      loadingOlder: false,
+      exhausted: !added,
+      capped: events.length >= (this.options.maxEvents ?? DEFAULT_TIMELINE_CAP),
+    });
+    if (added) {
+      this.validation.schedule();
+    }
+  }
+
+  /**
    * Close the subscription, keeping the relay and connection; {@link applyFilter}
    * starts again. For benchmarking: a live subscription reads through to
    * upstream and would contaminate a cold pass.
@@ -321,7 +422,8 @@ export class TimelineController {
     // A resolving source holds a subscription of its own. Its state goes too,
     // or `resolving` strands the widget on a spinner nothing will clear.
     this.filterSourceAbort.abort();
-    this.patch({ follows: undefined });
+    this.pagingAbort.abort();
+    this.patch({ follows: undefined, loadingOlder: false });
     this.closeLookups();
     this.validation.clearTimers();
   }
@@ -331,6 +433,7 @@ export class TimelineController {
     this.stopped = true;
     this.signalStopped();
     this.filterSourceAbort.abort();
+    this.pagingAbort.abort();
     this.validation.clearTimers();
     this.closeLookups();
     if (this.currentSubId) {
@@ -358,6 +461,9 @@ export class TimelineController {
     }
     this.validation.clearTimers();
     this.suspended = false;
+    this.currentFilters = filters;
+    this.pagingAbort.abort();
+    this.pagingAbort = new AbortController();
     if (this.filterSourceAbort.signal.aborted && !this.stopped) {
       // Re-armed so a resumed controller can run a filter source again.
       this.filterSourceAbort = new AbortController();
@@ -374,6 +480,9 @@ export class TimelineController {
       embeds: this.embeds.embedMap(),
       eose: false,
       error: undefined,
+      loadingOlder: false,
+      exhausted: false,
+      capped: false,
     });
 
     if (!this.connection.isConnected && !this.isRecovering()) {
@@ -476,12 +585,17 @@ export class TimelineController {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
     }
+    // The filters asked for that same population, so paging must not carry on
+    // fetching under them.
+    this.currentFilters = [];
+    this.pagingAbort.abort();
     this.patch({
       follows,
       events: [],
       origins: new Map(),
       validationStatuses: new Map(),
       eose: false,
+      loadingOlder: false,
     });
   }
 

@@ -149,4 +149,46 @@ describe('Timeline', () => {
 
     expect(screen.getByText('@たけし')).toBeInTheDocument();
   });
+
+  /**
+   * The trigger itself is `IntersectionObserver`, which jsdom does not
+   * implement — `whileVisible` reports nothing there, so what these pin down is
+   * everything around it: when the end is watched at all, and what it says.
+   */
+  describe('paging the end of the list', () => {
+    const events = [makeEvent({ id: 'a' }), makeEvent({ id: 'b' })];
+
+    it('watches the end only when the embedder asked for paging', () => {
+      const { container } = render(Timeline, { props: { events, eose: true } });
+      expect(container.querySelector('.sentinel')).toBeNull();
+
+      const paging = render(Timeline, {
+        props: { events, eose: true, onReachEnd: () => {} },
+      });
+      expect(paging.container.querySelector('.sentinel')).not.toBeNull();
+    });
+
+    it('has nothing to watch while the timeline is still empty', () => {
+      const { container } = render(Timeline, { props: { events: [], onReachEnd: () => {} } });
+
+      expect(container.querySelector('.sentinel')).toBeNull();
+    });
+
+    it('says a page is on its way, in words the empty state does not use', () => {
+      render(Timeline, {
+        props: { events, eose: true, loadingOlder: true, onReachEnd: () => {} },
+      });
+
+      expect(screen.getByText('さらに読み込んでいます…')).toBeInTheDocument();
+      expect(screen.queryByText('読み込み中…')).toBeNull();
+    });
+
+    it('says nothing once the timeline has run out', () => {
+      const { container } = render(Timeline, {
+        props: { events, eose: true, exhausted: true, onReachEnd: () => {} },
+      });
+
+      expect(container.querySelector('.loading-more')).toBeNull();
+    });
+  });
 });

@@ -4,7 +4,7 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEvent, seedValidated } from '../test-fixtures.ts';
 import { parsePostTarget } from './post-target.ts';
-import type { RelayConnection } from './relay-connection.ts';
+import { RelayConnection } from './relay-connection.ts';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
 import {
   type FollowsState,
@@ -526,6 +526,243 @@ describe('TimelineController', () => {
     await controller.stop();
     await expect(controller.stop()).resolves.toBeUndefined();
     expect(getRelayHostRefCount()).toBe(0);
+  });
+
+  /**
+   * Paging is the one path that adds to the timeline without the subscription
+   * doing it, so the things worth pinning down are that it appends rather than
+   * replaces, and that every way of running out stops it — a page that keeps
+   * asking costs the embedding page a read-through per scroll.
+   */
+  describe('loadOlder', () => {
+    const AUTHOR = 'a'.repeat(64);
+
+    /** `n` notes one second apart, newest first, as a timeline holds them. */
+    function notes(count: number, from = 1_700_000_000): NostrEvent[] {
+      return Array.from({ length: count }, (_, index) =>
+        makeEvent({
+          id: `${index}`.padStart(64, 'e'),
+          pubkey: AUTHOR,
+          created_at: from - index,
+          content: `note ${index}`,
+        })
+      );
+    }
+
+    /** Start on a seeded cache and wait for the first page to settle. */
+    async function startPaged(
+      events: NostrEvent[],
+      filters: Filter[] = [{ kinds: [1], authors: [AUTHOR], limit: 2 }],
+      options: { maxEvents?: number } = {}
+    ) {
+      const dbName = `paging-${crypto.randomUUID()}`;
+      await seedCache(dbName, events);
+      const states: TimelineState[] = [];
+      const controller = new TimelineController({
+        host: { dbName },
+        maxEvents: options.maxEvents,
+        onChange: (state) => states.push(state),
+      });
+      controllers.push(controller);
+      await controller.start(filters);
+      await waitFor(() => last(states).eose, 'the first page to arrive');
+      return { controller, states };
+    }
+
+    function last(states: TimelineState[]): TimelineState {
+      return states[states.length - 1];
+    }
+
+    function contents(state: TimelineState): string[] {
+      return state.events.map((event) => event.content);
+    }
+
+    it('appends the next page rather than replacing what is on screen', async () => {
+      const { controller, states } = await startPaged(notes(5));
+      expect(contents(last(states))).toEqual(['note 0', 'note 1']);
+
+      await controller.loadOlder();
+
+      expect(contents(last(states))).toEqual(['note 0', 'note 1', 'note 2', 'note 3']);
+    });
+
+    it('walks back a page at a time to the end of the cache', async () => {
+      const { controller, states } = await startPaged(notes(5));
+
+      await controller.loadOlder();
+      await controller.loadOlder();
+
+      expect(contents(last(states))).toEqual(['note 0', 'note 1', 'note 2', 'note 3', 'note 4']);
+      expect(last(states).exhausted).toBe(false);
+    });
+
+    it('keeps the boundary event once, not twice', async () => {
+      // `until` is inclusive, so the cursor event is delivered again.
+      const { controller, states } = await startPaged(notes(4));
+
+      await controller.loadOlder();
+
+      const ids = last(states).events.map((event) => event.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('keeps two events sharing a second, which a cursor of until-1 would skip', async () => {
+      const events = [
+        makeEvent({ id: 'a'.repeat(64), pubkey: AUTHOR, created_at: 200, content: 'newest' }),
+        makeEvent({ id: 'b'.repeat(64), pubkey: AUTHOR, created_at: 100, content: 'tied one' }),
+        makeEvent({ id: 'c'.repeat(64), pubkey: AUTHOR, created_at: 100, content: 'tied two' }),
+      ];
+      const { controller, states } = await startPaged(events, [
+        { kinds: [1], authors: [AUTHOR], limit: 2 },
+      ]);
+
+      await controller.loadOlder();
+
+      expect(contents(last(states)).sort()).toEqual(['newest', 'tied one', 'tied two']);
+    });
+
+    it('widens the page by what already sits on the cursor second', async () => {
+      // Without this the boundary events spend a slot of every page: `until` is
+      // inclusive, so the relay counts them against the limit and hands them
+      // back to be dropped as duplicates.
+      const fetchOnce = vi.spyOn(RelayConnection.prototype, 'fetchOnce');
+      const events = [
+        makeEvent({ id: 'a'.repeat(64), pubkey: AUTHOR, created_at: 200 }),
+        makeEvent({ id: 'b'.repeat(64), pubkey: AUTHOR, created_at: 100 }),
+        makeEvent({ id: 'c'.repeat(64), pubkey: AUTHOR, created_at: 100 }),
+      ];
+      const { controller } = await startPaged(events, [
+        { kinds: [1], authors: [AUTHOR], limit: 3 },
+      ]);
+
+      await controller.loadOlder();
+
+      expect(fetchOnce.mock.calls[0][0]).toEqual([
+        { kinds: [1], authors: [AUTHOR], limit: 5, until: 100 },
+      ]);
+    });
+
+    it('leaves out a filter whose since the cursor has already passed', async () => {
+      // It could not match, and the relay would still forward it upstream — a
+      // `since` puts a filter outside the freshness window.
+      const fetchOnce = vi.spyOn(RelayConnection.prototype, 'fetchOnce');
+      const events = [
+        makeEvent({ id: 'a'.repeat(64), pubkey: AUTHOR, kind: 1, created_at: 200 }),
+        makeEvent({ id: 'b'.repeat(64), pubkey: AUTHOR, kind: 1, created_at: 199 }),
+        makeEvent({ id: 'c'.repeat(64), pubkey: AUTHOR, kind: 6, created_at: 100 }),
+        makeEvent({ id: 'd'.repeat(64), pubkey: AUTHOR, kind: 6, created_at: 99 }),
+      ];
+      const { controller } = await startPaged(events, [
+        { kinds: [1], authors: [AUTHOR], limit: 2, since: 150 },
+        { kinds: [6], authors: [AUTHOR], limit: 2 },
+      ]);
+
+      await controller.loadOlder();
+
+      expect(fetchOnce.mock.calls[0][0]).toEqual([
+        { kinds: [6], authors: [AUTHOR], limit: 3, until: 99 },
+      ]);
+    });
+
+    it('stops asking once a page brings nothing new', async () => {
+      const { controller, states } = await startPaged(notes(3));
+
+      await controller.loadOlder();
+      expect(last(states).exhausted).toBe(false);
+      await controller.loadOlder();
+      expect(last(states).exhausted).toBe(true);
+
+      const before = states.length;
+      await controller.loadOlder();
+      expect(states.length).toBe(before);
+    });
+
+    it('stops at the ceiling rather than evicting the page it just read', async () => {
+      const { controller, states } = await startPaged(notes(10), undefined, { maxEvents: 4 });
+
+      await controller.loadOlder();
+
+      expect(last(states).events).toHaveLength(4);
+      expect(last(states).capped).toBe(true);
+
+      const before = states.length;
+      await controller.loadOlder();
+      expect(states.length).toBe(before);
+    });
+
+    it('classifies the page it appends, so its cards carry a badge too', async () => {
+      const { controller, states } = await startPaged(notes(4));
+
+      await controller.loadOlder();
+
+      const state = last(states);
+      expect([...state.origins.keys()].sort()).toEqual(
+        state.events.map((event) => event.id).sort()
+      );
+    });
+
+    it('asks for nothing before the first page has arrived', async () => {
+      const dbName = `paging-${crypto.randomUUID()}`;
+      await seedCache(dbName, notes(4));
+      const states: TimelineState[] = [];
+      const controller = new TimelineController({
+        host: { dbName },
+        onChange: (state) => states.push(state),
+      });
+      controllers.push(controller);
+
+      // No `start`: there is no subscription, no cursor and no EOSE.
+      await controller.loadOlder();
+
+      expect(states).toEqual([]);
+    });
+
+    it('ends the timeline when the cursor passes a since bound', async () => {
+      const events = notes(4);
+      const { controller, states } = await startPaged(events, [
+        { kinds: [1], authors: [AUTHOR], limit: 2, since: events[1].created_at },
+      ]);
+
+      await controller.loadOlder();
+
+      expect(last(states).exhausted).toBe(true);
+      expect(contents(last(states))).toEqual(['note 0', 'note 1']);
+    });
+
+    it('forgets the cursor and the paging state on a filter change', async () => {
+      const { controller, states } = await startPaged(notes(4));
+      await controller.loadOlder();
+      await controller.loadOlder();
+      expect(last(states).exhausted).toBe(true);
+
+      controller.applyFilter([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+
+      expect(last(states).exhausted).toBe(false);
+      expect(last(states).capped).toBe(false);
+      expect(last(states).events).toEqual([]);
+    });
+
+    it('opens no page while suspended', async () => {
+      const { controller, states } = await startPaged(notes(5));
+      controller.suspend();
+
+      const before = states.length;
+      await controller.loadOlder();
+
+      expect(states.length).toBe(before);
+    });
+
+    it('abandons a page in flight when the controller is stopped', async () => {
+      const { controller, states } = await startPaged(notes(5));
+
+      const paging = controller.loadOlder();
+      await controller.stop();
+      await paging;
+
+      // The page it had asked for never lands: nothing is appended after the
+      // stop, on this snapshot or any that followed it.
+      expect(states.every((state) => state.events.length <= 2)).toBe(true);
+    });
   });
 
   /**

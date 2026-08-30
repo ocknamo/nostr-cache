@@ -229,6 +229,45 @@ describe('<nostr-timeline> custom element', () => {
     expect(presses[0].pubkey).toBe(author);
   });
 
+  describe('infinite-scroll attribute', () => {
+    /** A timeline with one card on it, which is what the sentinel hangs off. */
+    async function mountWithACard(attributes: Record<string, string>): Promise<Element> {
+      const dbName = `timeline-${crypto.randomUUID()}`;
+      const seeding = await acquireRelayHost({ dbName });
+      try {
+        await seedValidated(seeding.storage, [
+          makeEvent({
+            id: 'ff00000000000000000000000000000000000000000000000000000000000002',
+            content: 'カードが 1 枚あればよい',
+          }),
+        ]);
+      } finally {
+        await seeding.release();
+      }
+
+      const element = document.createElement('nostr-timeline');
+      element.setAttribute('db-name', dbName);
+      for (const [name, value] of Object.entries(attributes)) {
+        element.setAttribute(name, value);
+      }
+      document.body.appendChild(element);
+      await waitFor(() => Boolean(element.shadowRoot?.querySelector('article')), 'the seeded card');
+      return element;
+    }
+
+    it('watches the end of the timeline by default', async () => {
+      const element = await mountWithACard({});
+
+      expect(element.shadowRoot?.querySelector('.sentinel')).not.toBeNull();
+    });
+
+    it('watches nothing when the embedder turned paging off', async () => {
+      const element = await mountWithACard({ 'infinite-scroll': 'false' });
+
+      expect(element.shadowRoot?.querySelector('.sentinel')).toBeNull();
+    });
+  });
+
   it('picks up a shared attribute set after mount', async () => {
     // The attributes the three elements have in common reach the view as one
     // object built in `embed-props.ts`; a read that stopped tracking them would

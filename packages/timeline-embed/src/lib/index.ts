@@ -164,6 +164,7 @@ export {
 export type { CacheStrategy, RelayHost, RelayHostConfig } from './relay-host.ts';
 export { RequestTimer } from './request-timer.ts';
 export type { RequestDurations, RequestTiming } from './request-timer.ts';
+export { hasScrollableAncestor } from './scrollable.ts';
 export {
   DEFAULT_KINDS,
   DEFAULT_LIMIT,
@@ -179,6 +180,7 @@ export {
   parseLimit,
   parseMaxEvents,
   parseMaxFollows,
+  parseMaxTimelineEvents,
   parseOgpProxy,
   parsePubkey,
   parseReactionsLimit,
@@ -202,4 +204,4 @@ export type {
 export { DEFAULT_TIMELINE_CAP, insertEvent } from './timeline-utils.ts';
 export { fetchValidationStatuses, hasPending } from './validation-status.ts';
 export type { ValidationStatus } from './validation-status.ts';
-export { whenVisible } from './when-visible.ts';
+export { whenVisible, whileVisible } from './when-visible.ts';

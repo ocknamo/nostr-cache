@@ -55,3 +55,37 @@ export function whenVisible(node: HTMLElement, callback?: () => void) {
     destroy: () => observer.disconnect(),
   };
 }
+
+/**
+ * Report whether the element is on screen, every time that changes.
+ *
+ * The paging sentinel it watches moves down the page as older events are
+ * appended, so it has to report each time it comes back — which is exactly what
+ * {@link whenVisible} disconnects to avoid.
+ *
+ * Where `IntersectionObserver` is missing this reports nothing at all, rather
+ * than taking that one's "assume visible" fallback: an eager author lookup is a
+ * good failure, a timeline that pages itself unprompted is not.
+ */
+export function whileVisible(node: HTMLElement, callback?: (visible: boolean) => void) {
+  if (typeof IntersectionObserver === 'undefined') {
+    return { update: () => {}, destroy: () => {} };
+  }
+
+  let current = callback;
+  const observer = new IntersectionObserver(
+    (entries) => {
+      current?.(entries.some((entry) => entry.isIntersecting));
+    },
+    // The same margin `whenVisible` uses: start the page just before the reader
+    // reaches the end, so the events are there by the time they are scrolled to.
+    { rootMargin: '200px' }
+  );
+  observer.observe(node);
+  return {
+    update: (next?: (visible: boolean) => void) => {
+      current = next;
+    },
+    destroy: () => observer.disconnect(),
+  };
+}

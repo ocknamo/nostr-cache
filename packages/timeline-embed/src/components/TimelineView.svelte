@@ -59,6 +59,11 @@
     fatal?: string;
     onAuthorVisible?: (pubkey: string) => void;
     onEmbedRequest?: (target: EmbedTarget) => void;
+    /**
+     * Called each time the reader reaches the end of the timeline. Leaving it
+     * out turns the paging off; see `Timeline.svelte`.
+     */
+    onReachEnd?: () => void;
   }
 
   const {
@@ -77,6 +82,7 @@
     fatal,
     onAuthorVisible,
     onEmbedRequest,
+    onReachEnd,
   }: Props = $props();
 
   const follows = $derived(state.follows);
@@ -153,6 +159,9 @@
         {materialIcons}
         {onAuthorVisible}
         {onEmbedRequest}
+        loadingOlder={state.loadingOlder}
+        exhausted={Boolean(state.exhausted || state.capped)}
+        {onReachEnd}
       />
     {/if}
   {/if}
