@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * One event quoted by a `nostr:` reference, rendered inside the note that
-   * quotes it (NIP-27's "preview" rendering of a NIP-21 URI).
+   * One event named by the card that shows it: a `nostr:` reference in a body
+   * (NIP-27's "preview" rendering of a NIP-21 URI), or a repost's subject.
    *
    * The layout is deliberately *not* the timeline card's. A card puts the avatar
    * in its own grid column, so the body is indented past it for the card's whole
@@ -15,20 +15,24 @@
    * returns nothing at `MAX_EMBED_DEPTH`.
    */
 
-  import { type EntityPart, embedKey, parseContent } from '../lib/content-parts.ts';
+  import { parseContent } from '../lib/content-parts.ts';
   import type { AuthorAction, EventActionContext, NoteAction } from '../lib/event-actions.ts';
   import {
+    type EmbedSource,
     type EmbedTarget,
     type EmbeddedEvent,
+    MAX_EMBED_DEPTH,
     embedKeys,
-    embedTarget,
     noteSegments,
     segmentKey,
     segmentMedia,
     selectEmbeds,
+    sourceKey,
+    sourceTarget,
   } from '../lib/note-embeds.ts';
-  import { type Profile, authorHandle, authorName } from '../lib/profile.ts';
+  import { type Profile, authorHandle, authorName, shortPubkey } from '../lib/profile.ts';
   import { eventBody } from '../lib/reactions.ts';
+  import { isRepost, repostTargetId } from '../lib/reposts.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
   import { whenVisible } from '../lib/when-visible.ts';
   import Avatar from './Avatar.svelte';
@@ -36,11 +40,11 @@
   import NoteContent from './NoteContent.svelte';
 
   interface Props {
-    /** The reference this card stands for, as it was written in the body. */
-    entity: EntityPart;
+    /** Which event this card stands for. */
+    source: EmbedSource;
     /** 1 for a quote on a timeline card, 2 for a quote inside that, and so on. */
     depth: number;
-    /** Every quoted event resolved so far, keyed by `embedKey`. */
+    /** Every event resolved so far, keyed by `sourceKey`. */
     embeds?: Map<string, EmbeddedEvent>;
     profiles?: Map<string, Profile>;
     /** The relay's verification verdicts, keyed by event id. */
@@ -77,7 +81,7 @@
   }
 
   const {
-    entity,
+    source,
     depth,
     embeds,
     profiles,
@@ -91,8 +95,14 @@
     onAction,
   }: Props = $props();
 
-  const target = $derived(embedTarget(entity.entity));
-  const key = $derived(embedKey(entity.entity));
+  const target = $derived(sourceTarget(source));
+  const key = $derived(sourceKey(source));
+  /** What to show when nothing resolves; an id has no entity to spell out. */
+  const chip = $derived(
+    source.kind === 'id'
+      ? { label: shortPubkey(source.id), title: source.id }
+      : { label: source.part.label, title: source.part.raw }
+  );
   // Not named `state`: that would turn the `$state(…)` rune below into a store
   // subscription to it.
   const resolved = $derived(key === undefined ? undefined : embeds?.get(key));
@@ -109,7 +119,11 @@
   );
   const fade = $derived(unverified && !ancestorUnverified);
 
-  const parts = $derived(event ? parseContent(eventBody(event)) : []);
+  /** A repost quoted by a body reaches this the same way any other event does. */
+  const repost = $derived(event !== undefined && isRepost(event));
+  const repostId = $derived(repost && event ? repostTargetId(event) : undefined);
+
+  const parts = $derived(event && !repost ? parseContent(eventBody(event)) : []);
   /** See `resolvable` in `EventCard.svelte`. */
   const resolvable = $derived(Boolean(onEmbedRequest) || (embeds?.size ?? 0) > 0);
   const nested = $derived(resolvable ? selectEmbeds(parts, depth) : []);
@@ -240,6 +254,29 @@
       </time>
     </header>
     <div class="quote-body">
+      {#if repost}
+        <p class="repost" part="repost">リポスト</p>
+        <!-- The depth test `selectEmbeds` makes for a body's references, made
+             here: this card is not one of them. -->
+        {#if repostId && depth < MAX_EMBED_DEPTH}
+          <div class="embed">
+            <Self
+              source={{ kind: 'id', id: repostId }}
+              depth={depth + 1}
+              {embeds}
+              {profiles}
+              {validationStatuses}
+              {showAvatar}
+              {showMedia}
+              ancestorUnverified={ancestorUnverified || unverified}
+              {onEmbedRequest}
+              {noteAction}
+              {authorAction}
+              {onAction}
+            />
+          </div>
+        {/if}
+      {/if}
       {#each segments as segment, index (segmentKey(segment, index))}
         {#if segment.kind === 'text'}
           <NoteContent
@@ -254,7 +291,7 @@
         {:else}
           <div class="embed">
             <Self
-              entity={segment.part}
+              source={{ kind: 'entity', part: segment.part }}
               depth={depth + 1}
               {embeds}
               {profiles}
@@ -278,7 +315,7 @@
   <!-- Nothing came back — or nothing is going to — so the reference is shown the
        way it was before this feature existed. A frame around it would claim
        there is a post here. -->
-  <span class="chip" title={entity.raw} use:whenVisible={request}>{entity.label}</span>
+  <span class="chip" title={chip.title} use:whenVisible={request}>{chip.label}</span>
 {/if}
 
 <style>
@@ -308,9 +345,15 @@
     font-size: var(--nt-quote-font-size, 1em);
   }
 
-  .loading {
+  .loading,
+  .repost {
     margin: 0;
     color: var(--nt-muted, #657786);
+  }
+
+  .repost {
+    font-size: 0.8em;
+    font-weight: 700;
   }
 
   .unverified {

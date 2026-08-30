@@ -56,6 +56,20 @@ describe('Embeddable timeline E2E', () => {
         }),
       }),
     ]);
+    // A repost of the first note, carrying the copy NIP-18 puts in `content` —
+    // which is what used to land in the card as raw JSON. Only the tests that
+    // ask for kind 6 see it.
+    cannedEvents.push(
+      await createTestEvent(undefined, {
+        kind: 6,
+        created_at: 1_700_000_300,
+        tags: [
+          ['e', cannedEvents[0].id],
+          ['p', cannedEvents[0].pubkey],
+        ],
+        content: JSON.stringify(cannedEvents[0]),
+      })
+    );
     upstream = await startMockUpstreamRelay(cannedEvents);
     browser = await launchBrowser();
   });
@@ -177,6 +191,23 @@ describe('Embeddable timeline E2E', () => {
     // Both notes and the profile event: the two filters travel as one REQ, so
     // everything matching either lands in the same timeline.
     await waitForEventCount(page, 3);
+  });
+
+  it('renders a repost as a label and the reposted note rather than its JSON', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url, kinds: '1,6' }));
+
+    // The nested card resolves through the same lookup a quote uses, so its
+    // arrival is what says the repost was read as a reference and not as text.
+    await page.waitForSelector('nostr-timeline .quote .content:has-text("from upstream one")', {
+      timeout: TIMEOUT,
+    });
+
+    expect(await page.$$('nostr-timeline .repost')).toHaveLength(1);
+    const bodies = await page.$$eval('nostr-timeline .note', (nodes) =>
+      nodes.map((node) => node.textContent ?? '')
+    );
+    expect(bodies.some((body) => body.includes('"kind"'))).toBe(false);
   });
 
   it('serves the same events from the local cache after a reload', async () => {

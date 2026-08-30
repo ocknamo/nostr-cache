@@ -90,8 +90,16 @@ export {
   segmentKey,
   segmentMedia,
   selectEmbeds,
+  sourceKey,
+  sourceTarget,
 } from './note-embeds.ts';
-export type { EmbedStatus, EmbedTarget, EmbeddedEvent, NoteSegment } from './note-embeds.ts';
+export type {
+  EmbedSource,
+  EmbedStatus,
+  EmbedTarget,
+  EmbeddedEvent,
+  NoteSegment,
+} from './note-embeds.ts';
 export {
   MAX_CACHED_PREVIEWS,
   OGP_TIMEOUT_MS,
@@ -125,6 +133,7 @@ export {
   summarizeReactions,
 } from './reactions.ts';
 export type { Reaction, ReactionGroup, ReactionKind, ReactionSummary } from './reactions.ts';
+export { isRepost, repostTargetId } from './reposts.ts';
 export {
   DEFAULT_REPLIES_LIMIT,
   DEFAULT_REPLY_DEPTH,

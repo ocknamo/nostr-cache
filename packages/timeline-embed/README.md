@@ -167,7 +167,7 @@ npm パッケージを入れられない構成のための入口です。
 |---|---|---|
 | `relays` | 上流リレー URL（カンマ区切り）。空ならキャッシュ済みイベントのみ表示 | なし |
 | `filters` | NIP-01 フィルタ配列の JSON。指定すると `kinds` / `authors` / `limit` は無視される（[下記](#filters-で細かく絞り込む)） | なし |
-| `kinds` | イベント種別（カンマ区切り） | `1` |
+| `kinds` | イベント種別（カンマ区切り） | `1,6` |
 | `authors` | 著者 pubkey（hex・カンマ区切り） | 指定なし |
 | `limit` | 取得件数 | `50` |
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
@@ -178,7 +178,7 @@ npm パッケージを入れられない構成のための入口です。
 | `show-origin` | **非推奨**。`debug` の旧称。`true` なら `debug` と同じくバッジを表示する（`false` は既定と同じ） | なし（非表示） |
 | `show-avatars` | `false` でアバター画像を隠す（表示名は取得したまま） | `true` |
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
-| `show-embeds` | `false` で本文中の `nostr:` 参照の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
+| `show-embeds` | `false` で本文中の `nostr:` 参照とリポスト元の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
 | `ogp-proxy` | 本文の最初のリンクの OGP カードを取得する CORS プロキシの URL（`https://corsproxy.io/?key=…` など）。**指定しなければカードを出さず、どこにも問い合わせません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 | `author-action` | 指定するとアイコン・表示名が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する。カードの著者に加えて**引用カードのヘッダ・本文中の `nostr:` メンション**にも効く（[下記](#著者アイコン表示名の押下)） | なし（押せない・従来どおり） |
@@ -288,7 +288,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 |---|---|---|
 | `pubkey` | 誰のフォローを辿るか。hex / `npub` / `nprofile` | **必須** |
 | `relays` | 上流リレー URL（カンマ区切り） | なし |
-| `kinds` | 並べるイベント種別（カンマ区切り） | `1` |
+| `kinds` | 並べるイベント種別（カンマ区切り） | `1,6` |
 | `limit` | 取得件数 | `50` |
 | `max-follows` | `authors` に載せるフォロー先の上限（病的なリストへの安全弁） | `2000` |
 | `include-self` | 本人の投稿も含める（`show-avatars` と同じ規約で、**`false` 以外はすべて有効**。`0` でも off にはなりません） | `true` |
@@ -331,9 +331,6 @@ iframe は**別のページ**（`embed/follow/`）です:
 - **kind 3 を一度も公開していない pubkey では鮮度ウィンドウが効きません。** キャッシュに
   一度も入らないものは「新鮮」と判定しようがないため、毎回 1 往復 + 最大 5 秒待って
   「見つかりませんでした」に落ちます（表示は正しいですが、上流に定期的な負荷がかかります）
-- **`kinds` に `6`（リポスト）を入れると表示が壊れます。** 実クライアントのホーム
-  タイムラインにはリポストが並びますが、このウィジェットのカードは kind 6 を解釈しません。
-  kind 6 の `content` は空かリポスト元イベントの JSON 文字列なので、**空カードか生 JSON**が出ます
 - **NIP-51（kind 30000 のフォローセット）は対象外**です。addressable なので鮮度ウィンドウの
   対象にもなりません
 - **kind 3 が退避されると毎回上流へ戻ります。** ウィジェットは kind 0 / 3 を
@@ -524,7 +521,7 @@ level 3  …
 | `debug` | `cache` / `upstream` バッジを表示 | オフ |
 | `show-avatars` | `"false"` でアバターを出さない（著者・リアクター両方） | オン |
 | `show-media` | `"false"` で本文中のメディアを描画しない | オン |
-| `show-embeds` | `"false"` で `nostr:` 参照を入れ子カードにしない | オン |
+| `show-embeds` | `"false"` で `nostr:` 参照とリポスト元を入れ子カードにしない | オン |
 | `ogp-proxy` | 本文の最初のリンクの OGP カードを表示する（`<nostr-timeline>` と同じ）。**投稿本体だけに効き、返信ツリーには出しません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
 | `show-reactions` | `"false"` でリアクション欄ごと出さない（kind 7 の購読も張らない） | オン |
 | `reactions-limit` | リアクションの初回取得件数（上限 500） | `200` |
@@ -664,7 +661,7 @@ part は `::part(widget)` / `::part(error)` / `::part(reconnecting)` / `::part(e
   - **絞り込み条件（`authors` など）の値が全滅した**フィルタも、条件だけ消えて
     検索範囲が広がってしまわないよう、そのフィルタごと捨てます。
 - JSON が壊れている、あるいは全フィルタが使えなかった場合は
-  `kinds` / `authors` / `limit`（未指定なら kind 1・50 件）に戻ります。
+  `kinds` / `authors` / `limit`（未指定なら kind 1・6・50 件）に戻ります。
 
 ## 見た目のカスタマイズ
 
@@ -827,6 +824,25 @@ nostr-timeline {
 
 置き換えるのは**この 3 つの綴りだけ**です。それ以外の絵文字や `:shortcode:` は普通の本文として
 そのまま描画します（チップと違い、`:shortcode:` の画像展開も、長さの上限もありません）。
+
+`kinds` の既定値には `6`（リポスト、NIP-18）が入っています。リポストのカードは
+**「リポスト」のラベルとリポスト元の引用カード**として描画します。カードの著者・時刻・
+アクション行はリポストした人のもののままで、リポスト元はその下に入れ子のカードとして出ます。
+
+リポスト元は **`e` タグの id を引いて取得**します。kind 6 の `content` にはリポスト元
+イベントの JSON が入っていますが、**それは描画しません** — その写しは署名検証を経ておらず、
+リポストした側が他人名義の投稿を表示させられるためです。id で引けば通常の引用カードと同じく
+✓（署名検証済み）やキャッシュ充填が効きます。取得できない場合・`show-embeds="false"` の
+場合は、短縮した id のチップになります（生 JSON は出しません）。
+
+引用カードの中がさらにリポストだった場合も同じ描き方で、`show-embeds` の深さ上限まで
+入れ子になります。ラベルは `::part(repost)` で公開しています。
+
+リポスト元を名指していないリポスト（`a` タグしか持たない kind 16 など）は、ラベルだけの
+カードになります。NIP-18 から外れて `content` に文章を書いているクライアントの kind 6 も、
+その文章は描画しません（写しと区別できないため）。
+
+コメントの無いリポストは、投稿詳細（`<nostr-post>`）の返信ツリーには並びません。
 
 添付は、引用カードで区切られた**各区間の末尾**にまとめて表示し、その URL は本文中から
 取り除きます（引用カードを含まない本文なら、これまでどおり本文全体の一番下です）。
@@ -1388,9 +1404,10 @@ import {
 | `parseProfileContent` / `authorName` / `authorHandle` / `stripUnrenderable` | kind 0 の防御的パースと表示名の決定。`stripUnrenderable` は 1 行に描くテキストから制御文字・bidi 上書きを落とす |
 | `parseRefs` / `replyParentId` / `replyParentAddress` | `e` / `q` タグから返信・引用の参照を抽出（NIP-10 のマーカー付き / 位置指定の両方）。後ろ 2 つは「この投稿の親はどれか」だけを返す |
 | `buildReplyTree` / `acceptsReply` / `MAX_REPLY_DEPTH` / `MAX_REPLIES` | 生の kind 1 からリプライツリーを組む純粋関数。ルートから降りるので循環は到達不能になり、`#e` の任意位置マッチで届く別の枝は繋がらないものとして落ちる |
+| `isRepost` / `repostTargetId` | リポスト（NIP-18 kind 6 / 16）の判定と、リポスト元イベントの id（最後の `e` タグ）。`content` の写しは読まない |
 | `parseContent` / `inlineParts` / `mediaParts` / `mediaAsLinks` / `mediaKind` / `readUrl` / `embedKey` | 本文を URL・添付・`nostr:` エンティティのトークン列へ分解する（マークアップは作らない） |
 | `notePreview` / `eventPreview` / `mentionLabel` / `PREVIEW_MAX_LENGTH` | 本文を 1 行の文字列へ畳む（チップのプレビュー用。添付は `[画像]`、URL はホスト名、言及は `@名前`）。`eventPreview` は本文を持たない kind を空文字で返す |
-| `selectEmbeds` / `embedTarget` / `eventIdTarget` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで。`eventIdTarget` は生の id（`e` タグ）から同じキーの取得を作る |
+| `selectEmbeds` / `embedTarget` / `eventIdTarget` / `sourceTarget` / `sourceKey` / `embedKeys` / `MAX_EMBED_DEPTH` / `MAX_EMBEDS_PER_TOP_NOTE` / `MAX_EMBEDS_PER_NOTE` | 本文中のどの `nostr:` 参照を入れ子表示するかの決定と、その取得フィルタ。タイムライン投稿本体は `MAX_EMBEDS_PER_TOP_NOTE` 件、入れ子の引用内は `MAX_EMBEDS_PER_NOTE` 件まで。`eventIdTarget` は生の id（`e` タグ）から同じキーの取得を作る。`sourceTarget` / `sourceKey` は本文の参照と生の id を同じ経路に載せる |
 | `noteSegments` / `segmentMedia` / `segmentKey` | 本文をテキスト区間と入れ子カードの並びに分割し(引用の展開位置を決める本体)、添付の重複排除をその区間をまたいで通す。`segmentKey` は描画時のキー |
 | `previewTarget` / `requestOgp` / `parseOgpHtml` / `ogpRequestUrl` / `resetOgpCache` / `DEFAULT_OGP_PROXY` / `OGP_TIMEOUT_MS` / `MAX_CACHED_PREVIEWS` / `OgpData` | リンクの OGP カード（[上記](#リンクの-ogp-カード)）。本文からカード化する 1 件を選び、CORS プロキシ経由でページを取得し、`og:` タグを検証して読む。結果はページ内メモリにだけ残る |
 | `whenVisible` | 要素が初めて画面に入ったことを 1 回だけ伝える Svelte action（プロフィール・引用・返信先プレビューの取得トリガ） |

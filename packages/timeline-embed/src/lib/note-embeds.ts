@@ -41,6 +41,13 @@ export const MAX_EMBEDS_PER_NOTE = 2;
  */
 export const MAX_EMBEDS_PER_TOP_NOTE = 10;
 
+/**
+ * What a nested card stands for: a `nostr:` reference written in a body, or an
+ * id read off a tag — a repost's subject (NIP-18), which carries no entity to
+ * decode.
+ */
+export type EmbedSource = { kind: 'entity'; part: EntityPart } | { kind: 'id'; id: string };
+
 export type EmbedStatus = 'loading' | 'ready' | 'missing';
 
 /**
@@ -92,6 +99,15 @@ export function embedTarget(entity: EntityPart['entity']): EmbedTarget | undefin
   // TLV is a hint written by whoever encoded the entity, and a wrong one would
   // turn a fetchable event into a permanent "missing".
   return eventIdTarget(key);
+}
+
+export function sourceTarget(source: EmbedSource): EmbedTarget | undefined {
+  return source.kind === 'id' ? eventIdTarget(source.id) : embedTarget(source.part.entity);
+}
+
+/** Shares {@link embedTarget}'s key space, so an id and an entity meet there. */
+export function sourceKey(source: EmbedSource): string | undefined {
+  return source.kind === 'id' ? source.id : embedKey(source.part.entity);
 }
 
 /**

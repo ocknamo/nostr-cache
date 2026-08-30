@@ -10,6 +10,7 @@ import {
   acquireRelayHost,
   getRelayHostRefCount,
 } from './lib/relay-host.ts';
+import { DEFAULT_KINDS } from './lib/timeline-config.ts';
 import { makeEvent, seedValidated } from './test-fixtures.ts';
 
 /** A distinct, valid 64-character hex pubkey per index. */
@@ -112,7 +113,9 @@ describe('<nostr-follow-timeline> custom element', () => {
       () => element.shadowRoot?.textContent?.includes('from a follow') === true,
       "the followed author's note"
     );
-    expect(await timelineFilters(dbName)).toEqual([{ kinds: [1], authors: [FRIEND], limit: 50 }]);
+    expect(await timelineFilters(dbName)).toEqual([
+      { kinds: DEFAULT_KINDS, authors: [FRIEND], limit: 50 },
+    ]);
   });
 
   it('accepts an npub for pubkey, the way an embedder copies one', async () => {
@@ -124,7 +127,9 @@ describe('<nostr-follow-timeline> custom element', () => {
     mount({ pubkey: npub, 'db-name': dbName, 'include-self': 'false' });
 
     await waitFor(async () => (await timelineFilters(dbName)) !== undefined, 'the subscription');
-    expect(await timelineFilters(dbName)).toEqual([{ kinds: [1], authors: [FRIEND], limit: 50 }]);
+    expect(await timelineFilters(dbName)).toEqual([
+      { kinds: DEFAULT_KINDS, authors: [FRIEND], limit: 50 },
+    ]);
   });
 
   it('includes the subject unless told not to', async () => {
@@ -134,7 +139,7 @@ describe('<nostr-follow-timeline> custom element', () => {
 
     await waitFor(async () => (await timelineFilters(dbName)) !== undefined, 'the subscription');
     expect(await timelineFilters(dbName)).toEqual([
-      { kinds: [1], authors: [FRIEND, SUBJECT], limit: 50 },
+      { kinds: DEFAULT_KINDS, authors: [FRIEND, SUBJECT], limit: 50 },
     ]);
   });
 
