@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EventOrigin } from '../lib/cache-metrics.ts';
 import type { Profile } from '../lib/profile.ts';
 import { makeEvent } from '../test-fixtures.ts';
@@ -148,5 +148,126 @@ describe('Timeline', () => {
     render(Timeline, { props: { events, profiles, eose: true } });
 
     expect(screen.getByText('@たけし')).toBeInTheDocument();
+  });
+
+  /**
+   * The trigger itself is `IntersectionObserver`, which jsdom does not
+   * implement — `whileVisible` reports nothing there, so what these pin down is
+   * everything around it: when the end is watched at all, and what it says.
+   */
+  describe('paging the end of the list', () => {
+    const events = [makeEvent({ id: 'a' }), makeEvent({ id: 'b' })];
+
+    it('watches the end only when the embedder asked for paging', () => {
+      const { container } = render(Timeline, { props: { events, eose: true } });
+      expect(container.querySelector('.sentinel')).toBeNull();
+
+      const paging = render(Timeline, {
+        props: { events, eose: true, onReachEnd: () => {} },
+      });
+      expect(paging.container.querySelector('.sentinel')).not.toBeNull();
+    });
+
+    it('has nothing to watch while the timeline is still empty', () => {
+      const { container } = render(Timeline, { props: { events: [], onReachEnd: () => {} } });
+
+      expect(container.querySelector('.sentinel')).toBeNull();
+    });
+
+    it('says a page is on its way, in words the empty state does not use', () => {
+      render(Timeline, {
+        props: { events, eose: true, loadingOlder: true, onReachEnd: () => {} },
+      });
+
+      expect(screen.getByText('さらに読み込んでいます…')).toBeInTheDocument();
+      expect(screen.queryByText('読み込み中…')).toBeNull();
+    });
+
+    it('says nothing once the timeline has run out', () => {
+      const { container } = render(Timeline, {
+        props: { events, eose: true, exhausted: true, onReachEnd: () => {} },
+      });
+
+      expect(container.querySelector('.loading-more')).toBeNull();
+    });
+  });
+
+  /**
+   * Two conditions gate a page, and each covers a case the other does not: an
+   * embed the reader never scrolled (a frame sized to its content, on its first
+   * paint, before the parent has resized it), and one they scrolled somewhere
+   * that is not this widget.
+   */
+  describe('what has to be true before a page is asked for', () => {
+    const events = [makeEvent({ id: 'a' }), makeEvent({ id: 'b' })];
+
+    /** Report the sentinel on screen, the way a real observer would. */
+    function observeAsVisible(): void {
+      class AlwaysVisible {
+        constructor(callback: IntersectionObserverCallback) {
+          // Asynchronously, as the real one delivers its first observation.
+          queueMicrotask(() =>
+            callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as never)
+          );
+        }
+        observe(): void {}
+        disconnect(): void {}
+      }
+      vi.stubGlobal('IntersectionObserver', AlwaysVisible);
+    }
+
+    function stubSize(element: Element, scrollHeight: number, clientHeight: number): void {
+      Object.defineProperty(element, 'scrollHeight', { value: scrollHeight, configurable: true });
+      Object.defineProperty(element, 'clientHeight', { value: clientHeight, configurable: true });
+    }
+
+    /** Let the observer's microtask and the effect that reads it both run. */
+    function settle(): Promise<void> {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      stubSize(document.documentElement, 0, 0);
+    });
+
+    it('waits for the reader to scroll, however visible the end already is', async () => {
+      observeAsVisible();
+      stubSize(document.documentElement, 2000, 800);
+      const onReachEnd = vi.fn();
+      render(Timeline, { props: { events, eose: true, onReachEnd } });
+
+      await settle();
+      expect(onReachEnd).not.toHaveBeenCalled();
+
+      window.dispatchEvent(new Event('scroll'));
+      await settle();
+      expect(onReachEnd).toHaveBeenCalled();
+    });
+
+    it('stays put when the scroll happened somewhere that cannot scroll', async () => {
+      observeAsVisible();
+      const onReachEnd = vi.fn();
+      render(Timeline, { props: { events, eose: true, onReachEnd } });
+
+      await settle();
+      window.dispatchEvent(new Event('scroll'));
+      await settle();
+
+      expect(onReachEnd).not.toHaveBeenCalled();
+    });
+
+    it('waits for EOSE, so the first page is not asked for twice', async () => {
+      observeAsVisible();
+      stubSize(document.documentElement, 2000, 800);
+      const onReachEnd = vi.fn();
+      render(Timeline, { props: { events, onReachEnd } });
+
+      await settle();
+      window.dispatchEvent(new Event('scroll'));
+      await settle();
+
+      expect(onReachEnd).not.toHaveBeenCalled();
+    });
   });
 });

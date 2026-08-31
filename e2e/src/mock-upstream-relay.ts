@@ -23,8 +23,12 @@ import { WebSocketServer } from 'ws';
  * forwards what it receives straight to the client, which would put profile
  * events in the timeline.
  *
- * Only `kinds`, `authors` and `ids` are implemented; an absent field matches
- * everything, as NIP-01 specifies.
+ * `since` / `until` are honoured because the timeline pages backwards with a
+ * cursor: a relay that ignored them would answer every page with the first one
+ * and the widget would read that as having reached the end.
+ *
+ * Only `kinds`, `authors`, `ids`, `since` and `until` are implemented; an
+ * absent field matches everything, as NIP-01 specifies.
  */
 function matchesFilter(event: NostrEvent, filter: Filter): boolean {
   if (filter.ids && !filter.ids.includes(event.id)) {
@@ -36,7 +40,31 @@ function matchesFilter(event: NostrEvent, filter: Filter): boolean {
   if (filter.authors && !filter.authors.includes(event.pubkey)) {
     return false;
   }
+  // Both bounds are inclusive.
+  if (filter.since !== undefined && event.created_at < filter.since) {
+    return false;
+  }
+  if (filter.until !== undefined && event.created_at > filter.until) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * What one REQ should answer with: each filter's own newest `limit` events,
+ * de-duplicated across the filters as a real relay does.
+ */
+function selectEvents(events: NostrEvent[], filters: Filter[]): NostrEvent[] {
+  const selected = new Map<string, NostrEvent>();
+  for (const filter of filters) {
+    const matched = events
+      .filter((event) => matchesFilter(event, filter))
+      .sort((a, b) => b.created_at - a.created_at);
+    for (const event of filter.limit === undefined ? matched : matched.slice(0, filter.limit)) {
+      selected.set(event.id, event);
+    }
+  }
+  return [...selected.values()];
 }
 
 export interface MockUpstreamRelay {
@@ -51,6 +79,8 @@ export interface MockUpstreamRelay {
    * "the timeline read through" has to say which kind it means.
    */
   reqCountForKind: (kind: number) => number;
+  /** The filters of every REQ this relay answered, in the order they arrived. */
+  reqFilters: () => Filter[][];
   close: () => Promise<void>;
 }
 
@@ -74,6 +104,7 @@ export async function startMockUpstreamRelay(
     : new WebSocketServer({ port: 0, host: '127.0.0.1' });
   let reqCount = 0;
   const reqCountByKind = new Map<number, number>();
+  const reqFilters: Filter[][] = [];
 
   server.on('connection', (socket) => {
     socket.on('message', (raw) => {
@@ -93,10 +124,9 @@ export async function startMockUpstreamRelay(
         for (const kind of new Set(filters.flatMap((filter) => filter.kinds ?? []))) {
           reqCountByKind.set(kind, (reqCountByKind.get(kind) ?? 0) + 1);
         }
-        for (const event of events) {
-          if (filters.some((filter) => matchesFilter(event, filter))) {
-            socket.send(JSON.stringify(['EVENT', subId, event]));
-          }
+        reqFilters.push(filters);
+        for (const event of selectEvents(events, filters)) {
+          socket.send(JSON.stringify(['EVENT', subId, event]));
         }
         socket.send(JSON.stringify(['EOSE', subId]));
         return;
@@ -122,6 +152,7 @@ export async function startMockUpstreamRelay(
     url: `${tlsServer ? 'wss' : 'ws'}://127.0.0.1:${port}`,
     reqCount: () => reqCount,
     reqCountForKind: (kind: number) => reqCountByKind.get(kind) ?? 0,
+    reqFilters: () => reqFilters,
     close: async () => {
       for (const client of server.clients) {
         client.terminate();

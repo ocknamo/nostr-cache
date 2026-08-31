@@ -10,7 +10,9 @@
   import type { MaterialVariant } from '../lib/material-symbols.ts';
   import type { EmbedTarget, EmbeddedEvent } from '../lib/note-embeds.ts';
   import type { Profile } from '../lib/profile.ts';
+  import { hasScrollableAncestor } from '../lib/scrollable.ts';
   import type { ValidationStatus } from '../lib/validation-status.ts';
+  import { whileVisible } from '../lib/when-visible.ts';
   import EventCard from './EventCard.svelte';
 
   interface Props {
@@ -77,6 +79,15 @@
      * card standing for it appears on screen.
      */
     onEmbedRequest?: (target: EmbedTarget) => void;
+    /** A page of older events is on its way. */
+    loadingOlder?: boolean;
+    /** Nothing older is left to ask for, so the end is not watched any more. */
+    exhausted?: boolean;
+    /**
+     * Called each time the end of the list is reached, until `exhausted`.
+     * Leaving it out is what turns the paging off: no sentinel is rendered.
+     */
+    onReachEnd?: () => void;
   }
 
   const {
@@ -98,7 +109,46 @@
     materialIcons,
     onAuthorVisible,
     onEmbedRequest,
+    loadingOlder = false,
+    exhausted = false,
+    onReachEnd,
   }: Props = $props();
+
+  let sentinel: HTMLElement | undefined = $state();
+  let atEnd = $state(false);
+  let scrolled = $state(false);
+
+  /**
+   * Whether the reader has scrolled here at all. `IntersectionObserver` cannot
+   * tell that from a sentinel that was on screen the whole time — which is what
+   * an iframe sized to its content leaves behind on every first paint.
+   */
+  $effect(() => {
+    if (!onReachEnd || scrolled) {
+      return;
+    }
+    const noticeScroll = () => {
+      scrolled = true;
+    };
+    // Captured, because a scroll on an inner container does not bubble.
+    const options = { capture: true, passive: true } as const;
+    window.addEventListener('scroll', noticeScroll, options);
+    return () => window.removeEventListener('scroll', noticeScroll, options);
+  });
+
+  $effect(() => {
+    if (!onReachEnd || !sentinel || !atEnd || !scrolled || loadingOlder || exhausted || !eose) {
+      return;
+    }
+    // The reader scrolled something; this is whether it was anything the widget
+    // sits in — see `scrollable.ts`.
+    if (!hasScrollableAncestor(sentinel)) {
+      return;
+    }
+    // Re-runs when the page lands and `loadingOlder` clears, so a sentinel still
+    // on screen keeps going rather than stopping one page short.
+    onReachEnd();
+  });
 </script>
 
 <div class="timeline">
@@ -132,6 +182,20 @@
         </li>
       {/each}
     </ul>
+    {#if onReachEnd}
+      <div
+        class="sentinel"
+        part="sentinel"
+        bind:this={sentinel}
+        use:whileVisible={(visible) => {
+          atEnd = visible;
+        }}
+      >
+        {#if loadingOlder}
+          <p class="loading-more" part="loading-more">さらに読み込んでいます…</p>
+        {/if}
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -162,7 +226,8 @@
     border-top: 1px solid var(--nt-separator, var(--nt-border, #e1e8ed));
   }
 
-  .empty {
+  .empty,
+  .loading-more {
     margin: 0;
     padding: 16px;
     text-align: center;

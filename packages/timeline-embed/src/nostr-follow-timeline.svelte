@@ -11,6 +11,8 @@
       sinceDays: { attribute: 'since-days' },
       followsFreshness: { attribute: 'follows-freshness' },
       maxEvents: { attribute: 'max-events' },
+      infiniteScroll: { attribute: 'infinite-scroll' },
+      maxTimelineEvents: { attribute: 'max-timeline-events' },
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       debug: { attribute: 'debug' },
@@ -57,6 +59,7 @@
     parseKinds,
     parseLimit,
     parseMaxFollows,
+    parseMaxTimelineEvents,
     parsePubkey,
     parseSinceDays,
   } from './lib/timeline-config.ts';
@@ -82,10 +85,31 @@
      * way for the reader to tell that from "nobody posted".
      */
     sinceDays?: string;
+    /**
+     * Set to `"false"` to stop the timeline loading older events as the reader
+     * reaches the end. On by default; see `<nostr-timeline>` for what a page costs.
+     */
+    infiniteScroll?: string | boolean;
+    /**
+     * Events kept on screen — and so how far the infinite scroll can go back.
+     * `0` lifts the ceiling. **Not** `max-events`, which bounds the cache.
+     */
+    maxTimelineEvents?: string;
   }
 
-  const { pubkey, kinds, limit, maxFollows, includeSelf, sinceDays, ...shared }: Props =
-    $props();
+  const {
+    pubkey,
+    kinds,
+    limit,
+    maxFollows,
+    includeSelf,
+    sinceDays,
+    infiniteScroll,
+    maxTimelineEvents,
+    ...shared
+  }: Props = $props();
+
+  const paging = $derived(parseEnabled(infiniteScroll));
 
   const view = $derived(viewPropsFrom(shared));
 
@@ -128,6 +152,7 @@
 
     const active = new TimelineController({
       host: relayConfigFrom(shared),
+      maxEvents: parseMaxTimelineEvents(maxTimelineEvents),
       onChange: (next) => {
         state = next;
       },
@@ -161,4 +186,5 @@
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(key) => controller?.requestProfile(key)}
   onEmbedRequest={(target) => controller?.requestEmbed(target)}
+  onReachEnd={paging ? () => void controller?.loadOlder() : undefined}
 />

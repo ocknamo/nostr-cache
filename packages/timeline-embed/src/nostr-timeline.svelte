@@ -11,6 +11,8 @@
       profileFreshness: { attribute: 'profile-freshness' },
       followsFreshness: { attribute: 'follows-freshness' },
       maxEvents: { attribute: 'max-events' },
+      infiniteScroll: { attribute: 'infinite-scroll' },
+      maxTimelineEvents: { attribute: 'max-timeline-events' },
       debug: { attribute: 'debug' },
       showOrigin: { attribute: 'show-origin' },
       showAvatars: { attribute: 'show-avatars' },
@@ -38,7 +40,13 @@
   } from './lib/embed-props.ts';
   import { dispatchActionEvent } from './lib/event-actions.ts';
   import { TimelineController, type TimelineState } from './lib/timeline-controller.ts';
-  import { parseDebug, parseFilters, parseShowOriginAlias } from './lib/timeline-config.ts';
+  import {
+    parseDebug,
+    parseEnabled,
+    parseFilters,
+    parseMaxTimelineEvents,
+    parseShowOriginAlias,
+  } from './lib/timeline-config.ts';
 
   interface Props extends SharedEmbedProps {
     /**
@@ -63,9 +71,31 @@
      * no longer does.
      */
     showOrigin?: string | boolean;
+    /**
+     * Set to `"false"` to stop the timeline loading older events as the reader
+     * reaches the end. On by default; it costs the relay one read-through per
+     * page, and a page under a `since` / `until` filter always reaches upstream.
+     */
+    infiniteScroll?: string | boolean;
+    /**
+     * Events kept on screen — and so how far the infinite scroll can go back.
+     * `0` lifts the ceiling. **Not** `max-events`, which bounds the cache.
+     */
+    maxTimelineEvents?: string;
   }
 
-  const { filters, kinds, authors, limit, showOrigin, ...shared }: Props = $props();
+  const {
+    filters,
+    kinds,
+    authors,
+    limit,
+    showOrigin,
+    infiniteScroll,
+    maxTimelineEvents,
+    ...shared
+  }: Props = $props();
+
+  const paging = $derived(parseEnabled(infiniteScroll));
 
   const view = $derived(viewPropsFrom(shared));
 
@@ -103,6 +133,7 @@
   $effect(() => {
     const active = new TimelineController({
       host: relayConfigFrom(shared),
+      maxEvents: parseMaxTimelineEvents(maxTimelineEvents),
       onChange: (next) => {
         state = next;
       },
@@ -126,4 +157,5 @@
   onAction={(action, context) => dispatchActionEvent(hostElement, action, context)}
   onAuthorVisible={(pubkey) => controller?.requestProfile(pubkey)}
   onEmbedRequest={(target) => controller?.requestEmbed(target)}
+  onReachEnd={paging ? () => void controller?.loadOlder() : undefined}
 />

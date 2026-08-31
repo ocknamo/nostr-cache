@@ -1060,4 +1060,162 @@ describe('Embeddable timeline E2E', () => {
     expect(name).toBeTruthy();
     expect(await originBadges(page)).toEqual(['cache', 'cache']);
   });
+
+  /**
+   * Paging back only happens where the reader could have scrolled, which is a
+   * question about layout and a real `IntersectionObserver` — neither of which
+   * jsdom has. This is the only place it can be exercised end to end.
+   */
+  describe('infinite scroll', () => {
+    const PAGE_SIZE = 3;
+    const TOTAL = 9;
+    /** Short enough to keep the first page taller than the window. */
+    const VIEWPORT = { width: 360, height: 320 };
+
+    let feed: MockUpstreamRelay;
+    let notes: NostrEvent[];
+
+    beforeAll(async () => {
+      notes = await Promise.all(
+        Array.from({ length: TOTAL }, (_, index) =>
+          createTestEvent(undefined, {
+            created_at: 1_700_000_000 - index,
+            // Long enough that three cards overflow the window, so the sentinel
+            // is genuinely below the fold rather than on screen from the start.
+            content: `note ${index}\n\n${'長い本文。'.repeat(20)}`,
+          })
+        )
+      );
+      feed = await startMockUpstreamRelay(notes);
+    });
+
+    afterAll(async () => {
+      await feed?.close();
+    });
+
+    function cardCount(target: Page): Promise<number> {
+      return target.$$('nostr-timeline article').then((cards) => cards.length);
+    }
+
+    /** Scroll to the bottom until the timeline stops growing. */
+    async function scrollToTheEnd(target: Page): Promise<number> {
+      let seen = await cardCount(target);
+      const deadline = Date.now() + TIMEOUT;
+      while (Date.now() < deadline) {
+        await target.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await target.waitForTimeout(200);
+        const now = await cardCount(target);
+        if (now === seen && now > 0) {
+          // Give a page in flight a chance before calling it settled.
+          await target.waitForTimeout(500);
+          if ((await cardCount(target)) === now) {
+            return now;
+          }
+        }
+        seen = now;
+      }
+      throw new Error(`Timed out waiting for the timeline to settle (last saw ${seen})`);
+    }
+
+    it('loads older events as the reader reaches the end', async () => {
+      page = await browser.newPage({ viewport: VIEWPORT });
+      await page.goto(embedUrl({ relays: feed.url, limit: String(PAGE_SIZE) }));
+      await page.waitForSelector('nostr-timeline article', { timeout: TIMEOUT });
+
+      expect(await scrollToTheEnd(page)).toBe(TOTAL);
+    });
+
+    it('asks with a cursor rather than repeating the first page', async () => {
+      // The relay is shared by this block, so only what this page asked counts.
+      const before = feed.reqFilters().length;
+      page = await browser.newPage({ viewport: VIEWPORT });
+      await page.goto(embedUrl({ relays: feed.url, limit: String(PAGE_SIZE) }));
+      await page.waitForSelector('nostr-timeline article', { timeout: TIMEOUT });
+      await scrollToTheEnd(page);
+
+      const paged = feed
+        .reqFilters()
+        .slice(before)
+        .flat()
+        .filter((filter) => filter.until !== undefined);
+      expect(paged.length).toBeGreaterThan(0);
+      // Strictly older each time: a repeated cursor is the failure the `until`
+      // widening exists to prevent, and a merely-sorted list would hide it.
+      const cursors = paged.map((filter) => filter.until as number);
+      expect([...cursors]).toEqual([...cursors].sort((a, b) => b - a));
+      expect(new Set(cursors).size).toBe(cursors.length);
+    });
+
+    it('stays on the first page when the embedder turned it off', async () => {
+      page = await browser.newPage({ viewport: VIEWPORT });
+      await page.goto(
+        embedUrl({
+          relays: feed.url,
+          limit: String(PAGE_SIZE),
+          'infinite-scroll': 'false',
+        })
+      );
+      await page.waitForSelector('nostr-timeline article', { timeout: TIMEOUT });
+
+      expect(await scrollToTheEnd(page)).toBe(PAGE_SIZE);
+    });
+
+    it('stays put inside a frame the embedding page sizes to its content', async () => {
+      // The README's height snippet leaves the frame with nothing to scroll —
+      // the case both gates in `Timeline.svelte` exist for.
+      page = await browser.newPage({ viewport: VIEWPORT });
+      await page.goto(site.scriptOnlyUrl);
+      await page.evaluate(
+        (src) => {
+          const frame = document.createElement('iframe');
+          frame.src = src;
+          frame.style.cssText = 'display:block;width:100%;border:0;height:200px';
+          window.addEventListener('message', (message) => {
+            if (message.source !== frame.contentWindow) {
+              return;
+            }
+            const height = (message.data as { type?: string; height?: number })?.height;
+            if ((message.data as { type?: string })?.type === 'nostr-timeline:height' && height) {
+              frame.style.height = `${height}px`;
+            }
+          });
+          document.body.appendChild(frame);
+        },
+        embedUrl({ relays: feed.url, limit: String(PAGE_SIZE) })
+      );
+
+      const framed = async (): Promise<number> => {
+        const inner = page?.frames().find((candidate) => candidate.url().includes('/embed/'));
+        return inner ? (await inner.$$('nostr-timeline article')).length : 0;
+      };
+
+      const deadline = Date.now() + TIMEOUT;
+      while ((await framed()) < PAGE_SIZE && Date.now() < deadline) {
+        await page.waitForTimeout(50);
+      }
+      expect(await framed()).toBe(PAGE_SIZE);
+
+      // Scroll the *embedding* page, which is the only thing that scrolls now.
+      for (let round = 0; round < 4; round += 1) {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await page.waitForTimeout(250);
+      }
+
+      expect(await framed()).toBe(PAGE_SIZE);
+    });
+
+    it('stops at the ceiling the embedder set', async () => {
+      page = await browser.newPage({ viewport: VIEWPORT });
+      await page.goto(
+        embedUrl({
+          relays: feed.url,
+          limit: String(PAGE_SIZE),
+          'max-timeline-events': '6',
+        })
+      );
+      await page.waitForSelector('nostr-timeline article', { timeout: TIMEOUT });
+
+      expect(await scrollToTheEnd(page)).toBe(6);
+    });
+  });
 });

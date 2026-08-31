@@ -179,6 +179,7 @@ export {
   parseLimit,
   parseMaxEvents,
   parseMaxFollows,
+  parseMaxTimelineEvents,
   parseOgpProxy,
   parsePubkey,
   parseReactionsLimit,
@@ -202,4 +203,4 @@ export type {
 export { DEFAULT_TIMELINE_CAP, insertEvent } from './timeline-utils.ts';
 export { fetchValidationStatuses, hasPending } from './validation-status.ts';
 export type { ValidationStatus } from './validation-status.ts';
-export { whenVisible } from './when-visible.ts';
+export { whenVisible, whileVisible } from './when-visible.ts';

@@ -17,6 +17,7 @@ import {
   parseLimit,
   parseMaxEvents,
   parseMaxFollows,
+  parseMaxTimelineEvents,
   parseOgpProxy,
   parsePubkey,
   parseReactionsLimit,
@@ -379,12 +380,27 @@ describe('configFromSearchParams', () => {
       dbName: 'demo',
       profileFreshness: 600,
       maxEvents: 1000,
+      infiniteScroll: true,
+      maxTimelineEvents: undefined,
       debug: true,
       showAvatars: true,
       showMedia: true,
       showEmbeds: true,
       actions: [],
     });
+  });
+
+  it('reads the paging switch and its ceiling out of the query string', () => {
+    const off = configFromSearchParams(
+      new URLSearchParams('infinite-scroll=false&max-timeline-events=120')
+    );
+    expect(off.infiniteScroll).toBe(false);
+    expect(off.maxTimelineEvents).toBe(120);
+
+    // On unless turned off, like the other switches spelled this way.
+    const on = configFromSearchParams(new URLSearchParams(''));
+    expect(on.infiniteScroll).toBe(true);
+    expect(on.maxTimelineEvents).toBeUndefined();
   });
 
   it('reads the action bar out of the query string', () => {
@@ -567,6 +583,44 @@ describe('parseMaxEvents', () => {
   });
 });
 
+describe('parseMaxTimelineEvents', () => {
+  it('reads a whole number of events', () => {
+    expect(parseMaxTimelineEvents('120')).toBe(120);
+  });
+
+  it('reads zero as "keep paging" rather than an empty timeline', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseMaxTimelineEvents('0')).toBe(Number.POSITIVE_INFINITY);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('leaves DEFAULT_TIMELINE_CAP in place for anything unusable', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseMaxTimelineEvents('-1')).toBeUndefined();
+    expect(parseMaxTimelineEvents('1.5')).toBeUndefined();
+    expect(parseMaxTimelineEvents('lots')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('names itself in the warning, so it is not read as max-events', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    parseMaxTimelineEvents('lots');
+
+    expect(warn.mock.calls[0][0]).toContain('max-timeline-events');
+  });
+
+  it('says nothing when the attribute is simply absent', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseMaxTimelineEvents(undefined)).toBeUndefined();
+    expect(parseMaxTimelineEvents('')).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe('parseOgpProxy', () => {
   /** Stand in for an embedding page, which is what the widget actually runs on. */
   function onPage(href: string) {
@@ -693,6 +747,8 @@ describe('followConfigFromSearchParams', () => {
       profileFreshness: 600,
       followsFreshness: 900,
       maxEvents: 1000,
+      infiniteScroll: true,
+      maxTimelineEvents: undefined,
       debug: true,
       showAvatars: true,
       showMedia: true,
@@ -712,6 +768,8 @@ describe('followConfigFromSearchParams', () => {
     expect(config.sinceSeconds).toBeUndefined();
     expect(config.followsFreshness).toBeUndefined();
     expect(config.maxEvents).toBeUndefined();
+    expect(config.infiniteScroll).toBe(true);
+    expect(config.maxTimelineEvents).toBeUndefined();
     expect(config.debug).toBe(false);
     expect(config.authorAction).toBeUndefined();
   });

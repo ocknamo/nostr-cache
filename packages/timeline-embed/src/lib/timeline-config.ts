@@ -163,6 +163,23 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
 }
 
 /**
+ * How many events the timeline holds — and so how far it can page back. Not
+ * `max-events`, which bounds the relay's IndexedDB rather than the screen.
+ *
+ * @returns The ceiling, `Infinity` for the documented `0`, or `undefined` to
+ *   leave `DEFAULT_TIMELINE_CAP` in place
+ */
+export function parseMaxTimelineEvents(value: string | null | undefined): number | undefined {
+  const parsed = parseWholeNumber(value, {
+    attribute: 'max-timeline-events',
+    expectation: 'a whole number of events, 0 for no ceiling',
+    min: 0,
+    element: 'nostr-timeline',
+  });
+  return parsed === 0 ? Number.POSITIVE_INFINITY : parsed;
+}
+
+/**
  * Parse the CORS proxy (`ogp-proxy`) the link previews are fetched through.
  *
  * Absent — the default — leaves the feature off entirely, so nothing about a
@@ -477,6 +494,9 @@ export function configFromSearchParams(params: URLSearchParams): {
   followsFreshness: number | undefined;
   /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
+  infiniteScroll: boolean;
+  /** Ceiling on events held on screen; `undefined` keeps the default. */
+  maxTimelineEvents: number | undefined;
   /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
   /** Whether to render author avatars. */
@@ -519,6 +539,8 @@ export function configFromSearchParams(params: URLSearchParams): {
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
     maxEvents: parseMaxEvents(params.get('max-events')),
+    infiniteScroll: parseEnabled(params.get('infinite-scroll')),
+    maxTimelineEvents: parseMaxTimelineEvents(params.get('max-timeline-events')),
     debug: parseDebug(params.get('debug')) || parseShowOriginAlias(params.get('show-origin')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
@@ -553,6 +575,9 @@ export interface FollowTimelineConfig {
   followsFreshness: number | undefined;
   /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
+  infiniteScroll: boolean;
+  /** Ceiling on events held on screen; `undefined` keeps the default. */
+  maxTimelineEvents: number | undefined;
   debug: boolean;
   showAvatars: boolean;
   showMedia: boolean;
@@ -592,6 +617,8 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
     maxEvents: parseMaxEvents(params.get('max-events')),
+    infiniteScroll: parseEnabled(params.get('infinite-scroll')),
+    maxTimelineEvents: parseMaxTimelineEvents(params.get('max-timeline-events')),
     debug: parseDebug(params.get('debug')),
     showAvatars: params.get('show-avatars') !== 'false',
     showMedia: params.get('show-media') !== 'false',
