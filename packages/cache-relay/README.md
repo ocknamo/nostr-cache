@@ -4,10 +4,10 @@
 トランスポート（WebSocket）をアダプタとして差し替えることで、**Node.js サーバ**としても
 **ブラウザ内のローカルキャッシュリレー**としても動作します。
 
-- プロジェクト全体の目的: [doc/concept.md](../../doc/concept.md)
-- 公開 API・オプション・対応 NIP の適用ルール: [doc/api.md](../../doc/api.md)
-- 実装状況と既知の制約: [doc/TODO.md](../../doc/TODO.md)
-- 内部設計: [doc/cache-relay/](../../doc/cache-relay/)
+- プロジェクト全体の目的: [doc/concept.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/concept.md)
+- 公開 API・オプション・対応 NIP の適用ルール: [doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md)
+- 実装状況と既知の制約: [doc/TODO.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/TODO.md)
+- 内部設計: [doc/cache-relay/](https://github.com/ocknamo/nostr-cache/tree/main/doc/cache-relay)
 
 ## 構成要素
 
@@ -35,7 +35,7 @@ npm install @nostr-cache/cache-relay
 
 既存の Nostr クライアント実装（素の `WebSocket` で NIP-01 を話すもの）を変更せずに、
 対象 URL への接続をブラウザ内リレーへ差し替えます。組み立て手順・対象 URL の指定パターン・
-注意点は [doc/transparent-cache.md](../../doc/transparent-cache.md) にまとめてあります。
+注意点は [doc/transparent-cache.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/transparent-cache.md) にまとめてあります。
 
 ```typescript
 // ブラウザでは Node.js 専用 WebSocketServer を含まない /browser エントリを使う
@@ -72,7 +72,7 @@ relay.unsubscribe('sub-1');
 ```
 
 > in-process 経路は `EventHandler` を経由しないため、replaceable の版比較・置換が
-> 効きません（[doc/TODO.md](../../doc/TODO.md) の「API の一貫性」）。
+> 効きません（[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md) の「置換可能 / アドレサブルイベント」）。
 
 ### Node.js（サーバとして起動）
 
@@ -93,13 +93,13 @@ const relay = new NostrCacheRelay(
 await relay.connect();
 ```
 
-> すぐに使えるサーバ実装は [`@nostr-cache/server`](../server/README.md) にもあります。
+> すぐに使えるサーバ実装は [`@nostr-cache/server`](https://github.com/ocknamo/nostr-cache/blob/main/packages/server/README.md) にもあります。
 
 ## キャッシュとしての設定
 
 どちらの形態も既定では「ローカルに保存済みのイベントを返す独立リレー」です。
 `NostrRelayOptions` で次の 3 つの軸を設定します（**各オプションの意味・既定値・制約は
-[doc/api.md](../../doc/api.md#interface-nostrrelayoptions) が唯一の情報源**です）。
+[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md#interface-nostrrelayoptions) が唯一の情報源**です）。
 
 | 軸 | オプション |
 |---|---|
@@ -124,4 +124,4 @@ relay.setCachePriority({ pubkeys: [currentUserNpub], kinds: [0] });
 ```
 
 上流キャッシュの設計（リードスルー / ライトスルー・鮮度ウィンドウ・id カバレッジ短絡）は
-[doc/cache-relay/upstream.md](../../doc/cache-relay/upstream.md) を参照してください。
+[doc/cache-relay/upstream.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/cache-relay/upstream.md) を参照してください。

@@ -2,7 +2,7 @@
 
 `@nostr-cache/cache-relay` を `WebSocketServer` と組み立てた、すぐ起動できる Node.js
 リレーサーバー。リレーとしての振る舞い（対応 NIP・イベント検証・購読管理・退避と TTL）は
-すべてリレーコアのもので、[doc/api.md](../../doc/api.md) が唯一の情報源です。
+すべてリレーコアのもので、[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md) が唯一の情報源です。
 このパッケージが固有に持つのは、**起動方法・永続化・環境変数・ヘルスチェック**です。
 
 ## インストールと実行
@@ -79,7 +79,7 @@ npm run start:server
 
 不正な値を指定した場合は起動時にエラーで停止します。実行中の差し替えは
 `server.setCachePriority(input)` で行えます（再起動不要）。優先イベントの扱いは
-[doc/api.md](../../doc/api.md) の「退避・TTL・キャッシュ優先度の注意」を参照してください。
+[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md) の「退避・TTL・キャッシュ優先度の注意」を参照してください。
 
 ## 設定オプション
 
@@ -120,7 +120,7 @@ interface NostrRelayServerOptions {
 ```
 
 `relay` の各値はリレーコアの `NostrRelayOptions` へ素通しされます。意味・既定値・制約は
-[doc/api.md](../../doc/api.md#interface-nostrrelayoptions) を参照してください。
+[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md#interface-nostrrelayoptions) を参照してください。
 
 > **注意（host バインドについて）**: `host` オプションはヘルスチェック用 HTTP サーバーには
 > 適用されますが、現状の WebSocket サーバー（`@nostr-cache/cache-relay` の `WebSocketServer`）は
@@ -164,5 +164,5 @@ await server.start();
 await server.stop();
 ```
 
-`NostrRelayServer` のメソッド一覧は [doc/api.md](../../doc/api.md#class-nostrrelayserver)
+`NostrRelayServer` のメソッド一覧は [doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md#class-nostrrelayserver)
 を参照してください。

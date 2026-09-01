@@ -28,7 +28,7 @@ Nostr クライアントのキャッシュを**完全に**行うには、キャ�
 
 | 形態 | トランスポート | ストレージ | 役割 |
 |---|---|---|---|
-| サーバ | `WebSocketServer`（Node.js / `ws`） | IndexedDB 互換（永続化が目標） | **普通の Nostr リレー**として動く |
+| サーバ | `WebSocketServer`（Node.js / `ws`） | `fake-indexeddb`（既定）/ `node:sqlite`（永続） | **普通の Nostr リレー**として動く |
 | Web クライアント | `WebSocketServerEmulator`（`globalThis.WebSocket` をインターセプト） | IndexedDB（ブラウザ） | **ローカルキャッシュリレー**として動く |
 
 - **サーバで実行すれば普通のリレーになる。** 通常の Nostr リレーとして外部公開できる。

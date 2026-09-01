@@ -185,12 +185,10 @@ interface NostrRelayOptions {
                                     // （created_at 基準ではない。未指定で無効。deleteExpired 対応ストレージが必要）
   ttlSweepInterval?: number;        // TTL スイープの実行間隔 秒 (default: 60)
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // 退避戦略 (default: 'FIFO')。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順（同数なら古い順）
-                                    // ※ 挿入も1回のアクセスとして数える。置換可能イベントは上書きのたびに
-                                    //    アクセス履歴がリセットされるため、頻繁に更新されるものは LFU で不利になる
   cachePriority?: {                 // キャッシュ優先度。指定 pubkey（npub / hex 可）の発行イベント、または指定 kind の
-    pubkeys?: string[];             // イベントを「優先イベント」として扱う。優先イベントは storageMaxSize 超過時に
-    kinds?: number[];               // 最後まで残り（非優先を先に退避。優先だけになったら通常の cacheStrategy 順で退避し
-  };                                // maxSize は常に厳守）、TTL スイープの削除対象外。不正な npub は生成時に例外
+    pubkeys?: string[];             // イベントを「優先イベント」として扱い、退避を後回しにして TTL スイープから除外する
+    kinds?: number[];               // （下記「退避・TTL・キャッシュ優先度の注意」）。不正な npub は生成時に例外
+  };
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
                                     // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
@@ -235,7 +233,8 @@ interface NostrRelayOptions {
 - `cachePriority` による **TTL の除外は無条件**です。`storageMaxSize` を設定せずに常用 kind
   （kind 1 等）を優先指定すると、該当イベントは TTL でも削除されずストレージが増え続けます。
   `cachePriority` は `storageMaxSize` と併用してください。
-- 置換可能イベントは上書きのたびにアクセス履歴（`access_count` 等）がリセットされ `LFU` で
+- `LRU` / `LFU` は**挿入も 1 回のアクセスとして数えます**。置換可能イベントは上書きのたびに
+  アクセス履歴（`access_count` 等）がリセットされるため頻繁に更新されるものは `LFU` で
   不利になりますが、`cachePriority` で指定すればこの不利は実質無効化されます。
 - NIP-09 の削除リクエスト（kind 5）は `cachePriority` の設定によらず常に同じ保護を受けます
   （TTL 対象外・最後に退避）。

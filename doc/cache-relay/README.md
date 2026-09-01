@@ -61,4 +61,7 @@
 +-----+----------------+
 ```
 
+図の最下段はブラウザ形態のもので、Node.js では同じ `StorageAdapter` の位置に
+`fake-indexeddb`（既定）または `SqliteStorage`（`node:sqlite`）が入る。
+
 各コンポーネントの責務と API は [doc/api.md](../api.md) と各ソースを参照。

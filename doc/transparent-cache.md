@@ -92,9 +92,10 @@ await relay.connect(); // ここでグローバル WebSocket が差し替わる
   （後述の[パターン B](#対象-url-の指定パターン)）はできません。細かく制御したい場合は上の自前組み立てを使ってください。
 
 引数・既定値・注意点（参照カウント、同一ページのウィジェットと設定を揃えること、
-二重読み込み不可、バンドルサイズ）は
-[packages/timeline-embed/README.md](../packages/timeline-embed/README.md#ウィジェットを置かずにページ内リレーだけ使うjs-api)
-を参照してください。
+二重読み込み不可）は
+[packages/timeline-embed/README.md](../packages/timeline-embed/README.md#ウィジェットを置かずにページ内リレーだけ使うjs-api)、
+バンドルサイズは同 README の
+[バンドルサイズ](../packages/timeline-embed/README.md#バンドルサイズ)を参照してください。
 
 ### 3. クライアントは普通に接続する
 
