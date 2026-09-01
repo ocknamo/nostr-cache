@@ -1,11 +1,7 @@
 /**
- * Parses the widget's string inputs — custom element attributes and iframe
- * query parameters — into the typed config the relay and NIP-01 filters need.
- *
- * Everything here is pure and string-in/value-out so both entry points (the
- * custom element and the iframe page) share one interpretation of `relays`,
- * `filters`, `kinds`, `authors` and `limit`. The JSON `filters` attribute is
- * involved enough to live on its own, in `filter-json.ts`.
+ * ウィジェットの文字列入力（属性・クエリパラメータ）を型付きの設定へ変換する。
+ * カスタム要素と iframe ページで解釈を 1 つにするため、すべて純粋関数。
+ * JSON の `filters` だけは量があるので `filter-json.ts` に分けている。
  */
 
 import type { Filter } from '@nostr-cache/shared';
@@ -37,13 +33,8 @@ function splitList(value: string | null | undefined): string[] {
 }
 
 /**
- * Parse a comma-separated relay list, dropping anything that is not a usable
- * WebSocket URL.
- *
- * A `ws://` upstream is rejected on an https page because the browser blocks it
- * as mixed content — worth catching here, where we can explain it, rather than
- * letting the connection fail silently later. (The intercepted local URL is
- * exempt: it is served in-page and never reaches the network.)
+ * https ページで `ws://` を弾くのは、ブラウザが混在コンテンツとして遮断するため。
+ * 後で静かに失敗させるより、理由を説明できるここで落とす。
  */
 export function parseRelays(value: string | null | undefined): string[] {
   const secureContext = typeof location !== 'undefined' && location.protocol === 'https:';
@@ -96,22 +87,14 @@ interface WholeNumberSpec {
    * minimum is a typo either way — none of these read a negative as a setting.
    */
   min: 0 | 1;
-  /**
-   * Clamps rather than rejects: an embed asking for more than the widget can
-   * hold has said "as many as you can", and refusing the attribute would drop
-   * it to the smaller default instead.
-   */
+  /** 拒否ではなくクランプ。上限超えは「出せるだけ」の意思表示で、拒否すると既定値に落ちる。 */
   max?: number;
   /** Applied last, so `min` and `max` both read the attribute's own unit. */
   scale?: number;
   element: 'nostr-timeline' | 'nostr-post';
 }
 
-/**
- * Read a whole-number attribute under the widget's house rule for bad input:
- * warn on the console and leave the caller's default in place, rather than
- * failing the embed over a typo.
- */
+/** 不正な入力は警告して呼び出し側の既定値に任せる（タイポで埋め込みを壊さない）。 */
 function parseWholeNumber(
   value: string | null | undefined,
   { attribute, expectation, min, max, scale = 1, element }: WholeNumberSpec
@@ -128,11 +111,9 @@ function parseWholeNumber(
 }
 
 /**
- * Seconds a cached profile (kind 0) or follow list (kind 3) is used before the
- * relay re-asks upstream.
+ * kind 0 / kind 3 のキャッシュを上流に聞き直さずに使う秒数。
  *
- * @param label Attribute this came from, so the warning names the one the
- *   embedder actually wrote — `follows-freshness` reaches here too
+ * @param label 警告に出す属性名。`follows-freshness` もここを通る
  */
 export function parseFreshness(
   value: string | null | undefined,
@@ -147,11 +128,9 @@ export function parseFreshness(
 }
 
 /**
- * The cache ceiling. The database it bounds lives on the embedding site's
- * origin, so an unusable value has to fall back rather than go unbounded.
+ * キャッシュの上限。埋め込み先オリジンの容量を使うので、不正値は無制限ではなく既定へ倒す。
  *
- * @returns The requested ceiling, or `undefined` to leave the relay host's
- *   default (`DEFAULT_STORAGE_MAX_SIZE`) in place
+ * @returns `undefined` なら `DEFAULT_STORAGE_MAX_SIZE` のまま
  */
 export function parseMaxEvents(value: string | null | undefined): number | undefined {
   return parseWholeNumber(value, {
@@ -163,11 +142,9 @@ export function parseMaxEvents(value: string | null | undefined): number | undef
 }
 
 /**
- * How many events the timeline holds — and so how far it can page back. Not
- * `max-events`, which bounds the relay's IndexedDB rather than the screen.
+ * 画面が保持するイベント数（= どこまで遡れるか）。IndexedDB を縛る `max-events` とは別。
  *
- * @returns The ceiling, `Infinity` for the documented `0`, or `undefined` to
- *   leave `DEFAULT_TIMELINE_CAP` in place
+ * @returns `0` は `Infinity`、`undefined` なら `DEFAULT_TIMELINE_CAP` のまま
  */
 export function parseMaxTimelineEvents(value: string | null | undefined): number | undefined {
   const parsed = parseWholeNumber(value, {
@@ -180,22 +157,14 @@ export function parseMaxTimelineEvents(value: string | null | undefined): number
 }
 
 /**
- * Parse the CORS proxy (`ogp-proxy`) the link previews are fetched through.
- *
- * Absent — the default — leaves the feature off entirely, so nothing about a
- * reader reaches a third party unless the embedder asked for it. The value has
- * to be the proxy's URL: there is no default to fall back to, since a shared
- * one would carry nobody's API key and spend a quota nobody owns.
- *
- * @returns The proxy URL to send the lookups to, or undefined to leave the
- *   previews off
+ * OGP 取得に使う CORS プロキシ。未指定なら機能ごと無効で、閲覧者の情報は第三者に渡らない。
+ * 既定のプロキシを用意しないのは、誰の API キーも持たず誰かのクォータを使うことになるため。
  */
 export function parseOgpProxy(value: string | boolean | null | undefined): string | undefined {
   if (value === null || value === undefined || value === false) {
     return undefined;
   }
-  // `true` arrives from a Svelte parent setting the property; it names no proxy
-  // either, so it lands on the same warning a bare attribute does.
+  // Svelte の親がプロパティで渡すと `true` が来る。URL が無いので属性なしと同じ警告へ。
   const proxy = value === true ? '' : value.trim();
   if (proxy === 'false' || proxy === '0') {
     return undefined;
@@ -206,8 +175,8 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
     );
     return undefined;
   }
-  // Checked before parsing, because `new URL` would resolve a typo like `off`
-  // against the embedding page and hand back a URL that looks usable.
+  // `new URL` は `off` のようなタイポを埋め込みページ基準で解決して使えそうな URL を返すため、
+  // パースより先に見る。
   if (!/^https?:\/\//i.test(proxy) && !proxy.startsWith('/')) {
     console.warn(
       `[nostr-timeline] Ignoring ogp-proxy (expected an https:// URL, or a path on this origin): ${value}`
@@ -241,18 +210,13 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
     );
     return undefined;
   }
-  // The resolved URL rather than what was written, so a path is resolved once
-  // here instead of again per request.
+  // パスの解決をリクエストごとに繰り返さないよう、解決後の URL を返す。
   return url.href;
 }
 
 /**
- * An opt-in boolean attribute: bare (empty string, as HTML boolean attributes
- * arrive), `"true"` or `"1"` turns it on, anything else leaves it off. Booleans
- * are accepted too, because a Svelte parent sets the property rather than the
- * attribute.
- *
- * The mirror of {@link parseEnabled}, for the ones on unless spelled `"false"`.
+ * オプトインの真偽属性。裸（空文字）・`"true"`・`"1"` で有効、他は無効。
+ * Svelte の親はプロパティで渡すので boolean も受ける。既定 on 側は {@link parseEnabled}。
  */
 export function parseFlag(value: string | boolean | null | undefined): boolean {
   if (value === null || value === undefined) {
@@ -265,13 +229,7 @@ export function parseFlag(value: string | boolean | null | undefined): boolean {
   return normalized === '' || normalized === 'true' || normalized === '1';
 }
 
-/**
- * Parse the `debug` switch that turns the widget's diagnostic UI on.
- *
- * Off unless asked for: the `cache` / `upstream` badges exist to show that the
- * cache is working, which is a thing the *embedder* wants to verify — a reader
- * of the embedding site has no use for them.
- */
+/** `cache` / `upstream` バッジは埋め込む側が動作確認に使うものなので、既定は off。 */
 export function parseDebug(value: string | boolean | null | undefined): boolean {
   return parseFlag(value);
 }
@@ -280,14 +238,8 @@ export function parseDebug(value: string | boolean | null | undefined): boolean 
 let showOriginWarned = false;
 
 /**
- * Read the deprecated `show-origin` switch, kept so embeds written against the
- * older attribute keep working.
- *
- * It can only turn the badges *on*: they used to be on unless `show-origin` said
- * otherwise, and honouring an absent attribute as "on" would give back the very
- * default this flag was moved away from. So `show-origin="true"` still shows
- * them (that embedder asked for them explicitly), `show-origin="false"` still
- * hides them, and an embed that never mentioned either gets the new default.
+ * 非推奨の `show-origin`。バッジを **on にすることしかできない**。
+ * 属性が無い場合を「on」と扱うと、この属性から離れた新しい既定に戻ってしまうため。
  */
 export function parseShowOriginAlias(value: string | boolean | null | undefined): boolean {
   if (value === null || value === undefined) {
@@ -339,14 +291,9 @@ export function parseFilter(input: FilterInput): Filter {
 let filtersPrecedenceWarned = false;
 
 /**
- * Build the filter list for the timeline subscription.
- *
- * `filters` wins outright when it yields anything usable: it can describe
- * things `kinds` / `authors` / `limit` cannot (several filters, `since`, tag
- * filters), so merging the two would produce a query the embedder never wrote.
- * The narrower attributes are the fallback — including when every filter in the
- * JSON turned out to be unusable, so a typo costs the reader a default timeline
- * rather than a blank one.
+ * 使える `filters` があればそちらが勝つ。`kinds` / `authors` / `limit` では書けない
+ * ことを表現できるので、混ぜると埋め込む側が書いていないクエリになる。
+ * JSON が全滅した場合も含め、狭い属性の側がフォールバック。
  */
 export function parseFilters(input: FilterInput): Filter[] {
   const filters = parseFilterList(input.filters);
@@ -357,22 +304,15 @@ export function parseFilters(input: FilterInput): Filter[] {
     filtersPrecedenceWarned = true;
     console.warn('[nostr-timeline] filters is set; ignoring kinds, authors and limit.');
   }
-  // An unbounded filter would have the relay hand back everything it has cached
-  // and then ask upstream for the same, on every page load. The widget's
-  // documented default applies unless the embedder named their own.
+  // limit 無しだとページを開くたびにキャッシュ全件 + 上流への同じ要求になる。
   return filters.map((filter) =>
     filter.limit === undefined ? { ...filter, limit: DEFAULT_LIMIT } : filter
   );
 }
 
 /**
- * Parse the `pubkey` attribute of `<nostr-follow-timeline>`.
- *
- * hex, `npub` and `nprofile` are all accepted, matching how `authors` entries
- * are read. Unlike every other attribute here, an unusable value is *not*
- * survivable: `pubkey` is the one input the widget cannot supply a default for,
- * since there is no sensible follow list to fall back to. The caller reports it
- * to the reader rather than subscribing to something else.
+ * hex / `npub` / `nprofile` を受ける。他の属性と違い既定値で代替できない
+ * （フォールバックできるフォローリストが無い）ため、呼び出し側が閲覧者に表示する。
  */
 export function parsePubkey(value: string | null | undefined): string | undefined {
   if (value === null || value === undefined || value.trim() === '') {
@@ -385,7 +325,6 @@ export function parsePubkey(value: string | null | undefined): string | undefine
   return hex;
 }
 
-/** Parse a comma-separated `kinds` list. */
 export function parseKinds(value: string | null | undefined): number[] {
   const kinds = parseNumberList(value);
   return kinds.length > 0 ? kinds : DEFAULT_KINDS;
@@ -397,12 +336,8 @@ export function parseLimit(value: string | null | undefined): number {
 }
 
 /**
- * The cap on how many follow-list entries reach `authors`. Zero is rejected
- * rather than read as "follow nobody": that would leave the timeline with no
- * authors at all, which is the one shape this widget must never subscribe with.
- *
- * @returns A positive count, or `undefined` when nothing usable was given —
- *   leaving the caller's default (`DEFAULT_MAX_FOLLOWS`) in place
+ * `authors` に載せるフォロー数の上限。0 を「誰もフォローしない」と読まず弾くのは、
+ * authors 空の購読になってしまうため。`undefined` なら `DEFAULT_MAX_FOLLOWS` のまま。
  */
 export function parseMaxFollows(value: string | null | undefined): number | undefined {
   return parseWholeNumber(value, {
@@ -424,13 +359,7 @@ export function parseSinceDays(value: string | null | undefined): number | undef
   });
 }
 
-/**
- * Read a switch that is on unless explicitly turned off, the way
- * `show-avatars` / `show-media` read.
- *
- * Booleans are accepted for the same reason {@link parseDebug} accepts them: a
- * Svelte parent setting the property rather than the attribute delivers one.
- */
+/** `show-avatars` / `show-media` のような、明示的に off にしない限り on の属性。 */
 export function parseEnabled(value: string | boolean | null | undefined): boolean {
   if (typeof value === 'boolean') {
     return value;
@@ -464,9 +393,8 @@ export function parseRepliesLimit(value: string | null | undefined): number | un
 }
 
 /**
- * Levels to open, counting the direct replies as one. The ceiling is not
- * politeness: each level is a live subscription, and the relay caps a client at
- * 20 while the widget already spends eight elsewhere.
+ * 開く階層数（直接の返信を 1 と数える）。上限があるのは礼儀ではなく、階層ごとに
+ * ライブ購読を 1 本使い、リレーの上限 20 のうち 8 本は既に他で使っているため。
  */
 export function parseRepliesDepth(value: string | null | undefined): number | undefined {
   return parseWholeNumber(value, {
@@ -479,52 +407,27 @@ export function parseRepliesDepth(value: string | null | undefined): number | un
 }
 
 /**
- * Read the widget config out of an iframe URL's query string, so
- * `embed/?relays=wss://nos.lol&kinds=1&limit=20` configures the same things the
- * custom element's attributes do.
+ * iframe の URL クエリから設定を読む。カスタム要素の属性と同じものを同じ名前で受ける。
+ * 省略可能な値の `undefined` は「呼び出し側の既定のまま」を意味する。
  */
 export function configFromSearchParams(params: URLSearchParams): {
   relays: string[];
-  /** Filters for the timeline REQ; always at least one. */
   filters: Filter[];
   dbName: string | undefined;
-  /** Seconds a cached profile is served for; `undefined` keeps the default. */
   profileFreshness: number | undefined;
-  /** Configures the shared relay, not this widget; see `<nostr-timeline>`. */
   followsFreshness: number | undefined;
-  /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
   infiniteScroll: boolean;
-  /** Ceiling on events held on screen; `undefined` keeps the default. */
   maxTimelineEvents: number | undefined;
-  /** Whether to render the diagnostic `cache` / `upstream` badges. */
   debug: boolean;
-  /** Whether to render author avatars. */
   showAvatars: boolean;
-  /** Whether to render media attachments found in a note's body. */
   showMedia: boolean;
-  /** Whether to render `nostr:` references in a body as nested cards. */
   showEmbeds: boolean;
-  /** Proxy the link previews are fetched through; `undefined` leaves them off. */
   ogpProxy: string | undefined;
-  /**
-   * The embedder's buttons under each card. A query string carries no
-   * functions, so these are declarative only — a press is reported by event.
-   */
   actions: EventAction[];
-  /**
-   * Makes each card's author pressable, reported under the embedder's own id.
-   * `undefined` leaves the avatar and the name plain.
-   */
   authorAction: AuthorAction | undefined;
-  /**
-   * Makes the quote cards in a body pressable, under the embedder's own id.
-   * `undefined` leaves them the plain frames they are.
-   */
   noteAction: NoteAction | undefined;
-  /** Material Symbols variant for the action icons, if asked for. */
   materialIcons: MaterialVariant | undefined;
-  /** `none` when the embedding page loads the icon font itself. */
   materialIconsFont: string | undefined;
 } {
   return {
@@ -559,50 +462,34 @@ export function configFromSearchParams(params: URLSearchParams): {
 
 export interface FollowTimelineConfig {
   relays: string[];
-  /** Hex pubkey whose follows are shown, or `undefined` when unusable. */
   pubkey: string | undefined;
   kinds: number[];
   limit: number;
-  /** Cap on follow-list entries; `undefined` keeps `DEFAULT_MAX_FOLLOWS`. */
   maxFollows: number | undefined;
   includeSelf: boolean;
-  /** Recency bound in seconds; `undefined` for none. */
   sinceSeconds: number | undefined;
   dbName: string | undefined;
-  /** Seconds a cached profile is served for; `undefined` keeps the default. */
   profileFreshness: number | undefined;
-  /** Seconds a cached follow list is served for; `undefined` keeps the default. */
   followsFreshness: number | undefined;
-  /** For `RelayHostConfig.storageMaxSize`; `undefined` keeps the default. */
   maxEvents: number | undefined;
   infiniteScroll: boolean;
-  /** Ceiling on events held on screen; `undefined` keeps the default. */
   maxTimelineEvents: number | undefined;
   debug: boolean;
   showAvatars: boolean;
   showMedia: boolean;
   showEmbeds: boolean;
-  /** Link preview proxy; see {@link configFromSearchParams}. */
   ogpProxy: string | undefined;
-  /** Declarative action buttons; see {@link configFromSearchParams}. */
   actions: EventAction[];
-  /** The author press; see {@link configFromSearchParams}. */
   authorAction: AuthorAction | undefined;
-  /** The quoted-note press; see {@link configFromSearchParams}. */
   noteAction: NoteAction | undefined;
-  /** Material Symbols variant for the action icons, if asked for. */
   materialIcons: MaterialVariant | undefined;
-  /** `none` when the embedding page loads the icon font itself. */
   materialIconsFont: string | undefined;
 }
 
 /**
- * Read `<nostr-follow-timeline>`'s config out of an iframe URL's query string.
- *
- * Its own function rather than a branch inside {@link configFromSearchParams},
- * for the same reason the two elements are separate: a query string carries no
- * element type, so a single entry point would have to guess which widget the
- * caller meant — and quietly drop the parameters the guessed element lacks.
+ * {@link configFromSearchParams} の分岐にしないのは、クエリ文字列が要素の種別を運ばず、
+ * 単一の入口だとどちらのウィジェットか推測することになるため（推測を外すと、その要素に
+ * 無いパラメータを黙って捨てる）。
  */
 export function followConfigFromSearchParams(params: URLSearchParams): FollowTimelineConfig {
   return {

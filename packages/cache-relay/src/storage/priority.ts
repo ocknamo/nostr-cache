@@ -1,42 +1,26 @@
 /**
- * キャッシュの保持優先度（退避・TTL スイープからの保護）の判定ロジック
- *
- * Dexie にも SQLite にも依存しない純粋関数として切り出し、両ストレージ実装で
- * 共有する（`dexie/tag-index.ts` と同じパターン）。
+ * キャッシュの保持優先度（退避・TTL スイープからの保護）の判定。
+ * 両ストレージ実装で共有するため、Dexie にも SQLite にも依存しない純粋関数。
  */
 
 import { DELETION_EVENT_KIND } from '../event/event-kind.js';
 
 /**
- * Cache priority configuration.
- *
- * Events whose `pubkey` matches any listed pubkey OR whose `kind` matches any
- * listed kind are treated as priority events: they are evicted last under
- * `storageMaxSize` (non-priority events are evicted first; priority events are
- * still evicted by the normal strategy once only priority events remain, so
- * `maxSize` is always honored) and they are exempt from the TTL sweep.
- *
- * Pubkeys must already be normalized to 64-character lowercase hex — npub
- * decoding happens once at option-resolution time, not here.
+ * pubkey **または** kind のどちらかに一致すれば優先イベント。
+ * pubkey は正規化済みの hex であることが前提（npub の復号はオプション解決時に済ませる）。
  */
 export interface CachePriority {
-  /** Priority authors as 64-character lowercase hex pubkeys */
+  /** 64 桁の小文字 hex */
   pubkeys?: string[];
-  /** Priority event kinds */
   kinds?: number[];
 }
 
 /**
- * Kinds that are always retained, on top of whatever the user configured.
+ * 利用者の設定によらず常に保持する kind。NIP-09 の削除リクエスト（kind 5）だけが対象で、
+ * 捨てると上流から削除済みイベントが再び届いたときに削除を再適用できなくなる。
  *
- * NIP-09 deletion requests (kind 5) are the only entry: the spec asks relays to
- * keep serving them indefinitely, and dropping one also drops this cache's
- * ability to re-apply the deletion when the deleted event arrives again from an
- * upstream relay. See [doc/nips/nip-09.md](../../../../doc/nips/nip-09.md).
- *
- * Retention is absolute against the TTL sweep and best-effort against
- * `storageMaxSize` — protected events are evicted last, but `maxSize` still
- * wins when nothing else is left to evict.
+ * TTL に対しては絶対、`storageMaxSize` に対しては best-effort（他に退避できるものが
+ * 無ければ `maxSize` が優先）。
  */
 const ALWAYS_RETAINED_KINDS: ReadonlySet<number> = new Set([DELETION_EVENT_KIND]);
 
@@ -57,20 +41,12 @@ export function isAlwaysRetainedKind(kind: number): boolean {
   return ALWAYS_RETAINED_KINDS.has(kind);
 }
 
-/**
- * The kinds that are always retained, for storage backends that express
- * retention as a query condition rather than a per-row predicate.
- */
+/** 行ごとの述語ではなくクエリ条件で保持を表すストレージ向け。 */
 export function getAlwaysRetainedKinds(): number[] {
   return Array.from(ALWAYS_RETAINED_KINDS);
 }
 
-/**
- * Build a matcher deciding whether a stored event row must be retained —
- * either because it matches a configured priority rule or because its kind is
- * always retained. Precomputes lookup sets once so the returned function is
- * cheap per row.
- */
+/** 参照集合を先に作るので、返す関数は 1 行あたり安い。 */
 export function createPriorityMatcher(
   priority?: CachePriority
 ): (row: { pubkey: string; kind: number }) => boolean {

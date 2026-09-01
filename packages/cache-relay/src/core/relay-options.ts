@@ -1,4 +1,4 @@
-/** Options and defaults for {@link NostrCacheRelay}. */
+/** {@link NostrCacheRelay} のオプションと既定値。仕様は doc/api.md を参照。 */
 
 import { normalizePubkey } from '@nostr-cache/shared';
 import { isReplaceableKind } from '../event/event-kind.js';
@@ -7,17 +7,9 @@ import type { CacheStrategy } from '../storage/storage-adapter.js';
 import type { FreshnessWindows } from '../upstream/freshness.js';
 import type { UpstreamPool } from '../upstream/upstream-types.js';
 
-/**
- * Default relay-imposed cap on the number of stored events returned per REQ
- * subscription / in-process subscribe replay.
- */
 export const DEFAULT_MAX_EVENTS = 500;
 
-/**
- * Client ID used for subscriptions created through the in-process API
- * (`subscribe()` / `unsubscribe()`), as opposed to subscriptions created
- * by remote clients over the transport layer.
- */
+/** transport 経由のクライアントと区別するための、in-process 購読の clientId。 */
 export const LOCAL_CLIENT_ID = 'local';
 
 export interface NostrRelayOptions {
@@ -30,131 +22,83 @@ export interface NostrRelayOptions {
    */
   maxEventsPerRequest?: number;
 
-  /**
-   * Maximum number of events to keep in storage. When set, after each saved
-   * event the relay asks the storage adapter to evict down to this size
-   * (see {@link cacheStrategy}). Disabled when undefined or non-positive.
-   *
-   * Requires a storage adapter implementing `enforceLimit` (DexieStorage
-   * does); otherwise it has no effect.
-   */
+  /** 最大保存件数。`enforceLimit` 対応ストレージが必要。未指定・非正で無効。 */
   storageMaxSize?: number;
 
   /**
-   * Time-to-live in seconds for cached events. Events cached (saved to
-   * storage) more than `ttl` seconds ago are deleted by a periodic background
-   * sweep (see {@link ttlSweepInterval}) rather than filtered on every read.
-   * Expiry counts from when the event entered this cache, not from the
-   * event's own `created_at`.
-   *
-   * Trade-off: an expired event may still be returned for up to one sweep
-   * interval before it is purged. Disabled when undefined or non-positive.
-   *
-   * Requires a storage adapter implementing `deleteExpired` (DexieStorage
-   * does). If the adapter does not, the TTL silently has no effect aside from
-   * a one-time warning logged on the first sweep.
+   * キャッシュ投入からの生存秒数。定期スイープで削除するため、期限切れイベントを
+   * 最大 {@link ttlSweepInterval} 秒ぶん返しうる。`deleteExpired` 対応ストレージが
+   * 必要。未指定・非正で無効。
    */
   ttl?: number;
 
-  /**
-   * Interval in seconds between TTL background sweeps when `ttl` is set.
-   * Defaults to 60. Smaller values reduce staleness at the cost of more
-   * frequent delete passes.
-   */
+  /** TTL スイープの実行間隔（秒）。既定 60 */
   ttlSweepInterval?: number;
 
-  /**
-   * Eviction strategy used when `storageMaxSize` is exceeded: `FIFO` (oldest
-   * `created_at` first), `LRU` (least recently read first) or `LFU` (least
-   * frequently read first). Defaults to `FIFO`.
-   */
+  /** {@link storageMaxSize} 超過時の退避戦略。既定 `FIFO` */
   cacheStrategy?: CacheStrategy;
 
   /**
-   * キャッシュ優先度。指定した pubkey（npub / hex どちらでも可）の発行イベント、
-   * または指定 kind のイベントを優先イベントとして扱う。優先イベントは
-   * {@link storageMaxSize} 超過時に最後まで残り（非優先を先に退避し、優先だけに
-   * なったら通常の {@link cacheStrategy} 順で退避するので `storageMaxSize` は常に
-   * 守られる）、{@link ttl} スイープの対象外になる。
-   *
-   * 不正な pubkey / kind はリレー生成時に例外。実行中の差し替えは
-   * `NostrCacheRelay.setCachePriority()` で行う。
+   * 優先イベント（指定 pubkey の発行イベント / 指定 kind）は退避を後回しにし、
+   * {@link ttl} スイープの対象外にする。pubkey は npub / hex どちらでも可。
+   * 不正な値はリレー生成時に例外。実行中の差し替えは `setCachePriority()`。
    */
   cachePriority?: { pubkeys?: string[]; kinds?: number[] };
 
+  /** 既定 `IMMEDIATELY` */
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY';
 
-  /**
-   * Interval in seconds between background validation passes when
-   * `validateEventsType` is `'LAZY'`. Defaults to 60.
-   */
+  /** `LAZY` のバックグラウンド検証間隔（秒）。既定 60 */
   lazyValidateInterval?: number;
 
-  /**
-   * Number of events validated per background pass when `validateEventsType`
-   * is `'LAZY'`. Defaults to 100.
-   */
+  /** `LAZY` の 1 回あたり検証件数。既定 100 */
   lazyValidateBatchSize?: number;
 
   /** Node.js の WebSocket サーバー用 */
   port?: number;
 
   /**
-   * 上流リレーの URL リスト。指定したときだけ透過キャッシュになる
-   * （REQ はリードスルー、EVENT はライトスルー）。未指定・空配列なら
-   * 「自分が保存済みのイベントのみ返す独立リレー」として動作する。
+   * 上流リレーの URL リスト。指定したときだけ透過キャッシュになる。
+   * 未指定・空配列なら「自分が保存済みのイベントのみ返す独立リレー」。
    */
   upstreamRelays?: string[];
 
   /**
-   * リードスルー時、上流の EOSE を待ってクライアントへ EOSE を返す上限 (ms)。
-   * 既定は `DEFAULT_SUBSCRIPTION_TIMEOUT`。上流が全滅していても、この時間で EOSE を返す。
+   * 上流の EOSE を待ってクライアントへ EOSE を返す上限 (ms)。
+   * 既定は `DEFAULT_SUBSCRIPTION_TIMEOUT`。上流が全滅していてもこの時間で返す。
    */
   upstreamEoseTimeout?: number;
 
   /**
-   * 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」（HTTP の
-   * `max-age` 相当）。`{ 0: 3600 }` なら「1時間以内にキャッシュした kind 0 は上流に
-   * 問い合わせない」。REQ のフィルタが replaceable イベント（`kinds` + `authors`）だけを
-   * 要求し、要求した (kind, pubkey) すべてが窓の内側のキャッシュから返せた場合、
-   * そのフィルタは上流へ転送しない。1 件でも古い・欠けている・列挙できない場合は
-   * 従来どおり転送する。
-   *
-   * {@link upstreamRelays} と併用したときだけ意味を持ち、`getCachedAt` 対応の
-   * ストレージ（`DexieStorage` / `SqliteStorage`）が必要。未対応なら警告 1 回で無効。
-   *
-   * Only replaceable kinds may be listed (0 / 3 / 10000–19999) — an addressable
-   * or regular kind throws at relay construction time, as does a non-positive
-   * window. See [doc/cache-relay/upstream.md](../../../../doc/cache-relay/upstream.md).
+   * 鮮度ウィンドウ（kind → 秒）。指定できるのは replaceable kind のみで、それ以外や
+   * 非正の秒はリレー生成時に例外。`getCachedAt` 対応ストレージが必要で、未対応なら
+   * 警告 1 回で無効。判定条件は doc/cache-relay/upstream.md 第5節を参照。
    */
   upstreamFreshness?: Record<number, number>;
 
   /**
-   * テスト・高度用途向け: 上流プールの実装を差し替える。指定時は `upstreamRelays`
-   * より優先され、リード/ライトスルーが有効になる。
+   * テスト・高度用途向けに上流プールの実装を差し替える。
+   * 指定時は {@link upstreamRelays} より優先される。
    */
   upstreamPool?: UpstreamPool;
 }
 
-/** Apply the relay's option defaults to a caller-supplied options object. */
 export function resolveRelayOptions(options: NostrRelayOptions): NostrRelayOptions {
   return {
     validateEventsType: 'IMMEDIATELY',
     maxSubscriptions: 20,
     ...options,
-    // Guard against an explicit `undefined` clobbering the default
+    // 明示的な undefined が既定値を潰さないようにする
     maxEventsPerRequest: options.maxEventsPerRequest ?? DEFAULT_MAX_EVENTS,
     cachePriority: normalizeCachePriority(options.cachePriority),
   };
 }
 
 /**
- * Normalize a caller-supplied cache priority config: pubkeys are converted to
- * 64-char lowercase hex (decoding `npub1...` input), kinds are validated, and
- * both lists are deduplicated. Downstream code (eviction, TTL sweep) only ever
- * sees normalized hex. Returns undefined when there are no effective rules.
+ * pubkey を hex へ揃えて重複を除く。退避・TTL スイープ側は正規化済み hex しか見ない。
+ * 実効ルールが無ければ undefined。
  *
- * @throws Error naming the offending entry on an invalid pubkey or kind
+ * @throws Error 不正な pubkey / kind。該当の値をメッセージに含める
  */
 export function normalizeCachePriority(input?: {
   pubkeys?: string[];
@@ -178,21 +122,15 @@ export function normalizeCachePriority(input?: {
 }
 
 /**
- * Normalize a caller-supplied {@link NostrRelayOptions.upstreamFreshness} map
- * into the `Map` the freshness gate evaluates against.
+ * {@link resolveRelayOptions} に畳み込まないのは、`Record` と `Map` が構造的に
+ * 互換でなく、公開オプション型が両方を受け入れる形になってしまうため。
+ * 代わりに `NostrCacheRelay` が構築時に 1 回呼ぶ。
  *
- * Deliberately not applied by {@link resolveRelayOptions}: unlike
- * `cachePriority`, whose input and normalized shapes are structurally
- * compatible, `Record<number, number>` and `Map` are not — folding it in would
- * force the public options type to admit both. `NostrCacheRelay` calls this
- * once at construction instead, so an invalid config still throws there.
+ * replaceable 以外を無視ではなく例外にするのは、kind 1 のような窓は結果集合が
+ * 無限で「キャッシュが全部持っている」を判定しようがなく、黙って落とすと設定が
+ * 効かない理由を利用者が知れないため。
  *
- * Non-replaceable kinds are rejected rather than ignored: a window on kind 1
- * can never be honoured (the result set is unbounded, so "the cache has
- * everything" is unknowable), and silently dropping it would leave the caller
- * with no way to see why their setting did nothing.
- *
- * @throws Error naming the offending entry on an invalid kind or window
+ * @throws Error 不正な kind / 窓。該当の値をメッセージに含める
  */
 export function normalizeFreshnessWindows(
   input?: Record<number, number>

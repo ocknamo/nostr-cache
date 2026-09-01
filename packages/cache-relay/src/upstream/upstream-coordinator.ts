@@ -1,21 +1,6 @@
 /**
- * Orchestrates read-through / write-through between the local relay and the
- * upstream pool.
- *
- * Responsibilities:
- * - Map each client subscription `(clientId, subscriptionId)` to a short
- *   upstream subscription id (kept well under NIP-01's 64-char limit) and back.
- * - De-duplicate events per subscription (against what the client already got
- *   from local storage and from other upstream relays), with a bounded memory
- *   footprint.
- * - Backfill upstream events into local storage via the injected `ingest`
- *   (which reuses the relay's normal event handling: validation mode,
- *   replaceable/ephemeral rules, lazy validation, storage limits).
- * - Deliver deduped, backfilled events to the owning client.
- * - Hold back the client's EOSE until the upstream pool's aggregated EOSE (or a
- *   timeout), so one-shot clients see upstream results before "end of stored".
- * - Clean up upstream subscriptions on CLOSE and on client disconnect.
- * - Forward published events upstream (write-through, fire-and-forget).
+ * ローカルリレーと上流プールの間でリードスルー / ライトスルーを取り持つ。
+ * 責務の分担とメッセージフローは doc/cache-relay/upstream.md 第2.2節・第3節を参照。
  */
 
 import { DEFAULT_SUBSCRIPTION_TIMEOUT, logger } from '@nostr-cache/shared';

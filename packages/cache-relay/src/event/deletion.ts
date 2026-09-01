@@ -1,19 +1,8 @@
 /**
- * NIP-09 (event deletion request) handling.
+ * NIP-09（削除リクエスト）の解釈。適用ルールは doc/api.md を参照。
  *
- * A kind 5 event asks the relay to delete the events it references by `e`
- * (event id) or `a` (replaceable / addressable coordinate) tag. See
- * [doc/nips/nip-09.md](../../../../doc/nips/nip-09.md).
- *
- * Two rules of the spec shape everything here:
- * - only the request author's own events may be deleted. `a` tags carry the
- *   author, so they are filtered while parsing; `e` tags do not, so the
- *   pubkey check is delegated to the storage adapter, which can see the
- *   stored row;
- * - the deletion request itself is stored and kept durably, because clients
- *   may not have seen it yet and it must be re-appliable and forwardable
- *   upstream. Kind 5 is therefore exempt from the TTL sweep and evicted last
- *   under `storageMaxSize` (see `storage/priority.ts`).
+ * `a` タグは著者を含むのでここで絞れるが、`e` タグは含まないため、同一 pubkey か
+ * どうかの判定は保存行を見られるストレージアダプタに委譲している。
  */
 
 import { logger } from '@nostr-cache/shared';
@@ -31,46 +20,29 @@ const HEX_ID_PATTERN = /^[0-9a-f]{64}$/;
 const KIND_PATTERN = /^(0|[1-9]\d*)$/;
 
 /**
- * Maximum references honored per deletion request, per tag type.
- *
- * Each coordinate costs one storage round trip, and on the server those run
- * synchronously against SQLite, so an unbounded request would let a single
- * EVENT block the relay for as long as it liked. Ids are cheaper (one batched
- * query) but capped for symmetry. Excess references are dropped with a log
- * rather than rejecting the request, since the request itself is still worth
- * storing and forwarding.
+ * タグ種別ごとの上限。座標 1 件につきストレージ往復が 1 回で、server では SQLite に
+ * 同期実行されるため、無制限だと 1 通の EVENT でリレーを好きなだけ塞げる。超過分は
+ * リクエストを拒否せず捨てる（リクエスト自体は保存・転送する価値がある）。
  */
 export const MAX_DELETION_REFERENCES = 1000;
 
-/**
- * The deletion targets carried by one kind 5 event, after dropping malformed
- * and out-of-scope references.
- */
+/** 不正・対象外の参照を落としたあとの削除対象。 */
 export interface DeletionRequest {
-  /** Author of the request; the only author whose events may be deleted. */
+  /** このリクエストの著者。削除できるのはこの著者のイベントだけ。 */
   pubkey: string;
-  /** Deduplicated event ids from `e` tags. */
+  /** `e` タグ（重複排除済み） */
   ids: string[];
-  /** Deduplicated coordinates from `a` tags, all authored by `pubkey`. */
+  /** `a` タグ（重複排除済み・すべて `pubkey` の著作） */
   addresses: EventAddress[];
-  /**
-   * `created_at` of the request. Coordinate deletions apply only to versions
-   * at or before this moment, so a newer version published afterwards is kept.
-   */
+  /** 座標削除はこの時刻以前の版にだけ適用する。後から公開された版は残る。 */
   until: number;
 }
 
-/** Whether an event is a NIP-09 deletion request (kind 5). */
 export function isDeletionEvent(event: Pick<NostrEvent, 'kind'>): boolean {
   return isDeletionKind(event.kind);
 }
 
-/**
- * Parse an `a` tag value (`<kind>:<pubkey>:<d-identifier>`) into a coordinate.
- *
- * The identifier may itself contain `:`, so only the first two separators are
- * significant.
- */
+/** 識別子自体が `:` を含みうるので、区切りとして意味を持つのは先頭 2 つだけ。 */
 export function parseAddress(value: string): EventAddress | undefined {
   const firstColon = value.indexOf(':');
   if (firstColon <= 0) {
@@ -85,7 +57,7 @@ export function parseAddress(value: string): EventAddress | undefined {
   const pubkey = value.slice(firstColon + 1, secondColon);
   const identifier = value.slice(secondColon + 1);
 
-  // 整数以外（'1.5' / '0x1' / ' 1'）を Number の寛容さで取り込まないよう桁だけを許し、
+  // Number の寛容さで '1.5' / '0x1' / ' 1' を取り込まないよう桁だけを許し、
   // 先行ゼロ（'007'）も非正規形として弾く
   if (!KIND_PATTERN.test(rawKind)) {
     return undefined;
@@ -99,17 +71,11 @@ export function parseAddress(value: string): EventAddress | undefined {
 }
 
 /**
- * Extract the deletion targets of a kind 5 event.
+ * パース時に落とすもの: 32 バイト hex でない `e` タグ、壊れている・他人を指す・座標で
+ * 参照できない kind を指す `a` タグ、{@link MAX_DELETION_REFERENCES} を超える分。
+ * kind 5 への自己参照は、対象の kind が見えるストレージアダプタ側で弾く。
  *
- * Dropped while parsing: `e` tags that are not 32-byte hex ids; `a` tags that
- * are malformed, name another author, or name a kind that is not addressed by
- * a coordinate (a regular kind such as `1:<pubkey>:` would otherwise delete
- * every note by that author). Self-references to kind 5 are rejected by the
- * storage adapter, which is where a target's kind is visible. References beyond
- * {@link MAX_DELETION_REFERENCES} per tag type are dropped.
- *
- * Tolerates a malformed `tags` array (a non-array, or entries that are not
- * arrays), which `NONE` validation mode makes reachable.
+ * `NONE` 検証モードでは壊れた `tags` も到達しうるので許容する。
  */
 export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
   const ids = new Set<string>();
@@ -171,30 +137,19 @@ export function parseDeletionRequest(event: NostrEvent): DeletionRequest {
 }
 
 /**
- * Whether a coordinate deletion may run at all.
+ * ストレージアダプタ共通のガード。{@link parseDeletionRequest} が既に弾く内容だが、
+ * `deleteEventsByAddress` は直接呼べる公開メソッドなので繰り返す。
  *
- * Shared guard for the storage adapters, mirroring what
- * {@link parseDeletionRequest} already rejects — the adapters repeat it because
- * `deleteEventsByAddress` is a public method that can be called directly, and a
- * coordinate naming a regular kind would delete every event of that kind by the
- * author. Kind 5 is excluded implicitly: it is neither replaceable nor
- * addressable, so it is never coordinate-addressable.
- *
- * `until` must be a finite number: IndexedDB orders strings above every number,
- * so a non-numeric upper bound would silently turn the range into "all
- * versions".
+ * `until` に有限数を要求するのは、IndexedDB が文字列を全数値より上に並べるため。
+ * 非数値の上限は範囲を黙って「全版」に変えてしまう。
  */
 export function isDeletableAddress(address: EventAddress, until: number): boolean {
   return isCoordinateAddressableKind(address.kind) && Number.isFinite(until);
 }
 
 /**
- * Whether a stored event's tags satisfy the `d` identifier of a coordinate.
- *
- * Pure predicate shared by the Dexie and SQLite adapters so both interpret
- * coordinates identically. Only addressable kinds carry a `d` tag; for
- * replaceable kinds the identifier is not part of the address. A missing `d`
- * tag counts as the empty identifier, matching NIP-01.
+ * 両アダプタが座標を同じに解釈するための純粋関数。`d` タグを持つのは addressable だけで、
+ * replaceable では識別子はアドレスの一部ではない。`d` 無しは空識別子（NIP-01）。
  */
 export function matchesAddressIdentifier(tags: string[][], address: EventAddress): boolean {
   if (!isAddressableKind(address.kind)) {
@@ -205,14 +160,11 @@ export function matchesAddressIdentifier(tags: string[][], address: EventAddress
 }
 
 /**
- * Apply a deletion request to storage: remove the referenced events that the
- * requester is allowed to delete.
+ * 冪等。同じリクエストを受け直しても新たに削除されるものが無いだけ。
  *
- * Idempotent, so re-receiving the same request (an upstream echo, a client
- * rebroadcast) simply deletes nothing new. Parsing and storage failures alike
- * are logged and swallowed — the request itself is already persisted and gets
- * re-applied the next time it arrives, and callers rely on this never throwing
- * (`NostrCacheRelay.publishEvent` has already committed the save by then).
+ * パース・ストレージの失敗はログのみで握り潰す。リクエスト自体は保存済みで次回
+ * 到着時に再適用され、呼び出し側は throw しないことに依存している
+ * （`publishEvent` はこの時点で保存を確定させている）。
  */
 export async function applyDeletionRequest(
   storage: StorageAdapter,

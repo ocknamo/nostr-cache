@@ -1,21 +1,13 @@
 /**
- * Boots — and shares — the in-page cache relay that backs every
- * `<nostr-timeline>` on a page.
+ * ページ内キャッシュリレーの起動と共有。
  *
- * Why a singleton: `WebSocketServerEmulator.start()` replaces
- * `globalThis.WebSocket`, keeping the previous value so `stop()` can restore
- * it. If two widgets each started their own emulator, the second would capture
- * the *already patched* constructor as its "original" and restoring them out of
- * order would leave the page with a dead WebSocket. One emulator per page also
- * avoids opening the same IndexedDB database twice and stops N widgets from
- * fanning N sets of upstream connections out to the same relays.
+ * シングルトンなのは、2 つ目のエミュレータが**差し替え済み**のコンストラクタを
+ * 「元の WebSocket」として掴んでしまい、復元の順序次第でページの WebSocket が
+ * 死ぬため。同じ IndexedDB を二重に開くことと、上流への接続が N 倍になることも防ぐ。
  *
- * Subscriptions are still isolated per widget: each one opens its own
- * `new WebSocket(interceptUrl)`, and the emulator tracks sockets in a
- * `Map<clientId, socket>`, so every widget gets its own client id and its own
- * REQ/CLOSE lifecycle. That is also why the widget talks NIP-01 over the
- * emulated socket rather than using the relay's in-process `subscribe()`, whose
- * `event` callback cannot say which subscription an event belongs to.
+ * 購読はウィジェットごとに独立する（各自が `new WebSocket(interceptUrl)` を開き、
+ * 別々の clientId を持つ）。in-process の `subscribe()` を使わないのは、その
+ * `event` コールバックがどの購読由来かを言えないため。
  */
 
 import {
@@ -29,124 +21,66 @@ import {
 import { CacheMetrics } from './cache-metrics.ts';
 import { InstrumentedUpstreamPool } from './instrumented-upstream-pool.ts';
 
-/**
- * Default URL served by the in-page relay. The RFC 6761 reserved `.invalid`
- * TLD can never resolve, so a connection that somehow escaped interception
- * fails instead of reaching a real server.
- */
+/** RFC 6761 予約の `.invalid` は解決しえないので、横取り漏れが実サーバへ届かない。 */
 export const DEFAULT_INTERCEPT_URL = 'ws://nostr-cache.invalid';
 export const DEFAULT_DB_NAME = 'nostr-cache-embed';
 /** Short enough that the ✓ badges appear while the user is still looking. */
 export const DEFAULT_LAZY_VALIDATE_INTERVAL = 5;
 /**
- * How long a cached kind 0 is trusted before the relay re-asks upstream.
+ * kind 0 の鮮度ウィンドウ。ウィジェットはカードが画面に入るたび著者ごとに 1 本引くので、
+ * 窓が無いと持っているプロフィールでも毎回上流へ REQ が出る。
  *
- * The widget opens a lookup per author as their card scrolls into view, which
- * without a window would forward a REQ upstream every time — for profiles it
- * already holds. Deciding when a cached copy is stale enough to re-check is the
- * relay's job (`upstreamFreshness`), not the widget's, so the widget simply
- * asks for what it wants to display and lets the window suppress the redundant
- * upstream traffic.
- *
- * A day, because that is the timescale profiles actually change on: avatars and
- * display names are edited rarely, while a reader who returns to the same page
- * within the day is the common case. A shorter window spends an upstream REQ per
- * visible author on every visit to re-fetch a profile that almost never differs.
- * Embedders who want edits picked up sooner can shorten it — `profile-freshness`
- * on the element / in the iframe query string, or `profileFreshness` when
- * calling {@link acquireRelayHost} directly.
+ * 1 日にしているのは、プロフィールが実際に変わる時間尺がその程度で、同じページに
+ * 日内で戻ってくる読者が普通だから。`profile-freshness` で短くできる。
  */
 export const DEFAULT_PROFILE_FRESHNESS = 86_400;
 /**
- * How long a cached follow list (kind 3) is trusted before the relay re-asks
- * upstream.
+ * kind 3 の鮮度ウィンドウ。`<nostr-follow-timeline>` は kind 3 が届くまで
+ * タイムラインの REQ を組めない（最大 5 秒待つ）ので、この窓が初回描画の速さを決める。
  *
- * `<nostr-follow-timeline>` cannot build its timeline REQ until the subject's
- * kind 3 arrives — waiting up to five seconds for it — so this window decides
- * whether a visit renders from cache or stalls first.
- *
- * An hour: follow lists change on the order of days, while the ten minutes this
- * started at expired inside an ordinary reading session, making a reader who
- * came back to the page pay for the round trip again. Still shorter than the day
- * given to profiles, since a stale list changes *which* posts appear rather than
- * how an avatar looks.
+ * プロフィールの 1 日より短いのは、古いリストは見た目ではなく**どの投稿が出るか**を
+ * 変えてしまうため。
  */
 export const DEFAULT_FOLLOWS_FRESHNESS = 3600;
 
 /**
- * How many events the shared cache keeps before it starts evicting.
- *
- * On by default, unlike every other cache setting here: the widget's IndexedDB
- * lives on the *embedding site's* origin, and spending an unbounded share of
- * someone else's storage quota is not a default an embed gets to pick.
- *
- * Five thousand events is roughly five megabytes once the indexes are counted —
- * small against a browser's per-origin budget, and still many visits' worth of
- * timeline.
+ * 他の設定と違い既定で有効。IndexedDB は**埋め込み先オリジン**の容量を使うので、
+ * 他人のクォータを無制限に使う既定を埋め込み側が選ぶわけにはいかない。
  */
 export const DEFAULT_STORAGE_MAX_SIZE = 5000;
 
 /**
- * Eviction order, overriding the relay's own FIFO default: FIFO goes by
- * `created_at`, which drops a profile published years ago however often the
- * widget reads it. Reads are tracked whichever strategy is set, so LRU costs
- * nothing more.
+ * リレー既定の FIFO を上書きする。FIFO は `created_at` 基準なので、何度読んでいても
+ * 何年も前に公開されたプロフィールから落ちる。読み出しの追跡は戦略によらず走るため
+ * LRU にしても増えるコストは無い。
  */
 export const DEFAULT_CACHE_STRATEGY: CacheStrategy = 'LRU';
 
 /**
- * Kinds evicted last: profiles and follow lists back the freshness windows
- * above, so evicting one spends the upstream round trip the window exists to
- * save — and a follow timeline whose kind 3 is gone stops rendering at all.
- * They are a rounding error next to the kind 1 / 7 traffic that fills the cache.
- *
- * Not an attribute: it follows from how this widget reads, not from taste.
+ * 最後に退避する kind。上の鮮度ウィンドウの土台なので、退避すると窓が省くはずだった
+ * 上流往復が発生し、kind 3 を失ったフォロータイムラインは描画自体が止まる。
+ * 属性にしていないのは、好みではなくこのウィジェットの読み方から決まるため。
  */
 const CACHE_PRIORITY: CachePriority = { kinds: [0, 3] };
 
-/** Re-exported so a JS caller can type the strategy it passes. */
 export type { CacheStrategy };
 
 export interface RelayHostConfig {
-  /** Upstream relay URLs (`wss://…`). Empty means a cache-only relay. */
+  /** 空ならキャッシュのみのリレーになる。 */
   upstreamRelays?: string[];
-  /** IndexedDB database name. */
   dbName?: string;
-  /** URL the emulator intercepts. */
   interceptUrl?: string;
-  /** Seconds between background signature-validation passes. */
   lazyValidateInterval?: number;
   /**
-   * Seconds a cached profile (kind 0) is served without re-asking upstream.
-   *
-   * Zero or negative switches the window off, so every profile REQ is forwarded
-   * upstream as it was before the window existed. (The relay itself rejects a
-   * non-positive window, which would fail the whole widget's startup — a
-   * surprising way to spell "disable this".) The `profile-freshness` attribute
-   * only ever reaches here as zero or above: `parseFreshness` rejects a negative
-   * one as a typo, so negatives are a JS-caller-only spelling.
+   * kind 0 の鮮度ウィンドウ（秒）。0 以下で無効。リレー自身は非正の窓を例外にするので、
+   * ここで落として「無効」を起動失敗にしないようにしている。
    */
   profileFreshness?: number;
-  /**
-   * Seconds a cached follow list (kind 3) is served without re-asking upstream.
-   *
-   * Same convention as {@link RelayHostConfig.profileFreshness}: zero or
-   * negative leaves kind 3 out of the window record entirely rather than being
-   * passed to the relay as a non-positive window, which the relay rejects
-   * outright — taking the whole widget's startup down with it.
-   */
+  /** kind 3 の鮮度ウィンドウ（秒）。{@link RelayHostConfig.profileFreshness} と同じ扱い。 */
   followsFreshness?: number;
-  /**
-   * Maximum number of events kept in the cache, defaulting to
-   * {@link DEFAULT_STORAGE_MAX_SIZE}; zero or negative lets it grow without a
-   * ceiling. Bounds the page-shared database, not one widget.
-   */
+  /** 0 以下で上限なし。縛るのはページ共有の DB であって 1 ウィジェットではない。 */
   storageMaxSize?: number;
-  /**
-   * Eviction order once `storageMaxSize` is exceeded, defaulting to
-   * {@link DEFAULT_CACHE_STRATEGY}. JS callers only — an embedder choosing a
-   * ceiling is not thereby choosing an order.
-   */
+  /** JS から呼ぶ場合のみ。上限を選ぶことは退避順序を選ぶことではないので属性は無い。 */
   cacheStrategy?: CacheStrategy;
 }
 
@@ -156,15 +90,12 @@ export interface RelayHost {
   relay: NostrCacheRelay;
   storage: DexieStorage;
   metrics: CacheMetrics;
-  /** URL to hand to `new WebSocket(...)`. */
   interceptUrl: string;
-  /** Number of upstream relays currently connected (0 when cache-only). */
   getConnectedUpstreams(): number;
-  /** Drop this acquisition. The relay is torn down when the last one releases. */
+  /** 最後の 1 つを release した時点でリレーが停止する。 */
   release(): Promise<void>;
 }
 
-/** The parts shared by every acquisition of the same host. */
 type SharedHost = Omit<RelayHost, 'release'>;
 
 interface HostState {
@@ -176,11 +107,9 @@ interface HostState {
 
 let current: HostState | undefined;
 /**
- * Teardown of the previous host, while it is still in flight.
- *
- * A new host must not be started until this settles: `relay.disconnect()`
- * restores `globalThis.WebSocket`, and starting early would capture the still
- * patched constructor as the next host's "original".
+ * 進行中の前ホストの停止処理。これが解決するまで次を起動してはいけない。
+ * `disconnect()` が `globalThis.WebSocket` を戻すので、早く起動すると差し替え済みの
+ * コンストラクタを「元の WebSocket」として掴む。
  */
 let pendingStop: Promise<void> | undefined;
 
@@ -198,17 +127,9 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
 }
 
 /**
- * Build the relay's `upstreamFreshness` record one kind at a time.
- *
- * Deliberately not a single expression over the whole record: each kind's
- * window is switched off independently, so `profileFreshness: 0` must leave
- * kind 3's window standing (and vice versa). A non-positive window is *omitted*
- * rather than passed through as `{ 3: 0 }` — `normalizeFreshnessWindows` throws
- * on one, which would fail `relay.connect()`. Turning a window off should cost
- * an upstream REQ, not the whole embed.
- *
- * @returns The configured windows, or `undefined` when every kind is switched
- *   off — which is how the relay spells "no freshness gate"
+ * kind ごとに独立して無効にできる必要があるため 1 つの式にまとめていない。
+ * 非正の窓は `{ 3: 0 }` として渡さず省く（`normalizeFreshnessWindows` が例外を投げ、
+ * `relay.connect()` ごと失敗するため）。全 kind が無効なら `undefined`。
  */
 function freshnessWindows(config: ResolvedConfig): Record<number, number> | undefined {
   const windows: Record<number, number> = {};
@@ -247,10 +168,8 @@ async function startHost(config: ResolvedConfig): Promise<SharedHost> {
   try {
     return await connectHost(config, metrics, storage, transport);
   } catch (error) {
-    // `relay.connect()` patches the global WebSocket before it can fail on
-    // anything after that (validator, reaper, upstream). Leaving the patch in
-    // place would hand the *next* host a patched constructor to keep as its
-    // "original" — the exact breakage this module exists to prevent.
+    // `connect()` はグローバルを差し替えたあとで失敗しうる。差し替えを残すと次の
+    // ホストが差し替え済みのコンストラクタを「元の WebSocket」として掴む。
     await transport.stop();
     throw error;
   }
@@ -262,13 +181,11 @@ async function connectHost(
   storage: DexieStorage,
   transport: WebSocketServerEmulator
 ): Promise<SharedHost> {
-  // Only wire the upstream layer when there is somewhere to read through to;
-  // otherwise the relay stays an independent cache-only relay.
   const upstreamPool = config.upstreamRelays.length
     ? new InstrumentedUpstreamPool(
         new UpstreamRelayPool(config.upstreamRelays, {
-          // Resolve the constructor at connect time so upstream connections use
-          // the pre-patch WebSocket and never loop back into the emulator.
+          // connect 時に解決して、上流接続が差し替え前の WebSocket を使うようにする
+          // （エミュレータへ戻るループを防ぐ）。
           webSocketFactory: () => transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
         }),
         {
@@ -278,20 +195,14 @@ async function connectHost(
     : undefined;
 
   const relay = new NostrCacheRelay(storage, transport, {
-    // The relay verifies signatures in the background and persists the verdict,
-    // so widgets render ✓ badges via getValidationStatus() without doing any
-    // crypto of their own.
+    // 検証はリレーが背後で行い結果を永続化するので、ウィジェット側は暗号処理をしない。
     validateEventsType: 'LAZY',
     lazyValidateInterval: config.lazyValidateInterval,
     maxSubscriptions: 20,
     upstreamPool,
-    // Cache-first windows for profiles (kind 0) and follow lists (kind 3): see
-    // DEFAULT_PROFILE_FRESHNESS / DEFAULT_FOLLOWS_FRESHNESS. Kept here rather
-    // than in the timeline code so the "when do we re-check upstream" policy
-    // lives with the cache that answers it.
+    // 「いつ上流に聞き直すか」の方針は、それに答えるキャッシュ側に置く。
     upstreamFreshness: freshnessWindows(config),
-    // A non-positive size passes through as-is: the relay defines it as "no
-    // limit", unlike a freshness window, which it rejects outright.
+    // 非正はそのまま渡す。鮮度ウィンドウと違い、リレーはこれを「上限なし」と定義している。
     storageMaxSize: config.storageMaxSize,
     cacheStrategy: config.cacheStrategy,
     cachePriority: CACHE_PRIORITY,
@@ -309,19 +220,15 @@ async function connectHost(
 }
 
 /**
- * Get the page's cache relay, starting it if this is the first caller.
+ * ページのキャッシュリレーを取得する（未起動なら起動）。
+ * **1 回の取得につき `release()` を必ず 1 回**呼ぶこと。
  *
- * Every call must be paired with exactly one `release()`; the relay shuts down
- * (restoring `globalThis.WebSocket`) when the last acquisition is released.
- *
- * @param config Relay settings. Honoured only by the first caller — see
- *   {@link warnOnConflict}.
+ * @param config 採用されるのは最初の呼び出し側の設定だけ（{@link warnOnConflict}）
  */
 export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<RelayHost> {
   const resolved = resolveConfig(config);
 
-  // Let a host that is still shutting down finish restoring the global
-  // WebSocket before starting a replacement on top of it.
+  // 停止中のホストがグローバルを戻し終えるまで、次を起動しない。
   while (!current && pendingStop) {
     await pendingStop;
   }
@@ -338,14 +245,12 @@ export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<Re
       config: resolved,
       promise,
       refCount: 0,
-      // Indirection so teardown works even if release() races the startup.
       stop: () => stop(),
     };
   }
 
   const state = current;
-  // Reserve synchronously, before any await, so a release() that lands while
-  // startup is still in flight cannot tear the host down underneath us.
+  // await の前に同期で予約する。起動中に release() が来てもホストを畳ませないため。
   state.refCount += 1;
 
   let shared: SharedHost;
@@ -374,8 +279,7 @@ export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<Re
       if (current === state) {
         current = undefined;
       }
-      // Publish the teardown before awaiting it, so an `acquire()` that starts
-      // while it is running waits rather than racing the global restore.
+      // await する前に公開する。実行中に始まった `acquire()` が待つようにするため。
       const stopping = state.stop().finally(() => {
         if (pendingStop === stopping) {
           pendingStop = undefined;
@@ -387,13 +291,7 @@ export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<Re
   };
 }
 
-/**
- * How many un-released acquisitions the page currently holds.
- *
- * Useful in tests asserting that widgets clean up after themselves, and to an
- * embedder that needs to know when every widget has let go — the demo site uses
- * it to sequence a relay restart.
- */
+/** 未 `release()` の取得数。テストと、リレーの再起動を順序づけたい埋め込み側が使う。 */
 export function getRelayHostRefCount(): number {
   return current?.refCount ?? 0;
 }
