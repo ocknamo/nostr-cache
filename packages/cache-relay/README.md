@@ -1,15 +1,13 @@
 # Nostr Cache Relay
 
-クライアント層で動く Nostr リレー実装本体です。NIP-01 に準拠したメッセージ処理
-（`EVENT` / `REQ` / `CLOSE` → `OK` / `EVENT` / `EOSE` / `CLOSED` / `NOTICE`）を実装し、
-kind 0 / 3 などの replaceable イベントにも対応します（NIP-02 のフォローリストは
-この replaceable 処理の範囲でのみ扱われ、専用ロジックは持ちません）。
-NIP-09（削除リクエスト・kind 5）にも対応し、`e` / `a` タグが指す**同一 pubkey の**
-イベントを削除します（削除リクエスト自体は保持し配信し続けます）。
-仕様と適用ルールの詳細は [../../doc/api.md](../../doc/api.md) を参照してください。
-ストレージ（IndexedDB / Dexie.js）とトランスポート（WebSocket）をアダプタとして
-差し替えることで、**Node.js サーバ**としても**ブラウザ内のローカルキャッシュリレー**としても
-動作します。プロジェクト全体の目的は [../../doc/concept.md](../../doc/concept.md) を参照してください。
+クライアント層で動く Nostr リレー実装本体。ストレージ（IndexedDB / Dexie.js）と
+トランスポート（WebSocket）をアダプタとして差し替えることで、**Node.js サーバ**としても
+**ブラウザ内のローカルキャッシュリレー**としても動作します。
+
+- プロジェクト全体の目的: [doc/concept.md](../../doc/concept.md)
+- 公開 API・オプション・対応 NIP の適用ルール: [doc/api.md](../../doc/api.md)
+- 実装状況と既知の制約: [doc/TODO.md](../../doc/TODO.md)
+- 内部設計: [doc/cache-relay/](../../doc/cache-relay/)
 
 ## 構成要素
 
@@ -29,15 +27,15 @@ npm install @nostr-cache/cache-relay
 
 ## 使用方法
 
-### ブラウザ（ローカルキャッシュリレー）
+### ブラウザ
 
-ブラウザからキャッシュとして使う方法は2つあります。
+ブラウザからキャッシュとして使う方法は 2 つあります。
 
 **① 透過型: `WebSocketServerEmulator` で WebSocket を横取り**
 
 既存の Nostr クライアント実装（素の `WebSocket` で NIP-01 を話すもの）を変更せずに、
-対象 URL への接続をブラウザ内リレーへ差し替えます。手順の詳細は
-[doc/transparent-cache.md](../../doc/transparent-cache.md) を参照してください。
+対象 URL への接続をブラウザ内リレーへ差し替えます。組み立て手順・対象 URL の指定パターン・
+注意点は [doc/transparent-cache.md](../../doc/transparent-cache.md) にまとめてあります。
 
 ```typescript
 // ブラウザでは Node.js 専用 WebSocketServer を含まない /browser エントリを使う
@@ -47,51 +45,34 @@ import {
   WebSocketServerEmulator,
 } from '@nostr-cache/cache-relay/browser';
 
-const storage = new DexieStorage('NostrCacheRelay');
-const transport = new WebSocketServerEmulator();
+const relay = new NostrCacheRelay(
+  new DexieStorage('NostrCacheRelay'),
+  new WebSocketServerEmulator(),
+);
 
-const relay = new NostrCacheRelay(storage, transport, {
-  validateEventsType: 'IMMEDIATELY',
-  maxSubscriptions: 20,
-});
-
-// WebSocket をインターセプトして接続を開始
-await relay.connect();
+await relay.connect(); // ここで globalThis.WebSocket が差し替わる
 
 // 以降、クライアントは普通に接続するだけでローカルリレーに繋がる
 const ws = new WebSocket('ws://nostr-cache.invalid');
 ```
 
-> インターセプト対象 URL はコンストラクタで指定できます
-> （例: `new WebSocketServerEmulator(['wss://relay.example.com/', 'ws://nostr-cache.invalid'])`）。
-> 省略時は `ws://nostr-cache.invalid`。既定値に RFC 6761 予約 TLD の `.invalid` を
-> 使っているのは、エミュレータが動いていない場合でも実在するサーバーへ誤接続する
-> 可能性をゼロにするためです（`ws://localhost:3000` のような「ありえる」URL は使わない）。
-> 対象 URL への接続は実ネットワークに一切触れず、複数の同時接続をそれぞれ独立した
-> クライアントとして扱います。対象外の URL への接続は元の `WebSocket` にそのまま
-> 委譲されます。
-
 **② 直接型: `NostrCacheRelay` の in-process API を呼ぶ**
 
 WebSocket を介さず、リレーをライブラリとして直接使うこともできます
 （自前クライアントを新規に書く場合はこちらが最短）。エミュレータは不要で、
-①と同様に組み立てた `relay`（transport は使われない）に対してリスナを登録して使います。
+①と同様に組み立てた `relay`（transport は使われない）にリスナを登録して使います。
 
 ```typescript
-// 購読結果・ライブ配信は 'event' / 'eose' リスナに届く
 relay.on('event', (event) => console.log('event:', event.content));
 relay.on('eose', (subscriptionId) => console.log('eose:', subscriptionId));
 
-await relay.publishEvent(event); // 保存 (既定の validateEventsType: 'IMMEDIATELY' では検証込み)
-await relay.subscribe('sub-1', [{ kinds: [1] }]); // 保存済みイベントをリスナへ再生し eose を発火
+await relay.publishEvent(event);                  // 保存（既定では署名検証込み）
+await relay.subscribe('sub-1', [{ kinds: [1] }]); // 保存済みイベントを再生し eose を発火
 relay.unsubscribe('sub-1');
 ```
 
-どちらの形態も既定では「ローカルに保存済みのイベントを返す独立リレー」です。
-`upstreamRelays` を指定すると上流実リレー群の手前に挟まる透過キャッシュ
-（リードスルー / ライトスルー）になり、`upstreamFreshness` で kind ごとに
-「窓の内側なら上流に問い合わせない」鮮度ウィンドウを設定できます
-（[doc/cache-relay/upstream.md](../../doc/cache-relay/upstream.md) 参照）。
+> in-process 経路は `EventHandler` を経由しないため、replaceable の版比較・置換が
+> 効きません（[doc/TODO.md](../../doc/TODO.md) の「API の一貫性」）。
 
 ### Node.js（サーバとして起動）
 
@@ -103,141 +84,44 @@ import {
 } from '@nostr-cache/cache-relay';
 import 'fake-indexeddb/auto'; // Node.js で IndexedDB をエミュレート
 
-const storage = new DexieStorage('NostrRelay');
-const transport = new WebSocketServer(8008);
-
-const relay = new NostrCacheRelay(storage, transport, {
-  maxSubscriptions: 100,
-});
+const relay = new NostrCacheRelay(
+  new DexieStorage('NostrRelay'),
+  new WebSocketServer(8008),
+  { maxSubscriptions: 100 },
+);
 
 await relay.connect();
 ```
 
-> すぐに使えるサーバ実装は `@nostr-cache/server` パッケージにもあります。
+> すぐに使えるサーバ実装は [`@nostr-cache/server`](../server/README.md) にもあります。
 
-### ストレージ上限と退避（eviction）
+## キャッシュとしての設定
 
-保存件数の上限と退避戦略は `NostrRelayOptions` の `storageMaxSize` / `cacheStrategy`
-で設定します。上限を超えると、relay が保存後に `storage.enforceLimit()` を呼び、
-古いイベント（`created_at` 昇順）から退避します。
+どちらの形態も既定では「ローカルに保存済みのイベントを返す独立リレー」です。
+`NostrRelayOptions` で次の 3 つの軸を設定します（**各オプションの意味・既定値・制約は
+[doc/api.md](../../doc/api.md#interface-nostrrelayoptions) が唯一の情報源**です）。
 
-```typescript
-const relay = new NostrCacheRelay(storage, transport, {
-  storageMaxSize: 10000, // この件数を超えると古いものから退避（未指定で無制限）
-  cacheStrategy: 'FIFO', // 現状 FIFO のみ実装。LRU/LFU は FIFO にフォールバック
-});
-```
-
-`@nostr-cache/server` では `storageOptions.maxSize` / `storageOptions.cacheStrategy`
-で同じ設定を渡せます。退避には `enforceLimit` を実装したストレージ（`DexieStorage`）が必要です。
-
-> **注意:** 上限は**ソフトリミット**です。退避パス（件数確認＋削除）はトランザクション
-> で原子化していますが、`saveEvent` 自体は別コミットのため、並行書き込み下では一時的に
-> `maxSize` を超えることがあります（最終的に収束）。また FIFO は `created_at`（秒精度）
-> 基準で、同値のイベントは主キー（id）順で退避されます（厳密な到着順ではない近似）。
-
-### キャッシュ優先度（cachePriority）
-
-特定の pubkey の発行イベントや特定 kind のイベントを優先的にキャッシュに残したい場合は
-`cachePriority` を設定します。指定した pubkey（`npub1...` / hex どちらでも可）**または**
-指定 kind にマッチするイベントは「優先イベント」となり、
-
-- `storageMaxSize` 超過時の退避で**最後まで残ります**（非優先イベントを先に退避）。
-- `ttl` による定期スイープの**削除対象外**になります。
+| 軸 | オプション |
+|---|---|
+| 保存量の制御 | `storageMaxSize` / `cacheStrategy` / `ttl` / `cachePriority` |
+| 上流への透過キャッシュ化 | `upstreamRelays` / `upstreamEoseTimeout` / `upstreamFreshness` |
+| 署名検証 | `validateEventsType` / `lazyValidateInterval` / `lazyValidateBatchSize` |
 
 ```typescript
 const relay = new NostrCacheRelay(storage, transport, {
-  storageMaxSize: 10000,
+  storageMaxSize: 10000,       // 超過分は cacheStrategy に従って退避
   ttl: 3600,
   cachePriority: {
-    pubkeys: ['npub1...'], // 自分の npub（hex でも可）を優先的にキャッシュ
-    kinds: [0], // kind 0（プロフィール）は TL 描画で大量参照されるため優先
+    pubkeys: ['npub1...'],     // 自分の投稿は最後まで残す
+    kinds: [0],                // プロフィールは TL 描画で大量参照されるため優先
   },
+  upstreamRelays: ['wss://nos.lol'],
+  upstreamFreshness: { 0: 3600 }, // 1時間以内にキャッシュした kind 0 は上流に聞かない
 });
-```
 
-kind 0 のような置換可能イベントは上書きのたびにアクセス履歴（`access_count` 等）が
-リセットされ LFU で不利になりますが、優先指定すればこの不利は実質無効化されます。
-
-設定は実行時にも差し替えられます（再起動不要）。優先判定は退避・TTL スイープの
-実行時に評価されるため、差し替えた設定は次回の退避・スイープから即座に反映されます
-（すでに退避・削除されたイベントは戻りません）。
-
-```typescript
-// 例: ログインユーザの切り替えに追従して優先 npub を差し替える
+// 優先設定は実行時にも差し替えられる（例: ログインユーザの切り替えに追従）
 relay.setCachePriority({ pubkeys: [currentUserNpub], kinds: [0] });
-
-// 全ルール解除
-relay.setCachePriority(undefined);
 ```
 
-> **注意:**
-> - 優先は**ソフト**です。キャッシュが優先イベントだけで `maxSize` を超えた場合は、
->   優先イベントも通常の `cacheStrategy` 順で退避されます（`maxSize` は常に厳守）。
->   この状態では保存のたびに優先イベントの退避が起きるため、優先リストは
->   `maxSize` に対して十分小さく保つことを推奨します。
-> - `DexieStorage` の退避は優先イベントを飛ばしながらインデックス順に走査するため、
->   キャッシュの大半が優先イベントで占められていると退避パスの走査コストが増えます。
-> - TTL の除外は**無条件**です。`storageMaxSize` を設定せずに常用 kind（kind 1 等）を
->   優先指定すると、該当イベントは TTL でも削除されずストレージが増え続けます。
->   `cachePriority` は `storageMaxSize` と併用してください。
-> - 不正な npub / kind は `NostrCacheRelay` 生成時に例外になります。
-
-### ローカル API による購読 / 発行
-
-トランスポート越しのクライアントとは別に、同一プロセス内から直接購読・発行できます。
-
-```typescript
-relay.on('event', (event) => console.log('event', event));
-relay.on('eose', (subscriptionId) => console.log('eose', subscriptionId));
-
-// 保存済みイベントを再生し、最後に eose を発火
-await relay.subscribe('sub1', [{ kinds: [1], limit: 50 }]);
-
-// 発行。ローカル購読にマッチすれば 'event' が発火する
-await relay.publishEvent(event);
-
-relay.unsubscribe('sub1');
-```
-
-## API
-
-### `new NostrCacheRelay(storage, transport, options?)`
-
-- `storage: StorageAdapter` — 例: `new DexieStorage(dbName)`
-- `transport: TransportAdapter` — 例: `new WebSocketServer(port)` / `new WebSocketServerEmulator()`
-- `options?: NostrRelayOptions`
-
-### メソッド
-
-- `connect(): Promise<void>` — トランスポートを開始し `connect` を発火。
-- `disconnect(): Promise<void>` — トランスポートを停止し `disconnect` を発火。
-- `publishEvent(event: NostrEvent): Promise<boolean>` — イベントを検証・保存し、
-  マッチするローカル購読へ `event` を通知。保存成否を返す。
-- `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` — ローカル購読を
-  登録し、保存済みの一致イベントを `event` で再生後、`eose` を発火。
-- `unsubscribe(subscriptionId: string): boolean` — ローカル購読を削除。削除できれば `true`。
-- `setCachePriority(input?): void` — キャッシュ優先度設定を実行時に差し替え（`cachePriority`
-  オプションと同形式。npub / hex 可。不正値は例外で現行設定を維持、`undefined` で解除。
-  次回の退避・TTL スイープから反映）。
-- `on(event, callback)` / `off(event, callback)` — イベントリスナの登録・解除。
-  イベント種別: `'connect' | 'disconnect' | 'error' | 'event' | 'eose'`。
-
-### `NostrRelayOptions`
-
-| オプション | 型 | 状況 |
-|---|---|---|
-| `maxSubscriptions` | `number` | 実装済み（デフォルト 20） |
-| `validateEventsType` | `'NONE' \| 'IMMEDIATELY' \| 'LAZY'` | 実装済み（デフォルト `IMMEDIATELY`）。in-process `publishEvent()` とトランスポート経由 `EVENT` の**両方**に適用。`IMMEDIATELY`=同期検証して不正を拒否、`NONE`=検証しない、`LAZY`=保存・受理して即応答し、バックグラウンドでバッチ検証して不正をストレージから削除。`LAZY` では保存されたイベントが最大 `lazyValidateInterval` 秒ぶん一時的に未検証で配信され得る。なお **ephemeral（kind 20000–29999）など保存されないイベントは、後から削除できないため `LAZY` でも同期検証**して不正を即拒否する。**NIP-09 の削除リクエスト（kind 5）は `NONE` を含む全モードで同期検証**する（削除は取り消せないため、未検証で受理すると任意のクライアントが任意の pubkey のキャッシュを破壊できてしまう）。検証キューは**ストレージ自体に永続化**される（`validated` カラム。メモリキュー・キュー上限なし）ため、リロード/クラッシュ後も次回 `connect()` 時に未検証分の検証を自動再開する。検証結果は `relay.getValidationStatus(ids)` で参照でき、組み込みクライアントが自前の署名検証を省略できる |
-| `port` | `number` | Node.js の WebSocket サーバ用 |
-| `maxEventsPerRequest` | `number` | 実装済み（デフォルト 500）。REQ 応答 / `subscribe()` 再生で返すストレージイベント数の上限。各フィルタの `limit` の上にかぶせるキャップで、超過時は新しい順に N 件を残す |
-| `storageMaxSize` | `number` | 実装済み。保存後に relay が `storage.enforceLimit()` を呼び、この件数を超えたら古い順に退避（未指定で無効。`enforceLimit` 対応ストレージが必要） |
-| `ttl` | `number` | 実装済み。キャッシュ投入（保存）時刻 `cached_at` が `now - ttl` より古いイベントを**バックグラウンドの定期スイープ**でストレージから削除（`created_at` 基準ではなく、読み出し時フィルタでもない）。最大で `ttlSweepInterval` 秒ぶん期限切れイベントを返しうる。未指定で無効。`deleteExpired` 対応ストレージ（`DexieStorage`）が必要 |
-| `ttlSweepInterval` | `number` | 実装済み。TTL スイープの実行間隔（秒、デフォルト 60） |
-| `cacheStrategy` | `'LRU' \| 'FIFO' \| 'LFU'` | 実装済み（`storageMaxSize` の退避戦略、デフォルト `FIFO`）。`FIFO`=作成が古い順、`LRU`=読み出しが古い順、`LFU`=読み出し頻度が低い順（同数なら古い順） |
-| `cachePriority` | `{ pubkeys?: string[]; kinds?: number[] }` | 実装済み。指定 pubkey（npub / hex）の発行イベントまたは指定 kind のイベントを優先イベントとして扱う。優先イベントは `storageMaxSize` 超過時に最後まで残り（非優先を先に退避。優先だけになったら通常の `cacheStrategy` 順で退避し `maxSize` は厳守）、`ttl` スイープの削除対象外。不正な npub は生成時に例外。なお **NIP-09 の削除リクエスト（kind 5）は設定によらず常に同じ保護を受ける**（TTL 対象外・最後に退避） |
-| `upstreamFreshness` | `Record<number, number>` | 実装済み。鮮度ウィンドウ（kind → 秒）。`upstreamRelays` と併用したとき、REQ のフィルタが replaceable な kind（`kinds` + `authors`）だけを要求し、要求した (kind, pubkey) すべてが窓の内側のキャッシュから返せた場合、そのフィルタを**上流へ転送せず即 EOSE を返す**（HTTP の `max-age` 相当）。1件でも古い・欠けていれば従来どおり転送する。指定できるのは replaceable な kind（0 / 3 / 10000–19999）のみで、それ以外や非正の秒は生成時に例外。`getCachedAt` / `touchCachedAt` 対応ストレージ（`DexieStorage` / `SqliteStorage`）が必要で、未対応なら警告1回で無効。窓が切れた REQ で上流が同じ版を返した場合は「再検証できた」として `cached_at` を打ち直し窓を張り直す（このとき TTL も数え直しになる）。`ttl` と併用する場合は `ttl` > 窓 にすること。**窓の内側の購読は上流購読を持たないためライブ更新を受け取らない**（次回 REQ で再検証）。詳細は [../../doc/cache-relay/upstream.md](../../doc/cache-relay/upstream.md) 第5節 |
-| `lazyValidateInterval` | `number` | 実装済み。`LAZY` 時のバックグラウンド検証の実行間隔（秒、デフォルト 60） |
-| `lazyValidateBatchSize` | `number` | 実装済み。`LAZY` 時の 1 回の検証で処理するイベント数（デフォルト 100） |
-
-詳細・最新の状況は [../../doc/TODO.md](../../doc/TODO.md) を参照してください。
+上流キャッシュの設計（リードスルー / ライトスルー・鮮度ウィンドウ・id カバレッジ短絡）は
+[doc/cache-relay/upstream.md](../../doc/cache-relay/upstream.md) を参照してください。

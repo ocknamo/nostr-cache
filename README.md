@@ -9,49 +9,26 @@ Nostrリレーとのやり取りをキャッシュするためのモノリポプ
 
 ## 目的 / ビジョン
 
-Nostrクライアントのキャッシュを**完全に**行うため、キャッシュ専用の仕組みを作り込むのではなく、**クライアント層で動くNostrリレー実装そのもの**を用意し、それをキャッシュとして動かす、というアイデアから始まっている。
+キャッシュ専用の仕組みを作り込むのではなく、**クライアント層で動くNostrリレー実装そのもの**を
+用意し、それをキャッシュとして動かす。同一のリレーコア（`cache-relay`）のトランスポートと
+ストレージを差し替えることで、サーバでは普通のリレーとして、Webクライアントでは
+ページ内のWebSocketを横取りするローカルリレーとして動作する。
 
-- **サーバで実行すれば普通のリレー**として動く。
-- **Webクライアントでは、ページ内のWebSocketをインターセプト**（あるいは同等の手段）してローカルリレーとして動かし、クライアントの通信を肩代わりする。
-- 最終的には、ローカルリレーが**上流の実リレー群の手前に透過的に挟まり**、リードスルー / ライトスルーで「完全なキャッシュ」として機能することを目指す。
-
-同一のリレーコア（`cache-relay`）のトランスポートとストレージを差し替えることで、この2形態を実現する。背景・全体像・現状とのギャップは [doc/concept.md](./doc/concept.md) を参照。
+背景・全体像・設計の根拠は [doc/concept.md](./doc/concept.md) を参照。
 
 ## プロジェクト構成
 
-このプロジェクトは以下のパッケージで構成されています：
+| パッケージ | 役割 |
+|---|---|
+| [cache-relay](./packages/cache-relay/README.md) | クライアント層で動くNostrリレー実装本体。キャッシュの中核 |
+| [shared](./packages/shared/README.md) | 共有型定義とユーティリティ |
+| [server](./packages/server/README.md) | Node.js リレーサーバー（`npm run dev:server`） |
+| [web-client](./packages/web-client/README.md) | Svelte 製の開発用クライアント。ブラウザ内ローカルリレーへの E2E 配線デモ（`npm run dev:web`） |
+| [timeline-embed](./packages/timeline-embed/README.md) | 他サイトに埋め込めるタイムラインウィジェット（iframe / Web Component。`npm run build:embed`） |
+| [demo-site](./packages/demo-site/README.md) | GitHub Pages で公開する透過キャッシュのデモサイト（`npm run dev:demo`） |
 
-- **cache-relay**: クライアント層で動くNostrリレー実装本体。キャッシュの中核
-- **shared**: 共有型定義とユーティリティ
-- **server**: サーバーサイドリレー実装（開発中）
-- **web-client**: Svelte 製 Web クライアント。ブラウザ内ローカルリレーへの E2E 配線デモ
-  （タイムライン + フィルタフォーム。`npm run dev:web` で起動）
-- **timeline-embed**: 他サイトに埋め込めるタイムラインウィジェット
-  （iframe / Web Component の 2 形態。`npm run build:embed`）
-- **demo-site**: GitHub Pages で公開する透過キャッシュのデモサイト
-  （`npm run dev:demo`）
-
-## 現状（2026-07）
-
-リレーコア（イベント種別処理・検証・NIP-01/02/09・ストレージ・購読管理）は実装済みで、
-モノレポ全体のビルド・型チェック・テストは CI で緑になっています。実装済みの主な機能：
-
-- **ブラウザ内ローカルリレーへのエンドツーエンド配線**（Svelte 製 web-client →
-  `WebSocketServerEmulator` + IndexedDB で動くブラウザ内リレー）
-- **上流リレーへの透過キャッシュ化**（リードスルー / ライトスルー。オプトイン）
-- **公開デモ**（GitHub Pages）と**埋め込みタイムラインウィジェット**（iframe / Web Component）
-- **server の実永続化**（オプトイン。`NOSTR_DB_PATH` または `storageOptions.dbPath` 指定で
-  `node:sqlite` バックエンド。既定は `fake-indexeddb`（インメモリ）で再起動で消えます）
-
-主な未実装・既知の制約は次のとおりです（残作業の詳細は [doc/TODO.md](./doc/TODO.md)）：
-
-- **対応 NIP は NIP-01・NIP-02**（kind 3 を replaceable として扱う範囲）**・NIP-09**
-  （イベント削除リクエスト・kind 5）のみ。NIP-40（`expiration` タグ）・
-  NIP-11（リレー情報ドキュメント）・NIP-42（AUTH）は未対応
-- **削除済みイベントの「復活」は防げません**（NIP-09 の既知の制約）。削除リクエストの適用後に、
-  同じイベントが別経路（削除を反映していない上流リレー、クライアントの再送）から届くと
-  再び保存されます
-- **時間窓ベースのレート制限**（メッセージ / EVENT 投稿の頻度制限）は未実装
+実装状況（対応 NIP・実装済みの機能・既知の制約・残作業）は [doc/TODO.md](./doc/TODO.md) に
+まとめてあります。
 
 ## 開発環境のセットアップ
 
@@ -88,13 +65,17 @@ npm run test
 
 ## ドキュメント
 
-- [packages/timeline-embed/README.md](./packages/timeline-embed/README.md): 埋め込みウィジェットの使い方（iframe / Web Component）
-- [doc/transparent-cache.md](./doc/transparent-cache.md): 透過型キャッシュをクライアントに埋め込む手順
-- [doc/api.md](./doc/api.md): 主要パッケージ（shared / cache-relay / server）の API リファレンス
-- [doc/web-client.md](./doc/web-client.md): 開発用クライアント（`npm run dev:web`）の構成
-- [examples/](./examples/README.md): 実行可能なサンプル（`@nostr-cache/cache-relay` を使った Node.js E2E デモ）
-- [doc/concept.md](./doc/concept.md): 背景・全体像
-- [doc/TODO.md](./doc/TODO.md): 残作業一覧
+各トピックの記述は 1 か所にだけ置き、他からはリンクします。
+
+| 知りたいこと | 参照先 |
+|---|---|
+| 何を実現しようとしているか | [doc/concept.md](./doc/concept.md) |
+| 実装状況・既知の制約・残作業 | [doc/TODO.md](./doc/TODO.md) |
+| 公開 API（型・オプション・NIP の適用ルール） | [doc/api.md](./doc/api.md) |
+| 既存クライアントに透過キャッシュを挟む手順 | [doc/transparent-cache.md](./doc/transparent-cache.md) |
+| 埋め込みウィジェットの使い方 | [packages/timeline-embed/README.md](./packages/timeline-embed/README.md) |
+| リレーコアの内部設計 | [doc/cache-relay/](./doc/cache-relay/) |
+| 実行可能なサンプル | [examples/](./examples/README.md) |
 
 ## ライセンス
 

@@ -1,13 +1,20 @@
-# cache-relay 設計方針
+# cache-relay 設計ドキュメント
 
-## 1. 基本コンセプト
+リレーコア（`packages/cache-relay`）の内部設計。**公開 API とオプションの仕様は
+[doc/api.md](../api.md)**、実装状況と残作業は [doc/TODO.md](../TODO.md) を参照。
 
-- **cache-relay**はブラウザ内で動作するNostrリレーの実装
-- 対応 NIP は NIP-01 / NIP-02 / NIP-09（詳細は [api.md](../api.md)）
-- ストレージとトランスポートはアダプタとして差し替える。ブラウザは IndexedDB
-  (Dexie.js) + WebSocket エミュレータ、Node.js は fake-indexeddb / `node:sqlite` + `ws`
+| ドキュメント | 内容 |
+|---|---|
+| [storage.md](./storage.md) | ストレージ層（Dexie / IndexedDB）のスキーマ・インデックス選択・クエリプラン |
+| [upstream.md](./upstream.md) | 上流透過キャッシュ（リードスルー / ライトスルー・鮮度ウィンドウ・id カバレッジ短絡） |
 
-## 2. アーキテクチャ
+## 基本コンセプト
+
+ストレージとトランスポートをアダプタとして差し替えることで、同一のリレーコアを
+ブラウザ（IndexedDB + WebSocket エミュレータ）と Node.js（fake-indexeddb /
+`node:sqlite` + `ws`）の両方で動かす。
+
+## コンポーネント構成
 
 ```
 +---------------------+
@@ -54,4 +61,4 @@
 +-----+----------------+
 ```
 
-各コンポーネントの責務と API は [api.md](../api.md) と各ソースを参照。
+各コンポーネントの責務と API は [doc/api.md](../api.md) と各ソースを参照。

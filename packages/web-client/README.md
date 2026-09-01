@@ -1,8 +1,9 @@
 # @nostr-cache/web-client
 
-Svelte 5 + Vite 製の Web クライアント。ブラウザ内で動くローカルキャッシュリレー
-（`@nostr-cache/cache-relay` の `WebSocketServerEmulator` + `DexieStorage`）への
-エンドツーエンド配線のデモを兼ねています。
+Svelte 5 + Vite 製の開発用クライアント。ブラウザ内で動くローカルキャッシュリレーへの
+エンドツーエンド配線を最小構成で示すもので、プロダクト志向の UI ではありません。
+埋め込み用の完成形は [timeline-embed](../timeline-embed/README.md)、公開デモは
+[demo-site](../demo-site/README.md) を参照してください。
 
 ## 機能
 
@@ -14,7 +15,8 @@ Svelte 5 + Vite 製の Web クライアント。ブラウザ内で動くロー�
 
 ## アーキテクチャ
 
-起動時にブラウザ内でローカルリレーを組み立てます:
+起動時に `startLocalRelay()`（`src/lib/local-relay.ts`）がブラウザ内でローカルリレーを
+組み立て、クライアントは rx-nostr 経由で `ws://nostr-cache.invalid` へ接続します。
 
 ```
 DexieStorage (IndexedDB)
@@ -22,18 +24,45 @@ DexieStorage (IndexedDB)
   + NostrCacheRelay
 ```
 
-クライアント側 (`RelayConnection`) は [rx-nostr](https://penpenpng.github.io/rx-nostr/)
-に接続管理を任せた NIP-01 クライアントです。既定の `ws://nostr-cache.invalid` への接続は
-エミュレータが横取りし、**ネットワークに一切出ずに**ブラウザ内リレーへ NIP-01 で
-届きます。接続が切れた場合は rx-nostr が自動再接続し（既定の指数バックオフ + jitter・5 回）、
-開いていた REQ を張り直します（接続状態バーは再接続中を `再接続中…` と表示）。イベント署名の検証は
-リレー側が行って結果を永続化するので、rx-nostr 側の検証は `skipVerify` で切っています。
-投稿はブラウザの IndexedDB に永続化されるため、リロード後も再購読で再生されます。
+```
+App.svelte
+├── ConnectionBar     接続状態と接続先 URL
+├── FilterForm        NIP-01 フィルタの入力（src/lib/filter-form.ts が解析）
+├── PostForm          kind 1 の投稿（src/lib/event-signer.ts が署名）
+└── Timeline → EventCard
+```
 
-URL を `wss://nos.lol` など実リレーに変更すると、そのまま実リレーへ直結できます
-（同一 UI で両対応）。ただしこの経路ではエミュレータもキャッシュリレーも挟まらないため、
-**署名を検証する主体が誰もいません**（`skipVerify` はキャッシュリレーが検証する前提で
-切っているため）。デモ・動作確認用と割り切ってください。
+エミュレータが横取りするため、この URL への通信は**ネットワークに一切出ません**。
+接続が切れた場合の再接続と REQ の張り直しは rx-nostr に任せています（接続状態バーは
+再接続中を `再接続中…` と表示）。仕組みの詳細は
+[doc/transparent-cache.md](../../doc/transparent-cache.md) を参照してください。
+
+タイムライン表示・購読・検証バッジのロジックは web-client 固有ではなく、
+`@nostr-cache/timeline-embed/lib`（`RelayConnection` / `insertEvent` /
+`fetchValidationStatuses`）を timeline-embed と共有しています。
+
+`App.svelte` の `UPSTREAM_RELAYS` に `wss://…` を入れると、ローカルリレーが上流の手前に
+挟まる透過キャッシュになります。空のままなら、ローカルに持っているイベントだけを返す
+独立キャッシュとして動きます。投稿は IndexedDB に永続化されるため、リロード後も再購読で
+再生されます（= ローカルキャッシュとして機能していることが確認できます）。
+
+`relayUrl` を `wss://nos.lol` など実リレーに変更すると、同じ UI でそのまま実リレーへ
+直結できます。ただしこの経路ではエミュレータもキャッシュリレーも挟まらないため、
+**署名を検証する主体が誰もいません**（後述のとおり rx-nostr 側の検証を切っているため）。
+デモ・動作確認用と割り切ってください。
+
+## 署名検証バッジ
+
+ローカルリレーを `validateEventsType: 'LAZY'` で起動し、署名検証はリレーの
+バックグラウンド検証に任せています。クライアントは自前で検証（重い処理）を行わず、
+リレーが永続化した検証結果を `relay.getValidationStatus(ids)`（エミュレータ WebSocket を
+介さない直接メソッド API）で一括取得し、検証済みイベントに ✓ バッジを表示します
+（rx-nostr 側の検証は `skipVerify` で切っています）。
+
+- イベント受信 / EOSE 後にデバウンス（200ms）してまとめて取得
+- `pending` が残っている間だけ 5 秒間隔で再取得。`unknown` は削除・退避済みの
+  確定状態なのでポーリングを駆動しない（全件確定で停止）
+- 検証結果は IndexedDB に永続化されるため、リロード後の再検証は不要
 
 ## 開発
 

@@ -85,21 +85,16 @@ await relay.connect(); // ここでグローバル WebSocket が差し替わる
 
 引き換えに次の点を受け入れることになります。
 
-- **バンドルは約 118 KB（gzip）** で、リレーだけが欲しい場合もウィジェット 2 種
-  （`<nostr-timeline>` / `<nostr-follow-timeline>`）の**カスタム要素が読み込み時に登録されます**。
-  要素を使わなければ描画コストはかかりませんが、要素名は占有されます。
+- リレーだけが欲しい場合も**ウィジェットのカスタム要素が読み込み時に登録され**、
+  ウィジェット一式ぶんのバンドルを読むことになります。
 - **バージョン付きの配信ではありません**（固定 URL の最新版を読みます）。
 - `validateEventsType` の変更や、横取り URL に実リレーの URL を使う構成
   （後述の[パターン B](#対象-url-の指定パターン)）はできません。細かく制御したい場合は上の自前組み立てを使ってください。
 
-引数と注意点（参照カウント、同一ページのウィジェットと設定を揃えること、二重読み込み不可）は
+引数・既定値・注意点（参照カウント、同一ページのウィジェットと設定を揃えること、
+二重読み込み不可、バンドルサイズ）は
 [packages/timeline-embed/README.md](../packages/timeline-embed/README.md#ウィジェットを置かずにページ内リレーだけ使うjs-api)
 を参照してください。
-
-> **注意**: この named export の追加により、`globalThis.NostrTimelineEmbed` は
-> コンポーネント自体ではなく**名前空間オブジェクト**になりました。グローバルから
-> コンポーネントを直接触っていた場合は `NostrTimelineEmbed.default` を参照してください
-> （HTML に `<nostr-timeline>` と書く通常の使い方は影響を受けません）。
 
 ### 3. クライアントは普通に接続する
 
@@ -147,53 +142,22 @@ new WebSocketServerEmulator(['wss://relay.example.com', 'wss://nos.lol']);
 パターン B を使うと、既存クライアントの接続先設定を変えることなくキャッシュを
 挟めます。ただし**次節の制約**に注意してください。
 
-## 主なオプション
-
-`NostrRelayOptions`（詳細は [doc/api.md](./api.md)）:
-
-| オプション | 内容 | 既定値 |
-|---|---|---|
-| `validateEventsType` | 署名検証のタイミング（`'IMMEDIATELY'` / `'LAZY'` / `'NONE'`） | `'IMMEDIATELY'` |
-| `maxSubscriptions` | クライアント毎の同時購読数上限 | 20 |
-| `maxEventsPerRequest` | REQ 1回あたりの返却イベント数上限 | 500 |
-| `storageMaxSize` | 保存イベント数の上限（超過時は `cacheStrategy` で退避） | 無効 |
-| `cacheStrategy` | 退避戦略（`FIFO` / `LRU` / `LFU`） | `FIFO` |
-| `ttl` | キャッシュ投入からの生存秒数（バックグラウンドスイープで削除） | 無効 |
-| `upstreamRelays` | 上流実リレーの URL 群。指定するとリード/ライトスルーが有効 | 無効（独立リレー） |
-| `upstreamEoseTimeout` | 上流 EOSE を待ってクライアントへ EOSE を返す上限（ms） | 3000 |
-| `upstreamFreshness` | 鮮度ウィンドウ（kind → 秒）。指定 kind のキャッシュが窓の内側なら上流に問い合わせない | 無効 |
-
 ## 上流リレーへのリードスルー / ライトスルー（透過キャッシュ）
 
 `upstreamRelays` を指定すると、ローカルリレーが上流実リレー群の手前に挟まる
-**透過キャッシュ**として動作します（設計詳細は
-[doc/cache-relay/upstream.md](./cache-relay/upstream.md)）。
+**透過キャッシュ**として動作します。
 
 - **リードスルー**: `REQ` を上流へも転送し、得たイベントを重複排除してローカルへ充填
   しつつクライアントへ返します。上流購読は CLOSE / 切断まで維持され、EOSE 後の新着も
   透過的に届きます。
 - **ライトスルー**: `EVENT` をローカル保存後、上流へも転送します（fire-and-forget）。
+- **鮮度ウィンドウ**: `upstreamFreshness` に kind ごとの秒数を指定すると、その kind の
+  キャッシュが窓の内側にある間は上流へ問い合わせず、即座に EOSE を返します
+  （HTTP キャッシュの `max-age` 相当）。**窓の内側の購読はライブ更新を受け取りません**。
 
 ```ts
 const relay = new NostrCacheRelay(storage, transport, {
   upstreamRelays: ['wss://nos.lol', 'wss://relay.damus.io'],
-  upstreamEoseTimeout: 3000,
-});
-```
-
-### 鮮度ウィンドウで上流への問い合わせを省く
-
-リードスルーは既定では**キャッシュのヒット状況に関係なく毎回**上流へ REQ を転送します。
-kind 0（プロフィール）のように「(pubkey, kind) ごとに1件しかなく、ほとんど変化しない」
-イベントでは、これは上流トラフィックと EOSE 待ち（最大 `upstreamEoseTimeout`）の両方が無駄です。
-
-`upstreamFreshness` に kind ごとの秒数を指定すると、その kind のキャッシュが窓の内側に
-ある間は上流へ問い合わせず、キャッシュだけで応答して即座に EOSE を返します
-（HTTP キャッシュの `max-age` 相当）。
-
-```ts
-const relay = new NostrCacheRelay(storage, transport, {
-  upstreamRelays: ['wss://nos.lol'],
   upstreamFreshness: {
     0: 3600,  // プロフィールは1時間キャッシュ優先
     3: 600,   // フォローリストは10分
@@ -201,10 +165,8 @@ const relay = new NostrCacheRelay(storage, transport, {
 });
 ```
 
-指定できるのは replaceable な kind（0 / 3 / 10000–19999）のみで、それ以外を指定すると
-リレー生成時に例外になります。窓の内側にある間はその購読が上流購読を持たないため
-**ライブ更新は届きません**（次回の REQ で再検証されます）。判定条件と制約の詳細は
-[doc/cache-relay/upstream.md](./cache-relay/upstream.md) の第5節を参照してください。
+判定条件・設計上のトレードオフは [doc/cache-relay/upstream.md](./cache-relay/upstream.md)、
+各オプションの意味と既定値は [doc/api.md](./api.md#interface-nostrrelayoptions) を参照してください。
 
 パターン B（実リレー URL を横取り）でも、上流コネクタは差し替え前の
 `WebSocket`（`getOriginalWebSocket()`）を使って実リレーへ接続するため、
@@ -245,29 +207,11 @@ npm run dev:web   # http://localhost:5173 で起動
 
 自分で組み立てる代わりに、本手順をパッケージ化した
 [`@nostr-cache/timeline-embed`](../packages/timeline-embed/README.md) をそのまま
-埋め込むこともできます。iframe と Web Component の 2 形態があり、実装は 1 つです。
-
-```html
-<!-- A. iframe: 埋め込み先から完全に隔離（iframe 自身の globalThis で動く） -->
-<iframe src="https://ocknamo.github.io/nostr-cache/embed/?relays=wss://nos.lol"></iframe>
-
-<!-- B. Web Component: 埋め込み先ページ内で動き、globalThis.WebSocket を差し替える -->
-<script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
-<nostr-timeline relays="wss://nos.lol" kinds="1" limit="50"></nostr-timeline>
-
-<!-- kinds/authors/limit で足りない場合は NIP-01 フィルタ配列をそのまま渡せる -->
-<nostr-timeline
-  relays="wss://nos.lol"
-  filters='[{"kinds":[1],"limit":10},{"kinds":[6],"limit":5}]'
-></nostr-timeline>
-```
-
-B は本ドキュメントの手順そのもの（パターン A の専用ローカル URL 方式）を内部で
-実行します。1 ページにリレーは 1 つだけ起動して共有されるため、複数のウィジェットを
-置いても上流への接続は増えません。B のバンドルからは
-[リレー起動 API だけを呼ぶ](#代替-ホスト済みバンドルから起動するnpm-を使わない場合)
-こともできるので、**ウィジェットを置かずにページ内の他のクライアントをキャッシュ経由に
-する**用途にも使えます（同じページにウィジェットも置く場合は同じリレーを共有します）。
+埋め込むこともできます。iframe（埋め込み先から隔離）と Web Component（埋め込み先ページ内で
+動作）の 2 形態があり、後者は本ドキュメントの手順そのもの（パターン A の専用ローカル URL 方式）を
+内部で実行します。1 ページにリレーは 1 つだけ起動して共有されるため、複数のウィジェットを
+置いても上流への接続は増えません。使い方は
+[packages/timeline-embed/README.md](../packages/timeline-embed/README.md) を参照してください。
 
 透過キャッシュの動作（キャッシュ由来の可視化・コールド/ウォーム計測）は
 公開デモで確認できます: <https://ocknamo.github.io/nostr-cache/>
@@ -276,4 +220,5 @@ B は本ドキュメントの手順そのもの（パターン A の専用ロー
 
 - [doc/concept.md](./concept.md): 透過キャッシュ構想の背景・全体像
 - [doc/api.md](./api.md): API リファレンス
+- [doc/cache-relay/upstream.md](./cache-relay/upstream.md): 上流透過キャッシュの設計
 - [packages/cache-relay/README.md](../packages/cache-relay/README.md): パッケージ概要と2つの利用形態
