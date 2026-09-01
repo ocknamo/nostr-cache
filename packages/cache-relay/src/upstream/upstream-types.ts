@@ -1,91 +1,54 @@
-/**
- * Types for the upstream relay layer.
- *
- * The upstream layer turns the local cache relay into a transparent cache in
- * front of real (upstream) relays: read-through (REQ is forwarded upstream and
- * fetched events are backfilled locally) and write-through (published EVENTs
- * are forwarded upstream). See `doc/cache-relay/upstream.md`.
- */
+/** 上流リレー層の型。層の役割は doc/cache-relay/upstream.md を参照。 */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 
 /**
- * Abstraction over a set of upstream relay connections.
+ * 実装は {@link UpstreamRelayPool}。テストはモックを差し込んで
+ * {@link UpstreamCoordinator} を実ソケット無しで動かす。
  *
- * The concrete implementation is {@link UpstreamRelayPool}; tests inject a mock
- * to drive the {@link UpstreamCoordinator} without real sockets.
- *
- * Subscription identity is expressed with an opaque `upstreamSubId` chosen by
- * the caller (the coordinator). It must satisfy NIP-01's 64-character limit —
- * the coordinator generates short ids and keeps its own mapping back to the
- * client subscription, rather than trying to encode client/sub ids into it.
+ * `upstreamSubId` は呼び出し側（coordinator）が採番する。NIP-01 の 64 文字制限が
+ * あるため、クライアントの購読 id を連結せず短い id と対応表で持つ。
  */
 export interface UpstreamPool {
-  /**
-   * Begin connecting to every upstream relay. Resolves once connection attempts
-   * have been kicked off; individual relays connect (and reconnect) in the
-   * background, so a relay being down never rejects this call.
-   */
+  /** 接続の開始だけを待つ。個々のリレーは背後で接続するので、落ちていても reject しない。 */
   start(): Promise<void>;
 
-  /** Close every connection and drop all subscriptions. */
   stop(): Promise<void>;
 
-  /**
-   * Forward an EVENT to every connected upstream (fire-and-forget). Events for
-   * relays that are not currently connected are dropped (no offline queue).
-   */
+  /** fire-and-forget。切断中のリレーへの分は捨てられる（再送キューは無い）。 */
   publish(event: NostrEvent): void;
 
-  /**
-   * Open a subscription (REQ) on every upstream with the given filters. The
-   * `upstreamSubId` is chosen by the caller and used to correlate EVENT/EOSE
-   * callbacks and to close the subscription later.
-   */
   openSubscription(upstreamSubId: string, filters: Filter[]): void;
 
-  /** Close a subscription (CLOSE) on every upstream. */
   closeSubscription(upstreamSubId: string): void;
 
-  /** Register a callback for EVENTs received from any upstream (raw, unvalidated). */
+  /** 届くのは未検証の生イベント。 */
   onEvent(callback: (upstreamSubId: string, event: NostrEvent, relayUrl: string) => void): void;
 
   /**
-   * Register a callback fired once per subscription when every relay that was
-   * connected at `openSubscription` time has returned EOSE (or immediately when
-   * no relay was connected). Relays that connect later do not participate, so a
-   * down relay never stalls the aggregated EOSE forever.
+   * `openSubscription` 時点で接続済みだったリレー全員が EOSE を返したら 1 回だけ発火
+   * （0 台なら即座に）。後から接続したリレーは集約に加えない。落ちているリレーが
+   * 集約 EOSE を永久に止めないため。
    */
   onEose(callback: (upstreamSubId: string) => void): void;
 
-  /** Number of upstream relays whose connection is currently established. */
   getConnectedCount(): number;
 }
 
-/** Options for {@link UpstreamRelayPool}. */
 export interface UpstreamPoolOptions {
-  /**
-   * Maximum number of relays to connect to. URLs beyond this are ignored with a
-   * warning. Default `DEFAULT_MAX_CONCURRENT_RELAYS`.
-   */
+  /** 超えた URL は警告して無視する。既定 `DEFAULT_MAX_CONCURRENT_RELAYS` */
   maxRelays?: number;
-  /**
-   * First delay in ms of the exponential reconnect ladder that follows a
-   * dropped connection. Default 1000.
-   */
+  /** 再接続の指数バックオフの初回待ち時間 (ms)。既定 1000 */
   reconnectBaseDelay?: number;
   /**
-   * How long in ms to wait before trying a relay again once the reconnect
-   * ladder has been exhausted, which is what makes reconnection unlimited
-   * rather than giving up after a handful of attempts. Default 60000.
+   * バックオフを使い切ったあと再武装するまでの待ち時間 (ms)。既定 60000。
+   * これがあるため再接続は数回で諦めず無制限になる。
    */
   reconnectMaxDelay?: number;
   /**
-   * Lazy factory for the `WebSocket` constructor to use. Evaluated once when
-   * the pool starts (not at construction) so that, in the browser, upstream
-   * connections reach the pre-patch `WebSocket` even when the emulator later
-   * replaces the global — avoiding a self-connection loop for an intercepted
-   * upstream URL. Defaults to `() => globalThis.WebSocket`.
+   * 構築時ではなく `start()` 時に 1 回評価する。ブラウザでエミュレータがグローバルを
+   * 差し替えたあとでも差し替え前の `WebSocket` へ届き、横取り URL を上流に指定した
+   * ときの自己接続ループを防ぐため。既定 `() => globalThis.WebSocket`
    */
   webSocketFactory?: () => typeof WebSocket;
 }

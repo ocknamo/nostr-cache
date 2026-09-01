@@ -1,69 +1,44 @@
 /**
- * Parses kind 0 (NIP-01 profile metadata) into the handful of fields the
- * timeline renders.
+ * kind 0 を、タイムラインが描く数フィールドへパースする。
  *
- * Everything here treats the event content as hostile input: it arrives as an
- * arbitrary JSON string from an upstream relay, and — because the widget runs
- * with lazy validation — it may not even have a verified signature yet when it
- * first reaches the UI. So every field is checked for type, clamped for length,
- * and (for `picture`) restricted to a scheme that is safe to put in an
- * `<img src>`.
+ * 内容はすべて敵性入力として扱う。上流から任意の JSON 文字列として届き、遅延検証の
+ * ため UI に出る時点では署名が未検証でもありうるため。
  */
 
-/** Longest name / handle we will render before treating the value as junk. */
 const MAX_NAME_LENGTH = 128;
-/** Longest URL we will accept. Comfortably above any real avatar URL. */
 const MAX_URL_LENGTH = 512;
 /**
- * Characters that must never reach the card: C0/C1 controls (a newline in a
- * name would break the single-line layout) and the bidi overrides, which can
- * reorder the text around a name and make it read as something else.
+ * カードに出してはいけない文字。C0/C1 制御（名前中の改行が 1 行レイアウトを壊す）と、
+ * 名前の周りのテキストを並べ替えて別物に読ませられる bidi 上書き。
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: removing them is the point
 const UNRENDERABLE = /[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
 export interface Profile {
-  /** NIP-01 `name` — the short handle, rendered as `@name`. */
+  /** `@name` として描く短いハンドル。 */
   name?: string;
-  /** NIP-01 `display_name` — the human-facing name, preferred for the title. */
   displayName?: string;
-  /** Avatar URL. Only `http:` / `https:` survive parsing. */
+  /** `http:` / `https:` 以外はパース時に落とす。 */
   picture?: string;
   /**
-   * NIP-05 identifier, exactly as published.
-   *
-   * **Not verified.** Confirming it needs a `.well-known/nostr.json` lookup
-   * against the claimed domain, which this package does not do — so this is an
-   * unchecked claim by the author and the timeline does not render it.
+   * **検証していない。** `.well-known/nostr.json` の照合を行わないため著者の自己申告に
+   * すぎず、タイムラインには表示しない。
    */
   nip05?: string;
 }
 
 /**
- * Drop everything from {@link UNRENDERABLE}.
- *
- * Exported for `content-preview.ts`, which needs this wide set — the same one a
- * name needs — rather than the narrower one `content-parts.ts` applies to a
- * body. It cannot reuse {@link safeText} instead: that one *rejects* text over
- * its limit where a preview truncates, and it strips before anything has had a
- * chance to collapse the whitespace, which would glue the lines of a note
- * together into one word.
+ * `content-preview.ts` 向けに公開している。{@link safeText} では代用できない:
+ * あちらは上限超えを切り詰めではなく**拒否**し、空白を畳む前に除去するので、
+ * 投稿の複数行が 1 語に繋がってしまう。
  */
 export function stripUnrenderable(value: string): string {
   return value.replace(UNRENDERABLE, '');
 }
 
 /**
- * Read a string field, rejecting non-strings and anything implausibly long.
- *
- * Control characters are stripped rather than rejected: a name is rendered on
- * one line, and a newline or a bidi override in it would let an author reshape
- * the card around their own text.
- *
- * Exported because `reactions.ts` reads strings out of an event the same way
- * and for the same reason — a reaction's content is rendered inline in a chip,
- * where a bidi override would reorder the text around it. Sharing the one
- * implementation is what keeps the two from drifting apart.
+ * 文字列フィールドを読む。制御文字は拒否ではなく除去する（1 行に描くため）。
+ * `reactions.ts` も同じ理由で使う。実装を 1 つにしておかないと両者がずれる。
  */
 export function safeText(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') {
@@ -83,13 +58,10 @@ export function safeText(value: unknown, maxLength: number): string | undefined 
  * embedding page's CSP is not ours to assume, and a data URL is an easy way to
  * push a multi-megabyte payload into the DOM.
  *
- * Exported for `reactions.ts`: a NIP-30 custom emoji is an author-supplied
- * image URL that ends up in an `<img src>` exactly like an avatar does, so it
- * has to clear the same bar.
+ * NIP-30 のカスタム絵文字もアバターと同じく `<img src>` に入るので `reactions.ts` が使う。
  *
- * @param maxLength Overrides the avatar-sized ceiling. `ogp.ts` raises it: an
- *   OGP image is routinely a generated URL carrying a title and a signature in
- *   its query string, which an avatar URL never is.
+ * @param maxLength `ogp.ts` が引き上げる。OGP 画像はクエリにタイトルや署名を載せた
+ *   生成 URL が普通で、アバター URL とは長さの前提が違う
  */
 export function safeImageUrl(value: unknown, maxLength = MAX_URL_LENGTH): string | undefined {
   const raw = safeText(value, maxLength);
@@ -105,8 +77,8 @@ export function safeImageUrl(value: unknown, maxLength = MAX_URL_LENGTH): string
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return undefined;
   }
-  // The parsed form, not the raw string: `new URL()` drops embedded tabs and
-  // newlines, so the two can differ and only one of them was validated.
+  // 生の文字列ではなくパース後を返す。`new URL()` はタブや改行を落とすので両者は
+  // 一致せず、検証したのはパース後の方だから。
   return url.href;
 }
 
@@ -143,37 +115,22 @@ export function parseProfileContent(content: string): Profile | undefined {
     profile.nip05 = nip05;
   }
 
-  // An object with none of the fields we render is indistinguishable from no
-  // profile at all, and returning it would suppress the pubkey fallback.
+  // 描くフィールドが 1 つも無ければプロフィール無しと同じ。返すと pubkey への
+  // フォールバックが効かなくなる。
   return Object.keys(profile).length > 0 ? profile : undefined;
 }
 
-/**
- * Abbreviate a pubkey for display.
- *
- * Used both as the author name when no profile is available and as the label
- * on a reference chip.
- */
+/** プロフィールが無いときの著者名と、参照チップのラベルの両方に使う。 */
 export function shortPubkey(pubkey: string): string {
   return pubkey.length <= 16 ? pubkey : `${pubkey.slice(0, 8)}…${pubkey.slice(-8)}`;
 }
 
-/**
- * The name to render for an author.
- *
- * `display_name` is the field clients show most prominently, `name` is the
- * handle, and the shortened pubkey is what is left when neither was published
- * (or the profile has not arrived yet).
- */
+/** `display_name` → `name` → 短縮 pubkey の順に落ちる。 */
 export function authorName(pubkey: string, profile?: Profile): string {
   return profile?.displayName ?? profile?.name ?? shortPubkey(pubkey);
 }
 
-/**
- * The `@handle` to render next to the name, if there is one worth showing.
- *
- * Suppressed when it would merely repeat the displayed name.
- */
+/** 表示名の繰り返しになる場合は出さない。 */
 export function authorHandle(pubkey: string, profile?: Profile): string | undefined {
   const handle = profile?.name;
   if (!handle || handle === authorName(pubkey, profile)) {

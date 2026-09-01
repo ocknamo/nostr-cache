@@ -1,14 +1,9 @@
 /**
- * A pool of upstream relay connections, backed by rx-nostr.
+ * 上流リレー接続のプール。接続・再接続・REQ 再送は rx-nostr が持つ。
  *
- * Opening sockets, reconnecting, re-issuing the REQs that were open when one
- * dropped, normalizing and de-duplicating relay URLs are all rx-nostr's job.
- * What is left here is the one thing it cannot do for us: aggregating per-relay
- * EOSE into a single per-subscription EOSE. rx-nostr's own aggregation is a
- * backward-strategy feature and closes the subscription when it fires, but
- * upstream subscriptions must stay open past EOSE to keep live events flowing
- * (`doc/cache-relay/upstream.md` §3) — which forces the forward strategy, where
- * `use()` carries EVENTs only and EOSE arrives on the shared message stream.
+ * ここに残るのは rx-nostr で代替できない EOSE の集約だけ。rx-nostr の集約は
+ * backward strategy の機能で EOSE 時に購読を閉じてしまうが、上流購読は EOSE 後も
+ * 開いたままにする必要がある（doc/cache-relay/upstream.md 第2.1節）。
  */
 
 import { DEFAULT_MAX_CONCURRENT_RELAYS, logger } from '@nostr-cache/shared';

@@ -1,17 +1,8 @@
 /**
  * NIP-01 の「置換可能イベントは最新の1件だけを保持する」判定。
  *
- * Which of two versions of the same replaceable / addressable event wins, per
- * NIP-01:
- *
- * > in case of replaceable events with the same timestamp, the event with the
- * > lowest id (first in lexical order) should be retained, and the other
- * > discarded
- *
- * Dependency-free pure predicates, like `event-kind.ts` / `storage/priority.ts`:
- * the event pipeline decides whether an incoming event may replace what is
- * stored, and both storage adapters (Dexie / SQLite) pick the current version
- * out of the rows they hold — all from this single source of truth.
+ * イベントパイプラインと両ストレージアダプタ（Dexie / SQLite）が同じ順序で版を選ぶ
+ * ため、依存を持たない純粋関数として切り出している。
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';

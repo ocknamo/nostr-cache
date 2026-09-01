@@ -185,12 +185,10 @@ interface NostrRelayOptions {
                                     // （created_at 基準ではない。未指定で無効。deleteExpired 対応ストレージが必要）
   ttlSweepInterval?: number;        // TTL スイープの実行間隔 秒 (default: 60)
   cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // 退避戦略 (default: 'FIFO')。FIFO=作成が古い順 / LRU=読み出しが古い順 / LFU=読み出し頻度が低い順（同数なら古い順）
-                                    // ※ 挿入も1回のアクセスとして数える。置換可能イベントは上書きのたびに
-                                    //    アクセス履歴がリセットされるため、頻繁に更新されるものは LFU で不利になる
   cachePriority?: {                 // キャッシュ優先度。指定 pubkey（npub / hex 可）の発行イベント、または指定 kind の
-    pubkeys?: string[];             // イベントを「優先イベント」として扱う。優先イベントは storageMaxSize 超過時に
-    kinds?: number[];               // 最後まで残り（非優先を先に退避。優先だけになったら通常の cacheStrategy 順で退避し
-  };                                // maxSize は常に厳守）、TTL スイープの削除対象外。不正な npub は生成時に例外
+    pubkeys?: string[];             // イベントを「優先イベント」として扱い、退避を後回しにして TTL スイープから除外する
+    kinds?: number[];               // （下記「退避・TTL・キャッシュ優先度の注意」）。不正な npub は生成時に例外
+  };
   validateEventsType?: 'NONE' | 'IMMEDIATELY' | 'LAZY'; // 検証方式 (default: 'IMMEDIATELY')
                                     // 'IMMEDIATELY'=同期検証, 'NONE'=検証なし,
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
@@ -217,6 +215,36 @@ interface NostrRelayOptions {
 `UpstreamCoordinator` と型 `UpstreamPool` / `UpstreamPoolOptions` が
 `@nostr-cache/cache-relay`（および `/browser`）から公開されています。設計は
 [doc/cache-relay/upstream.md](./cache-relay/upstream.md) を参照してください。
+
+#### 退避・TTL・キャッシュ優先度の注意 / Eviction, TTL and cache priority caveats
+
+- `storageMaxSize` は**ソフトリミット**です。退避パス（件数確認＋削除）はトランザクション
+  で原子化していますが、`saveEvent` 自体は別コミットのため、並行書き込み下では一時的に
+  上限を超えることがあります（最終的に収束）。また `FIFO` は `created_at`（秒精度）基準で、
+  同値のイベントは主キー（id）順に退避されます（厳密な到着順ではない近似）。
+- `ttl` の期限切れはバックグラウンドの定期スイープで削除されるため、**最大で
+  `ttlSweepInterval` 秒ぶん、期限切れイベントを `REQ` に返しうります**（読み出し時の
+  フィルタではありません）。
+- `cachePriority` の優先も**ソフト**です。キャッシュが優先イベントだけで `maxSize` を
+  超えた場合は、優先イベントも通常の `cacheStrategy` 順で退避されます（`maxSize` は常に厳守）。
+  この状態では保存のたびに退避が起きるため、優先対象は `maxSize` に対して十分小さく保つこと。
+- `DexieStorage` の退避は優先イベントを飛ばしながらインデックス順に走査するため、
+  キャッシュの大半が優先イベントだと退避パスの走査コストが増えます。
+- `cachePriority` による **TTL の除外は無条件**です。`storageMaxSize` を設定せずに常用 kind
+  （kind 1 等）を優先指定すると、該当イベントは TTL でも削除されずストレージが増え続けます。
+  `cachePriority` は `storageMaxSize` と併用してください。
+- `LRU` / `LFU` は**挿入も 1 回のアクセスとして数えます**。置換可能イベントは上書きのたびに
+  アクセス履歴（`access_count` 等）がリセットされるため頻繁に更新されるものは `LFU` で
+  不利になりますが、`cachePriority` で指定すればこの不利は実質無効化されます。
+- NIP-09 の削除リクエスト（kind 5）は `cachePriority` の設定によらず常に同じ保護を受けます
+  （TTL 対象外・最後に退避）。
+
+/ `storageMaxSize` is a soft limit (the eviction pass is atomic, but `saveEvent` commits
+separately, so concurrent writes may overshoot transiently). Cache priority is soft too: when
+priority events alone exceed `maxSize` they are evicted in normal `cacheStrategy` order, since
+`maxSize` is always enforced. TTL exemption, by contrast, is unconditional — pair `cachePriority`
+with `storageMaxSize` or storage grows without bound. Kind 5 always gets the same protection
+regardless of `cachePriority`.
 
 ### `interface StorageAdapter`
 
@@ -421,8 +449,9 @@ const cache = new NostrRelayServer({
 | `getPort(): number` | 待ち受けポート / The configured port |
 | `setCachePriority(input?): void` | キャッシュ優先度設定（`storageOptions.cachePriority` と同形式。npub / hex 可）を実行時に差し替える。不正値は例外で現行設定を維持、`undefined` で解除。次回の退避・TTL スイープから反映 / Replaces the cache priority config at runtime (same shape as `storageOptions.cachePriority`; npub or hex). Invalid input throws and keeps the current config; `undefined` clears. Applies from the next eviction / TTL sweep |
 
-設定オプションの詳細は [`packages/server/README.md`](../packages/server/README.md) を参照してください。
-See the server README for the full option list.
+起動方法・永続化（`NOSTR_DB_PATH`）・環境変数・ヘルスチェックなど、このパッケージ固有の
+設定は [`packages/server/README.md`](../packages/server/README.md) を参照してください。
+/ For server-specific setup — startup, persistence, env vars, health check — see the server README.
 
 ---
 
@@ -477,6 +506,9 @@ type NostrWireMessage =
 | `logger`, `LogLevel` | ロガー / Logger |
 | `getRandomSecret()` | 32 バイトのランダム秘密鍵（hex）/ Random 32-byte secret key (hex) |
 | `messageToWire(message)` | 内部メッセージ型をワイヤー配列へ変換 / Converts an internal message into the wire array form |
+| `npubToHex(npub)`, `normalizePubkey(value)` | NIP-19 の `npub1…` を 64 桁 hex へ / Decodes `npub1…` to 64-char hex |
+| `decodeNip19(value)`, `NIP19_PREFIXES` | NIP-19 エンティティ（`note` / `nevent` / `nprofile` / `naddr` 等）のデコード / Decodes NIP-19 entities |
+| `DEFAULT_RELAY_URLS` | 既定の上流リレー URL 群 / Default upstream relay URLs |
 
 ---
 

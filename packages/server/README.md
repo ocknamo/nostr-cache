@@ -1,16 +1,9 @@
 # Nostr Cache Server
 
-NIP-01 / NIP-02 / NIP-09 準拠のNostrリレーサーバー実装。このパッケージは`@nostr-cache/cache-relay`を使用してNostrリレーサーバーをローカルで実行できるようにします。
-
-## 主な機能
-
-- WebSocketを通じたNIP-01準拠のNostrリレープロトコルの実装
-- NIP-09（イベント削除リクエスト・kind 5）の適用
-- イベントの保存と取得
-- サブスクリプション管理
-- イベントのバリデーション
-- サーバーサイドでのデータ保存（既定: fake-indexedDB によるインメモリ保存 /
-  オプトイン: `node:sqlite` によるファイル永続化。下記「永続化（オプトイン）」参照）
+`@nostr-cache/cache-relay` を `WebSocketServer` と組み立てた、すぐ起動できる Node.js
+リレーサーバー。リレーとしての振る舞い（対応 NIP・イベント検証・購読管理・退避と TTL）は
+すべてリレーコアのもので、[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md) が唯一の情報源です。
+このパッケージが固有に持つのは、**起動方法・永続化・環境変数・ヘルスチェック**です。
 
 ## インストールと実行
 
@@ -21,16 +14,14 @@ NIP-01 / NIP-02 / NIP-09 準拠のNostrリレーサーバー実装。このパ�
 npm run build:server
 
 # 開発モードでサーバーを起動
-# 注意: 実行時に実験的機能の警告が表示されますが、機能には影響ありません
 npm run dev:server
 
 # 本番モードでサーバーを起動
 npm run start:server
 ```
 
-## 使用方法
-
-サーバーはデフォルトで8008ポートで起動します。WebSocketクライアントを使用して接続できます。
+サーバーはデフォルトで 8008 ポートで起動します。WebSocket クライアントを使用して
+接続できます。
 
 ## 永続化（オプトイン）
 
@@ -42,9 +33,6 @@ Node.js 組み込みの `node:sqlite` による永続ストレージにオプト
 ```bash
 # 永続化を有効にして起動
 NOSTR_DB_PATH=/var/lib/nostr-cache/relay.db npm run start:server
-
-# イベント投稿 → Ctrl-C（SIGINT）や docker stop（SIGTERM）で停止 → 再起動しても
-# 保存済みイベントは REQ で取得できる
 ```
 
 プログラムから利用する場合は `storageOptions.dbPath` を指定します：
@@ -56,34 +44,14 @@ const server = new NostrRelayServer({
 });
 ```
 
-## キャッシュ優先度（環境変数）
-
-特定の pubkey の発行イベントや特定 kind のイベントを優先的にキャッシュに残したい場合は、
-環境変数で指定できます（カンマ区切り。pubkey は `npub1...` / hex どちらでも可）。
-優先イベントは `storageOptions.maxSize` 超過時に最後まで残り（maxSize は厳守）、TTL
-スイープの削除対象外になります。不正な値を指定した場合は起動時にエラーで停止します。
-
-```bash
-# 自分の npub と kind 0（プロフィール）を優先的にキャッシュして起動
-NOSTR_CACHE_PRIORITY_PUBKEYS=npub1... \
-NOSTR_CACHE_PRIORITY_KINDS=0 \
-npm run start:server
-```
-
-プログラムから利用する場合は `storageOptions.cachePriority` を指定します（下記
-「設定オプション」参照）。実行中の差し替えは `server.setCachePriority(input)` で
-行えます（再起動不要。不正値は例外を投げて現行設定を維持し、`undefined` で解除。
-次回の退避・TTL スイープから反映）。
-
-挙動の要点：
+永続モード固有の挙動：
 
 - `dbPath` 未指定なら**従来どおり**インメモリで、`stop()` 時にストレージをクリアします。
   永続モードでは `stop()` はデータを保持したまま DB を閉じます（WAL のチェックポイント +
   ファイルハンドル解放）。同一インスタンスを再度 `start()` すると DB は自動で
   再オープンされます
-- TTL（`relay.ttl`）・保存上限（`storageOptions.maxSize` / `cacheStrategy` の
-  FIFO / LRU / LFU）・遅延バリデーションの永続キューは、永続モードでもインメモリと
-  同一のセマンティクスで機能します
+- TTL・保存上限・退避戦略・遅延バリデーションの永続キューは、永続モードでも
+  インメモリと同一のセマンティクスで機能します
 - `node:sqlite` は実験的機能のため、永続化を**有効にしたときだけ** ExperimentalWarning が
   1 回表示されます（機能には影響ありません。`NODE_OPTIONS=--disable-warning=ExperimentalWarning`
   で抑制できます）
@@ -94,9 +62,26 @@ npm run start:server
 - クエリ層には Drizzle ORM（`drizzle-orm/node-sqlite`）を使用しています（エンジンは
   `node:sqlite` のまま）。SQL への値の埋め込みはすべて型付きのクエリビルダ経由です
 
-### 設定オプション
+## 環境変数
 
-`NostrRelayServer`クラスは以下の設定オプションをサポートしています：
+| 環境変数 | 内容 |
+|---|---|
+| `NOSTR_DB_PATH` | SQLite ファイルパス。指定すると永続化が有効になる |
+| `NOSTR_CACHE_PRIORITY_PUBKEYS` | 優先キャッシュする pubkey（カンマ区切り。`npub1...` / hex） |
+| `NOSTR_CACHE_PRIORITY_KINDS` | 優先キャッシュする kind（カンマ区切り） |
+
+```bash
+# 自分の npub と kind 0（プロフィール）を優先的にキャッシュして起動
+NOSTR_CACHE_PRIORITY_PUBKEYS=npub1... \
+NOSTR_CACHE_PRIORITY_KINDS=0 \
+npm run start:server
+```
+
+不正な値を指定した場合は起動時にエラーで停止します。実行中の差し替えは
+`server.setCachePriority(input)` で行えます（再起動不要）。優先イベントの扱いは
+[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md) の「退避・TTL・キャッシュ優先度の注意」を参照してください。
+
+## 設定オプション
 
 ```typescript
 interface NostrRelayServerOptions {
@@ -108,21 +93,21 @@ interface NostrRelayServerOptions {
   storageOptions?: {
     dbName?: string;   // データベース名（既定のインメモリモードのみ）
     dbPath?: string;   // SQLite ファイルパス。指定すると永続化が有効になる（dbName は無視）
-    maxSize?: number;  // 最大サイズ
-    cacheStrategy?: 'LRU' | 'FIFO' | 'LFU'; // maxSize 超過時の退避戦略（デフォルト FIFO）
-    // キャッシュ優先度。指定 pubkey（npub / hex）の発行イベントと指定 kind のイベントは
-    // maxSize 超過時に最後まで残り（maxSize は厳守）、TTL スイープの削除対象外になる。
-    // 不正な npub はコンストラクタで例外
+    maxSize?: number;  // 最大保存件数
+    cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
     cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
 
-  // リレー設定
+  // リレー設定（NostrRelayOptions へ素通し）
   relay?: {
-    maxSubscriptions?: number;     // 最大サブスクリプション数
-    maxEventsPerRequest?: number;  // リクエストあたりの最大イベント数
-    validateEvents?: boolean;      // イベントのバリデーションを行うかどうか
-                                   // false でも NIP-09 の削除リクエスト（kind 5）は必ず署名検証する
-                                   // （削除は取り消せないため）
+    maxSubscriptions?: number;
+    maxEventsPerRequest?: number;
+    validateEvents?: boolean;      // false は validateEventsType: 'NONE' に対応
+    ttl?: number;
+    ttlSweepInterval?: number;
+    upstreamRelays?: string[];
+    upstreamEoseTimeout?: number;
+    upstreamFreshness?: Record<number, number>;
   };
 
   // ヘルスチェック設定
@@ -134,11 +119,18 @@ interface NostrRelayServerOptions {
 }
 ```
 
-### ヘルスチェックエンドポイント
+`relay` の各値はリレーコアの `NostrRelayOptions` へ素通しされます。意味・既定値・制約は
+[doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md#interface-nostrrelayoptions) を参照してください。
+
+> **注意（host バインドについて）**: `host` オプションはヘルスチェック用 HTTP サーバーには
+> 適用されますが、現状の WebSocket サーバー（`@nostr-cache/cache-relay` の `WebSocketServer`）は
+> `host` を受け取らず全インターフェースで待ち受けます。`host` で待ち受け範囲を厳密に
+> 制限したい場合はこの非対称性に注意してください。
+
+## ヘルスチェックエンドポイント
 
 サーバー起動時、WebSocket ポートとは別の HTTP ポート（デフォルトは `port + 1`）で
-ヘルスチェックエンドポイント（デフォルト `/health`）が起動します。リレーの稼働状況を
-JSON で返します。
+ヘルスチェックエンドポイント（デフォルト `/health`）が起動します。
 
 ```bash
 curl http://localhost:8009/health
@@ -153,38 +145,24 @@ curl http://localhost:8009/health
 `/health` 以外のパスや `GET` 以外のメソッドには `404` を返します。
 `healthCheck.enabled: false` で無効化できます。なお補助機能のため、ヘルスチェック用
 ポートの確保に失敗してもリレー本体は停止せず、警告ログのみを出力します。
-
 `healthCheck.port: 0` を指定すると OS による動的ポート割り当てになり、実際に
 バインドされたポート番号は `getHealthPort()` で取得できます。
 
-> **注意（host バインドについて）**: `host` オプションはヘルスチェック用 HTTP サーバーには
-> 適用されますが、現状の WebSocket サーバー（`@nostr-cache/cache-relay` の `WebSocketServer`）は
-> `host` を受け取らず全インターフェースで待ち受けます。`host` で待ち受け範囲を厳密に
-> 制限したい場合はこの非対称性に注意してください。
-
-### プログラムからの利用
+## プログラムからの利用
 
 ```typescript
 import { NostrRelayServer } from '@nostr-cache/server';
 
-// カスタム設定でサーバーを作成
 const server = new NostrRelayServer({
   port: 9000,
-  storageOptions: {
-    dbName: 'MyNostrRelay',
-    maxSize: 1000000
-  },
-  relay: {
-    maxSubscriptions: 200,
-    maxEventsPerRequest: 1000,
-    validateEvents: true
-  }
+  storageOptions: { dbName: 'MyNostrRelay', maxSize: 1000000 },
+  relay: { maxSubscriptions: 200, maxEventsPerRequest: 1000 },
 });
 
-// サーバーを起動
 await server.start();
-
-// サーバーを停止
+// ...
 await server.stop();
 ```
 
+`NostrRelayServer` のメソッド一覧は [doc/api.md](https://github.com/ocknamo/nostr-cache/blob/main/doc/api.md#class-nostrrelayserver)
+を参照してください。

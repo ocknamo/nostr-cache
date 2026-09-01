@@ -167,14 +167,12 @@ transport.onDisconnect(clientId) ──▶ MessageHandler.handleClientDisconnect
 relay.disconnect() ──▶ coordinator.stop()（全 EOSE タイマー解除 + pool.stop = 全ソケット close）
 ```
 
-## 4. オプション（`NostrRelayOptions`）
+## 4. オプション
 
-| オプション | 既定 | 説明 |
-|---|---|---|
-| `upstreamRelays?: string[]` | なし | 上流リレー URL。指定時のみリード/ライトスルーが有効 |
-| `upstreamEoseTimeout?: number` | `DEFAULT_SUBSCRIPTION_TIMEOUT`（3000ms） | クライアント EOSE を上流 EOSE まで待つ上限 |
-| `upstreamFreshness?: Record<number, number>` | なし | 鮮度ウィンドウ。kind → 「その kind のキャッシュを新鮮とみなす秒数」（第5節参照）。replaceable な kind のみ指定可 |
-| `upstreamPool?: UpstreamPool` | なし | テスト・高度用途。プール実装を差し替える（`upstreamRelays` より優先） |
+この層を制御するのは `NostrRelayOptions` の `upstreamRelays` / `upstreamEoseTimeout` /
+`upstreamFreshness` / `upstreamPool` の 4 つ。**意味と既定値は
+[doc/api.md](../api.md#interface-nostrrelayoptions) を参照**（このドキュメントは
+判定アルゴリズムとトレードオフだけを扱う）。
 
 `packages/server` では `NostrRelayServerOptions.relay.upstreamRelays` 等として素通しする。
 `packages/web-client` の `startLocalRelay(url, { upstreamRelays })` からも指定できる。
@@ -364,16 +362,10 @@ REQ のフィルタごとに独立に判定する。
 
 ## 8. 既知の制限（将来課題）
 
-- **`id` が内容のハッシュであることを検証していない**: `EventValidator` は
-  `@rx-nostr/crypto` の `verifier` を呼ぶだけで、これは内容から再計算したハッシュに
-  対して署名を検証する（`schnorr.verify(sig, getEventHash(event), pubkey)`）ものの、
-  `event.id` とは突き合わせない。rx-nostr 側にも id の検算は無い。したがって
-  「署名は本物だが id だけ差し替えた」イベントは、その偽 id で保存されうる。
-  第6節の id カバレッジ短絡はこの前提の上に成り立っている。ただしこれは今回の短絡で
-  新たに生じた穴ではない: `UpstreamCoordinator` の重複排除も id ベースなので、
-  後から上流が本物を配信しても dedup されて訂正されない。ingest 時点で
-  `id === getEventHash(event)` を検算するのが筋（`validateEventsType` と無関係に
-  無条件で行う必要がある。LAZY では最大 `lazyValidateInterval` 秒遅れるため）
+追跡中の課題（`id` の検算、部分カバー時の残余フィルタ、EOSE 保留ポリシー、鮮度ウィンドウの
+再武装）は [doc/TODO.md](../TODO.md) を参照。ここには、この層の設計から直接くる性質だけを
+挙げる。
+
 - **再送キューは持たない**: 上流が全滅している間に投稿された EVENT は転送されず失われる
   （クライアントへの `OK` は `true` で返る）。オフライン中の投稿を後で送る仕組みは未実装。
 - **購読多重化はしない**: クライアント購読 1 に対し上流購読 1（1:1）。同一フィルタの
@@ -394,24 +386,11 @@ REQ のフィルタごとに独立に判定する。
   設定値そのままとは限らない（`wss://nos.lol/` → `wss://nos.lol`）。
   `CacheMetrics.recordUpstreamEvent` 経由でデモの計測表示に出る値もこれになる。
 - **上流 AUTH（NIP-42）などは未対応**: 認証が必要な上流リレーには接続できない。
-- **鮮度ウィンドウは replaceable の置換バグを増幅する（要修正）**: `EventHandler` の
-  `handleReplaceableEvent` / `handleAddressableEvent` は `created_at` を比較せず、
-  同じ (pubkey, kind) の既存版を無条件に削除してから保存する。つまり**古い署名済み
-  イベントを1通投げるだけで新しい版を上書きでき**、その保存で `cached_at` が現在時刻に
-  なる。鮮度ウィンドウ無効時は次の REQ が上流に問い合わせて自己修復するが、有効時は
-  **最大で窓の秒数ぶん stale な版が固定される**。攻撃者による過去イベントの再投稿だけで
-  なく、複数上流のうち遅れている1台が古い版を返して最後に ingest された場合にも起きる。
-  根本原因は NIP-01 の「最新の1件だけを保持する」に対する置換ロジックの非準拠であり、
-  この機能とは独立した修正（`created_at` 比較、同値時は id 辞書順）が必要。
 - **鮮度ウィンドウは addressable 未対応**: 30000–39999 は座標に `d` タグが入るため、
-  フィルタに `#d` がなければ期待集合を列挙できない。今回は replaceable
-  （0 / 3 / 10000–19999）のみを対象とし、addressable な kind を設定すると構築時に
-  例外を投げる。
+  フィルタに `#d` がなければ期待集合を列挙できない。replaceable（0 / 3 / 10000–19999）
+  のみを対象とし、addressable な kind を設定すると構築時に例外を投げる。
 - **鮮度ウィンドウは部分ヒットを絞り込まない**: `authors` の一部だけが新鮮な場合、
   そのフィルタは元のまま上流へ転送される（新鮮でない author だけに絞った残余
   フィルタは作らない）。著者を多数まとめて引く REQ では節約が効きにくい。
 - **鮮度ウィンドウでスキップした購読はライブ更新を受け取らない**: 上流購読を
   開かないため、その購読が生きている間の新着は届かない（第5節のトレードオフ）。
-- **`ids` 指定のショートサーキットは未実装**: id は内容ハッシュで不変なので
-  「要求 id 全件がキャッシュにあれば上流に聞かなくてよい」が原理的に成り立つが、
-  今回の鮮度ウィンドウとは別の判定経路になるため実装していない。

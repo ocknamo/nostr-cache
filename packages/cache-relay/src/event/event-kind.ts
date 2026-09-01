@@ -1,9 +1,6 @@
 /**
- * Event kind classification (NIP-01 kind ranges).
- *
- * Dependency-free pure predicates so the event pipeline and both storage
- * adapters (Dexie / SQLite) classify kinds from a single source of truth —
- * the same pattern as `storage/tag-index.ts` and `storage/priority.ts`.
+ * イベント種別の判定（NIP-01 の kind 範囲）。
+ * イベントパイプラインと両ストレージアダプタが同じ判定を使うための純粋関数。
  */
 
 /** Kind of a NIP-09 deletion request event. */
@@ -35,12 +32,8 @@ export function isDeletionKind(kind: number): boolean {
 }
 
 /**
- * Whether a kind can be referenced by an `a` tag coordinate
- * (`<kind>:<pubkey>:<d-identifier>`) — i.e. replaceable or addressable.
- *
- * Used to reject NIP-09 `a` tags naming a regular kind: `1:<pubkey>:` would
- * otherwise mean "delete every kind 1 note by this author up to the deletion
- * request's created_at", turning one malformed tag into a mass deletion.
+ * `a` タグの座標で参照できる kind か。通常 kind の座標（`1:<pubkey>:`）を弾くために使う。
+ * 通せば 1 つのタグが「この著者の kind 1 を全削除」になる。
  */
 export function isCoordinateAddressableKind(kind: number): boolean {
   return isReplaceableKind(kind) || isAddressableKind(kind);

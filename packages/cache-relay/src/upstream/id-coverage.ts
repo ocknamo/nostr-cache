@@ -1,18 +1,9 @@
 /**
- * id 指定フィルタのキャッシュ充足判定（id カバレッジ短絡）
+ * id 指定フィルタのキャッシュ充足判定（id カバレッジ短絡）。
+ * 判定条件は doc/cache-relay/upstream.md 第6節を参照。
  *
- * 鮮度ウィンドウ（`freshness.ts`）は「上流にもっと新しい版があるかもしれない」を
- * 時間で妥協している。`ids` にはその妥協が要らない: id はイベント内容のハッシュで
- * あり、同じ id を持つ「より新しい版」は存在しえないためである。
- *
- * この違いは判定の強さに直結する。`filter.ids` に挙がった id をすべてキャッシュが
- * 持っているなら、そのフィルタにマッチしうるイベントは高々その n 件で、すべて配信
- * 済みなのだから、**上流購読を開いても今後届くものが無い**。EOSE を早めるだけでなく
- * 上流購読そのものが不要になり、失効という概念も無いので設定にも依存しない。
- *
- * 判定材料は「その REQ がローカルから配信した id」だけで、追加のストレージ
- * アクセスは伴わない（`MessageHandler.handleReqMessage` が重複排除のために
- * どのみち集めている）。
+ * id は内容のハッシュなので「より新しい版」が存在しえず、鮮度ウィンドウと違って
+ * 失効しない。全 id が配信済みなら上流購読そのものが不要になる。
  */
 
 import type { Filter } from '@nostr-cache/shared';
@@ -20,31 +11,19 @@ import type { Filter } from '@nostr-cache/shared';
 /**
  * Whether local storage alone has already answered this filter in full.
  *
- * Judged from what was *delivered* rather than from what storage holds. The two
- * differ when a held event fails another condition of the same filter (a `kinds`
- * that does not match it, an `until` it is newer than) or when `limit` /
- * `maxEventsPerRequest` truncated it away. Proving those cases covered would
- * cost a storage round trip to learn which ids exist, so they are reported
- * uncovered instead and the filter is forwarded upstream exactly as before —
- * the same fail-open direction `narrowFiltersByFreshness` takes.
+ * 判定材料は「保持している id」ではなく「配信した id」。保持していても同じフィルタの
+ * 他の条件や `limit` で落ちた分は追加のストレージ往復なしには確かめられないので、
+ * 未充足として上流へ転送する（フェイルオープン）。
  *
- * An empty `ids` array counts as covered: it matches nothing locally
- * (`eventMatchesFilter` rejects every event against it), and forwarding it would
- * expose us to an upstream relay that reads `[]` as "no constraint" and answers
- * with its whole store.
+ * 空の `ids` は充足扱い。ローカルでは何にもマッチしない一方、転送すると `[]` を
+ * 「制約なし」と読む上流に全件返されうるため。
  *
- * @param delivered Ids delivered by the REQ this filter belongs to — every
- *   filter of it, not just this one. The question is whether the cache *holds*
- *   the id, and a delivery under any filter of the same REQ proves that.
+ * @param delivered この REQ が配信した id。フィルタ単位ではなく REQ 単位で見る
  */
 export function isIdCovered(filter: Filter, delivered: ReadonlySet<string>): boolean {
-  // `ids` reaching here is not necessarily an array: `isValidFilterShape` is a
-  // disjunction, so `{"ids":"abc","limit":1}` is admitted on the strength of
-  // `limit` alone. Everything downstream of it happens to tolerate the string
-  // (`includes` and `length` both exist on one), so this is the first place a
-  // non-array would throw — and a throw here would leave the REQ with neither
-  // EOSE nor CLOSED. Treated as uncovered, which forwards it upstream exactly
-  // as before this short-circuit existed.
+  // `isValidFilterShape` は選言なので、`{"ids":"abc","limit":1}` は `limit` だけで
+  // 通る。ここが非配列で最初に throw する場所で、throw すると REQ が EOSE も CLOSED も
+  // 受け取れずに終わる。
   if (!Array.isArray(filter.ids)) {
     return false;
   }
@@ -52,15 +31,7 @@ export function isIdCovered(filter: Filter, delivered: ReadonlySet<string>): boo
 }
 
 /**
- * Decide which of a REQ's filters still need to be forwarded upstream.
- *
- * Unlike the freshness window this is unconditional — it needs no configuration,
- * because it rests on id being the event's content hash rather than on a policy
- * about how stale a cached copy may be.
- *
- * @param sentIds Ids this REQ delivered from local storage
- * @returns The filters to forward upstream; empty means the subscription is
- *   already complete and can be finished with an immediate EOSE
+ * 上流へ転送する必要が残っているフィルタを返す。空なら即 EOSE で購読を閉じてよい。
  */
 export function narrowFiltersByIdCoverage(filters: Filter[], sentIds: Iterable<string>): Filter[] {
   if (!filters.some((filter) => Array.isArray(filter.ids))) {

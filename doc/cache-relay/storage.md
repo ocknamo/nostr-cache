@@ -6,36 +6,18 @@
 
 ## 2. システム構成
 
-### 2.1. 依存関係
-#### 2.1.1. 主要依存パッケージ
-- dexie: ^4.0.11（IndexedDBラッパーライブラリ）
-- @nostr-cache/shared: ^0.1.0（共有型定義、共有ユーティリティ）
-
-#### 2.1.2. テスト用依存パッケージ
-- fake-indexeddb: ^6.0.0（IndexedDBモック）
-
-### 2.2. 基本構成
-- 実装ファイル: packages/cache-relay/src/storage/dexie-storage.ts
-  （1 フィルタの読み方は packages/cache-relay/src/storage/dexie/query.ts）
-- データベース: IndexedDB (Dexie.js)
+- 実装ファイル: `packages/cache-relay/src/storage/dexie-storage.ts`
+  （1 フィルタの読み方は `packages/cache-relay/src/storage/dexie/query.ts`）
+- データベース: IndexedDB（Dexie.js）。テストと Node.js では `fake-indexeddb` でエミュレート
 - テーブル構成: events
   - 主要フィールド：id, pubkey, created_at, kind, tags, content, sig
   - インデックス用フィールド：indexed_tags
   - 検証状態フィールド：validated（0=未検証, 1=署名検証済み。boolean は
     IndexedDB でインデックス化できないため数値で保持）
 
-### 2.3. インターフェース仕様
-StorageAdapterインターフェースの実装
-- saveEvent(event, options?): イベントの保存機能（`options.validated` で検証済みとして保存。省略時は未検証。既存行が検証済みの場合、再保存で未検証へ**ダウングレードしない**）
-- getEvents(): フィルタに基づくイベント取得機能
-- deleteEvent(): イベント削除機能
-- clear(): ストレージクリア機能
-- getUnvalidatedEvents(limit): 未検証イベントを保存時刻の古い順に取得（遅延検証の永続キュー。アクセス追跡しない）
-- markValidated(ids): 検証済みフラグの一括付与（存在しない id は no-op）
-- getValidationStatus(ids): id ごとの検証状態（`validated` / `pending` / `unknown`）を一括取得（主キー bulkGet。アクセス追跡しない）
-- deleteEventsByIdsForPubkey(ids, pubkey): NIP-09 の `e` タグに対応する削除。`pubkey` が一致する行のみ削除し、kind 5 は削除しない（両方ともストレージ側で保証する）
-- getCurrentVersion(address): 座標（kind / pubkey / `d` 値）に保存されている置換可能・アドレサブルイベントを取得。複数版があれば NIP-01 の順序（`created_at` の新しい方、同値は id の辞書順で小さい方）で 1 件を返す。リレーが「受信イベントを保存してよいか」の判定に使う書き込み経路の事前確認のため、アクセス追跡はしない。失敗は握り潰さず伝播させる（「未保存」と誤認すると古い版で新しい版を上書きしてしまうため）
-- deleteEventsByAddress(address, until): NIP-09 の `a` タグに対応する削除。`created_at <= until` の版のみ削除。アドレサブル kind では `d` タグの一致を要求し、置換可能 kind では `identifier` を無視する（判定は cache-relay の共通純関数 `matchesAddressIdentifier`）
+`StorageAdapter` が実装すべきメソッドとその契約（各メソッドの引数・戻り値・
+アクセス追跡の有無・エラー時の扱い）は [doc/api.md](../api.md#interface-storageadapter)
+を参照。この設計書は **Dexie 実装がその契約をどう満たすか**だけを扱う。
 
 ## 3. データベース設計
 
@@ -113,7 +95,7 @@ StorageAdapterインターフェースの実装
 かつ一致が疎で `limit` が早く埋まらない」帯（17 人〜数百人でキャッシュにその人たちの
 投稿がほとんど無い場合）は 2 の経路が `scan` より不利になりうるが、どちらも数十 ms の
 領域なので、そこに合わせた調整はしていない。2 の最悪ケース（一致 0 件で kind 1 の
-4000 行を走査）は実測 145ms で、既定の `storageMaxSize`（5000）が走査量の上限になる。
+4000 行を走査）は実測 145ms（キャッシュ 5000 件）で、走査量の上限は `storageMaxSize` になる。
 走査バジェットによる打ち切りは設けていない。
 
 同着の扱いに注意がいる。IndexedDB の降順走査は `created_at` が同値のとき主キーの
@@ -129,7 +111,7 @@ StorageAdapterインターフェースの実装
 読む行数**だけである。
 
 ただし `indexed_tags` 経由だけは結果も変わりうる。このインデックスは保存時に
-100 件で切り詰められる（7 節）ので、単一文字タグが 100 個を超えるイベントは溢れた
+100 件で切り詰められる（5 節）ので、単一文字タグが 100 個を超えるイベントは溢れた
 タグでは引けない。全行走査してフルの `tags` 配列で照合していた経路（`kind` /
 `pubkey` インデックス）と違い、**タグインデックスは取りこぼす**。`p` タグを 150 個
 持つリプライが自分の `e` タグを落とす、というのがその形（優先タグ同士では相対順を
@@ -194,10 +176,9 @@ StorageAdapterインターフェースの実装
   ため、これで厳密に一致する）
 - タグ値の検証と正規化処理
 
-## 7. 制限事項
-- インデックス化されるタグの数は最大100個（**保存時に切り詰める**ので、100 個を超える
-  単一文字タグを持つイベントは溢れたタグでは引けない。4.1.1 でタグ条件を優先して
-  引くようにしたため、`kinds` / `authors` を併記したフィルタもこの上限の影響を受ける。
-  上限を見直すには既存行の再インデックスが必要）
-- シングルレターのタグのみがインデックス化される
+## 5. 制限事項
+
+- インデックス化されるのはシングルレタータグのみで、**保存時に最大 100 個で切り詰める**。
+  100 個を超える単一文字タグを持つイベントは、溢れたタグでは引けない
+  （影響範囲と理由は 4.1.1、上限見直しの検討は [doc/TODO.md](../TODO.md)）
 - 複雑なタグフィルタリングはパフォーマンスに影響を与える可能性あり
