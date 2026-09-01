@@ -4,7 +4,11 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEvent, seedValidated } from '../test-fixtures.ts';
 import { parsePostTarget } from './post-target.ts';
-import { RelayConnection } from './relay-connection.ts';
+import {
+  RelayConnection,
+  type RelayConnectionOptions,
+  type SubscriptionHandlers,
+} from './relay-connection.ts';
 import { type RelayHost, acquireRelayHost, getRelayHostRefCount } from './relay-host.ts';
 import {
   type FollowsState,
@@ -1877,6 +1881,185 @@ describe('TimelineController', () => {
       // The lookups a stop tears down publish nothing of their own.
       expect(changesSince(states, before)).toEqual([['status']]);
       expect(states.at(-1)?.status).toBe('disconnected');
+    });
+  });
+
+  /**
+   * A REQ is answered cache-first and upstream-second, each side stopping at
+   * the REQ's own `limit`. What these pin down is the case where the two
+   * answers no longer meet — the reader left the page alone long enough for
+   * upstream's newest `limit` events to all be new — which used to render as a
+   * fresh block, a jump of however long they were away, and then whatever the
+   * cache still held.
+   */
+  describe('an answer that does not reach the cache', () => {
+    const AUTHOR = 'b'.repeat(64);
+    const UPSTREAM = 'wss://upstream.example';
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function note(id: string, createdAt: number): NostrEvent {
+      return makeEvent({
+        id: id.padStart(64, 'f'),
+        pubkey: AUTHOR,
+        created_at: createdAt,
+        content: id,
+      });
+    }
+
+    function contents(state: TimelineState): string[] {
+      return state.events.map((event) => event.content);
+    }
+
+    /**
+     * Start a controller whose timeline subscription is fed by hand.
+     *
+     * The widget's relay is cache-only in these specs, so the upstream half of
+     * an answer has to be played rather than fetched: an event is delivered
+     * upstream-side by recording the sighting the metrics classify it by, the
+     * same order the read-through path produces it in.
+     */
+    async function startFed(filters: Filter[]) {
+      const states: TimelineState[] = [];
+      const controller = new TimelineController({
+        host: { dbName: `coverage-${crypto.randomUUID()}` },
+        onChange: (state) => states.push(state),
+      });
+      controllers.push(controller);
+      let handlers: SubscriptionHandlers | undefined;
+      vi.spyOn(RelayConnection.prototype, 'subscribe').mockImplementation(
+        (_subId, _filters, given) => {
+          handlers = given;
+        }
+      );
+      await controller.start(filters);
+      if (!handlers) {
+        throw new Error('the controller should have opened a subscription');
+      }
+      const opened = handlers;
+
+      return {
+        controller,
+        states,
+        deliver(events: NostrEvent[], origin: 'cache' | 'upstream' = 'cache'): void {
+          for (const event of events) {
+            if (origin === 'upstream') {
+              controller.host?.metrics.recordUpstreamEvent(event.id, UPSTREAM);
+            }
+            opened.onEvent(event);
+          }
+        },
+        eose(): void {
+          opened.onEose?.();
+        },
+        /** What a reconnect looks like from here: rx-nostr re-sends the REQ. */
+        reconnect(): void {
+          const connection = (controller as unknown as { connection: RelayConnection }).connection;
+          const options = (connection as unknown as { options: RelayConnectionOptions }).options;
+          options.onStatusChange?.('connected');
+        },
+      };
+    }
+
+    it('leaves out the older block the answer stopped short of', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+
+      // What the cache had from the reader's last visit, and what upstream
+      // answers with today — two blocks with a day between them.
+      fed.deliver([note('old-1', 1_700_000_000), note('old-2', 1_699_999_999)]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('keeps the older block when the answer came back short of the limit', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+
+      fed.deliver([note('old-1', 1_700_000_000), note('old-2', 1_699_999_999)]);
+      // One event, under a limit of two: upstream sent everything it had, so
+      // there is nothing missing between it and the cache's block.
+      fed.deliver([note('new-1', 1_700_086_400)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'old-1', 'old-2']);
+    });
+
+    it('keeps everything when nothing came from upstream', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+
+      // A cache-only relay: no answer to vouch for anything, and none needed.
+      fed.deliver([note('old-1', 1_700_000_000), note('old-2', 1_699_999_999)]);
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['old-1', 'old-2']);
+    });
+
+    it('leaves out what a re-sent REQ no longer reaches back to', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000), note('read-2', 1_699_999_999)], 'upstream');
+      fed.eose();
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['read-1', 'read-2']);
+
+      // The page sat open for a day; the socket came back and the REQ with it.
+      fed.reconnect();
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      // The events read a day ago are what the jump would be rendered under.
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('lets paging read the left-out block back', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('old-1', 1_700_000_000)]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+      expect(fed.states[fed.states.length - 1].exhausted).toBe(false);
+
+      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue([
+        note('gap-1', 1_700_086_398),
+        note('old-1', 1_700_000_000),
+      ]);
+      await fed.controller.loadOlder();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual([
+        'new-1',
+        'new-2',
+        'gap-1',
+        'old-1',
+      ]);
+    });
+
+    it('cuts a page that stops short of its own older block', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      // The page is widened by the event sitting on the cursor second, so its
+      // answer is cut off at three — and whatever the cache still holds below
+      // `gap-3` is behind another jump.
+      const page = [
+        note('gap-1', 1_700_086_398),
+        note('gap-2', 1_700_086_397),
+        note('gap-3', 1_700_086_396),
+        note('old-1', 1_700_000_000),
+      ];
+      for (const event of page.slice(0, 3)) {
+        fed.controller.host?.metrics.recordUpstreamEvent(event.id, UPSTREAM);
+      }
+      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue(page);
+      await fed.controller.loadOlder();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual([
+        'new-1',
+        'new-2',
+        'gap-1',
+        'gap-2',
+        'gap-3',
+      ]);
     });
   });
 });

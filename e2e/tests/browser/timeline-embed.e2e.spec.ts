@@ -117,6 +117,27 @@ describe('Embeddable timeline E2E', () => {
     throw new Error(`Timed out waiting for ${count} event cards (last saw ${actual})`);
   }
 
+  /** The body of each rendered card, in display order. */
+  function contentsOf(target: Page): Promise<string[]> {
+    return target.$$eval('nostr-timeline .content', (nodes) =>
+      nodes.map((node) => node.textContent?.trim() ?? '')
+    );
+  }
+
+  /** Wait until the widget renders exactly these bodies, in this order. */
+  async function waitForContents(target: Page, expected: string[]): Promise<void> {
+    const deadline = Date.now() + TIMEOUT;
+    let actual: string[] = [];
+    while (Date.now() < deadline) {
+      actual = await contentsOf(target);
+      if (actual.length === expected.length && actual.every((body, i) => body === expected[i])) {
+        return;
+      }
+      await target.waitForTimeout(50);
+    }
+    throw new Error(`Timed out waiting for ${expected.join(', ')} (last saw ${actual.join(', ')})`);
+  }
+
   /** The cache/upstream badge text of each rendered card, in display order. */
   function originBadges(target: Page): Promise<string[]> {
     return target.$$eval('nostr-timeline .origin', (nodes) =>
@@ -226,6 +247,50 @@ describe('Embeddable timeline E2E', () => {
     // The events come out of IndexedDB before the upstream answers, and the
     // coordinator's dedup stops the upstream echo from re-delivering them.
     expect(await originBadges(page)).toEqual(['cache', 'cache']);
+  });
+
+  it('leaves out the cached block an upstream answer no longer reaches', async () => {
+    // What a reader comes back to after a while: the cache still holds the
+    // block from their last visit, and today's answer — cut off at `limit` —
+    // is made up entirely of events published since. Rendered as they arrive,
+    // the two blocks read as one timeline with a jump in the middle of it.
+    const author = getRandomSecret();
+    const lastVisit = await startMockUpstreamRelay(
+      await Promise.all([
+        createTestEvent(author, { content: 'last visit one', created_at: 1_700_000_100 }),
+        createTestEvent(author, { content: 'last visit two', created_at: 1_700_000_200 }),
+      ])
+    );
+    const today = await startMockUpstreamRelay(
+      await Promise.all([
+        createTestEvent(author, { content: 'while away one', created_at: 1_700_090_100 }),
+        createTestEvent(author, { content: 'while away two', created_at: 1_700_090_200 }),
+      ])
+    );
+    try {
+      dbCounter += 1;
+      const visit = (relay: string) =>
+        `${site.embedUrl}?${new URLSearchParams({
+          'db-name': `e2e-embed-${dbCounter}`,
+          kinds: '1',
+          limit: '2',
+          relays: relay,
+        })}`;
+      page = await browser.newPage();
+      await page.goto(visit(lastVisit.url));
+      await waitForEventCount(page, 2);
+
+      // The same database, against a relay that has moved on since.
+      await page.goto(visit(today.url));
+      await waitForContents(page, ['while away two', 'while away one']);
+
+      // Nothing is waiting to be appended under them once the answer has ended.
+      await page.waitForTimeout(1000);
+      expect(await contentsOf(page)).toEqual(['while away two', 'while away one']);
+    } finally {
+      await lastVisit.close();
+      await today.close();
+    }
   });
 
   it('keeps reading through to the upstream on a warm load', async () => {

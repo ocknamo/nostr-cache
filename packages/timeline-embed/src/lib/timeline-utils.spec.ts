@@ -1,6 +1,6 @@
 import type { NostrEvent } from '@nostr-cache/shared';
 import { describe, expect, it } from 'vitest';
-import { insertEvent } from './timeline-utils.ts';
+import { coverageFloor, insertEvent, requestLimit, trimOlderThan } from './timeline-utils.ts';
 
 function event(id: string, createdAt: number): NostrEvent {
   return {
@@ -52,5 +52,56 @@ describe('insertEvent', () => {
     const snapshot = [...original];
     insertEvent(original, event('b', 200));
     expect(original).toEqual(snapshot);
+  });
+});
+
+describe('requestLimit', () => {
+  it('takes the largest limit the filters ask for', () => {
+    expect(
+      requestLimit([
+        { kinds: [1], limit: 20 },
+        { kinds: [6], limit: 50 },
+      ])
+    ).toBe(50);
+  });
+
+  it('reports none when a filter has no limit of its own', () => {
+    // Its answer is bounded by the relay's own ceiling, which says nothing
+    // about whether it was cut off.
+    expect(requestLimit([{ kinds: [1], limit: 20 }, { kinds: [6] }])).toBeUndefined();
+    expect(requestLimit([])).toBeUndefined();
+  });
+});
+
+describe('coverageFloor', () => {
+  it('reports the oldest event of an answer that hit the limit', () => {
+    expect(coverageFloor({ count: 50, oldest: 1_700_000_000 }, 50)).toBe(1_700_000_000);
+  });
+
+  it('vouches all the way down when the answer came back short', () => {
+    expect(coverageFloor({ count: 49, oldest: 1_700_000_000 }, 50)).toBeUndefined();
+  });
+
+  it('vouches all the way down when nothing came from upstream', () => {
+    // What a cache-only relay produces on every REQ.
+    expect(coverageFloor({ count: 0 }, 50)).toBeUndefined();
+  });
+
+  it('reports nothing without a limit to have been cut off at', () => {
+    expect(coverageFloor({ count: 500, oldest: 1_700_000_000 }, undefined)).toBeUndefined();
+  });
+});
+
+describe('trimOlderThan', () => {
+  it('drops what is older than the floor and keeps what sits on it', () => {
+    const timeline = [event('a', 300), event('b', 200), event('c', 100)];
+
+    expect(trimOlderThan(timeline, 200).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('returns the original array when nothing is older', () => {
+    const timeline = [event('a', 300), event('b', 200)];
+
+    expect(trimOlderThan(timeline, 200)).toBe(timeline);
   });
 });
