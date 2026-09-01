@@ -34,23 +34,20 @@ export function insertEvent(
   return next.length > maxSize ? next.slice(0, maxSize) : next;
 }
 
-/**
- * What an upstream answer has delivered so far: how many events, and how far
- * back they reach.
- */
+/** What an upstream answer has delivered: how many, and how far back. */
 export interface UpstreamAnswer {
   count: number;
-  /** Oldest `created_at` delivered; undefined until the first event. */
+  /** Undefined until the first event. */
   oldest?: number;
 }
 
 /**
- * The count an answer to these filters is cut off at, or undefined when there
- * is nothing to compare a count against.
+ * The most events an answer to these filters can hold without one of them
+ * having been cut off; undefined when a filter has no limit to be cut off at.
  *
- * The largest of the limits rather than their sum: the filters travel as one
- * REQ and are answered as one stream, so a count cannot be attributed to the
- * filter that earned it.
+ * Their sum, because the filters travel as one REQ and come back as one stream:
+ * a count cannot be attributed to the filter that earned it, and only the sum
+ * makes "as many as this" imply that some filter reached its own limit.
  */
 export function requestLimit(filters: Filter[]): number | undefined {
   let limit: number | undefined;
@@ -58,22 +55,19 @@ export function requestLimit(filters: Filter[]): number | undefined {
     if (filter.limit === undefined) {
       return undefined;
     }
-    limit = limit === undefined ? filter.limit : Math.max(limit, filter.limit);
+    limit = (limit ?? 0) + filter.limit;
   }
   return limit;
 }
 
 /**
- * How far back an upstream answer vouches for the timeline being whole.
+ * How far back an upstream answer vouches for the timeline being whole: an
+ * answer long enough to have been cut off sent nothing below its oldest event,
+ * so what the cache has further down can be separated from it by a hole.
  *
- * An answer as long as the REQ's `limit` was cut off there: upstream holds more
- * below its oldest event and did not send it, so anything the cache has further
- * down may be separated from it by a hole. A shorter answer is everything
- * upstream had, and leaves nothing to be missing — as does an answer with no
- * events in it at all, which is what a cache-only relay always produces.
- *
- * @returns the oldest `created_at` upstream delivered, below which nothing is
- *   vouched for; undefined when the answer proves nothing is missing
+ * @returns that oldest `created_at`, or undefined when the answer was short
+ *   enough to be everything upstream had — including the empty answer a
+ *   cache-only relay gives
  */
 export function coverageFloor(
   answer: UpstreamAnswer,

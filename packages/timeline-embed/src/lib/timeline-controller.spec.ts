@@ -1885,12 +1885,9 @@ describe('TimelineController', () => {
   });
 
   /**
-   * A REQ is answered cache-first and upstream-second, each side stopping at
-   * the REQ's own `limit`. What these pin down is the case where the two
-   * answers no longer meet — the reader left the page alone long enough for
-   * upstream's newest `limit` events to all be new — which used to render as a
-   * fresh block, a jump of however long they were away, and then whatever the
-   * cache still held.
+   * The reader was away long enough that the cache's answer and upstream's no
+   * longer meet, which used to render as a fresh block, a jump of however long
+   * they were gone, and then whatever the cache still held.
    */
   describe('an answer that does not reach the cache', () => {
     const AUTHOR = 'b'.repeat(64);
@@ -1914,12 +1911,9 @@ describe('TimelineController', () => {
     }
 
     /**
-     * Start a controller whose timeline subscription is fed by hand.
-     *
-     * The widget's relay is cache-only in these specs, so the upstream half of
-     * an answer has to be played rather than fetched: an event is delivered
-     * upstream-side by recording the sighting the metrics classify it by, the
-     * same order the read-through path produces it in.
+     * Start a controller whose timeline subscription is fed by hand: the relay
+     * is cache-only here, so the upstream half of an answer is played by
+     * recording the sighting the metrics classify a delivery by.
      */
     async function startFed(filters: Filter[]) {
       const states: TimelineState[] = [];
@@ -2038,16 +2032,16 @@ describe('TimelineController', () => {
       fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
       fed.eose();
 
-      // The page is widened by the event sitting on the cursor second, so its
-      // answer is cut off at three — and whatever the cache still holds below
-      // `gap-3` is behind another jump.
+      // What the relay answers a page with: the cursor event again (`until` is
+      // inclusive, and the widened limit pays for it), the two the page asked
+      // for, and — from the cache alone — the block below the jump.
       const page = [
+        note('new-2', 1_700_086_399),
         note('gap-1', 1_700_086_398),
         note('gap-2', 1_700_086_397),
-        note('gap-3', 1_700_086_396),
         note('old-1', 1_700_000_000),
       ];
-      for (const event of page.slice(0, 3)) {
+      for (const event of [page[1], page[2]]) {
         fed.controller.host?.metrics.recordUpstreamEvent(event.id, UPSTREAM);
       }
       vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue(page);
@@ -2058,8 +2052,89 @@ describe('TimelineController', () => {
         'new-2',
         'gap-1',
         'gap-2',
-        'gap-3',
       ]);
+    });
+
+    it('keeps a page whose answer came back short, duplicate cursor and all', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      // One event under the limit once the duplicate cursor is discounted —
+      // which is why the page is judged against the filters as asked rather
+      // than as widened by what sits on the cursor second.
+      const page = [
+        note('new-2', 1_700_086_399),
+        note('gap-1', 1_700_086_398),
+        note('old-1', 1_700_000_000),
+      ];
+      fed.controller.host?.metrics.recordUpstreamEvent(page[1].id, UPSTREAM);
+      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue(page);
+      await fed.controller.loadOlder();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual([
+        'new-1',
+        'new-2',
+        'gap-1',
+        'old-1',
+      ]);
+    });
+
+    it('keeps the older block when neither filter of a REQ was cut off', async () => {
+      // Two filters of ten, twelve events between them: enough to pass the
+      // larger limit, and nowhere near enough for either to have been cut off.
+      const fed = await startFed([
+        { kinds: [1], authors: [AUTHOR], limit: 10 },
+        { kinds: [6], authors: [AUTHOR], limit: 10 },
+      ]);
+      fed.deliver([note('old-1', 1_700_000_000)]);
+      fed.deliver(
+        Array.from({ length: 12 }, (_, index) => note(`new-${index}`, 1_700_086_400 - index)),
+        'upstream'
+      );
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toContain('old-1');
+    });
+
+    it('forgets the origins of what it leaves out', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      const stale = note('old-1', 1_700_000_000);
+      fed.deliver([stale]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      // Nothing renders a badge for it any more, so keeping the entry would
+      // only grow the map a reconnect at a time.
+      expect(fed.states[fed.states.length - 1].origins.has(stale.id)).toBe(false);
+    });
+
+    it('abandons a page asked for from a cursor the cut has removed', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000), note('read-2', 1_699_999_999)], 'upstream');
+      fed.eose();
+
+      // A page for the block below `read-2`, still in flight when the socket
+      // comes back and the re-sent REQ answers with a day's worth of newer
+      // events: its answer belongs to a timeline that is no longer on screen.
+      let release: (events: NostrEvent[]) => void = () => {};
+      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        })
+      );
+      const paging = fed.controller.loadOlder();
+      fed.reconnect();
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+      release([note('older-1', 1_699_999_998)]);
+      await paging;
+
+      const state = fed.states[fed.states.length - 1];
+      expect(contents(state)).toEqual(['new-1', 'new-2']);
+      // And the widget is free to page again from the cut, rather than left
+      // waiting on the answer it just abandoned.
+      expect(state.loadingOlder).toBe(false);
     });
   });
 });

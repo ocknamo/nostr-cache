@@ -56,13 +56,13 @@ describe('insertEvent', () => {
 });
 
 describe('requestLimit', () => {
-  it('takes the largest limit the filters ask for', () => {
+  it('adds the filters up: any less and none of them need have been cut off', () => {
     expect(
       requestLimit([
         { kinds: [1], limit: 20 },
         { kinds: [6], limit: 50 },
       ])
-    ).toBe(50);
+    ).toBe(70);
   });
 
   it('reports none when a filter has no limit of its own', () => {

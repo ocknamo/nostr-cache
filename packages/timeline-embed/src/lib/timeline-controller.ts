@@ -380,17 +380,18 @@ export class TimelineController {
     // dropped by id. Asking from one second earlier would instead skip whatever
     // shares that second, so the page is widened by what is already held at it.
     const held = this.state.events.filter((event) => event.created_at === oldest.created_at).length;
-    const filters = this.currentFilters
-      // A filter the cursor has passed cannot match, and the relay would still
-      // forward it upstream — `since` puts it outside the freshness window.
-      .filter((filter) => filter.since === undefined || filter.since <= oldest.created_at)
-      .map((filter) => {
-        const page: Filter = { ...filter, until: oldest.created_at };
-        if (page.limit !== undefined) {
-          page.limit += held;
-        }
-        return page;
-      });
+    // A filter the cursor has passed cannot match, and the relay would still
+    // forward it upstream — `since` puts it outside the freshness window.
+    const asked = this.currentFilters.filter(
+      (filter) => filter.since === undefined || filter.since <= oldest.created_at
+    );
+    const filters = asked.map((filter) => {
+      const page: Filter = { ...filter, until: oldest.created_at };
+      if (page.limit !== undefined) {
+        page.limit += held;
+      }
+      return page;
+    });
     if (filters.length === 0) {
       this.patch({ exhausted: true });
       return;
@@ -419,8 +420,10 @@ export class TimelineController {
       countUpstream(answer, event, origin);
     }
     // A page is answered cache-first the same way the subscription is, so it
-    // can arrive with a hole of its own below the events upstream sent.
-    events = this.dropBelowCoverage(events, origins, answer, filters);
+    // can arrive with a hole of its own below the events upstream sent. Judged
+    // against the filters as asked rather than as widened: the `held` events the
+    // widening pays for come back as duplicates, which are not counted here.
+    events = this.dropBelowCoverage(events, origins, answer, asked);
 
     const added = events !== this.state.events;
     this.patch({
@@ -439,17 +442,13 @@ export class TimelineController {
   }
 
   /**
-   * Cut the timeline back to the stretch the answer that just ended vouches for.
+   * Cut the timeline back to the stretch the answer that just ended vouches for,
+   * rather than render the older events the cache held under a jump in time.
+   * See the README's 「時系列の連続性」.
    *
-   * A REQ is answered from the cache first and upstream second, and both sides
-   * stop at the same `limit`. Once the reader has been away long enough for
-   * upstream's newest `limit` events to all be new, the two answers no longer
-   * meet: the screen gets the fresh block, then a jump of however long the
-   * reader was gone, then whatever the cache still held. Those older events are
-   * dropped rather than rendered under a hole — {@link loadOlder} reads them
-   * back in order, filling the hole from upstream on the way.
+   * @returns the patch to publish, empty when nothing was cut
    */
-  private trimToCoverage(): void {
+  private trimToCoverage(): Partial<TimelineState> {
     const origins = new Map(this.state.origins);
     const events = this.dropBelowCoverage(
       this.state.events,
@@ -458,15 +457,20 @@ export class TimelineController {
       this.currentFilters
     );
     if (events === this.state.events) {
-      return;
+      return {};
     }
-    this.patch({
+    // A page in flight was asked for from a cursor that is no longer on screen,
+    // so its answer would put the cut events straight back.
+    this.pagingAbort.abort();
+    this.pagingAbort = new AbortController();
+    return {
       events,
       origins,
       // There is more below the cut now, whatever an earlier page concluded.
       exhausted: false,
       capped: events.length >= this.ceiling,
-    });
+      loadingOlder: false,
+    };
   }
 
   /** Applies {@link coverageFloor}, forgetting the origins of what it drops. */
@@ -591,17 +595,16 @@ export class TimelineController {
         if (origin) {
           origins.set(event.id, origin);
         }
-        countUpstream(this.answer, event, origin);
-        this.patch({
-          events: insertEvent(this.state.events, event, this.options.maxEvents),
-          origins,
-        });
+        const events = insertEvent(this.state.events, event, this.options.maxEvents);
+        if (events !== this.state.events) {
+          countUpstream(this.answer, event, origin);
+        }
+        this.patch({ events, origins });
         this.validation.schedule();
       },
       onEose: () => {
         this.timer.markEose(subId);
-        this.trimToCoverage();
-        this.patch({ eose: true });
+        this.patch({ eose: true, ...this.trimToCoverage() });
         this.validation.schedule();
       },
       onClosed: (reason) => {
