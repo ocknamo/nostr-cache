@@ -20,6 +20,7 @@
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
       ogpProxy: { attribute: 'ogp-proxy' },
+      imageProxy: { attribute: 'image-proxy' },
       actions: { attribute: 'actions' },
       authorAction: { attribute: 'author-action' },
       authorActionLabel: { attribute: 'author-action-label' },

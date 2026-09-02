@@ -156,11 +156,33 @@ export function parseMaxTimelineEvents(value: string | null | undefined): number
   return parsed === 0 ? Number.POSITIVE_INFINITY : parsed;
 }
 
-/**
- * OGP 取得に使う CORS プロキシ。未指定なら機能ごと無効で、閲覧者の情報は第三者に渡らない。
- * 既定のプロキシを用意しないのは、誰の API キーも持たず誰かのクォータを使うことになるため。
- */
-export function parseOgpProxy(value: string | boolean | null | undefined): string | undefined {
+interface ProxyAttribute {
+  attribute: 'ogp-proxy' | 'image-proxy';
+  /** 「URL が要る」警告の後半。用途と書き方の例。 */
+  missing: string;
+  /** 資格情報つきの URL を使えない理由。 */
+  credentials: string;
+}
+
+const OGP_PROXY: ProxyAttribute = {
+  attribute: 'ogp-proxy',
+  missing:
+    'it needs the proxy to fetch through, e.g. ogp-proxy="https://corsproxy.io/?key=YOUR_API_KEY"',
+  credentials: 'which a CORS request cannot carry',
+};
+
+const IMAGE_PROXY: ProxyAttribute = {
+  attribute: 'image-proxy',
+  missing:
+    'it needs the proxy to load images through, e.g. image-proxy="https://nostr-image-optimizer.ocknamo.com/image"',
+  credentials: 'which an image request cannot carry',
+};
+
+/** 属性なし・`false`・`0` は無効。URL の無い指定だけは、書き間違いとみなして警告する。 */
+function parseProxyUrl(
+  value: string | boolean | null | undefined,
+  { attribute, missing, credentials }: ProxyAttribute
+): string | undefined {
   if (value === null || value === undefined || value === false) {
     return undefined;
   }
@@ -170,16 +192,14 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
     return undefined;
   }
   if (proxy === '' || proxy === 'true' || proxy === '1') {
-    console.warn(
-      '[nostr-timeline] Ignoring ogp-proxy without a URL: it needs the proxy to fetch through, e.g. ogp-proxy="https://corsproxy.io/?key=YOUR_API_KEY".'
-    );
+    console.warn(`[nostr-timeline] Ignoring ${attribute} without a URL: ${missing}.`);
     return undefined;
   }
   // `new URL` は `off` のようなタイポを埋め込みページ基準で解決して使えそうな URL を返すため、
   // パースより先に見る。
   if (!/^https?:\/\//i.test(proxy) && !proxy.startsWith('/')) {
     console.warn(
-      `[nostr-timeline] Ignoring ogp-proxy (expected an https:// URL, or a path on this origin): ${value}`
+      `[nostr-timeline] Ignoring ${attribute} (expected an https:// URL, or a path on this origin): ${value}`
     );
     return undefined;
   }
@@ -187,16 +207,16 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
   try {
     url = new URL(proxy, typeof location === 'undefined' ? undefined : location.href);
   } catch {
-    console.warn(`[nostr-timeline] Ignoring malformed ogp-proxy: ${value}`);
+    console.warn(`[nostr-timeline] Ignoring malformed ${attribute}: ${value}`);
     return undefined;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    console.warn(`[nostr-timeline] Ignoring non-http(s) ogp-proxy: ${value}`);
+    console.warn(`[nostr-timeline] Ignoring non-http(s) ${attribute}: ${value}`);
     return undefined;
   }
   if (url.username || url.password) {
     console.warn(
-      `[nostr-timeline] Ignoring ogp-proxy with credentials in it, which a CORS request cannot carry: ${value}`
+      `[nostr-timeline] Ignoring ${attribute} with credentials in it, ${credentials}: ${value}`
     );
     return undefined;
   }
@@ -206,12 +226,41 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
     url.protocol === 'http:'
   ) {
     console.warn(
-      `[nostr-timeline] Ignoring ${value}: an https page cannot fetch from an http:// proxy (mixed content). Use https://.`
+      `[nostr-timeline] Ignoring ${value}: an https page cannot reach an http:// proxy (mixed content). Use https://.`
     );
     return undefined;
   }
   // パスの解決をリクエストごとに繰り返さないよう、解決後の URL を返す。
   return url.href;
+}
+
+/**
+ * OGP 取得に使う CORS プロキシ。未指定なら機能ごと無効で、閲覧者の情報は第三者に渡らない。
+ * 既定のプロキシを用意しないのは、誰の API キーも持たず誰かのクォータを使うことになるため。
+ */
+export function parseOgpProxy(value: string | boolean | null | undefined): string | undefined {
+  return parseProxyUrl(value, OGP_PROXY);
+}
+
+/**
+ * 添付画像・アバター・OGP サムネイルを通す画像最適化プロキシ。未指定なら投稿者が書いた
+ * URL から直接読み込む。既定を置かないのは、全閲覧者の IP をそのホストに送ることになるため。
+ */
+export function parseImageProxy(value: string | boolean | null | undefined): string | undefined {
+  const proxy = parseProxyUrl(value, IMAGE_PROXY);
+  if (proxy === undefined) {
+    return undefined;
+  }
+  // `ogp-proxy` と違い、この URL の後ろには寸法と元の URL がパスとして続く。
+  // クエリがあるとその全部がクエリ側に落ちて、警告も出ないまま壊れた要求になる。
+  const url = new URL(proxy);
+  if (url.search || url.hash) {
+    console.warn(
+      `[nostr-timeline] Ignoring image-proxy with a query or fragment, which the resized path would end up inside: ${value}`
+    );
+    return undefined;
+  }
+  return proxy;
 }
 
 /**
@@ -424,6 +473,7 @@ export function configFromSearchParams(params: URLSearchParams): {
   showMedia: boolean;
   showEmbeds: boolean;
   ogpProxy: string | undefined;
+  imageProxy: string | undefined;
   actions: EventAction[];
   authorAction: AuthorAction | undefined;
   noteAction: NoteAction | undefined;
@@ -449,6 +499,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
     ogpProxy: parseOgpProxy(params.get('ogp-proxy')),
+    imageProxy: parseImageProxy(params.get('image-proxy')),
     actions: normalizeActions(params.get('actions')),
     authorAction: normalizeAuthorAction(
       params.get('author-action'),
@@ -479,6 +530,7 @@ export interface FollowTimelineConfig {
   showMedia: boolean;
   showEmbeds: boolean;
   ogpProxy: string | undefined;
+  imageProxy: string | undefined;
   actions: EventAction[];
   authorAction: AuthorAction | undefined;
   noteAction: NoteAction | undefined;
@@ -511,6 +563,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     showMedia: params.get('show-media') !== 'false',
     showEmbeds: params.get('show-embeds') !== 'false',
     ogpProxy: parseOgpProxy(params.get('ogp-proxy')),
+    imageProxy: parseImageProxy(params.get('image-proxy')),
     actions: normalizeActions(params.get('actions')),
     authorAction: normalizeAuthorAction(
       params.get('author-action'),

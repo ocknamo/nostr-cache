@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { AVATAR_IMAGE, proxiedImageUrl } from '../lib/image-proxy.ts';
   import type { Profile } from '../lib/profile.ts';
 
   interface Props {
@@ -7,9 +8,10 @@
     profile?: Profile;
     /** Accessible name for the image, normally the author's display name. */
     name: string;
+    imageProxy?: string;
   }
 
-  const { pubkey, profile, name }: Props = $props();
+  const { pubkey, profile, name, imageProxy }: Props = $props();
 
   /**
    * Set when the avatar URL fails to load, so a broken image falls back to the
@@ -19,8 +21,19 @@
    * one (a profile update) would stay stuck on the fallback.
    */
   let failedUrl = $state<string | undefined>();
+  /**
+   * The picture whose proxied form failed, so a proxy that is down or does not
+   * know the host costs the reader the optimisation and not the avatar.
+   */
+  let proxyFailedUrl = $state<string | undefined>();
 
   const picture = $derived(profile?.picture);
+  const proxied = $derived(
+    picture && imageProxy && proxyFailedUrl !== picture
+      ? proxiedImageUrl(imageProxy, picture, AVATAR_IMAGE)
+      : undefined
+  );
+  const source = $derived(proxied ?? picture);
   const showImage = $derived(Boolean(picture) && picture !== failedUrl);
 
   /**
@@ -35,7 +48,7 @@
   <img
     class="avatar"
     part="avatar"
-    src={picture}
+    src={source}
     alt={name}
     width="40"
     height="40"
@@ -43,7 +56,11 @@
     decoding="async"
     referrerpolicy="no-referrer"
     onerror={() => {
-      failedUrl = picture;
+      if (proxied) {
+        proxyFailedUrl = picture;
+      } else {
+        failedUrl = picture;
+      }
     }}
   />
 {:else}

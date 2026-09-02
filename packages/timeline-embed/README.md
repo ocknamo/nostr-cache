@@ -188,6 +188,7 @@ npm パッケージを入れられない構成のための入口です。
 | `show-media` | `false` で本文中の画像・動画・音声の埋め込みを止める（URL はリンクとして残る） | `true` |
 | `show-embeds` | `false` で本文中の `nostr:` 参照とリポスト元の入れ子表示を止める（短縮チップとして残り、リレーへの追加取得も行わない） | `true` |
 | `ogp-proxy` | 本文の最初のリンクの OGP カードを取得する CORS プロキシの URL（`https://corsproxy.io/?key=…` など）。**指定しなければカードを出さず、どこにも問い合わせません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
+| `image-proxy` | 添付画像・アバター・OGP サムネイルを通す画像最適化プロキシの URL（`https://nostr-image-optimizer.ocknamo.com/image` など）。**指定しなければ書かれた URL から直接読み込みます**（[下記](#画像プロキシ)） | なし（直接読み込む） |
 | `actions` | 各投稿の下に並べるボタンの JSON 配列（[下記](#投稿ごとのアクションボタン仕組みのみ)） | なし（ボタンを出さない） |
 | `author-action` | 指定するとアイコン・表示名が押せるようになり、押下をこの ID で `nostr-timeline:action` として通知する。カードの著者に加えて**引用カードのヘッダ・本文中の `nostr:` メンション**にも効く（[下記](#著者アイコン表示名の押下)） | なし（押せない・従来どおり） |
 | `author-action-label` | その押下の説明（アクセシブル名）。`author-action` が無いときは効きません | `プロフィールを開く` |
@@ -401,7 +402,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `infinite-scroll` | `false` で追加読み込みを止める（[下記](#無限スクロール)） | 有効 |
 | `max-timeline-events` | 画面に並べるイベント数の上限。`0` で上限なし（[下記](#無限スクロール)） | `500` |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `3600`（1 時間） |
-| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `ogp-proxy` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `ogp-proxy` / `image-proxy` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -630,6 +631,7 @@ level 3  …
 | `show-media` | `"false"` で本文中のメディアを描画しない | オン |
 | `show-embeds` | `"false"` で `nostr:` 参照とリポスト元を入れ子カードにしない | オン |
 | `ogp-proxy` | 本文の最初のリンクの OGP カードを表示する（`<nostr-timeline>` と同じ）。**投稿本体だけに効き、返信ツリーには出しません**（[下記](#リンクの-ogp-カード)） | なし（表示しない） |
+| `image-proxy` | 画像を最適化プロキシ経由で読み込む（`<nostr-timeline>` と同じ）。リプライツリーのアバター・添付にも効きます（[下記](#画像プロキシ)） | なし（直接読み込む） |
 | `show-reactions` | `"false"` でリアクション欄ごと出さない（kind 7 の購読も張らない） | オン |
 | `reactions-limit` | リアクションの初回取得件数（上限 500） | `200` |
 | `reactions-open` | 付けるとリアクションしたユーザの一覧を最初から開く | オフ |
@@ -910,7 +912,7 @@ nostr-timeline {
 | 対象 | 描画 |
 |---|---|
 | `http(s)` の URL | `<a target="_blank" rel="noopener noreferrer nofollow">` |
-| 画像 URL（`.jpg` `.jpeg` `.png` `.gif` `.webp` `.avif`） | `<img>`。クリックで原寸を新規タブに開く |
+| 画像 URL（`.jpg` `.jpeg` `.png` `.gif` `.webp` `.avif`） | `<img>`。クリックで原寸を新規タブに開く（`image-proxy` 指定時は縮小版を表示。[下記](#画像プロキシ)） |
 | 動画 URL（`.mp4` `.webm` `.ogv` `.mov`） | `<video controls preload="none">` |
 | 音声 URL（`.mp3` `.ogg` `.oga` `.wav` `.m4a`） | `<audio controls preload="none">` |
 | `nostr:npub1…` / `nprofile`（`nostr:` 無しの裸の形も可） | 短縮表示のチップ。**リンクにはしません** |
@@ -1029,6 +1031,36 @@ OGP（Open Graph Protocol）のカードを本文の下に表示します。**�
   `Content-Type` や `<meta charset>` が UTF-8 以外を名乗ればその文字コードで解釈します
 - 入れ子の引用カードと `<nostr-post>` の返信ツリーには**出しません**。1 画面あたりの
   外部リクエストが投稿数に比例して増えるのを避けるためです
+
+### 画像プロキシ
+
+`image-proxy` に画像最適化プロキシの URL を渡すと、**添付画像・アバター・OGP サムネイル**を
+そのプロキシ経由で読み込みます。表示する大きさに縮めた WebP が返るので、40px のアイコンに
+原寸の写真が落ちてくることがなくなります。動画・音声とカスタム絵文字は対象外です。
+
+```html
+<nostr-timeline
+  relays="wss://relay.example"
+  image-proxy="https://nostr-image-optimizer.ocknamo.com/image"
+></nostr-timeline>
+```
+
+- 組み立てる URL は
+  `{image-proxy}/width=…,quality=…,format=webp/{元の画像URL}` の 1 本です
+  （[nostr-image-optimizer](https://github.com/ocknamo/nostr-image-optimizer) の形式）。
+  元の URL はエンコードせずにそのまま繋ぐので、**同じ形式を解釈するプロキシなら差し替えられます**
+- 要求する幅と品質は用途ごとに固定です（添付 `width=800,quality=60` /
+  アバター `width=96,quality=70` / OGP サムネイル `width=600,quality=60`）。
+  `--nt-media-max-height` を既定より大きくすると添付は引き伸ばされます
+- **プロキシが失敗した画像は、投稿者が書いた URL で読み直します。** さらに失敗した場合の
+  表示は `image-proxy` が無いときと同じです（添付は素のリンク、アバターはイニシャル、
+  OGP はサムネイルなしのカード）
+- 添付画像のクリック先は**元の URL のまま**です。縮小版は表示用で、原寸は 1 クリック先にあります
+- **クエリやフラグメントを持つ URL は受け付けません**（`?` 以降にリサイズ指定と元の URL が
+  丸ごと入ってしまうため）。警告して、指定が無いときと同じ動作になります
+- 元の URL に資格情報（`https://user:pass@…`）が入っていた場合は、プロキシに渡す前に外します
+- 添付画像の描画には [`svelte-remote-image`](https://www.npmjs.com/package/svelte-remote-image) を
+  使い、読み込み完了までは透明にしています
 
 ### 入れ子の投稿（引用）
 
@@ -1425,6 +1457,16 @@ window.addEventListener('message', (event) => {
   （`preload="none"` なので、**再生ボタンを押すまで通信は発生しません**）。
   避けたい場合は `show-media="false"` を指定してください。URL はリンクとして残るので、
   閲覧者が自分で開くことは引き続きできます
+- **`image-proxy` を指定すると、添付画像・アバター・OGP サムネイルの読み込み先が
+  そのプロキシに変わります**（カスタム絵文字は対象外で、従来どおり直接読み込みます）。
+  閲覧者の IP アドレスと、その人が読んでいる投稿に含まれる**画像 URL** がプロキシ運営者に
+  渡る代わりに、**投稿者が指定した画像ホストには閲覧者の情報が渡らなくなります**
+  （取りに行くのはプロキシです）。どちらが望ましいかは埋め込む側の判断なので、
+  既定では指定されていません。なお添付画像はプロキシ経由のときだけ
+  `referrerpolicy="no-referrer"` が付かない（描画に使っている `svelte-remote-image` が
+  この属性を受け取らないため）ので、**埋め込み先ページのオリジンがプロキシに送られます**
+  （プロキシが埋め込み先と同一オリジンなら、クエリ文字列を含む URL 全体）。
+  アバターと OGP サムネイルはプロキシ経由でも従来どおり何も送りません
 - **`ogp-proxy` を指定すると、閲覧者の情報がそのプロキシ（corsproxy.io など）に
   渡ります。** リクエストには**閲覧者の IP アドレスと、その人が読んでいる投稿に含まれる
   URL** が乗り、プロキシはその URL のページを代わりに取得します。ウィジェットは既定で
@@ -1474,12 +1516,13 @@ window.addEventListener('message', (event) => {
 
 ## バンドルサイズ
 
-`dist/nostr-timeline.js` は約 **427 KB（gzip 約 137 KB）** の自己完結した IIFE です
+`dist/nostr-timeline.js` は約 **451 KB（gzip 約 145 KB）** の自己完結した IIFE です
 （`<nostr-timeline>` / `<nostr-follow-timeline>` / `<nostr-post>` の 3 つすべてを含みます）。
 CSS も含めて 1 ファイルに収まっています（Shadow DOM 内へインライン展開されるため
 別途スタイルシートを読み込む必要はありません）。大部分は Dexie（IndexedDB）、
 署名検証用の `@rx-nostr/crypto`、そしてリレー接続管理の `rx-nostr`（+ RxJS）で、
-いずれもリレー本体とクライアント接続の機能に必要です。
+いずれもリレー本体とクライアント接続の機能に必要です。`svelte-remote-image`（画像プロキシ経由の
+添付描画）は gzip 約 2 KB で、Svelte 4 形式のコンポーネントなので旧 API 分のランタイムも入ります。
 
 ## ライブラリとしての利用
 

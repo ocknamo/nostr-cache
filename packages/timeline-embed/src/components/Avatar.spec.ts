@@ -39,6 +39,40 @@ describe('Avatar', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
+  it('asks the image proxy for an avatar-sized picture', () => {
+    render(Avatar, {
+      props: {
+        pubkey: PUBKEY,
+        name: 'alice',
+        profile: { picture: 'https://example.com/a.png' },
+        imageProxy: 'https://optimizer.example/image',
+      },
+    });
+
+    expect(screen.getByRole('img', { name: 'alice' })).toHaveAttribute(
+      'src',
+      'https://optimizer.example/image/width=96,quality=70,format=webp/https://example.com/a.png'
+    );
+  });
+
+  it('falls back to the picture itself when the proxy cannot serve it', async () => {
+    render(Avatar, {
+      props: {
+        pubkey: PUBKEY,
+        name: 'alice',
+        profile: { picture: 'https://example.com/a.png' },
+        imageProxy: 'https://optimizer.example/image',
+      },
+    });
+
+    // A proxy that is down must cost the reader the optimisation, not the avatar.
+    screen.getByRole('img', { name: 'alice' }).dispatchEvent(new Event('error'));
+
+    await expect
+      .poll(() => screen.queryByRole('img', { name: 'alice' })?.getAttribute('src'))
+      .toBe('https://example.com/a.png');
+  });
+
   it('tries again when the profile names a different picture', async () => {
     const { container, rerender } = render(Avatar, {
       props: { pubkey: PUBKEY, name: 'alice', profile: { picture: 'https://example.com/bad.png' } },

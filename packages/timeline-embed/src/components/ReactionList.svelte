@@ -27,6 +27,7 @@
      * hide who reacted.
      */
     showAvatars?: boolean;
+    imageProxy?: string;
     /** Called the first time a reactor's row appears. */
     onReactorVisible?: (pubkey: string) => void;
     /** Makes each reactor's avatar and name pressable, under this id. */
@@ -44,6 +45,7 @@
     reactors,
     profiles = new Map(),
     showAvatars = true,
+    imageProxy,
     onReactorVisible,
     authorAction,
     onAuthorPress,
@@ -70,6 +72,7 @@
             pubkey={reactor.pubkey}
             profile={profiles.get(reactor.pubkey)}
             name={authorName(reactor.pubkey, profiles.get(reactor.pubkey))}
+            {imageProxy}
           />
         {/if}
         <span class="name">{authorName(reactor.pubkey, profiles.get(reactor.pubkey))}</span>

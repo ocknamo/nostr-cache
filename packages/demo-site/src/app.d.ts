@@ -27,6 +27,8 @@ declare namespace svelteHTML {
       'show-avatars'?: string;
       'show-media'?: string;
       'show-embeds'?: string;
+      /** Image optimizer for attachments, avatars and OGP thumbnails. */
+      'image-proxy'?: string;
       /** JSON array of buttons to render under each card. */
       actions?: string;
       /** Makes the quote cards in a body pressable, under this id. */
@@ -60,6 +62,8 @@ declare namespace svelteHTML {
       'show-avatars'?: string;
       'show-media'?: string;
       'show-embeds'?: string;
+      /** Image optimizer for attachments, avatars and OGP thumbnails. */
+      'image-proxy'?: string;
       /** `"false"` also stops the kind 7 subscription being opened. */
       'show-reactions'?: string | boolean;
       'reactions-limit'?: string;
@@ -92,6 +96,8 @@ declare namespace svelteHTML {
       'show-avatars'?: string;
       'show-media'?: string;
       'show-embeds'?: string;
+      /** Image optimizer for attachments, avatars and OGP thumbnails. */
+      'image-proxy'?: string;
       /** JSON array of buttons to render under each card. */
       actions?: string;
       /** Makes the quote cards in a body pressable, under this id. */

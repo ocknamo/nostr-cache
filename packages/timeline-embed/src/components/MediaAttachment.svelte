@@ -1,13 +1,16 @@
 <script lang="ts">
+  import { Img } from 'svelte-remote-image';
   import type { MediaKind } from '../lib/content-parts.ts';
+  import { ATTACHMENT_IMAGE, proxiedImageUrl } from '../lib/image-proxy.ts';
 
   interface Props {
     media: MediaKind;
     /** The attachment's URL. Already validated as `http(s)` by the parser. */
     url: string;
+    imageProxy?: string;
   }
 
-  const { media, url }: Props = $props();
+  const { media, url, imageProxy }: Props = $props();
 
   /**
    * Set when the URL fails to load, so a dead link falls back to being a link
@@ -35,6 +38,14 @@
     }
   });
 
+  /** The attachment whose proxied form failed; see `Avatar.svelte`. */
+  let proxyFailedUrl = $state<string | undefined>();
+  const proxied = $derived(
+    media === 'image' && imageProxy && proxyFailedUrl !== url
+      ? proxiedImageUrl(imageProxy, url, ATTACHMENT_IMAGE)
+      : undefined
+  );
+
   const fail = () => {
     failedUrl = url;
   };
@@ -42,6 +53,22 @@
 
 {#if broken}
   <a class="fallback" href={url} target="_blank" rel="noopener noreferrer nofollow">{url}</a>
+{:else if proxied}
+  <a href={url} target="_blank" rel="noopener noreferrer nofollow">
+    <!-- `Img` looks its own element up with `document.getElementById`, which
+         cannot reach into this shadow root, so its fallback never runs. An
+         `error` does not bubble but is delivered to ancestors while capturing,
+         so the proxy's failure is caught here and the branch below takes over
+         with the URL the author wrote. -->
+    <span
+      class="proxied"
+      onerrorcapture={() => {
+        proxyFailedUrl = url;
+      }}
+    >
+      <Img src={{ img: proxied }} alt={label} class="attachment" />
+    </span>
+  </a>
 {:else if media === 'image'}
   <!-- Wrapped in a link so the full-size original is still one click away:
        the thumbnail here is capped to keep one photo from filling the embed. -->
@@ -68,7 +95,16 @@
 {/if}
 
 <style>
-  .attachment {
+  /* `display: contents` so the wrapper `Img` needs is not a box of its own. */
+  .proxied {
+    display: contents;
+  }
+
+  /* The second selector is the <img> `Img` renders: an element a child
+     component owns carries no scope class, so `class="attachment"` on it is a
+     handle for the DOM, not something these rules can match. */
+  .attachment,
+  .proxied :global(img) {
     display: block;
     max-width: 100%;
     /* Bounded height, so one tall photo does not push the rest of the timeline

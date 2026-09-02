@@ -42,7 +42,8 @@
   "dependencies": {
     "@nostr-cache/cache-relay": "^0.1.0",
     "@nostr-cache/shared": "^0.1.0",
-    "rx-nostr": "^3.7.5"
+    "rx-nostr": "^3.7.5",
+    "svelte-remote-image": "^0.4.6"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.2.1",

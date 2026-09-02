@@ -29,6 +29,7 @@
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
+    imageProxy?: string;
     showEmbeds?: boolean;
     /** Link preview proxy; undefined leaves previews off. */
     ogpProxy?: string;
@@ -71,6 +72,7 @@
     showOrigin = false,
     showAvatars = true,
     showMedia = true,
+    imageProxy,
     showEmbeds = true,
     ogpProxy,
     actions = [],
@@ -150,6 +152,7 @@
         {showOrigin}
         {showAvatars}
         {showMedia}
+        {imageProxy}
         {showEmbeds}
         {ogpProxy}
         {actions}

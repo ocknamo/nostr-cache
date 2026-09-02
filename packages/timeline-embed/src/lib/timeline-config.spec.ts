@@ -13,6 +13,7 @@ import {
   parseFilters,
   parseFlag,
   parseFreshness,
+  parseImageProxy,
   parseKinds,
   parseLimit,
   parseMaxEvents,
@@ -688,6 +689,51 @@ describe('parseOgpProxy', () => {
     expect(parseOgpProxy(undefined)).toBeUndefined();
     expect(parseOgpProxy(null)).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseImageProxy', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the optimizer URL it was given', () => {
+    expect(parseImageProxy('https://nostr-image-optimizer.example/image')).toBe(
+      'https://nostr-image-optimizer.example/image'
+    );
+  });
+
+  it('loads images straight from their host when the attribute is absent or off', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseImageProxy(undefined)).toBeUndefined();
+    expect(parseImageProxy(null)).toBeUndefined();
+    expect(parseImageProxy('false')).toBeUndefined();
+    expect(parseImageProxy(false)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a proxy URL that would swallow the resized path in its query', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // `https://p.example/?key=x` + `/width=800,…/https://…` puts the whole
+    // request inside `key`, and the proxy answers as if it were asked nothing.
+    expect(parseImageProxy('https://p.example/?key=x')).toBeUndefined();
+    expect(parseImageProxy('https://p.example/image#frag')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('names the attribute it is rejecting, not the one it shares code with', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('location', new URL('https://embed.example/'));
+
+    expect(parseImageProxy('')).toBeUndefined();
+    expect(parseImageProxy('off')).toBeUndefined();
+    expect(parseImageProxy('http://optimizer.example/image')).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(3);
+    for (const [message] of warn.mock.calls) {
+      expect(message).not.toContain('ogp-proxy');
+    }
   });
 });
 

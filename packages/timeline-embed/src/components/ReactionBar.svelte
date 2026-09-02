@@ -27,6 +27,7 @@
     /** Every profile the widget has, keyed by pubkey. */
     profiles?: Map<string, Profile>;
     showAvatars?: boolean;
+    imageProxy?: string;
     /**
      * Open the list on first render. Off by default: each visible row costs a
      * profile lookup, and a page embedding a post for its text should not pay
@@ -44,6 +45,7 @@
     summary,
     profiles = new Map(),
     showAvatars = true,
+    imageProxy,
     defaultOpen = false,
     onReactorVisible,
     authorAction,
@@ -118,6 +120,7 @@
         reactors={summary.reactors}
         {profiles}
         {showAvatars}
+        {imageProxy}
         {onReactorVisible}
         {authorAction}
         {onAuthorPress}

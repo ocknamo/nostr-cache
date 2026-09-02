@@ -34,6 +34,23 @@ describe('ReactionList', () => {
     expect(screen.getByText('🔥')).toBeInTheDocument();
   });
 
+  it('serves a reactor avatar through the image proxy', () => {
+    const profiles = new Map<string, Profile>([
+      [ALICE, { displayName: 'Alice', picture: 'https://example.com/a.png' }],
+    ]);
+
+    const { container } = render(ReactionList, {
+      props: { reactors: [reactor()], profiles, imageProxy: 'https://optimizer.example/image' },
+    });
+
+    // The list is the deepest place an avatar is rendered, and so the easiest
+    // one for the attribute to stop short of.
+    expect(container.querySelector('img.avatar')).toHaveAttribute(
+      'src',
+      'https://optimizer.example/image/width=96,quality=70,format=webp/https://example.com/a.png'
+    );
+  });
+
   it('falls back to a shortened pubkey while the profile has not arrived', () => {
     render(ReactionList, { props: { reactors: [reactor()] } });
 

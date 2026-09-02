@@ -45,6 +45,53 @@ describe('NoteContent', () => {
     expect(container.querySelector('.content')).toHaveTextContent('look at this');
   });
 
+  it('serves an attachment through the image proxy when one is named', () => {
+    const { container } = render(NoteContent, {
+      props: {
+        content: 'look https://cdn.example.com/a.jpg',
+        imageProxy: 'https://optimizer.example/image',
+      },
+    });
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://optimizer.example/image/width=800,quality=60,format=webp/https://cdn.example.com/a.jpg'
+    );
+    // The link still goes to the original, so the full-size photo stays reachable.
+    expect(container.querySelector('a')).toHaveAttribute('href', 'https://cdn.example.com/a.jpg');
+  });
+
+  it('falls back to the URL the author wrote when the proxy cannot serve it', async () => {
+    const { container } = render(NoteContent, {
+      props: {
+        content: 'look https://cdn.example.com/a.jpg',
+        imageProxy: 'https://optimizer.example/image',
+      },
+    });
+
+    // `Img` swallows the error, so the capture-phase listener is what has to
+    // notice it; without that the attachment would stay invisible.
+    await fireEvent.error(container.querySelector('img') as HTMLImageElement);
+
+    await expect
+      .poll(() => container.querySelector('img')?.getAttribute('src'))
+      .toBe('https://cdn.example.com/a.jpg');
+  });
+
+  it('leaves a video alone: the proxy only serves images', () => {
+    const { container } = render(NoteContent, {
+      props: {
+        content: 'https://cdn.example.com/a.mp4',
+        imageProxy: 'https://optimizer.example/image',
+      },
+    });
+
+    expect(container.querySelector('video')).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/a.mp4'
+    );
+  });
+
   it('never fetches a video or audio attachment before it is played', () => {
     const { container } = render(NoteContent, {
       props: { content: 'https://cdn.example.com/a.mp4 https://cdn.example.com/b.mp3' },

@@ -35,6 +35,7 @@
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
+    imageProxy?: string;
     showEmbeds?: boolean;
     authorAction?: AuthorAction;
     noteAction?: NoteAction;
@@ -55,6 +56,7 @@
     showOrigin = false,
     showAvatars = true,
     showMedia = true,
+    imageProxy,
     showEmbeds = true,
     authorAction,
     noteAction,
@@ -77,6 +79,7 @@
         {embeds}
         showAvatar={showAvatars}
         {showMedia}
+        {imageProxy}
         {showEmbeds}
         showReplyRef={false}
         {authorAction}
@@ -95,6 +98,7 @@
           {showOrigin}
           {showAvatars}
           {showMedia}
+          {imageProxy}
           {showEmbeds}
           {authorAction}
           {noteAction}
