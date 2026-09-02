@@ -1,5 +1,6 @@
 <script lang="ts">
   import { readUrl } from '../lib/content-parts.ts';
+  import { OGP_IMAGE, proxiedImageUrl } from '../lib/image-proxy.ts';
   import { type OgpData, requestOgp } from '../lib/ogp.ts';
   import { whenVisible } from '../lib/when-visible.ts';
 
@@ -8,9 +9,11 @@
     proxy: string;
     /** The link to preview. */
     url: string;
+    /** Image proxy for the thumbnail; the page itself goes through `proxy`. */
+    imageProxy?: string;
   }
 
-  const { proxy, url }: Props = $props();
+  const { proxy, url, imageProxy }: Props = $props();
 
   /**
    * Re-validated here rather than trusted from the caller: this component is
@@ -25,9 +28,16 @@
    */
   let loaded = $state<{ url: string; data?: OgpData } | undefined>();
   let imageFailedUrl = $state<string | undefined>();
+  /** The link whose proxied thumbnail failed; see `Avatar.svelte`. */
+  let imageProxyFailedUrl = $state<string | undefined>();
 
   const data = $derived(loaded && loaded.url === href ? loaded.data : undefined);
   const image = $derived(href !== undefined && imageFailedUrl === href ? undefined : data?.image);
+  const proxiedImage = $derived(
+    image && imageProxy && imageProxyFailedUrl !== href
+      ? proxiedImageUrl(imageProxy, image, OGP_IMAGE)
+      : undefined
+  );
 
   const load = () => {
     const target = href;
@@ -58,13 +68,17 @@
           <img
             class="image"
             part="ogp-image"
-            src={image}
+            src={proxiedImage ?? image}
             alt=""
             loading="lazy"
             decoding="async"
             referrerpolicy="no-referrer"
             onerror={() => {
-              imageFailedUrl = href;
+              if (proxiedImage) {
+                imageProxyFailedUrl = href;
+              } else {
+                imageFailedUrl = href;
+              }
             }}
           />
         {/if}

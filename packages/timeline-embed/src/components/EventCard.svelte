@@ -56,6 +56,7 @@
     showAvatar?: boolean;
     /** Render image / video / audio attachments found in the body. */
     showMedia?: boolean;
+    imageProxy?: string;
     /**
      * Render the events a `nostr:` reference in the body points at, as nested
      * cards (NIP-27), and the event a repost carries (NIP-18). With this off —
@@ -141,6 +142,7 @@
     embeds,
     showAvatar = true,
     showMedia = true,
+    imageProxy,
     showEmbeds = true,
     ogpProxy,
     datePlacement = 'above',
@@ -371,10 +373,10 @@
         onpointerdown={(pointer) => pointer.preventDefault()}
         onclick={() => select(authorAction, event.pubkey)}
       >
-        <Avatar pubkey={event.pubkey} {profile} {name} />
+        <Avatar pubkey={event.pubkey} {profile} {name} {imageProxy} />
       </button>
     {:else}
-      <Avatar pubkey={event.pubkey} {profile} {name} />
+      <Avatar pubkey={event.pubkey} {profile} {name} {imageProxy} />
     {/if}
   {/if}
   <div class="body">
@@ -490,7 +492,7 @@
                   onclick={() => onNavigate(ref.id)}
                 >
                   {#if showAvatar}
-                    <Avatar pubkey={replyEvent.pubkey} profile={replyProfile} name="" />
+                    <Avatar pubkey={replyEvent.pubkey} profile={replyProfile} name="" {imageProxy} />
                   {/if}
                   <span class="ref-text">{replyPreview}</span>
                 </button>
@@ -500,7 +502,7 @@
                        aria-hidden, so an `alt` here would announce the author
                        only for the ones who published a picture. The span
                        below says it for all of them. -->
-                  <Avatar pubkey={replyEvent.pubkey} profile={replyProfile} name="" />
+                  <Avatar pubkey={replyEvent.pubkey} profile={replyProfile} name="" {imageProxy} />
                 {/if}
                 <span class="ref-author">{replyName}</span>
                 <span class="ref-text" title="{replyName}: {replyPreview}">{replyPreview}</span>
@@ -546,6 +548,7 @@
               {validationStatuses}
               {showAvatar}
               {showMedia}
+              {imageProxy}
               ancestorUnverified={unverified}
               onEmbedRequest={showEmbeds ? onEmbedRequest : undefined}
               {noteAction}
@@ -565,6 +568,7 @@
             parts={segment.parts}
             embedded={embeddedKeys}
             {showMedia}
+            {imageProxy}
             {profiles}
             media={segmentMediaLists[index]}
             {authorAction}
@@ -580,6 +584,7 @@
               {validationStatuses}
               {showAvatar}
               {showMedia}
+              {imageProxy}
               ancestorUnverified={unverified}
               {onEmbedRequest}
               {noteAction}
@@ -594,7 +599,7 @@
            the text — a preview that fails to load must not take the URL with
            it. -->
       {#if ogpProxy && ogpUrl}
-        <OgpCard proxy={ogpProxy} url={ogpUrl} />
+        <OgpCard proxy={ogpProxy} url={ogpUrl} {imageProxy} />
       {/if}
     </div>
   </div>

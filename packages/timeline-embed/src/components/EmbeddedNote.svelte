@@ -51,6 +51,7 @@
     validationStatuses?: Map<string, ValidationStatus>;
     showAvatar?: boolean;
     showMedia?: boolean;
+    imageProxy?: string;
     /**
      * `opacity` multiplies down the tree, so a five-deep chain of unverified
      * quotes would come out at 0.6^5 — under 8%, which is invisible rather than
@@ -88,6 +89,7 @@
     validationStatuses,
     showAvatar = true,
     showMedia = true,
+    imageProxy,
     ancestorUnverified = false,
     onEmbedRequest,
     noteAction,
@@ -216,10 +218,10 @@
             onpointerdown={(pointer) => pointer.preventDefault()}
             onclick={() => select(authorAction, event.pubkey)}
           >
-            <Avatar pubkey={event.pubkey} {profile} {name} />
+            <Avatar pubkey={event.pubkey} {profile} {name} {imageProxy} />
           </button>
         {:else}
-          <Avatar pubkey={event.pubkey} {profile} {name} />
+          <Avatar pubkey={event.pubkey} {profile} {name} {imageProxy} />
         {/if}
       {/if}
       {#snippet identity()}
@@ -268,6 +270,7 @@
               {validationStatuses}
               {showAvatar}
               {showMedia}
+              {imageProxy}
               ancestorUnverified={ancestorUnverified || unverified}
               {onEmbedRequest}
               {noteAction}
@@ -283,6 +286,7 @@
             parts={segment.parts}
             embedded={nestedKeys}
             {showMedia}
+            {imageProxy}
             {profiles}
             media={segmentMediaLists[index]}
             {authorAction}
@@ -298,6 +302,7 @@
               {validationStatuses}
               {showAvatar}
               {showMedia}
+              {imageProxy}
               ancestorUnverified={ancestorUnverified || unverified}
               {onEmbedRequest}
               {noteAction}

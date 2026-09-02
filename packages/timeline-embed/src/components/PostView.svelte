@@ -38,6 +38,7 @@
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
+    imageProxy?: string;
     showEmbeds?: boolean;
     /**
      * Link preview proxy for the post itself. The thread does not get one:
@@ -93,6 +94,7 @@
     showOrigin = false,
     showAvatars = true,
     showMedia = true,
+    imageProxy,
     showEmbeds = true,
     ogpProxy,
     showReactions = true,
@@ -195,6 +197,7 @@
           embeds={state.embeds}
           showAvatar={showAvatars}
           {showMedia}
+          {imageProxy}
           {showEmbeds}
           {ogpProxy}
           {actions}
@@ -227,6 +230,7 @@
             {showOrigin}
             {showAvatars}
             {showMedia}
+            {imageProxy}
             {showEmbeds}
             {authorAction}
             {noteAction}

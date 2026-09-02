@@ -85,6 +85,14 @@ const TALL_PNG = buildTallPng();
 const OGP_PATH = '/cors';
 
 /**
+ * Prefix of the stub image optimizer. See {@link EmbedSiteServer.imageProxyUrl}.
+ *
+ * Answers every request under it with the same picture, so a test can tell the
+ * proxied path from the original by the URL alone.
+ */
+const IMAGE_PROXY_PATH = '/optimize';
+
+/**
  * Paths the stub proxy's page references from a `<script>` and an `<img>`.
  *
  * Nothing serves them: a request for either is the failure the test watches
@@ -143,6 +151,8 @@ export interface EmbedSiteServer {
   photoUrl: string;
   /** URL of a stub CORS proxy, for the `ogp-proxy` attribute. */
   ogpProxyUrl: string;
+  /** URL of a stub image optimizer, for the `image-proxy` attribute. */
+  imageProxyUrl: string;
   /** Paths the page that proxy answers with references, and nothing serves. */
   linkedPageSubresourcePaths: string[];
   close: () => Promise<void>;
@@ -234,6 +244,11 @@ export async function startEmbedSiteServer(
       res.end(TALL_PNG);
       return;
     }
+    if (path.startsWith(`${IMAGE_PROXY_PATH}/`)) {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(TALL_PNG);
+      return;
+    }
     // Answers with a page about whichever URL it is asked for, so a test can
     // assert that the card shows what the page said rather than anything the
     // note carried. The page also carries a script and an image of its own,
@@ -291,6 +306,7 @@ export async function startEmbedSiteServer(
     avatarUrl: `${baseUrl}${AVATAR_PATH}`,
     photoUrl: `${baseUrl}${PHOTO_PATH}`,
     ogpProxyUrl: `${baseUrl}${OGP_PATH}`,
+    imageProxyUrl: `${baseUrl}${IMAGE_PROXY_PATH}`,
     linkedPageSubresourcePaths: [PAGE_SCRIPT_PATH, PAGE_IMAGE_PATH],
     close: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
   };

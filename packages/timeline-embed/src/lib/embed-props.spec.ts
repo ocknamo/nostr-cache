@@ -51,6 +51,7 @@ describe('viewPropsFrom', () => {
       showMedia: true,
       showEmbeds: true,
       ogpProxy: undefined,
+      imageProxy: undefined,
       actions: [],
       authorAction: undefined,
       noteAction: undefined,
@@ -64,6 +65,12 @@ describe('viewPropsFrom', () => {
     expect(view.showAvatars).toBe(false);
     expect(view.showMedia).toBe(true);
     expect(view.showEmbeds).toBe(true);
+  });
+
+  it('carries the image proxy through, resolved once', () => {
+    const view = viewPropsFrom({ imageProxy: 'https://optimizer.example/image' });
+
+    expect(view.imageProxy).toBe('https://optimizer.example/image');
   });
 
   it('pairs each press with its own label attribute', () => {

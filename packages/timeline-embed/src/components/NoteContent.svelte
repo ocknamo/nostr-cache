@@ -29,6 +29,7 @@
      * asks an arbitrary host for bytes.
      */
     showMedia?: boolean;
+    imageProxy?: string;
     /**
      * Profiles already fetched, keyed by pubkey, used to give a mention a name.
      *
@@ -80,6 +81,7 @@
     parts: given,
     embedded,
     showMedia = true,
+    imageProxy,
     profiles,
     media: givenMedia,
     authorAction,
@@ -127,7 +129,7 @@
 {#if media.length > 0}
   <ul class="media">
     {#each media as item (item.url)}
-      <li><MediaAttachment media={item.media} url={item.url} /></li>
+      <li><MediaAttachment media={item.media} url={item.url} {imageProxy} /></li>
     {/each}
   </ul>
 {/if}

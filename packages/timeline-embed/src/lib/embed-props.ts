@@ -17,7 +17,13 @@ import {
   parseMaterialVariant,
 } from './material-symbols.ts';
 import type { RelayHostConfig } from './relay-host.ts';
-import { parseFreshness, parseMaxEvents, parseOgpProxy, parseRelays } from './timeline-config.ts';
+import {
+  parseFreshness,
+  parseImageProxy,
+  parseMaxEvents,
+  parseOgpProxy,
+  parseRelays,
+} from './timeline-config.ts';
 
 /**
  * 属性の意味・既定値・注意点は packages/timeline-embed/README.md が唯一の情報源。
@@ -44,6 +50,8 @@ export interface SharedEmbedProps {
   showEmbeds?: string;
   /** 未指定・URL 無しなら**プレビュー機能ごと無効で、問い合わせも発生しない**。 */
   ogpProxy?: string;
+  /** 未指定なら添付・アバター・OGP サムネイルを書かれた URL から直接読み込む。 */
+  imageProxy?: string;
   /**
    * JSON 配列、または JS からプロパティで渡す場合は配列そのもの（`onSelect` を持てる）。
    * ウィジェット自身は何も定義せず、押下は `nostr-timeline:action` で通知するだけ。
@@ -75,6 +83,7 @@ export interface SharedViewProps {
   showMedia: boolean;
   showEmbeds: boolean;
   ogpProxy?: string;
+  imageProxy?: string;
   actions: EventAction[];
   authorAction?: AuthorAction;
   noteAction?: NoteAction;
@@ -99,6 +108,7 @@ export function viewPropsFrom(props: SharedEmbedProps): SharedViewProps {
     showMedia: props.showMedia !== 'false',
     showEmbeds: props.showEmbeds !== 'false',
     ogpProxy: parseOgpProxy(props.ogpProxy),
+    imageProxy: parseImageProxy(props.imageProxy),
     actions: normalizeActions(props.actions),
     authorAction: normalizeAuthorAction(props.authorAction, props.authorActionLabel),
     noteAction: normalizeNoteAction(props.noteAction, props.noteActionLabel),

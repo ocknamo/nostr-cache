@@ -39,6 +39,7 @@
      * default; turning it off leaves the URLs in the text as links.
      */
     showMedia?: boolean;
+    imageProxy?: string;
     /**
      * Render the events a `nostr:` reference in a body points at, as nested
      * cards. On by default; turning it off leaves the references as chips and
@@ -100,6 +101,7 @@
     showOrigin = true,
     showAvatars = true,
     showMedia = true,
+    imageProxy,
     showEmbeds = true,
     ogpProxy,
     actions = [],
@@ -168,6 +170,7 @@
             {embeds}
             showAvatar={showAvatars}
             {showMedia}
+            {imageProxy}
             {showEmbeds}
             {ogpProxy}
             {actions}

@@ -87,6 +87,25 @@ describe('OgpCard', () => {
     expect(screen.getByText('A title')).toBeInTheDocument();
   });
 
+  it('serves the thumbnail through the image proxy, falling back to its host', async () => {
+    stubProxy({ title: 'A title', image: 'https://cdn.example.com/a.png' });
+    const { container } = render(OgpCard, {
+      props: { proxy: PROXY, url: URL_A, imageProxy: 'https://optimizer.example/image' },
+    });
+
+    await screen.findByText('A title');
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://optimizer.example/image/width=600,quality=60,format=webp/https://cdn.example.com/a.png'
+    );
+
+    await fireEvent.error(container.querySelector('img') as HTMLImageElement);
+
+    await expect
+      .poll(() => container.querySelector('img')?.getAttribute('src'))
+      .toBe('https://cdn.example.com/a.png');
+  });
+
   it('renders nothing when the page has no title to show', async () => {
     stubProxy({ description: 'A description' });
     const { container } = render(OgpCard, { props: { proxy: PROXY, url: URL_A } });

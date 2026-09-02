@@ -444,6 +444,16 @@ describe('Embeddable timeline E2E', () => {
       .toBe(afterFirstLoad + 2);
   });
 
+  it('serves avatars through image-proxy when one is set', async () => {
+    page = await browser.newPage();
+    await page.goto(embedUrl({ relays: upstream.url, 'image-proxy': site.imageProxyUrl }));
+
+    const avatar = await page.waitForSelector('nostr-timeline img.avatar', { timeout: TIMEOUT });
+    expect(await avatar.getAttribute('src')).toBe(
+      `${site.imageProxyUrl}/width=96,quality=70,format=webp/${site.avatarUrl}`
+    );
+  });
+
   it('honours show-avatars=false from the iframe query string', async () => {
     page = await browser.newPage();
     await page.goto(embedUrl({ relays: upstream.url, 'show-avatars': 'false' }));
@@ -512,6 +522,46 @@ describe('Embeddable timeline E2E', () => {
           (node) => node.textContent?.trim() ?? ''
         );
         expect(text).not.toContain(site.avatarUrl);
+      } finally {
+        await disposable.close();
+      }
+    });
+
+    it('serves attachments through image-proxy when one is set', async () => {
+      const disposable = await startRichUpstream();
+      try {
+        page = await browser.newPage();
+        await page.goto(embedUrl({ relays: disposable.url, 'image-proxy': site.imageProxyUrl }));
+        await waitForEventCount(page, 1);
+
+        const attachment = await page.waitForSelector('nostr-timeline .media img', {
+          timeout: TIMEOUT,
+        });
+        expect(await attachment.getAttribute('src')).toBe(
+          `${site.imageProxyUrl}/width=800,quality=60,format=webp/${site.avatarUrl}`
+        );
+        // The proxied bytes really arrive, and the picture really shows: `Img`
+        // renders at opacity 0 and reveals itself on the load event, which it
+        // is the only thing that can do inside this shadow root.
+        await attachment.evaluate(
+          (node) =>
+            (node as HTMLImageElement).complete ||
+            new Promise((resolve) => node.addEventListener('load', resolve, { once: true }))
+        );
+        expect(await attachment.evaluate((node) => (node as HTMLImageElement).naturalHeight)).toBe(
+          1000
+        );
+        await expect
+          .poll(() => attachment.evaluate((node) => getComputedStyle(node).opacity), {
+            timeout: TIMEOUT,
+          })
+          .toBe('1');
+
+        // The link still points at what the author wrote, so the full-size
+        // picture stays one press away.
+        expect(
+          await page.$eval('nostr-timeline .media a', (node) => node.getAttribute('href'))
+        ).toBe(site.avatarUrl);
       } finally {
         await disposable.close();
       }

@@ -16,6 +16,7 @@
       showMedia: { attribute: 'show-media' },
       showEmbeds: { attribute: 'show-embeds' },
       ogpProxy: { attribute: 'ogp-proxy' },
+      imageProxy: { attribute: 'image-proxy' },
       showReactions: { attribute: 'show-reactions' },
       reactionsLimit: { attribute: 'reactions-limit' },
       reactionsOpen: { attribute: 'reactions-open' },

@@ -39,6 +39,7 @@
     showOrigin?: boolean;
     showAvatars?: boolean;
     showMedia?: boolean;
+    imageProxy?: string;
     showEmbeds?: boolean;
     /** Makes each reply's author pressable, under this id. */
     authorAction?: AuthorAction;
@@ -62,6 +63,7 @@
     showOrigin = false,
     showAvatars = true,
     showMedia = true,
+    imageProxy,
     showEmbeds = true,
     authorAction,
     noteAction,
@@ -86,6 +88,7 @@
         {showOrigin}
         {showAvatars}
         {showMedia}
+        {imageProxy}
         {showEmbeds}
         {authorAction}
         {noteAction}
