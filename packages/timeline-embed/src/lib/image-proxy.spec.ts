@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_IMAGE, AVATAR_IMAGE, proxiedImageUrl } from './image-proxy.ts';
+import { ATTACHMENT_IMAGE, AVATAR_IMAGE, OGP_IMAGE, proxiedImageUrl } from './image-proxy.ts';
 
 const PROXY = 'https://nostr-image-optimizer.example/image';
 const IMAGE = 'https://media.example/cat.webp';
@@ -11,6 +11,9 @@ describe('proxiedImageUrl', () => {
     );
     expect(proxiedImageUrl(PROXY, IMAGE, AVATAR_IMAGE)).toBe(
       `${PROXY}/width=96,quality=70,format=webp/${IMAGE}`
+    );
+    expect(proxiedImageUrl(PROXY, IMAGE, OGP_IMAGE)).toBe(
+      `${PROXY}/width=600,quality=60,format=webp/${IMAGE}`
     );
   });
 
@@ -25,7 +28,7 @@ describe('proxiedImageUrl', () => {
     );
   });
 
-  it('keeps the query the original URL needs to be served', () => {
+  it('carries the query the original URL was written with', () => {
     const signed = 'https://media.example/cat.webp?sig=abc&exp=1';
 
     expect(proxiedImageUrl(PROXY, signed, ATTACHMENT_IMAGE)).toBe(
@@ -39,11 +42,20 @@ describe('proxiedImageUrl', () => {
     );
   });
 
+  it('strips credentials rather than handing them to the proxy operator', () => {
+    expect(proxiedImageUrl(PROXY, 'https://user:pw@media.example/cat.webp', ATTACHMENT_IMAGE)).toBe(
+      `${PROXY}/width=800,quality=60,format=webp/https://media.example/cat.webp`
+    );
+  });
+
   it('passes anything it cannot read through untouched, rather than to the proxy', () => {
     // Left for the `<img>` to fail on, as it would without a proxy.
     expect(proxiedImageUrl(PROXY, 'data:image/png;base64,AAAA', ATTACHMENT_IMAGE)).toBe(
       'data:image/png;base64,AAAA'
     );
     expect(proxiedImageUrl(PROXY, 'not a url', ATTACHMENT_IMAGE)).toBe('not a url');
+    // Past `readUrl`'s 2048-character ceiling, as a body's links are.
+    const long = `https://media.example/${'a'.repeat(2048)}.webp`;
+    expect(proxiedImageUrl(PROXY, long, ATTACHMENT_IMAGE)).toBe(long);
   });
 });

@@ -168,6 +168,36 @@ describe('PostView', () => {
     expect(context.event).toMatchObject({ id: 'r1', kind: 7 });
   });
 
+  it('serves every avatar it renders through the image proxy', () => {
+    const bob = 'ee0000000000000000000000000000000000000000000000000000000000000e';
+    const { container } = render(PostView, {
+      props: {
+        state: state({
+          events: [POST],
+          profiles: new Map([
+            [ALICE, { picture: 'https://example.com/author.png' }],
+            [bob, { picture: 'https://example.com/reactor.png' }],
+          ]),
+          reactions: new Map([[POST_ID, [reaction(bob, '🔥', 'r1')]]]),
+        }),
+        target: TARGET,
+        reactionsOpen: true,
+        imageProxy: 'https://optimizer.example/image',
+      },
+    });
+
+    // The reactor list hangs off the reaction bar rather than off the card, so
+    // it is the one branch the attribute can quietly stop short of — hence a
+    // reactor who is not the author, whose avatar only that branch renders.
+    const sources = [...container.querySelectorAll('img.avatar')].map((node) =>
+      node.getAttribute('src')
+    );
+    expect(sources).toEqual([
+      'https://optimizer.example/image/width=96,quality=70,format=webp/https://example.com/author.png',
+      'https://optimizer.example/image/width=96,quality=70,format=webp/https://example.com/reactor.png',
+    ]);
+  });
+
   it('hides the reaction bar when the element turned reactions off', () => {
     render(PostView, {
       props: {

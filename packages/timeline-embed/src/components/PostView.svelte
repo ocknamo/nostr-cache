@@ -214,6 +214,7 @@
             {summary}
             profiles={state.profiles}
             {showAvatars}
+            {imageProxy}
             defaultOpen={reactionsOpen}
             onReactorVisible={onAuthorVisible}
             {authorAction}

@@ -100,8 +100,9 @@
     display: contents;
   }
 
-  /* 2 つ目のセレクタは `Img` が描く <img>。子コンポーネントの要素には
-     スコープクラスが付かないので、ラッパー越しに当てる。 */
+  /* The second selector is the <img> `Img` renders: an element a child
+     component owns carries no scope class, so `class="attachment"` on it is a
+     handle for the DOM, not something these rules can match. */
   .attachment,
   .proxied :global(img) {
     display: block;

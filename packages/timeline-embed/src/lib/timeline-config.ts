@@ -247,7 +247,20 @@ export function parseOgpProxy(value: string | boolean | null | undefined): strin
  * URL から直接読み込む。既定を置かないのは、全閲覧者の IP をそのホストに送ることになるため。
  */
 export function parseImageProxy(value: string | boolean | null | undefined): string | undefined {
-  return parseProxyUrl(value, IMAGE_PROXY);
+  const proxy = parseProxyUrl(value, IMAGE_PROXY);
+  if (proxy === undefined) {
+    return undefined;
+  }
+  // `ogp-proxy` と違い、この URL の後ろには寸法と元の URL がパスとして続く。
+  // クエリがあるとその全部がクエリ側に落ちて、警告も出ないまま壊れた要求になる。
+  const url = new URL(proxy);
+  if (url.search || url.hash) {
+    console.warn(
+      `[nostr-timeline] Ignoring image-proxy with a query or fragment, which the resized path would end up inside: ${value}`
+    );
+    return undefined;
+  }
+  return proxy;
 }
 
 /**
