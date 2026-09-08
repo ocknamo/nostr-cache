@@ -105,7 +105,8 @@ interface NostrRelayServerOptions {
     validateEvents?: boolean;      // false は validateEventsType: 'NONE' に対応
     ttl?: number;
     ttlSweepInterval?: number;
-    storageSweepInterval?: number; // 上限チェックの実行間隔（秒）。既定 600
+    storageSweepInterval?: number; // 上限チェックの実行間隔（秒）。既定 600。前回から
+                                   // maxSize の約 10% が保存された時点でも走る
     upstreamRelays?: string[];
     upstreamEoseTimeout?: number;
     upstreamFreshness?: Record<number, number>;

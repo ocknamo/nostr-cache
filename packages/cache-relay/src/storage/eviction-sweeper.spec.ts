@@ -3,7 +3,7 @@
 import { logger } from '@nostr-cache/shared';
 import { type Mock, vi } from 'vitest';
 import { type MockStorage, createMockStorage } from '../test/utils/mock-storage.js';
-import { EvictionSweeper } from './eviction-sweeper.js';
+import { DEFAULT_STORAGE_SWEEP_DELAY, EvictionSweeper } from './eviction-sweeper.js';
 import type { StorageAdapter } from './storage-adapter.js';
 
 describe('EvictionSweeper', () => {
@@ -82,14 +82,10 @@ describe('EvictionSweeper', () => {
 
   it('should hold the first sweep back past the boot burst, then run on the interval', async () => {
     (storage.count as Mock).mockResolvedValue(101);
-    const sweeper = new EvictionSweeper(storage, {
-      maxSize: 100,
-      intervalSeconds: 60,
-      initialDelaySeconds: 30,
-    });
+    const sweeper = new EvictionSweeper(storage, { maxSize: 100, intervalSeconds: 60 });
 
     sweeper.start();
-    await vi.advanceTimersByTimeAsync(29_000);
+    await vi.advanceTimersByTimeAsync(DEFAULT_STORAGE_SWEEP_DELAY * 1000 - 1_000);
     expect(storage.enforceLimit).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1_000);
@@ -103,11 +99,7 @@ describe('EvictionSweeper', () => {
 
   it('should stop sweeping after stop(), including before the first sweep', async () => {
     (storage.count as Mock).mockResolvedValue(101);
-    const sweeper = new EvictionSweeper(storage, {
-      maxSize: 100,
-      intervalSeconds: 60,
-      initialDelaySeconds: 30,
-    });
+    const sweeper = new EvictionSweeper(storage, { maxSize: 100, intervalSeconds: 60 });
 
     sweeper.start();
     sweeper.stop();
@@ -141,6 +133,43 @@ describe('EvictionSweeper', () => {
     expect(storage.enforceLimit).toHaveBeenCalledTimes(2);
 
     sweeper.stop();
+  });
+
+  it('should sweep once enough events have been stored, without waiting for the interval', async () => {
+    (storage.count as Mock).mockResolvedValue(101);
+    // maxSize の 10%。滞在がスイープ間隔より短い読者でも退避が起きる契機
+    const sweeper = new EvictionSweeper(storage, { maxSize: 100, intervalSeconds: 600 });
+
+    sweeper.start();
+    for (let saved = 0; saved < 9; saved += 1) {
+      sweeper.recordStored();
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(storage.enforceLimit).not.toHaveBeenCalled();
+
+    sweeper.recordStored();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(storage.enforceLimit).toHaveBeenCalledTimes(1);
+
+    // 予算は使い切るたびに戻る
+    for (let saved = 0; saved < 10; saved += 1) {
+      sweeper.recordStored();
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(storage.enforceLimit).toHaveBeenCalledTimes(2);
+
+    sweeper.stop();
+  });
+
+  it('should ignore stored events when maxSize is non-positive', async () => {
+    const sweeper = new EvictionSweeper(storage, { maxSize: 0 });
+
+    for (let saved = 0; saved < 100; saved += 1) {
+      sweeper.recordStored();
+    }
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(storage.count).not.toHaveBeenCalled();
   });
 
   it('should keep sweeping after a failed pass', async () => {

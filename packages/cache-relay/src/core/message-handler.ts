@@ -38,7 +38,9 @@ export class MessageHandler {
     private maxSubscriptions = 20,
     private maxEventsPerRequest = 500,
     validateEventsType: ValidateEventsType = 'IMMEDIATELY',
-    private freshnessGate?: FreshnessGate
+    private freshnessGate?: FreshnessGate,
+    /** Called once per stored event, so eviction can be paced by write volume. */
+    private onEventStored?: () => void
   ) {
     this.storage = storage;
     this.subscriptionManager = subscriptionManager;
@@ -100,9 +102,13 @@ export class MessageHandler {
       const {
         success,
         message: resultMessage,
+        stored,
         superseded,
         matches,
       } = await this.eventHandler.handleEvent(event);
+      if (stored) {
+        this.onEventStored?.();
+      }
 
       if (!success) {
         this.sendOK(clientId, event.id, false, resultMessage);
@@ -152,6 +158,9 @@ export class MessageHandler {
   ): Promise<{ success: boolean; stored: boolean; superseded: boolean }> {
     try {
       const { success, stored, superseded } = await this.eventHandler.handleEvent(event);
+      if (stored) {
+        this.onEventStored?.();
+      }
       return { success, stored, superseded: superseded === true };
     } catch (error) {
       logger.error('Error ingesting upstream event:', error);

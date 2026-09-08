@@ -90,8 +90,10 @@ rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を�
   （既定 10,000 件）で頭打ちにし、超過時は挿入順に古い id から破棄する。
 - **backfill**: 上流イベントは `MessageHandler.ingestUpstreamEvent` 経由で取り込む。
   これにより検証モード（`validateEventsType`）・replaceable/addressable の置換・
-  ephemeral の非保存・遅延検証・ストレージ上限退避が、通常の EVENT 入口と同じ挙動で
-  適用される。取り込みは**購読単位で直列化**し、replaceable の置換競合を防ぐ。
+  ephemeral の非保存・遅延検証が、通常の EVENT 入口と同じ挙動で適用される。
+  取り込みは**購読単位で直列化**し、replaceable の置換競合を防ぐ。
+  ストレージ上限の退避はどちらの経路にも入らない（`EvictionSweeper` が定期的に行う。
+  ここに入れると上限に張り付いたキャッシュで ingest ごとに退避の走査が挟まる）。
 - **EOSE の保留**: クライアントへの `EOSE` は、上流の集約 EOSE か
   タイムアウト（既定 `DEFAULT_SUBSCRIPTION_TIMEOUT`）の早い方まで保留してから送る。
 - **クリーンアップ**: `CLOSE`・購読上書き・クライアント切断時に、対応する上流購読を閉じる。
@@ -102,7 +104,7 @@ rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を�
 
 ```
 client ── ["EVENT", ev] ──▶ MessageHandler.handleEventMessage
-  ├─ ingestEvent（検証 → EventHandler.handleEvent → lazy enqueue → enforceLimit）
+  ├─ EventHandler.handleEvent（検証 → 保存 → lazy enqueue）
   ├─ client ◀── ["OK", id, true]（ローカル保存の成否で即応答。上流は待たない）
   ├─ ローカル購読へブロードキャスト（従来どおり）
   └─ coordinator.publish(ev) → pool: 接続済み全上流へ ["EVENT", ev]
@@ -123,7 +125,7 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
 
 上流 ── ["EVENT", upstreamSubId, ev] ──▶ coordinator
   ├─ 対応表を引く（CLOSE 済みなら破棄）／ sentIds 重複なら破棄
-  ├─ ingest（検証・保存・置換・lazy・enforceLimit を通常経路と同一に適用）
+  ├─ ingest（検証・保存・置換・lazy を通常経路と同一に適用）
   └─ 成功時: sentIds 追加 → client へ ["EVENT", subId, ev]（EOSE 前後を問わず配信）
 
 全上流 EOSE or upstreamEoseTimeout ──▶ client ◀── ["EOSE", subId]（1 回だけ）

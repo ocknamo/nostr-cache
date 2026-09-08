@@ -5,6 +5,7 @@ import { getRandomSecret } from '@nostr-cache/shared';
 import { seckeySigner } from '@rx-nostr/crypto';
 import { type Mock, vi } from 'vitest';
 import { LazyValidator } from '../event/lazy-validator.js';
+import { DEFAULT_STORAGE_SWEEP_DELAY } from '../storage/eviction-sweeper.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { createMockStorage } from '../test/utils/mock-storage.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
@@ -191,17 +192,6 @@ describe('NostrCacheRelay', () => {
       ).toThrow(/npub1invalid/);
     });
 
-    it('should keep the current config when setCachePriority input is invalid', () => {
-      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        storageMaxSize: 100,
-        cachePriority: { kinds: [0] },
-      });
-
-      expect(() => boundedRelay.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(
-        /npub1invalid/
-      );
-    });
-
     it('should leave eviction to the sweep rather than doing it on save', async () => {
       const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         storageMaxSize: 100,
@@ -215,8 +205,7 @@ describe('NostrCacheRelay', () => {
   });
 
   describe('storage limit background sweep', () => {
-    /** {@link DEFAULT_STORAGE_SWEEP_DELAY} 秒。初回スイープはここまで走らない。 */
-    const DELAY_MS = 30_000;
+    const DELAY_MS = DEFAULT_STORAGE_SWEEP_DELAY * 1000;
 
     beforeEach(() => {
       vi.useFakeTimers();
@@ -289,6 +278,63 @@ describe('NostrCacheRelay', () => {
         pubkeys: ['7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e'],
         kinds: [0],
       });
+
+      await boundedRelay.disconnect();
+    });
+
+    it('should keep the current config when setCachePriority input is invalid', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cachePriority: { kinds: [0] },
+      });
+
+      expect(() => boundedRelay.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(
+        /npub1invalid/
+      );
+      await boundedRelay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS);
+
+      // 例外時は反映されず、生成時の設定のまま
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(90, undefined, {
+        pubkeys: [],
+        kinds: [0],
+      });
+
+      await boundedRelay.disconnect();
+    });
+
+    it('should clear the priority config when setCachePriority is called without rules', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cachePriority: { kinds: [0] },
+      });
+
+      boundedRelay.setCachePriority(undefined);
+      await boundedRelay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS);
+
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(90, undefined, undefined);
+
+      await boundedRelay.disconnect();
+    });
+
+    it('should sweep on write volume alone, without waiting for the interval', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        storageSweepInterval: 600,
+      });
+
+      await boundedRelay.connect();
+      for (let saved = 0; saved < 10; saved += 1) {
+        await boundedRelay.publishEvent({ ...sampleEvent, id: `${saved}`.repeat(64) });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 初回スイープの猶予（30 秒）より前でも、保存が積もれば退避される
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(90, undefined, undefined);
 
       await boundedRelay.disconnect();
     });

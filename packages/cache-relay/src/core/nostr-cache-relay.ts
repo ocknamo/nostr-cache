@@ -100,10 +100,11 @@ export class NostrCacheRelay {
       // LAZY の検証キューはストレージ自体（validated カラム）なので、
       // ここで検証器を渡す必要はない
       this.options.validateEventsType ?? 'IMMEDIATELY',
-      this.freshnessGate
+      this.freshnessGate,
+      () => this.evictionSweeper?.recordStored()
     );
 
-    // 上限の超過は保存のたびではなく、この定期スイープでまとめて解消する
+    // 上限の超過は保存のたびではなく、スイープでまとめて解消する
     if (this.options.storageMaxSize !== undefined && this.options.storageMaxSize > 0) {
       this.evictionSweeper = new EvictionSweeper(storage, {
         maxSize: this.options.storageMaxSize,
@@ -263,6 +264,8 @@ export class NostrCacheRelay {
     const saved = await this.storage.saveEvent(event, { validated: mustValidateNow });
 
     if (saved) {
+      this.evictionSweeper?.recordStored();
+
       // NIP-09: 削除リクエストを保存したら参照先の削除を適用する
       // （transport 経由の EVENT では EventHandler が同じ処理を行う）
       if (isDeletionEvent(event)) {
