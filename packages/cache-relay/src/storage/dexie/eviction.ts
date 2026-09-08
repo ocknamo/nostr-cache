@@ -25,9 +25,9 @@ const evictionIndex: Record<CacheStrategy, string> = {
  *
  * Semantics / caveats:
  * - This is a **soft limit**. The count and the delete run inside a single
- *   read-write transaction so a given pass is atomic, but the preceding
- *   `saveEvent` commits separately, so under heavy concurrent writes the
- *   store may briefly exceed `maxSize` before converging.
+ *   read-write transaction so a given pass is atomic, but writes commit
+ *   separately and this only runs when the caller asks (`EvictionSweeper`, on a
+ *   timer), so the store spends most of its time above `maxSize`.
  * - FIFO is keyed on `created_at` (second precision), i.e. "oldest event
  *   first" rather than strict arrival order (`cached_at`) — a deliberate
  *   choice. Events sharing the same `created_at` are evicted in primary-key
@@ -89,7 +89,7 @@ export async function enforceLimit(
 
       const evicted = nonPriorityVictims.length + priorityVictims.length;
       if (evicted > 0) {
-        logger.info(`Evicted ${evicted} events to respect storageMaxSize ${maxSize}`);
+        logger.info(`Evicted ${evicted} events to leave at most ${maxSize}`);
       }
       return evicted;
     });

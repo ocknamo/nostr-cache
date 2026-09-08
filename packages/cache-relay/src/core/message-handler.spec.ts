@@ -316,88 +316,13 @@ describe('MessageHandler', () => {
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
         });
 
-        it('enforces the storage limit after a stored transport EVENT', async () => {
-          const boundedHandler = new MessageHandler(
-            mockStorage,
-            mockSubscriptionManager,
-            20,
-            500,
-            'IMMEDIATELY',
-            100,
-            'FIFO'
-          );
-          boundedHandler.onResponse(vi.fn());
+        it('leaves eviction to the sweeper: a stored EVENT does not enforce the limit', async () => {
+          const handler = new MessageHandler(mockStorage, mockSubscriptionManager, 20, 500);
+          handler.onResponse(vi.fn());
 
-          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
+          await handler.handleMessage('client1', ['EVENT', sampleEvent]);
 
-          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', undefined);
-        });
-
-        it('passes the cache priority config to enforceLimit', async () => {
-          const cachePriority = { pubkeys: ['a'.repeat(64)], kinds: [0] };
-          const boundedHandler = new MessageHandler(
-            mockStorage,
-            mockSubscriptionManager,
-            20,
-            500,
-            'IMMEDIATELY',
-            100,
-            'FIFO',
-            cachePriority
-          );
-          boundedHandler.onResponse(vi.fn());
-
-          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
-
-          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', cachePriority);
-        });
-
-        it('uses the config replaced via setCachePriority for later events', async () => {
-          const boundedHandler = new MessageHandler(
-            mockStorage,
-            mockSubscriptionManager,
-            20,
-            500,
-            'IMMEDIATELY',
-            100,
-            'FIFO',
-            { kinds: [0] }
-          );
-          boundedHandler.onResponse(vi.fn());
-
-          const replaced = { pubkeys: ['b'.repeat(64)], kinds: [3] };
-          boundedHandler.setCachePriority(replaced);
-          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
-
-          expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', replaced);
-        });
-
-        it('does not let an enforceLimit failure break the OK/broadcast of a stored event', async () => {
-          (mockStorage.enforceLimit as Mock).mockRejectedValueOnce(new Error('evict boom'));
-          const subscriptions = new Map([['client2', [{ id: 'sub1', filters: [sampleFilter] }]]]);
-          (mockSubscriptionManager.findMatchingSubscriptions as Mock).mockReturnValueOnce(
-            subscriptions
-          );
-          const boundedHandler = new MessageHandler(
-            mockStorage,
-            mockSubscriptionManager,
-            20,
-            500,
-            'IMMEDIATELY',
-            100,
-            'FIFO'
-          );
-          const cb = vi.fn();
-          boundedHandler.onResponse(cb);
-
-          await boundedHandler.handleMessage('client1', ['EVENT', sampleEvent]);
-
-          // Exactly one OK (true) — no double OK(false) from a swallowed eviction error
-          const okCalls = cb.mock.calls.filter(([, wire]) => wire[0] === 'OK');
-          expect(okCalls).toHaveLength(1);
-          expect(okCalls[0][1]).toEqual(['OK', sampleEvent.id, true, '']);
-          // Broadcast to the matching subscriber still happened
-          expect(cb).toHaveBeenCalledWith('client2', ['EVENT', 'sub1', sampleEvent]);
+          expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
         });
 
         it('LAZY: accepts unstorable events without persisting anything', async () => {
@@ -854,9 +779,6 @@ describe('MessageHandler', () => {
           20,
           500,
           'IMMEDIATELY',
-          undefined,
-          undefined,
-          undefined,
           gate
         );
         const callback = vi.fn();
@@ -954,9 +876,6 @@ describe('MessageHandler', () => {
           20,
           500,
           'IMMEDIATELY',
-          undefined,
-          undefined,
-          undefined,
           new FreshnessGate(storage, new Map([[0, 3600]]), () => NOW)
         );
         handler.setUpstreamCoordinator(coordinator as never);

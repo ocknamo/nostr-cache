@@ -19,13 +19,14 @@ interface NostrRelayServerOptions {
     // ストレージを使用し、再起動をまたいでイベントが保持される（dbName は無視）。
     // 未指定なら従来どおり fake-indexeddb（インメモリ・非永続）
     dbPath?: string;
-    // 保存イベント数の上限。超過時は古いイベントから退避（未指定で無制限）
+    // 保存イベント数の上限。定期スイープで超過を検知したときに約 90% まで退避する
+    // ため、最大で storageSweepInterval 秒ぶん超過しうる（未指定で無制限）
     maxSize?: number;
     // 退避戦略（FIFO: 作成が古い順 / LRU: 読み出しが古い順 / LFU: 読み出し頻度が低い順）
     cacheStrategy?: CacheStrategy;
     // キャッシュ優先度。指定 pubkey（npub / hex）の発行イベントと指定 kind の
-    // イベントは maxSize 超過時に最後まで残り、TTL スイープの対象外になる
-    // （maxSize は常に厳守）。不正な npub はコンストラクタで例外を投げる
+    // イベントは退避で最後まで残り、TTL スイープの対象外になる（退避先の件数は
+    // 常に厳守）。不正な npub はコンストラクタで例外を投げる
     cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
 
@@ -38,6 +39,8 @@ interface NostrRelayServerOptions {
     ttl?: number;
     // TTL スイープの実行間隔（秒）。既定 60
     ttlSweepInterval?: number;
+    // 上限チェックの実行間隔（秒）。既定 600
+    storageSweepInterval?: number;
     // 上流リレーの URL リスト。指定するとリードスルー / ライトスルーが有効になり、
     // このサーバーは上流リレー群の手前に挟まる透過キャッシュとして動作する。
     // 未指定なら従来どおり自分が保存したイベントのみ返す独立リレー。
@@ -81,13 +84,14 @@ export class NostrRelayServer {
     this.server = new WebSocketServer(this.options.port);
 
     // ストレージ上限・退避戦略は relay 経由で適用する
-    // （relay が保存後に storage.enforceLimit を呼ぶ）
+    // （relay の定期スイープが storage.enforceLimit を呼ぶ）
     this.relay = new NostrCacheRelay(this.storage, this.server, {
       maxSubscriptions: this.options.relay?.maxSubscriptions || 100,
       maxEventsPerRequest: this.options.relay?.maxEventsPerRequest || 500,
       storageMaxSize: this.options.storageOptions?.maxSize,
       cacheStrategy: this.options.storageOptions?.cacheStrategy,
       cachePriority: this.options.storageOptions?.cachePriority,
+      storageSweepInterval: this.options.relay?.storageSweepInterval,
       ttl: this.options.relay?.ttl,
       ttlSweepInterval: this.options.relay?.ttlSweepInterval,
       validateEventsType: this.options.relay?.validateEvents !== false ? 'IMMEDIATELY' : 'NONE',

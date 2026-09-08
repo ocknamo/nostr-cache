@@ -82,7 +82,7 @@ kind 5 のイベントを受け取ると、リレーは `e` タグ（イベン�
 - **削除リクエスト自体は保存し、配信し続けます**（まだ受け取っていないクライアントのため／
   再受信時に再適用できるようにするため）。そのため kind 5 は **`ttl` スイープの対象外**で、
   **`storageMaxSize` 超過時も最後に退避**されます（`cachePriority` の設定によらず常に）。
-  ただし退避の保護は best-effort で、他に退避できるものが無ければ `maxSize` が優先されます。
+  ただし退避の保護は best-effort で、他に退避できるものが無ければ退避の目標件数が優先されます。
   kind 5 を指す kind 5 は効果を持ちません
 - `a` タグは `created_at <= 削除リクエストの created_at` の版のみを削除します。
   リクエストより後に公開された版は残ります
@@ -180,7 +180,9 @@ new NostrCacheRelay(
 interface NostrRelayOptions {
   maxSubscriptions?: number;        // クライアントあたりの最大購読数 (default: 20)
   maxEventsPerRequest?: number;     // REQ 応答 / subscribe 再生で返す最大件数 (default: 500)。超過時は新しい順に N 件
-  storageMaxSize?: number;          // 最大保存件数。超過時は relay が storage.enforceLimit を呼び cacheStrategy に従って退避（未指定で無効）
+  storageMaxSize?: number;          // 最大保存件数。定期スイープが超過を検知したとき cacheStrategy に従って約 90% まで退避（未指定で無効）
+  storageSweepInterval?: number;    // 上限チェックの実行間隔（秒）。既定 600。前回から storageMaxSize の
+                                    // 約 10% が保存された時点でも走る（初回は connect の 30 秒後）
   ttl?: number;                     // TTL 秒。キャッシュ投入（保存）からの経過時間が超過したイベントを定期スイープで削除
                                     // （created_at 基準ではない。未指定で無効。deleteExpired 対応ストレージが必要）
   ttlSweepInterval?: number;        // TTL スイープの実行間隔 秒 (default: 60)
@@ -218,16 +220,21 @@ interface NostrRelayOptions {
 
 #### 退避・TTL・キャッシュ優先度の注意 / Eviction, TTL and cache priority caveats
 
-- `storageMaxSize` は**ソフトリミット**です。退避パス（件数確認＋削除）はトランザクション
-  で原子化していますが、`saveEvent` 自体は別コミットのため、並行書き込み下では一時的に
-  上限を超えることがあります（最終的に収束）。また `FIFO` は `created_at`（秒精度）基準で、
-  同値のイベントは主キー（id）順に退避されます（厳密な到着順ではない近似）。
+- `storageMaxSize` は**ソフトリミット**です。退避は保存のたびではなく `storageSweepInterval`
+  秒ごとのスイープで行い、超過を検知したときに `storageMaxSize` の約 90% までまとめて
+  落とします。したがって**次のスイープまで上限を超えたまま保持しえます**（保存経路に
+  退避の走査を入れると、上限に張り付いたキャッシュでは 1 件保存するたびに読み出しと
+  同じテーブルの rw トランザクションが挟まるため）。超過幅が時間だけで決まらないよう、
+  前回のスイープから `storageMaxSize` の約 10% が保存された時点でも 1 回走ります。
+  また `FIFO` は
+  `created_at`（秒精度）基準で、同値のイベントは主キー（id）順に退避されます
+  （厳密な到着順ではない近似）。
 - `ttl` の期限切れはバックグラウンドの定期スイープで削除されるため、**最大で
   `ttlSweepInterval` 秒ぶん、期限切れイベントを `REQ` に返しうります**（読み出し時の
   フィルタではありません）。
 - `cachePriority` の優先も**ソフト**です。キャッシュが優先イベントだけで `maxSize` を
-  超えた場合は、優先イベントも通常の `cacheStrategy` 順で退避されます（`maxSize` は常に厳守）。
-  この状態では保存のたびに退避が起きるため、優先対象は `maxSize` に対して十分小さく保つこと。
+  超えた場合は、優先イベントも通常の `cacheStrategy` 順で退避されます（スイープは
+  必ず目標件数まで落とす）。優先対象は `maxSize` に対して十分小さく保つこと。
 - `DexieStorage` の退避は優先イベントを飛ばしながらインデックス順に走査するため、
   キャッシュの大半が優先イベントだと退避パスの走査コストが増えます。
 - `cachePriority` による **TTL の除外は無条件**です。`storageMaxSize` を設定せずに常用 kind
@@ -239,12 +246,13 @@ interface NostrRelayOptions {
 - NIP-09 の削除リクエスト（kind 5）は `cachePriority` の設定によらず常に同じ保護を受けます
   （TTL 対象外・最後に退避）。
 
-/ `storageMaxSize` is a soft limit (the eviction pass is atomic, but `saveEvent` commits
-separately, so concurrent writes may overshoot transiently). Cache priority is soft too: when
-priority events alone exceed `maxSize` they are evicted in normal `cacheStrategy` order, since
-`maxSize` is always enforced. TTL exemption, by contrast, is unconditional — pair `cachePriority`
-with `storageMaxSize` or storage grows without bound. Kind 5 always gets the same protection
-regardless of `cachePriority`.
+/ `storageMaxSize` is a soft limit: eviction runs on a timer (`storageSweepInterval`), or sooner
+once about 10% of `storageMaxSize` has been stored since the last pass, and only cuts back — to
+about 90% — when the count exceeds the limit, so the store sits above it between passes. Cache
+priority is soft too: when priority events alone exceed that target they are evicted in normal
+`cacheStrategy` order, since the target is always reached. TTL exemption, by contrast, is
+unconditional — pair `cachePriority` with `storageMaxSize` or storage grows without bound.
+Kind 5 always gets the same protection regardless of `cachePriority`.
 
 ### `interface StorageAdapter`
 

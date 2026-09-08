@@ -103,13 +103,13 @@ await relay.connect();
 
 | 軸 | オプション |
 |---|---|
-| 保存量の制御 | `storageMaxSize` / `cacheStrategy` / `ttl` / `cachePriority` |
+| 保存量の制御 | `storageMaxSize` / `storageSweepInterval` / `cacheStrategy` / `ttl` / `cachePriority` |
 | 上流への透過キャッシュ化 | `upstreamRelays` / `upstreamEoseTimeout` / `upstreamFreshness` |
 | 署名検証 | `validateEventsType` / `lazyValidateInterval` / `lazyValidateBatchSize` |
 
 ```typescript
 const relay = new NostrCacheRelay(storage, transport, {
-  storageMaxSize: 10000,       // 超過分は cacheStrategy に従って退避
+  storageMaxSize: 10000,       // 定期スイープで超過を検知したら約 90% まで退避
   ttl: 3600,
   cachePriority: {
     pubkeys: ['npub1...'],     // 自分の投稿は最後まで残す

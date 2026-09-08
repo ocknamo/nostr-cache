@@ -565,7 +565,7 @@ export class SqliteStorage implements StorageAdapter {
         return deleted;
       });
       if (evicted > 0) {
-        logger.info(`Evicted ${evicted} events to respect storageMaxSize ${maxSize}`);
+        logger.info(`Evicted ${evicted} events to leave at most ${maxSize}`);
       }
       return evicted;
     } catch (error) {

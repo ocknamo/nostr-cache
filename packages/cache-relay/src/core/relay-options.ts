@@ -22,8 +22,15 @@ export interface NostrRelayOptions {
    */
   maxEventsPerRequest?: number;
 
-  /** 最大保存件数。`enforceLimit` 対応ストレージが必要。未指定・非正で無効。 */
+  /**
+   * 最大保存件数。定期スイープで退避するため、超過したまま最大
+   * {@link storageSweepInterval} 秒ぶん保持しうる（超過を検知したら約 90% まで
+   * 落とす）。`enforceLimit` 対応ストレージが必要。未指定・非正で無効。
+   */
   storageMaxSize?: number;
+
+  /** 上限チェックの実行間隔（秒）。既定 600 */
+  storageSweepInterval?: number;
 
   /**
    * キャッシュ投入からの生存秒数。定期スイープで削除するため、期限切れイベントを
