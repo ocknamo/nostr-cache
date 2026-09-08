@@ -75,6 +75,10 @@ export interface StorageAdapter {
 
   deleteEvent(id: string): Promise<boolean>;
 
+  /**
+   * 全イベントを削除する。戻り値を持たないので、失敗は reject で伝える
+   * （握りつぶすと `NostrCacheRelay.clearCache()` が消せていないのに成功を返す）。
+   */
   clear(): Promise<void>;
 
   count(): Promise<number>;

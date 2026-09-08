@@ -141,7 +141,8 @@ npm パッケージを入れられない構成のための入口です。
 
 | 名前 | 内容 |
 |---|---|
-| `acquireRelayHost(config?)` | ページ共有リレーを取得（未起動なら起動）。`{ relay, storage, metrics, interceptUrl, getConnectedUpstreams(), release() }` を返す（**埋め込む側が使うのは `interceptUrl` と `release()` だけで十分です**。`relay` / `storage` / `metrics` は内部実装のインスタンスなので、予告なく変わり得ます） |
+| `acquireRelayHost(config?)` | ページ共有リレーを取得（未起動なら起動）。`{ relay, storage, metrics, interceptUrl, getConnectedUpstreams(), clearCache(), release() }` を返す（**埋め込む側が使うのは `interceptUrl` / `clearCache()` / `release()` だけで十分です**。`relay` / `storage` / `metrics` は内部実装のインスタンスなので、予告なく変わり得ます） |
+| `host.clearCache()` | 保存済みイベントを全消しする。リレーは動いたままで購読も閉じないので、**画面に出ているイベントは消えません**（利用者向けの「キャッシュを削除」ならリロードと組み合わせてください）。release 済みの handle から呼ぶと例外 |
 | `getRelayHostRefCount()` | 未 `release()` の取得数。0 は「停止処理に入った」であって、`globalThis.WebSocket` が戻るのは最後の `release()` の await が解決したあとです |
 | `DEFAULT_INTERCEPT_URL` / `DEFAULT_DB_NAME` / `DEFAULT_PROFILE_FRESHNESS` / `DEFAULT_FOLLOWS_FRESHNESS` / `DEFAULT_LAZY_VALIDATE_INTERVAL` / `DEFAULT_STORAGE_MAX_SIZE` / `DEFAULT_CACHE_STRATEGY` | 上表の既定値 |
 | `default` | `<nostr-timeline>` のコンポーネント（**通常は使いません**。要素は読み込み時に自動登録されます） |

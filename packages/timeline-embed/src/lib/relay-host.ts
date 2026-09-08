@@ -92,11 +92,14 @@ export interface RelayHost {
   metrics: CacheMetrics;
   interceptUrl: string;
   getConnectedUpstreams(): number;
+  /** 保存済みイベントを全消しする。リレーは動いたまま、購読も閉じない。 */
+  clearCache(): Promise<void>;
   /** 最後の 1 つを release した時点でリレーが停止する。 */
   release(): Promise<void>;
 }
 
-type SharedHost = Omit<RelayHost, 'release'>;
+/** 取得側ごとに違うのは、解放済み判定を持つ `clearCache` / `release` だけ。 */
+type SharedHost = Omit<RelayHost, 'clearCache' | 'release'>;
 
 interface HostState {
   config: ResolvedConfig;
@@ -267,6 +270,16 @@ export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<Re
   let released = false;
   return {
     ...shared,
+    clearCache: async () => {
+      // release 済みなら、この handle が掴んでいるのは畳んだホストで、
+      // いま動いているホストの DB を消しにいくことになる。
+      if (released) {
+        throw new Error('This relay host acquisition has already been released');
+      }
+      await shared.relay.clearCache();
+      // 消えたイベントの origin が残ると、次の配信をキャッシュヒットと誤って数える。
+      shared.metrics.reset();
+    },
     release: async () => {
       if (released) {
         return;

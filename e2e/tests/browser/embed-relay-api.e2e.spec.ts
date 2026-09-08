@@ -27,6 +27,7 @@ const TIMEOUT = 15000;
 interface EmbedGlobal {
   acquireRelayHost(config?: Record<string, unknown>): Promise<{
     interceptUrl: string;
+    clearCache(): Promise<void>;
     release(): Promise<void>;
   }>;
   getRelayHostRefCount(): number;
@@ -46,7 +47,7 @@ interface EmbedWindow extends Window {
   /** Captured by the host page before the bundle can patch it. */
   __originalWebSocket: unknown;
   /** The acquisition under test, parked so a later `evaluate` can release it. */
-  __host: { release(): Promise<void> };
+  __host: { clearCache(): Promise<void>; release(): Promise<void> };
 }
 
 describe('Embed bundle relay API E2E', () => {
@@ -202,6 +203,68 @@ describe('Embed bundle relay API E2E', () => {
     });
 
     expect(afterRelease).toEqual({ refCount: 0, restored: true });
+  });
+
+  it('clears the cached events through the bundle API', async () => {
+    page = await openScriptOnlyPage();
+
+    // No upstream: the only way an event can come back from a REQ is the cache,
+    // so an empty answer after clearCache() means the cache really is empty.
+    const counts = await page.evaluate(
+      async ({ event, timeout }) => {
+        const win = window as unknown as EmbedWindow;
+        const host = await win.NostrTimelineEmbed.acquireRelayHost({ dbName: 'e2e-relay-clear' });
+        win.__host = host;
+
+        const socket = new WebSocket(host.interceptUrl);
+        await new Promise<void>((resolve) => {
+          socket.onopen = () => resolve();
+        });
+
+        const roundTrip = <T>(
+          send: () => void,
+          onMessage: (message: [string, ...unknown[]], done: (value: T) => void) => void
+        ) =>
+          new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('timed out')), timeout);
+            socket.onmessage = (message) => {
+              onMessage(JSON.parse(message.data), (value) => {
+                clearTimeout(timer);
+                resolve(value);
+              });
+            };
+            send();
+          });
+
+        const stored = await roundTrip<boolean>(
+          () => socket.send(JSON.stringify(['EVENT', event])),
+          ([type, , accepted], done) => {
+            if (type === 'OK') done(accepted as boolean);
+          }
+        );
+
+        const query = (subscriptionId: string) => {
+          let received = 0;
+          return roundTrip<number>(
+            () => socket.send(JSON.stringify(['REQ', subscriptionId, { kinds: [1], limit: 10 }])),
+            ([type], done) => {
+              if (type === 'EVENT') received += 1;
+              else if (type === 'EOSE') done(received);
+            }
+          );
+        };
+
+        const before = await query('before');
+        await host.clearCache();
+        const after = await query('after');
+
+        socket.close();
+        return { stored, before, after };
+      },
+      { event: cannedEvent, timeout: TIMEOUT }
+    );
+
+    expect(counts).toEqual({ stored: true, before: 1, after: 0 });
   });
 
   it('shares its relay with a widget added to the same page', async () => {

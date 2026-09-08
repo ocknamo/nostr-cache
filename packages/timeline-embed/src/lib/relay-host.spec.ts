@@ -209,6 +209,35 @@ describe('acquireRelayHost', () => {
    * Losing the ceiling would go unnoticed until someone's IndexedDB had grown
    * for a month, so pin what reaches the relay.
    */
+  describe('clearCache', () => {
+    it('empties the cache and forgets the metrics it recorded', async () => {
+      const host = await acquire();
+      await host.relay.publishEvent(makeEvent({ id: '0'.repeat(64) }));
+      host.metrics.recordUpstreamEvent('0'.repeat(64), 'wss://upstream.example');
+
+      await host.clearCache();
+
+      expect(await host.storage.count()).toBe(0);
+      expect(host.metrics.snapshot()).toEqual({ cacheHits: 0, upstreamEvents: 0, delivered: 0 });
+    });
+
+    it('leaves the relay running', async () => {
+      const host = await acquire();
+
+      await host.clearCache();
+
+      expect(globalThis.WebSocket).not.toBe(originalWebSocket);
+      expect(getRelayHostRefCount()).toBe(1);
+    });
+
+    it('refuses to clear through a released handle', async () => {
+      const host = await acquire();
+      await host.release();
+
+      await expect(host.clearCache()).rejects.toThrow();
+    });
+  });
+
   describe('cache ceiling', () => {
     function evictionOptions(host: RelayHost): {
       storageMaxSize?: number;

@@ -153,6 +153,7 @@ new NostrCacheRelay(
 | `subscribe(subscriptionId: string, filters: Filter[]): Promise<void>` | インプロセス購読を作成し、保存済みイベントを `event` リスナへ再生してから `eose` を発火 / Creates an in-process subscription, replays stored events to `event` listeners, then emits `eose` |
 | `unsubscribe(subscriptionId: string): boolean` | 購読を削除。存在して削除できたら `true` / Removes a subscription; `true` if it existed |
 | `getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>` | イベント id ごとの永続化された署名検証状態（`'validated'` / `'pending'` / `'unknown'`）を一括取得。主キー参照のため高頻度呼び出し可・LRU/LFU のアクセス追跡に影響しない。組み込みクライアントが自前の署名検証を省略してバッジ表示等に使える / Bulk-fetches the persisted signature-verification status per event id. Primary-key lookup — cheap to poll and never counts as a read for LRU/LFU. Lets an embedding client reuse the relay's verification instead of re-verifying |
+| `clearCache(): Promise<void>` | 保存済みイベントをすべて削除する。リレーは動いたままで購読も閉じないため、クライアントに配信済みのイベントは画面に残り、ライブ更新も届き続ける。削除に失敗した場合は reject する / Deletes every stored event. The relay keeps running and subscriptions stay open, so events already delivered to a client remain on its screen and live updates keep arriving. Rejects if the deletion fails |
 | `setCachePriority(input?): void` | キャッシュ優先度設定（`cachePriority` オプションと同形式。pubkey は npub / hex 可）を実行時に差し替える。不正値は例外を投げて現行設定を維持。`undefined` で解除。優先判定は退避・TTL スイープ実行時に評価されるため、次回の退避・スイープから即反映（退避済みイベントは戻らない） / Replaces the cache priority config at runtime (same shape as the `cachePriority` option; pubkeys as npub or hex). Invalid input throws and keeps the current config; pass `undefined` to clear. Priority is evaluated at eviction / TTL-sweep time, so new rules apply from the next pass — already-evicted events are not restored |
 | `on(event, callback): void` | イベントリスナを登録 / Registers an event listener |
 | `off(event, callback): void` | イベントリスナを解除 / Removes an event listener |
@@ -342,6 +343,12 @@ interface EventAddress {
   `created_at <= until`; for addressable kinds the `d` tag must equal
   `address.identifier` (a missing `d` tag counts as the empty identifier), while for
   replaceable kinds the identifier is ignored.
+- `clear` は全イベントを削除します。`getCurrentVersion` と同じく**失敗を握り潰してはいけません**:
+  戻り値が無いため例外だけが唯一の信号で、握り潰すと `NostrCacheRelay.clearCache()` が
+  「消せていないのに消した」と応えることになります。
+  / `clear` deletes every event and, like `getCurrentVersion`, must not swallow errors: it
+  returns nothing, so throwing is the only signal there is — swallowing makes
+  `NostrCacheRelay.clearCache()` report a cache it failed to empty as emptied.
 - `getCurrentVersion` は座標（`EventAddress`）に保存されている置換可能 / アドレサブル
   イベントを返します。リレーは受信イベントを保存してよいかの判定（NIP-01 の版比較）に
   使うため、複数の版が保存されている場合は NIP-01 の順序（`created_at` の新しい方、

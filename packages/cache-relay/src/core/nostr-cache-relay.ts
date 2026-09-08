@@ -156,6 +156,16 @@ export class NostrCacheRelay {
   }
 
   /**
+   * Drop every cached event.
+   *
+   * Open subscriptions are left alone: clients keep the events already
+   * delivered to them, and live updates keep arriving.
+   */
+  async clearCache(): Promise<void> {
+    await this.storage.clear();
+  }
+
+  /**
    * Wire up the upstream read/write-through coordinator when upstream relays
    * (or a custom pool) are configured. When neither is set, no coordinator is
    * created and the relay behaves as an independent relay (opt-in).

@@ -453,14 +453,8 @@ export class SqliteStorage implements StorageAdapter {
   }
 
   async clear(): Promise<void> {
-    try {
-      // event_tags は ON DELETE CASCADE で追随する
-      this.db.delete(events).run();
-    } catch (error) {
-      logger.error(
-        `Failed to clear events: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
+    // event_tags は ON DELETE CASCADE で追随する
+    this.db.delete(events).run();
   }
 
   /**
