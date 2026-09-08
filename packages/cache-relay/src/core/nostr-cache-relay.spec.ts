@@ -487,6 +487,31 @@ describe('NostrCacheRelay', () => {
     });
   });
 
+  describe('clearCache', () => {
+    it('should clear the storage', async () => {
+      await relay.clearCache();
+
+      expect(mockStorage.clear).toHaveBeenCalled();
+    });
+
+    it('should propagate a storage failure', async () => {
+      mockStorage.clear.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(relay.clearCache()).rejects.toThrow('boom');
+    });
+
+    it('should keep delivering to subscriptions opened before the clear', async () => {
+      const received = vi.fn();
+      await relay.subscribe('sub1', [sampleFilter]);
+      relay.on('event', received);
+
+      await relay.clearCache();
+      await relay.publishEvent(sampleEvent);
+
+      expect(received).toHaveBeenCalledWith(sampleEvent);
+    });
+  });
+
   describe('event listeners', () => {
     it('should add and remove event listeners', () => {
       const handler = vi.fn();

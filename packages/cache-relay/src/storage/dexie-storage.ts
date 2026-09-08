@@ -318,13 +318,7 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   }
 
   async clear(): Promise<void> {
-    try {
-      await this.events.clear();
-    } catch (error) {
-      logger.error(
-        `Failed to clear events: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
+    await this.events.clear();
   }
 
   /**

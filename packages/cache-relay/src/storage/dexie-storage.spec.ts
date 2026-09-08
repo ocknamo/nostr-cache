@@ -91,6 +91,17 @@ describe('DexieStorage (Dexie-specific)', () => {
         })
       ).rejects.toThrow('Database is locked');
     });
+
+    it('should propagate a clear failure instead of reporting an empty cache', async () => {
+      // 戻り値が無いので、握りつぶすと消せていないのに消したことになる
+      await storage.saveEvent(CONFORMANCE_MOCK_EVENT);
+      // @ts-ignore - private field access for testing
+      vi.spyOn(storage.events, 'clear').mockImplementationOnce(() => {
+        throw new Error('Database is locked');
+      });
+
+      await expect(storage.clear()).rejects.toThrow('Database is locked');
+    });
   });
 
   // `limit` の有無で別々の経路を通るので、切り詰めた結果が「全一致を新しい順に

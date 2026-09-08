@@ -138,8 +138,13 @@ export class NostrRelayServer {
       const storage = this.storage as StorageAdapter & { close?: () => void };
       storage.close?.();
     } else {
-      // インメモリモードは従来どおりストレージをクリーンアップ
-      await this.storage.clear();
+      // インメモリモードは従来どおりストレージをクリーンアップ。
+      // 消せなくても停止自体は完了させる（プロセスと一緒に消えるため）
+      try {
+        await this.storage.clear();
+      } catch (error) {
+        logger.error('Failed to clear storage on shutdown:', error);
+      }
     }
     logger.info('Nostr relay server stopped');
   }

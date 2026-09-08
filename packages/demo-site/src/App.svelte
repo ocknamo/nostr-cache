@@ -180,12 +180,7 @@
       benchmarkResult = await runBenchmark({
         interceptUrl: host.interceptUrl,
         filter,
-        clearCache: async () => {
-          await host.storage.clear();
-          // Origins recorded against the wiped events would mislabel the
-          // cold pass as cache hits.
-          host.metrics.reset();
-        },
+        clearCache: () => host.clearCache(),
       });
       await refreshStoredCount();
     } catch (error) {
