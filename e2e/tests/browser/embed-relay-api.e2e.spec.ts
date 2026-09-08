@@ -214,7 +214,6 @@ describe('Embed bundle relay API E2E', () => {
       async ({ event, timeout }) => {
         const win = window as unknown as EmbedWindow;
         const host = await win.NostrTimelineEmbed.acquireRelayHost({ dbName: 'e2e-relay-clear' });
-        win.__host = host;
 
         const socket = new WebSocket(host.interceptUrl);
         await new Promise<void>((resolve) => {
@@ -259,6 +258,7 @@ describe('Embed bundle relay API E2E', () => {
         const after = await query('after');
 
         socket.close();
+        await host.release();
         return { stored, before, after };
       },
       { event: cannedEvent, timeout: TIMEOUT }

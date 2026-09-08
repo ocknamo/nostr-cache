@@ -500,12 +500,15 @@ describe('NostrCacheRelay', () => {
       await expect(relay.clearCache()).rejects.toThrow('boom');
     });
 
-    it('should keep existing subscriptions', async () => {
+    it('should keep delivering to subscriptions opened before the clear', async () => {
+      const received = vi.fn();
       await relay.subscribe('sub1', [sampleFilter]);
+      relay.on('event', received);
 
       await relay.clearCache();
+      await relay.publishEvent(sampleEvent);
 
-      expect(relay.unsubscribe('sub1')).toBe(true);
+      expect(received).toHaveBeenCalledWith(sampleEvent);
     });
   });
 

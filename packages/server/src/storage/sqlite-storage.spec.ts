@@ -114,7 +114,7 @@ describe('SqliteStorage (SQLite-specific)', () => {
       ).rejects.toThrow();
     });
 
-    it('should not throw from the void-returning methods', async () => {
+    it('should not throw from markValidated', async () => {
       await expect(storage.markValidated([mockEvent.id])).resolves.toBeUndefined();
     });
 

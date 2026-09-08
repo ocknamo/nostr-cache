@@ -277,7 +277,8 @@ export async function acquireRelayHost(config: RelayHostConfig = {}): Promise<Re
         throw new Error('This relay host acquisition has already been released');
       }
       await shared.relay.clearCache();
-      // 消えたイベントの origin が残ると、次の配信をキャッシュヒットと誤って数える。
+      // 消えたイベントの上流目撃が残ると、次にそれが届いたときキャッシュではなく
+      // 上流由来として数えられる。持ち越したカウンタも同じく前パスの値になる。
       shared.metrics.reset();
     },
     release: async () => {

@@ -205,10 +205,6 @@ describe('acquireRelayHost', () => {
     socket.close();
   });
 
-  /**
-   * Losing the ceiling would go unnoticed until someone's IndexedDB had grown
-   * for a month, so pin what reaches the relay.
-   */
   describe('clearCache', () => {
     it('empties the cache and forgets the metrics it recorded', async () => {
       const host = await acquire();
@@ -238,6 +234,10 @@ describe('acquireRelayHost', () => {
     });
   });
 
+  /**
+   * Losing the ceiling would go unnoticed until someone's IndexedDB had grown
+   * for a month, so pin what reaches the relay.
+   */
   describe('cache ceiling', () => {
     function evictionOptions(host: RelayHost): {
       storageMaxSize?: number;
