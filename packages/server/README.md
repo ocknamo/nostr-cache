@@ -93,7 +93,7 @@ interface NostrRelayServerOptions {
   storageOptions?: {
     dbName?: string;   // データベース名（既定のインメモリモードのみ）
     dbPath?: string;   // SQLite ファイルパス。指定すると永続化が有効になる（dbName は無視）
-    maxSize?: number;  // 最大保存件数
+    maxSize?: number;  // 最大保存件数（定期スイープで約 90% まで退避するソフトリミット）
     cacheStrategy?: 'LRU' | 'FIFO' | 'LFU';
     cachePriority?: { pubkeys?: string[]; kinds?: number[] };
   };
@@ -105,6 +105,7 @@ interface NostrRelayServerOptions {
     validateEvents?: boolean;      // false は validateEventsType: 'NONE' に対応
     ttl?: number;
     ttlSweepInterval?: number;
+    storageSweepInterval?: number; // 上限チェックの実行間隔（秒）。既定 600
     upstreamRelays?: string[];
     upstreamEoseTimeout?: number;
     upstreamFreshness?: Record<number, number>;

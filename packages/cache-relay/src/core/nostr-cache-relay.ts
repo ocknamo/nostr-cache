@@ -12,6 +12,7 @@ import type {
 import { applyDeletionRequest, isDeletionEvent } from '../event/deletion.js';
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
+import { EvictionSweeper } from '../storage/eviction-sweeper.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter, ValidationStatus } from '../storage/storage-adapter.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
@@ -45,6 +46,8 @@ export class NostrCacheRelay {
   private lazyValidator?: LazyValidator;
   /** Background TTL sweeper, present only when `ttl` is configured. */
   private expiryReaper?: ExpiryReaper;
+  /** Background eviction sweeper, present only when `storageMaxSize` is set. */
+  private evictionSweeper?: EvictionSweeper;
   /**
    * Upstream read/write-through orchestrator, present only when upstream relays
    * (or a custom pool) are configured.
@@ -97,11 +100,18 @@ export class NostrCacheRelay {
       // LAZY の検証キューはストレージ自体（validated カラム）なので、
       // ここで検証器を渡す必要はない
       this.options.validateEventsType ?? 'IMMEDIATELY',
-      this.options.storageMaxSize,
-      this.options.cacheStrategy,
-      this.options.cachePriority,
       this.freshnessGate
     );
+
+    // 上限の超過は保存のたびではなく、この定期スイープでまとめて解消する
+    if (this.options.storageMaxSize !== undefined && this.options.storageMaxSize > 0) {
+      this.evictionSweeper = new EvictionSweeper(storage, {
+        maxSize: this.options.storageMaxSize,
+        intervalSeconds: this.options.storageSweepInterval,
+        strategy: this.options.cacheStrategy,
+        priority: this.options.cachePriority,
+      });
+    }
 
     // TTL 設定時はバックグラウンドの定期パージを用意する。
     // 期限切れイベントは読み出し時ではなく、このスイープで削除する
@@ -140,7 +150,7 @@ export class NostrCacheRelay {
     // 正規化が throw した場合は現行設定を維持する（先に検証してから反映）
     const normalized = normalizeCachePriority(input);
     this.options.cachePriority = normalized;
-    this.messageHandler.setCachePriority(normalized);
+    this.evictionSweeper?.setPriority(normalized);
     this.expiryReaper?.setPriority(normalized);
   }
 
@@ -214,6 +224,7 @@ export class NostrCacheRelay {
     await this.transport.start();
     this.lazyValidator?.start();
     this.expiryReaper?.start();
+    this.evictionSweeper?.start();
     // 上流への接続失敗はログのみで connect 自体は成功させる
     // （キャッシュはオフラインでも従来動作で機能すべき）
     if (this.upstreamCoordinator) {
@@ -232,6 +243,7 @@ export class NostrCacheRelay {
     // 未検証イベントは validated=0 のまま永続化されており、次回 connect で検証が再開される
     this.lazyValidator?.stop();
     this.expiryReaper?.stop();
+    this.evictionSweeper?.stop();
     this.emitter.emit('disconnect');
   }
 
@@ -257,8 +269,6 @@ export class NostrCacheRelay {
         await applyDeletionRequest(this.storage, event);
       }
 
-      await this.enforceStorageLimit();
-
       const matches = this.subscriptionManager.findMatchingSubscriptions(event);
       const localSubs = matches.get(LOCAL_CLIENT_ID);
       if (localSubs && localSubs.length > 0) {
@@ -276,27 +286,6 @@ export class NostrCacheRelay {
     }
 
     return saved;
-  }
-
-  /**
-   * Ask the storage adapter to evict down to `storageMaxSize` (if configured
-   * and supported). Eviction is a post-save side effect: its failure never
-   * affects the originating save / notification.
-   */
-  private async enforceStorageLimit(): Promise<void> {
-    const maxSize = this.options.storageMaxSize;
-    if (maxSize === undefined || maxSize <= 0) {
-      return;
-    }
-    try {
-      await this.storage.enforceLimit?.(
-        maxSize,
-        this.options.cacheStrategy,
-        this.options.cachePriority
-      );
-    } catch (error) {
-      logger.error('Failed to enforce storage limit:', error);
-    }
   }
 
   /**

@@ -8,8 +8,7 @@ import {
   type ReqMessage,
 } from '@nostr-cache/shared';
 import { EventHandler, type ValidateEventsType } from '../event/event-handler.js';
-import type { CachePriority } from '../storage/priority.js';
-import type { CacheStrategy, StorageAdapter } from '../storage/storage-adapter.js';
+import type { StorageAdapter } from '../storage/storage-adapter.js';
 import type { FreshnessGate } from '../upstream/freshness.js';
 import { narrowFiltersByIdCoverage } from '../upstream/id-coverage.js';
 import type { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
@@ -39,9 +38,6 @@ export class MessageHandler {
     private maxSubscriptions = 20,
     private maxEventsPerRequest = 500,
     validateEventsType: ValidateEventsType = 'IMMEDIATELY',
-    private storageMaxSize?: number,
-    private cacheStrategy?: CacheStrategy,
-    private cachePriority?: CachePriority,
     private freshnessGate?: FreshnessGate
   ) {
     this.storage = storage;
@@ -106,7 +102,7 @@ export class MessageHandler {
         message: resultMessage,
         superseded,
         matches,
-      } = await this.ingestEvent(event);
+      } = await this.eventHandler.handleEvent(event);
 
       if (!success) {
         this.sendOK(clientId, event.id, false, resultMessage);
@@ -146,51 +142,16 @@ export class MessageHandler {
   }
 
   /**
-   * Validate (per the configured mode), store, and post-process one event —
-   * the storage-side work shared by the transport EVENT path and by upstream
-   * backfill ({@link ingestUpstreamEvent}). Does NOT send OK or broadcast.
-   *
-   * Validation happens inside `EventHandler.handleEvent` — IMMEDIATELY rejects
-   * invalid events before storing, LAZY stores as pending for the background
-   * pass (but validates ephemeral events up front, since they are never
-   * stored), NONE skips it. No pre-check here: that would verify the signature
-   * twice per EVENT.
-   */
-  private async ingestEvent(
-    event: NostrEvent
-  ): Promise<Awaited<ReturnType<EventHandler['handleEvent']>>> {
-    const result = await this.eventHandler.handleEvent(event);
-    if (!result.success) {
-      return result;
-    }
-
-    // 退避は保存後の付随処理であり、失敗してもレスポンス/配信に影響させない
-    if (result.stored && this.storageMaxSize !== undefined && this.storageMaxSize > 0) {
-      try {
-        await this.storage.enforceLimit?.(
-          this.storageMaxSize,
-          this.cacheStrategy,
-          this.cachePriority
-        );
-      } catch (error) {
-        logger.error('Failed to enforce storage limit:', error);
-      }
-    }
-
-    return result;
-  }
-
-  /**
    * Backfill one event received from an upstream relay. Runs the same
-   * validation / storage / post-processing as a client EVENT but sends no OK
-   * and broadcasts to no subscriptions — the {@link UpstreamCoordinator}
-   * decides delivery (dedup, routing to the owning subscription).
+   * validation and storage as a client EVENT but sends no OK and broadcasts to
+   * no subscriptions — the {@link UpstreamCoordinator} decides delivery (dedup,
+   * routing to the owning subscription).
    */
   async ingestUpstreamEvent(
     event: NostrEvent
   ): Promise<{ success: boolean; stored: boolean; superseded: boolean }> {
     try {
-      const { success, stored, superseded } = await this.ingestEvent(event);
+      const { success, stored, superseded } = await this.eventHandler.handleEvent(event);
       return { success, stored, superseded: superseded === true };
     } catch (error) {
       logger.error('Error ingesting upstream event:', error);
@@ -205,15 +166,6 @@ export class MessageHandler {
    */
   setUpstreamCoordinator(coordinator: UpstreamCoordinator): void {
     this.upstreamCoordinator = coordinator;
-  }
-
-  /**
-   * Replace the cache priority config at runtime. Called by
-   * {@link NostrCacheRelay.setCachePriority} with an already-normalized
-   * config; takes effect from the next stored event's eviction pass.
-   */
-  setCachePriority(priority?: CachePriority): void {
-    this.cachePriority = priority;
   }
 
   private async handleReqMessage(clientId: string, message: ReqMessage): Promise<void> {

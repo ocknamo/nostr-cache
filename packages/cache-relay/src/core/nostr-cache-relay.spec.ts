@@ -182,18 +182,96 @@ describe('NostrCacheRelay', () => {
       }
     );
 
-    it('should enforce the storage limit after a save when storageMaxSize is set', async () => {
-      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        storageMaxSize: 100,
-        cacheStrategy: 'FIFO',
-      });
-
-      await boundedRelay.publishEvent(sampleEvent);
-
-      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', undefined);
+    it('should throw at construction time on an invalid cachePriority pubkey', () => {
+      expect(
+        () =>
+          new NostrCacheRelay(mockStorage, mockTransport, {
+            cachePriority: { pubkeys: ['npub1invalid'] },
+          })
+      ).toThrow(/npub1invalid/);
     });
 
-    it('should pass the normalized cachePriority (npub decoded to hex) to enforceLimit', async () => {
+    it('should keep the current config when setCachePriority input is invalid', () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        cachePriority: { kinds: [0] },
+      });
+
+      expect(() => boundedRelay.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(
+        /npub1invalid/
+      );
+    });
+
+    it('should leave eviction to the sweep rather than doing it on save', async () => {
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+      });
+
+      const result = await boundedRelay.publishEvent(sampleEvent);
+
+      expect(result).toBe(true);
+      expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('storage limit background sweep', () => {
+    /** {@link DEFAULT_STORAGE_SWEEP_DELAY} 秒。初回スイープはここまで走らない。 */
+    const DELAY_MS = 30_000;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      // clearAllMocks は実装を残すので、件数のモックが後続へ漏れないよう戻す
+      (mockStorage.count as Mock).mockResolvedValue(0);
+    });
+
+    it('should not sweep when storageMaxSize is unset', async () => {
+      await relay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS + 600_000);
+
+      expect(mockStorage.count).not.toHaveBeenCalled();
+      expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
+    });
+
+    it('should not evict while the count is within the limit', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(100);
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        storageSweepInterval: 60,
+      });
+
+      await boundedRelay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS);
+
+      expect(mockStorage.count).toHaveBeenCalledTimes(1);
+      expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
+
+      await boundedRelay.disconnect();
+    });
+
+    it('should evict down to 90% of storageMaxSize once it is exceeded', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
+      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        storageMaxSize: 100,
+        storageSweepInterval: 60,
+        cacheStrategy: 'LRU',
+      });
+
+      await boundedRelay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS);
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(90, 'LRU', undefined);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockStorage.enforceLimit).toHaveBeenCalledTimes(2);
+
+      await boundedRelay.disconnect();
+    });
+
+    it('should pass the normalized cachePriority (npub decoded to hex) to the sweep', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
       const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         storageMaxSize: 100,
         cacheStrategy: 'FIFO',
@@ -204,114 +282,50 @@ describe('NostrCacheRelay', () => {
         },
       });
 
-      await boundedRelay.publishEvent(sampleEvent);
+      await boundedRelay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS);
 
-      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
+      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(90, 'FIFO', {
         pubkeys: ['7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e'],
         kinds: [0],
       });
+
+      await boundedRelay.disconnect();
     });
 
-    it('should throw at construction time on an invalid cachePriority pubkey', () => {
-      expect(
-        () =>
-          new NostrCacheRelay(mockStorage, mockTransport, {
-            cachePriority: { pubkeys: ['npub1invalid'] },
-          })
-      ).toThrow(/npub1invalid/);
-    });
-
-    it('should apply setCachePriority (normalized) to subsequent evictions', async () => {
+    it('should apply setCachePriority to subsequent sweeps', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
       const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         storageMaxSize: 100,
-        cacheStrategy: 'FIFO',
+        storageSweepInterval: 60,
       });
 
-      boundedRelay.setCachePriority({
-        // NIP-19 公式テストベクタ
-        pubkeys: ['npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg'],
-        kinds: [0],
-      });
-      await boundedRelay.publishEvent(sampleEvent);
+      await boundedRelay.connect();
+      await vi.advanceTimersByTimeAsync(DELAY_MS);
+      expect(mockStorage.enforceLimit).toHaveBeenLastCalledWith(90, undefined, undefined);
 
-      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
-        pubkeys: ['7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e'],
-        kinds: [0],
-      });
-    });
-
-    it('should clear the priority config when setCachePriority is called without rules', async () => {
-      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        storageMaxSize: 100,
-        cacheStrategy: 'FIFO',
-        cachePriority: { kinds: [0] },
-      });
-
-      boundedRelay.setCachePriority(undefined);
-      await boundedRelay.publishEvent(sampleEvent);
-
-      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', undefined);
-    });
-
-    it('should keep the current config when setCachePriority input is invalid', async () => {
-      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
-        storageMaxSize: 100,
-        cacheStrategy: 'FIFO',
-        cachePriority: { kinds: [0] },
-      });
-
-      expect(() => boundedRelay.setCachePriority({ pubkeys: ['npub1invalid'] })).toThrow(
-        /npub1invalid/
-      );
-      await boundedRelay.publishEvent(sampleEvent);
-
-      // 例外時は反映されず、生成時の設定のまま
-      expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
+      boundedRelay.setCachePriority({ kinds: [0] });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockStorage.enforceLimit).toHaveBeenLastCalledWith(90, undefined, {
         pubkeys: [],
         kinds: [0],
       });
+
+      await boundedRelay.disconnect();
     });
 
-    it('should apply setCachePriority to transport EVENT evictions', async () => {
+    it('should stop sweeping after disconnect', async () => {
+      (mockStorage.count as Mock).mockResolvedValue(101);
       const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         storageMaxSize: 100,
-        cacheStrategy: 'FIFO',
+        storageSweepInterval: 60,
       });
-      // relay が transport に登録したメッセージハンドラ（MessageHandler 経路）
-      const onMessage = (mockTransport.onMessage as Mock).mock.calls.at(-1)?.[0];
 
-      boundedRelay.setCachePriority({ kinds: [0] });
-      onMessage('client1', ['EVENT', sampleEvent]);
+      await boundedRelay.connect();
+      await boundedRelay.disconnect();
 
-      // transport 経由の退避（MessageHandler.ingestEvent）にも新設定が届くこと
-      await vi.waitFor(() => {
-        expect(mockStorage.enforceLimit).toHaveBeenCalledWith(100, 'FIFO', {
-          pubkeys: [],
-          kinds: [0],
-        });
-      });
-    });
-
-    it('should not enforce the storage limit when storageMaxSize is unset', async () => {
-      await relay.publishEvent(sampleEvent);
-
+      await vi.advanceTimersByTimeAsync(DELAY_MS + 600_000);
       expect(mockStorage.enforceLimit).not.toHaveBeenCalled();
-    });
-
-    it('should not let an enforceLimit failure affect the save or notification', async () => {
-      (mockStorage.enforceLimit as Mock).mockRejectedValueOnce(new Error('evict boom'));
-      const boundedRelay = new NostrCacheRelay(mockStorage, mockTransport, { storageMaxSize: 1 });
-      const eventHandler = vi.fn();
-      boundedRelay.on('event', eventHandler);
-      await boundedRelay.subscribe('sub1', [{ kinds: [1] }]);
-      eventHandler.mockClear();
-
-      const result = await boundedRelay.publishEvent(sampleEvent);
-
-      // The save succeeded and the local subscriber was notified despite the
-      // eviction failure.
-      expect(result).toBe(true);
-      expect(eventHandler).toHaveBeenCalledWith(sampleEvent);
     });
   });
 

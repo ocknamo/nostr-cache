@@ -218,6 +218,13 @@ describe('acquireRelayHost', () => {
       return (host.relay as unknown as { options: Record<string, never> }).options;
     }
 
+    /** タイマーを待たずに 1 回だけスイープさせる。 */
+    function sweep(host: RelayHost): Promise<number> {
+      return (
+        host.relay as unknown as { evictionSweeper: { sweep(): Promise<number> } }
+      ).evictionSweeper.sweep();
+    }
+
     it('bounds the cache by default', async () => {
       const host = await acquire();
 
@@ -249,31 +256,36 @@ describe('acquireRelayHost', () => {
       expect(evictionOptions(host).storageMaxSize).toBe(0);
     });
 
-    it('evicts down to the ceiling as events are saved', async () => {
-      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 2 });
+    it('evicts down to the low-water mark on a sweep, not on save', async () => {
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 10 });
 
-      for (const index of [1, 2, 3]) {
+      for (let index = 1; index <= 11; index += 1) {
         await host.relay.publishEvent(
-          makeEvent({ id: `${index}`.repeat(64), created_at: 1_700_000_000 + index })
+          makeEvent({ id: `${index}`.padStart(64, '0'), created_at: 1_700_000_000 + index })
         );
       }
+      expect(await host.storage.count()).toBe(11);
 
-      expect(await host.storage.count()).toBe(2);
+      await sweep(host);
+
+      expect(await host.storage.count()).toBe(9);
     });
 
     it('evicts notes rather than the profile they belong to', async () => {
-      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 2 });
+      const host = await acquire({ dbName: `test-${crypto.randomUUID()}`, storageMaxSize: 4 });
 
       // The profile goes in first, so every eviction order that ignores the
       // priority rules — LRU, FIFO and LFU alike — would pick it as the victim.
       await host.relay.publishEvent(makeEvent({ id: '0'.repeat(64), kind: 0, content: '{}' }));
-      for (const index of [1, 2]) {
+      for (let index = 1; index <= 4; index += 1) {
         await host.relay.publishEvent(
-          makeEvent({ id: `${index}`.repeat(64), created_at: 1_700_000_000 + index })
+          makeEvent({ id: `${index}`.padStart(64, '0'), created_at: 1_700_000_000 + index })
         );
       }
 
-      expect(await host.storage.count()).toBe(2);
+      await sweep(host);
+
+      expect(await host.storage.count()).toBe(3);
       expect(await host.storage.getEvents([{ kinds: [0] }])).toHaveLength(1);
     });
   });
