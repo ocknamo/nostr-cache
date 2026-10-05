@@ -96,7 +96,8 @@ export interface NostrRelayOptions {
 
   /**
    * テスト・高度用途向けに上流プールの実装を差し替える。
-   * 指定時は {@link upstreamRelays} より優先される。
+   * 指定時は {@link upstreamRelays} より優先される（`upstreamRelays` はアウトボックスの宛先から
+   * 既定の上流を除くのに使われるので、併せて渡すとよい）。
    */
   upstreamPool?: UpstreamPool;
 }

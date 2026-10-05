@@ -1,8 +1,6 @@
 /**
- * 既定の上流以外のリレーへ、署名済みイベントを 1 回だけ送る。
- *
  * 上流プールの rx-nostr に宛先付きで送らせないのは、一時接続が閉じずに残り、以後の購読の
- * EOSE 集約が開いたままのそれを待ってしまうため（rx-nostr 3.7 の `confirmOK` の不具合）。
+ * EOSE 集約がそれを待ってしまうため（rx-nostr 3.7 の `confirmOK` の不具合）。
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
@@ -46,9 +44,9 @@ export class OutboxPublisher {
   }
 
   private sendTo(relay: string, event: NostrEvent): void {
-    const Ctor = (this.options.webSocketFactory ?? (() => globalThis.WebSocket))();
     let socket: WebSocket;
     try {
+      const Ctor = (this.options.webSocketFactory ?? (() => globalThis.WebSocket))();
       socket = new Ctor(relay);
     } catch (error) {
       logger.debug(`Outbox ${relay}: could not connect:`, error);

@@ -56,6 +56,51 @@ describe('OutboxPublisher', () => {
     expect(socket('wss://slow').readyState).toBe(3);
   });
 
+  it('lets go of a socket the relay drops before answering, leaving no timer behind', () => {
+    vi.useFakeTimers();
+    const { publisher, socket } = setup();
+
+    publisher.publish(EVENT, ['wss://a']);
+    socket('wss://a').mockOpen();
+    socket('wss://a').close();
+
+    expect(vi.getTimerCount()).toBe(0);
+    // 閉じた後に OK が届いても何も起きない
+    expect(() => socket('wss://a').mockMessage(['OK', 'e1', true, ''])).not.toThrow();
+  });
+
+  it('clears the timeout once the OK arrives', () => {
+    vi.useFakeTimers();
+    const { publisher, socket } = setup();
+
+    publisher.publish(EVENT, ['wss://a']);
+    socket('wss://a').mockOpen();
+    socket('wss://a').mockMessage(['OK', 'e1', true, '']);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('skips a relay whose socket cannot be constructed and still sends to the rest', () => {
+    const fake = createFakeWebSocketFactory();
+    const publisher = new OutboxPublisher({
+      webSocketFactory: () => {
+        const Ctor = fake.factory();
+        return class extends (Ctor as unknown as new (url: string) => WebSocket) {
+          constructor(url: string) {
+            if (url === 'wss://bad') {
+              throw new SyntaxError('bad url');
+            }
+            super(url);
+          }
+        } as unknown as typeof WebSocket;
+      },
+    });
+
+    publisher.publish(EVENT, ['wss://bad', 'wss://good']);
+
+    expect(fake.sockets.map((s) => s.url)).toEqual(['wss://good']);
+  });
+
   it('closes what is still open on stop, and connects nowhere afterwards', () => {
     const { publisher, fake, socket } = setup();
     publisher.publish(EVENT, ['wss://a']);

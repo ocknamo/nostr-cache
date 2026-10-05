@@ -43,7 +43,7 @@ import { SubscriptionManager } from './subscription-manager.js';
 
 export type { NostrRelayOptions } from './relay-options.js';
 
-/** ms。書き込みの宛先を引くときに、10002 の取得を待つ上限。 */
+/** ms */
 const OUTBOX_RESOLVE_WAIT = 3000;
 
 /**
@@ -288,13 +288,18 @@ export class NostrCacheRelay {
     const pubkeys = [event.pubkey, ...inboxRecipients(event)];
     // 先読みの後ろに並ぶと数十秒待ちうるので、届いている分で送る
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-      resolver.resolve(pubkeys),
-      new Promise((resolve) => {
-        timer = setTimeout(resolve, OUTBOX_RESOLVE_WAIT);
-      }),
-    ]);
-    clearTimeout(timer);
+    try {
+      await Promise.race([
+        resolver.resolve(pubkeys),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, OUTBOX_RESOLVE_WAIT);
+        }),
+      ]);
+    } catch (error) {
+      logger.debug('Relay list resolution failed; using what is cached:', error);
+    } finally {
+      clearTimeout(timer);
+    }
     const lists = await resolver.lookup(pubkeys);
     const exclude = new Set(
       (this.options.upstreamRelays ?? []).map((url) => normalizeRelayUrl(url) ?? url)

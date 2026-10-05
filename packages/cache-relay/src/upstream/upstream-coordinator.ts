@@ -39,7 +39,7 @@ export interface UpstreamCoordinatorDeps {
    * revalidation and re-arm. Optional and must never throw.
    */
   onDuplicate?: (event: NostrEvent) => void;
-  /** Called after the event went to the default upstreams (outbox routing). Must not throw. */
+  /** Called after the event went to the default upstreams (outbox routing). A throw is logged. */
   onPublish?: (event: NostrEvent) => void;
 }
 
