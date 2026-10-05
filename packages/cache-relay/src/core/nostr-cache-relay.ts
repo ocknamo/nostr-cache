@@ -10,10 +10,11 @@ import type {
   RelayEventHandler,
 } from '@nostr-cache/shared';
 import { applyDeletionRequest, isDeletionEvent } from '../event/deletion.js';
-import { RELAY_LIST_KIND } from '../event/event-kind.js';
+import { RELAY_LIST_KIND, isEphemeralKind } from '../event/event-kind.js';
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { IndexRelayClient } from '../outbox/index-relay-client.js';
+import { OutboxPublisher } from '../outbox/outbox-publisher.js';
 import { RelayListResolver } from '../outbox/relay-list-resolver.js';
 import { normalizeRelayUrl } from '../outbox/relay-list.js';
 import { inboxRecipients, writeTargets } from '../outbox/write-targets.js';
@@ -42,6 +43,17 @@ import { SubscriptionManager } from './subscription-manager.js';
 
 export type { NostrRelayOptions } from './relay-options.js';
 
+/** ms。書き込みの宛先を引くときに、10002 の取得を待つ上限。 */
+const OUTBOX_RESOLVE_WAIT = 3000;
+
+/**
+ * ephemeral（NIP-46 など）と gift wrap（kind 1059）は使い捨ての鍵で署名されるので、
+ * その鍵で 10002 を引いても無駄で、閲覧者と鍵の対応をインデックスリレーに漏らすだけ。
+ */
+function isOutboxKind(kind: number): boolean {
+  return !isEphemeralKind(kind) && kind !== 1059;
+}
+
 export class NostrCacheRelay {
   private options: NostrRelayOptions;
   private storage: StorageAdapter;
@@ -68,6 +80,7 @@ export class NostrCacheRelay {
   private freshnessGate?: FreshnessGate;
   private indexRelayClient?: IndexRelayClient;
   private indexRelays: string[] = [];
+  private outboxPublisher?: OutboxPublisher;
   private relayListResolver?: RelayListResolver;
   private emitter = new RelayEventEmitter();
 
@@ -219,8 +232,7 @@ export class NostrCacheRelay {
         // 鮮度ウィンドウを張り直す（内容が変わらない replaceable でも窓が
         // 再武装するようにするため。詳細は FreshnessGate.markRevalidated）
         onDuplicate: (event) => this.freshnessGate?.markRevalidated(event),
-        // 上流より後で組み立てるので、その時点のものを呼び出しのたびに引く
-        outboxTargets: (event) => this.outboxTargets(event),
+        onPublish: (event) => this.forwardToOutbox(event),
       },
       { eoseTimeout: this.options.upstreamEoseTimeout }
     );
@@ -233,6 +245,9 @@ export class NostrCacheRelay {
       return;
     }
     this.indexRelays = indexRelays;
+    this.outboxPublisher = new OutboxPublisher({
+      webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
+    });
     this.indexRelayClient = new IndexRelayClient(indexRelays, {
       webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
     });
@@ -249,6 +264,18 @@ export class NostrCacheRelay {
     this.emitter.on('event', (event: NostrEvent) => this.observeDelivered(event));
   }
 
+  private forwardToOutbox(event: NostrEvent): void {
+    const publisher = this.outboxPublisher;
+    if (!publisher || !isOutboxKind(event.kind)) {
+      return;
+    }
+    this.outboxTargets(event)
+      .then((relays) => publisher.publish(event, relays))
+      .catch((error) => {
+        logger.debug('Outbox targets could not be resolved:', error);
+      });
+  }
+
   /**
    * 既定の上流以外に送る先。kind 10002 はインデックスリレーにも載せ、他のクライアントが
    * 著者の新しいリストを見つけられるようにする。
@@ -259,7 +286,15 @@ export class NostrCacheRelay {
       return [];
     }
     const pubkeys = [event.pubkey, ...inboxRecipients(event)];
-    await resolver.resolve(pubkeys);
+    // 先読みの後ろに並ぶと数十秒待ちうるので、届いている分で送る
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      resolver.resolve(pubkeys),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, OUTBOX_RESOLVE_WAIT);
+      }),
+    ]);
+    clearTimeout(timer);
     const lists = await resolver.lookup(pubkeys);
     const exclude = new Set(
       (this.options.upstreamRelays ?? []).map((url) => normalizeRelayUrl(url) ?? url)
@@ -313,6 +348,7 @@ export class NostrCacheRelay {
     await this.transport.start();
     this.lazyValidator?.start();
     this.indexRelayClient?.start();
+    this.outboxPublisher?.start();
     this.relayListResolver?.start();
     this.expiryReaper?.start();
     this.evictionSweeper?.start();
@@ -333,6 +369,7 @@ export class NostrCacheRelay {
     await this.upstreamCoordinator?.stop();
     this.relayListResolver?.stop();
     this.indexRelayClient?.stop();
+    this.outboxPublisher?.stop();
     // 未検証イベントは validated=0 のまま永続化されており、次回 connect で検証が再開される
     this.lazyValidator?.stop();
     this.expiryReaper?.stop();

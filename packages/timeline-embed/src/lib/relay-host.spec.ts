@@ -430,6 +430,16 @@ describe('acquireRelayHost', () => {
       expect(windowForKind(host, 10002)).toBe(DEFAULT_RELAY_LIST_FRESHNESS);
     });
 
+    it('tells the relay its default upstreams, so outbox writes skip them', async () => {
+      const host = await acquire({
+        dbName: `test-${crypto.randomUUID()}`,
+        upstreamRelays: ['wss://relay.example'],
+      });
+
+      const options = (host.relay as unknown as { options: { upstreamRelays?: string[] } }).options;
+      expect(options.upstreamRelays).toEqual(['wss://relay.example']);
+    });
+
     it('is off for a cache-only relay', async () => {
       const host = await acquire();
 

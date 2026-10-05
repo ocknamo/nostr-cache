@@ -98,16 +98,13 @@ export class UpstreamRelayPool implements UpstreamPool {
     this.rxNostr = undefined;
   }
 
-  publish(event: NostrEvent, relays?: string[]): void {
-    if (relays?.length === 0) {
-      return;
-    }
+  publish(event: NostrEvent): void {
     // `completeOn: 'sent'` is done the moment the EVENT has gone out. The
     // default would hold the send open until every relay answered OK or the 30s
     // timeout expired, once per event — and write-through never waits for the
     // upstream's verdict anyway.
     this.connect()
-      ?.send(event as never, { completeOn: 'sent', ...(relays ? { on: { relays } } : {}) })
+      ?.send(event as never, { completeOn: 'sent' })
       .subscribe({ error: () => {} });
   }
 
@@ -264,10 +261,7 @@ export class UpstreamRelayPool implements UpstreamPool {
       this.fireEose(upstreamSubId);
     }
 
-    // 宛先指定で一時的に繋いだリレーは再武装しない。他人のリストにある落ちたリレーへ
-    // 60 秒ごとに繋ぎ直し続けることになる
-    const isDefault = this.rxNostr?.getDefaultRelays()[from] !== undefined;
-    if (state === 'error' && isDefault && !this.recoveryTimers.has(from)) {
+    if (state === 'error' && !this.recoveryTimers.has(from)) {
       const delay = this.options.reconnectMaxDelay ?? DEFAULT_RECONNECT_MAX_DELAY;
       logger.debug(`Upstream ${from}: retries exhausted, reconnecting in ${delay}ms`);
       this.recoveryTimers.set(

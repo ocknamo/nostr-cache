@@ -64,14 +64,12 @@ describe('InstrumentedUpstreamPool', () => {
 
     await instrumented.start();
     instrumented.publish(event);
-    instrumented.publish(event, ['wss://outbox']);
     instrumented.openSubscription('sub', filters);
     instrumented.closeSubscription('sub');
     await instrumented.stop();
 
     expect(pool.start).toHaveBeenCalledOnce();
-    expect(pool.publish).toHaveBeenNthCalledWith(1, event, undefined);
-    expect(pool.publish).toHaveBeenNthCalledWith(2, event, ['wss://outbox']);
+    expect(pool.publish).toHaveBeenCalledWith(event);
     expect(pool.openSubscription).toHaveBeenCalledWith('sub', filters);
     expect(pool.closeSubscription).toHaveBeenCalledWith('sub');
     expect(pool.stop).toHaveBeenCalledOnce();

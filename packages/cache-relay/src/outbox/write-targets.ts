@@ -13,7 +13,6 @@ const NOTIFYING_KINDS = new Set([1, 6, 7, 16, 1111]);
 export const MAX_INBOX_RECIPIENTS = 20;
 /** NIP-65 はリストを 2〜4 本に保つよう勧めているので、それを超える分は使わない。 */
 export const RELAYS_PER_INBOX = 3;
-/** 1 件の書き込みで開く宛先の上限。 */
 export const MAX_WRITE_TARGETS = 30;
 
 const HEX64 = /^[0-9a-f]{64}$/;

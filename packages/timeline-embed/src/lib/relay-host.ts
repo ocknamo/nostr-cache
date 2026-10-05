@@ -223,6 +223,8 @@ async function connectHost(
     lazyValidateInterval: config.lazyValidateInterval,
     maxSubscriptions: 20,
     upstreamPool,
+    // プールは上で組み立てて渡すので、ここではアウトボックスの宛先から既定の上流を除くためだけに使う
+    upstreamRelays: config.upstreamRelays,
     // 「いつ上流に聞き直すか」の方針は、それに答えるキャッシュ側に置く。
     upstreamFreshness: freshnessWindows(config),
     // 非正はそのまま渡す。鮮度ウィンドウと違い、リレーはこれを「上限なし」と定義している。

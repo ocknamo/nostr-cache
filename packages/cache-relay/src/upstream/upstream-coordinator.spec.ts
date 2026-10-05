@@ -14,7 +14,6 @@ class MockPool implements UpstreamPool {
   readonly opened: Array<{ subId: string; filters: Filter[] }> = [];
   readonly closed: string[] = [];
   readonly published: NostrEvent[] = [];
-  readonly publishedTo: Array<{ event: NostrEvent; relays: string[] }> = [];
   started = false;
   stopped = false;
   connectedCount = 1;
@@ -25,12 +24,8 @@ class MockPool implements UpstreamPool {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  publish(event: NostrEvent, relays?: string[]): void {
-    if (relays) {
-      this.publishedTo.push({ event, relays });
-    } else {
-      this.published.push(event);
-    }
+  publish(event: NostrEvent): void {
+    this.published.push(event);
   }
   openSubscription(subId: string, filters: Filter[]): void {
     this.opened.push({ subId, filters });
@@ -336,58 +331,23 @@ describe('UpstreamCoordinator', () => {
     expect(pool.published).toEqual([event]);
   });
 
-  describe('outbox targets', () => {
-    function harnessWith(outboxTargets: (event: NostrEvent) => Promise<string[]>) {
-      const pool = new MockPool();
-      const coordinator = new UpstreamCoordinator({
-        pool,
-        ingest: vi.fn(),
-        deliver: vi.fn(),
-        sendEose: vi.fn(),
-        outboxTargets,
-      });
-      return { pool, coordinator };
-    }
-
-    it('sends to the default upstreams at once, and to the outbox targets once resolved', async () => {
-      let release!: (relays: string[]) => void;
-      const { pool, coordinator } = harnessWith(
-        () =>
-          new Promise((resolve) => {
-            release = resolve;
-          })
-      );
-      const event = makeEvent('x');
-
-      coordinator.publish(event);
-      expect(pool.published).toEqual([event]);
-      expect(pool.publishedTo).toEqual([]);
-
-      release(['wss://outbox.example.com']);
-      await flush();
-      expect(pool.publishedTo).toEqual([{ event, relays: ['wss://outbox.example.com'] }]);
-    });
-
-    it('sends nothing more when there is nowhere else to go', async () => {
-      const { pool, coordinator } = harnessWith(async () => []);
-
-      coordinator.publish(makeEvent('x'));
-      await flush();
-
-      expect(pool.publishedTo).toEqual([]);
-    });
-
-    it('swallows a failure to resolve the targets', async () => {
-      const { pool, coordinator } = harnessWith(async () => {
-        throw new Error('index down');
-      });
-
-      coordinator.publish(makeEvent('x'));
-      await flush();
-
+  it('publish hands the event on after the default upstreams, surviving a throwing hook', () => {
+    const pool = new MockPool();
+    const onPublish = vi.fn(() => {
       expect(pool.published).toHaveLength(1);
-      expect(pool.publishedTo).toEqual([]);
+      throw new Error('boom');
     });
+    const coordinator = new UpstreamCoordinator({
+      pool,
+      ingest: vi.fn(),
+      deliver: vi.fn(),
+      sendEose: vi.fn(),
+      onPublish,
+    });
+    const event = makeEvent('x');
+
+    expect(() => coordinator.publish(event)).not.toThrow();
+    expect(onPublish).toHaveBeenCalledWith(event);
   });
 
   it('markDelivered dedups a subsequent upstream echo of a locally-delivered event', async () => {

@@ -38,10 +38,14 @@ build / typecheck / test は CI で緑。ブラウザ内ローカルリレーへ
   - いまの `upstreamRelays` は、10002 が無い著者と、著者で宛先を決められないフィルタの
     フォールバックになる
 - 置き場所: 「どこに聞くか」はキャッシュの判断なので、鮮度ウィンドウや id カバレッジと同じく
-  coordinator 側に置き、プールは宛先付きの REQ / EVENT を受けるだけにする（rx-nostr 3.7 の
-  `use(req, { on: { relays } })` / `send(ev, { on: { relays } })` が一時接続と
-  `disconnectTimeout` での自動切断を持つ）。`upstreamPool` の差し替えで済ませないのは、
-  インデックスリレーから取った 10002 を通常の ingest 経路（検証・版比較・保存）に通すため
+  リレー側に置く。`upstreamPool` の差し替えで済ませないのは、インデックスリレーから取った
+  10002 を通常の ingest 経路（検証・版比較・保存）に通すため
+- **上流プールの rx-nostr に宛先付きで送らせない**: rx-nostr 3.7 の `send(ev, { on: { relays } })`
+  が張る一時接続は、`confirmOK` の条件が逆になっている不具合で送信件数が減らず、
+  `disconnectTimeout` で閉じない。閉じない接続は `connectedUrls()` に入り、以後の購読の EOSE 集約が
+  それを待ってタイムアウトまで遅れる。段階 2 は宛先ごとに短命の WebSocket で送る
+  （`OutboxPublisher`）。段階 3 で宛先付きの REQ を出すときも同じ問題に当たるので、
+  集約対象を宛先に絞るか別の接続を使うこと
 - 制約として残るもの: NIP-42 未対応なので AUTH 必須の inbox へは書けない。ライトスルーは
   fire-and-forget なので投稿者は気づけない
 
@@ -72,9 +76,10 @@ build / typecheck / test は CI で緑。ブラウザ内ローカルリレーへ
     - 10002 を持つのは 200〜300 人のバッチで約 8 割。残りはフォールバックに落ちる前提で組む。
       1000 人の和集合で 1 本にしか無かったのは 17 人（purplepag.es だけにあった人は 0）
 - [x] **2. 書き込みのルーティング**
-  - 対応: `outbox/write-targets.ts`。ライトスルーは既定の上流へ即座に送り、宛先の 10002 を
-    揃えてから残りへ `UpstreamPool.publish(event, relays)` で送る（rx-nostr の一時接続）。
-    受信者は 20 人・1 人 3 本・合計 30 本まで。一時接続のリレーは落ちても再武装しない
+  - 対応: `outbox/write-targets.ts` / `outbox/outbox-publisher.ts`。ライトスルーは既定の上流へ
+    即座に送り、宛先の 10002 を最大 3 秒待って揃えてから、残りへ宛先ごとの短命な WebSocket で
+    送る（`OK` か 10 秒で閉じる）。受信者は 20 人・1 人 3 本・合計 30 本まで。ephemeral と
+    gift wrap（kind 1059）は使い捨ての鍵なので対象外
   - 宛先 = `event.pubkey` の write リレー ∪ `p` で言及された人の read リレー ∪ フォールバック
   - `p` を inbox へ展開するのは通知になる kind（1 / 6 / 7 / 16 / 1111 など）に限り、人数にも
     上限を設ける。kind 3 や 10000 番台のリストは `p` が数百〜数千あるので展開しない
