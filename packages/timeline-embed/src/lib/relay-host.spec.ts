@@ -1,6 +1,10 @@
 // fake-indexeddb provides an in-memory IndexedDB so DexieStorage works in Node.
 import 'fake-indexeddb/auto';
-import { NostrCacheRelay, WebSocketServerEmulator } from '@nostr-cache/cache-relay/browser';
+import {
+  DEFAULT_RELAY_LIST_FRESHNESS,
+  NostrCacheRelay,
+  WebSocketServerEmulator,
+} from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEvent } from '../test-fixtures.ts';
 import {
@@ -9,7 +13,6 @@ import {
   DEFAULT_INDEX_RELAYS,
   DEFAULT_PROFILE_FRESHNESS,
   DEFAULT_STORAGE_MAX_SIZE,
-  RELAY_LIST_FRESHNESS,
   type RelayHost,
   acquireRelayHost,
   getRelayHostRefCount,
@@ -424,7 +427,7 @@ describe('acquireRelayHost', () => {
       });
 
       expect(indexRelaysOf(host)).toEqual(DEFAULT_INDEX_RELAYS);
-      expect(windowForKind(host, 10002)).toBe(RELAY_LIST_FRESHNESS);
+      expect(windowForKind(host, 10002)).toBe(DEFAULT_RELAY_LIST_FRESHNESS);
     });
 
     it('is off for a cache-only relay', async () => {

@@ -13,6 +13,7 @@
 import {
   type CachePriority,
   type CacheStrategy,
+  DEFAULT_RELAY_LIST_FRESHNESS,
   DexieStorage,
   NostrCacheRelay,
   UpstreamRelayPool,
@@ -49,9 +50,6 @@ export const DEFAULT_INDEX_RELAYS = [
   'wss://indexer.coracle.social',
   'wss://directory.yabu.me',
 ];
-
-/** kind 10002 の鮮度ウィンドウ（秒）。 */
-export const RELAY_LIST_FRESHNESS = 21_600;
 
 /**
  * 他の設定と違い既定で有効。IndexedDB は**埋め込み先オリジン**の容量を使うので、
@@ -136,7 +134,8 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
     lazyValidateInterval: config.lazyValidateInterval ?? DEFAULT_LAZY_VALIDATE_INTERVAL,
     profileFreshness: config.profileFreshness ?? DEFAULT_PROFILE_FRESHNESS,
     followsFreshness: config.followsFreshness ?? DEFAULT_FOLLOWS_FRESHNESS,
-    indexRelays: config.indexRelays ?? DEFAULT_INDEX_RELAYS,
+    // 公開している既定の配列を、後から書き換えられても巻き込まれないよう複製する
+    indexRelays: [...(config.indexRelays ?? DEFAULT_INDEX_RELAYS)],
     storageMaxSize: config.storageMaxSize ?? DEFAULT_STORAGE_MAX_SIZE,
     cacheStrategy: config.cacheStrategy ?? DEFAULT_CACHE_STRATEGY,
   };
@@ -156,7 +155,7 @@ function freshnessWindows(config: ResolvedConfig): Record<number, number> | unde
     windows[3] = config.followsFreshness;
   }
   if (outboxEnabled(config)) {
-    windows[10002] = RELAY_LIST_FRESHNESS;
+    windows[10002] = DEFAULT_RELAY_LIST_FRESHNESS;
   }
   return Object.keys(windows).length > 0 ? windows : undefined;
 }

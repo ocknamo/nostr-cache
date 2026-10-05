@@ -6,7 +6,6 @@
 /** Kind of a NIP-09 deletion request event. */
 export const DELETION_EVENT_KIND = 5;
 
-/** NIP-65 のリレーリスト。 */
 export const RELAY_LIST_KIND = 10002;
 
 /**

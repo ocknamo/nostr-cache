@@ -6,8 +6,13 @@ import { createRxBackwardReq, createRxNostr } from 'rx-nostr';
 
 export const DEFAULT_INDEX_EOSE_TIMEOUT = 5000;
 
+export interface IndexFetchResult {
+  events: NostrEvent[];
+  answered: number;
+}
+
 export interface IndexRelayClientOptions {
-  /** 全リレーの EOSE を待つ上限 (ms)。 */
+  /** 接続後、各リレーの EOSE を待つ上限 (ms)。全体の上限はその 2 倍。 */
   eoseTimeout?: number;
   /** {@link UpstreamPoolOptions.webSocketFactory} と同じ理由で、接続時に 1 回評価する。 */
   webSocketFactory?: () => typeof WebSocket;
@@ -16,6 +21,7 @@ export interface IndexRelayClientOptions {
 export class IndexRelayClient {
   private rxNostr?: RxNostr;
   private stopped = false;
+  private sequence = 0;
 
   constructor(
     private readonly urls: string[],
@@ -32,16 +38,22 @@ export class IndexRelayClient {
     this.rxNostr = undefined;
   }
 
-  /** 全リレーの答えを重複排除せずに返す。失敗したリレーの分は欠けるだけで reject しない。 */
-  fetch(filter: Filter): Promise<NostrEvent[]> {
+  /**
+   * 全リレーの答えを重複排除せずに返す。reject しない代わりに、EOSE を返したリレーの数を
+   * 添える（0 なら「誰も答えなかった」で、「誰も持っていない」とは区別される）。
+   */
+  fetch(filter: Filter): Promise<IndexFetchResult> {
     const rxNostr = this.connect();
     if (!rxNostr) {
-      return Promise.resolve([]);
+      return Promise.resolve({ events: [], answered: 0 });
     }
     const timeout = this.options.eoseTimeout ?? DEFAULT_INDEX_EOSE_TIMEOUT;
+    this.sequence += 1;
+    const reqId = `idx${this.sequence}`;
     return new Promise((resolve) => {
       const events: NostrEvent[] = [];
-      const req = createRxBackwardReq();
+      const answered = new Set<string>();
+      const req = createRxBackwardReq(reqId);
       let settled = false;
       const finish = () => {
         if (settled) {
@@ -50,12 +62,21 @@ export class IndexRelayClient {
         settled = true;
         clearTimeout(guard);
         // complete から同期で呼ばれうるので、subscribe() が返るのを待ってから外す
-        queueMicrotask(() => subscription.unsubscribe());
-        resolve(events);
+        queueMicrotask(() => {
+          subscription.unsubscribe();
+          eoses.unsubscribe();
+        });
+        resolve({ events, answered: answered.size });
       };
       // rx-nostr の EOSE タイムアウトは接続後の REQ から数えるので、繋がらないリレーを
       // 待ち続けないよう全体にも上限を掛ける
       const guard = setTimeout(finish, timeout * 2);
+      // backward のワイヤ上の id は `${reqId}:${n}`
+      const eoses = rxNostr.createAllMessageObservable().subscribe((packet) => {
+        if (packet.type === 'EOSE' && packet.subId.startsWith(`${reqId}:`)) {
+          answered.add(packet.from);
+        }
+      });
       const subscription = rxNostr.use(req).subscribe({
         next: ({ event }) => {
           events.push(event as NostrEvent);

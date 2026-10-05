@@ -8,19 +8,20 @@ import { logger } from '@nostr-cache/shared';
 import { RELAY_LIST_KIND } from '../event/event-kind.js';
 import { selectCurrentVersion } from '../event/replaceable.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
+import type { IndexFetchResult } from './index-relay-client.js';
 import { type RelayList, parseRelayList } from './relay-list.js';
 
 /** インデックスリレーが 1 REQ を 500 件で黙って打ち切るため、それを下回らせる。 */
 export const DEFAULT_RELAY_LIST_BATCH_SIZE = 300;
 
-/** フォローリスト 1 つから先読みする人数の上限。 */
+/** 1 つのフォローリストからも、取得待ち全体でも、これ以上は先読みしない。 */
 export const MAX_PREFETCH_AUTHORS = 2000;
 
 const HEX64 = /^[0-9a-f]{64}$/;
 
 export interface RelayListResolverDeps {
   storage: StorageAdapter;
-  fetch: (filter: Filter) => Promise<NostrEvent[]>;
+  fetch: (filter: Filter) => Promise<IndexFetchResult>;
   /** 通常の取り込み経路（検証・版比較・保存）。 */
   ingest: (event: NostrEvent) => Promise<unknown>;
 }
@@ -43,7 +44,8 @@ export class RelayListResolver {
   private readonly inflight = new Map<string, Promise<void>>();
   /** インデックスリレーへ並べて投げないよう、バッチを 1 本ずつ流す。 */
   private queue: Promise<void> = Promise.resolve();
-  private readonly prefetchedFollowLists = new Set<string>();
+  /** 同じフォローリストを開きっぱなしでも、窓が切れたら先読みし直す。 */
+  private readonly prefetchedAt = new Map<string, number>();
   private stopped = false;
 
   constructor(
@@ -104,10 +106,18 @@ export class RelayListResolver {
    * 決めるときに、初回表示へインデックスリレーとの往復を足さないため。
    */
   prefetchFollows(followList: NostrEvent): void {
-    if (followList.kind !== 3 || this.prefetchedFollowLists.has(followList.id)) {
+    if (this.stopped || followList.kind !== 3 || !Array.isArray(followList.tags)) {
       return;
     }
-    this.prefetchedFollowLists.add(followList.id);
+    const prefetched = this.prefetchedAt.get(followList.id);
+    if (prefetched !== undefined && this.withinWindow(prefetched)) {
+      return;
+    }
+    // 他人のフォローリストをまとめて引く REQ でも、取得待ちを際限なく積まない
+    if (this.inflight.size >= MAX_PREFETCH_AUTHORS) {
+      return;
+    }
+    this.prefetchedAt.set(followList.id, this.now());
     const follows: string[] = [];
     for (const tag of followList.tags) {
       if (follows.length >= MAX_PREFETCH_AUTHORS) {
@@ -143,7 +153,11 @@ export class RelayListResolver {
 
   private checkedRecently(pubkey: string): boolean {
     const checked = this.checkedAt.get(pubkey);
-    return checked !== undefined && this.now() - checked <= this.options.freshnessSeconds * 1000;
+    return checked !== undefined && this.withinWindow(checked);
+  }
+
+  private withinWindow(at: number): boolean {
+    return this.now() - at <= this.options.freshnessSeconds * 1000;
   }
 
   /** `getCachedAt` が無いアダプタでは全員を古い扱いにする（鮮度ウィンドウと同じ倒し方）。 */
@@ -184,14 +198,23 @@ export class RelayListResolver {
     return run;
   }
 
-  /** 失敗しても reject しない。問い合わせ済みにはせず、次の resolve で取り直す。 */
+  /**
+   * reject しない。どのリレーも答えなかったとき・止められたときは問い合わせ済みにせず、
+   * 次の resolve で取り直す。
+   */
   private async fetchBatch(batch: string[]): Promise<void> {
     try {
       if (this.stopped) {
         return;
       }
       const asked = new Set(batch);
-      const events = await this.deps.fetch({ kinds: [RELAY_LIST_KIND], authors: batch });
+      const { events, answered } = await this.deps.fetch({
+        kinds: [RELAY_LIST_KIND],
+        authors: batch,
+      });
+      if (this.stopped || answered === 0) {
+        return;
+      }
       // 旧版まで返すインデックスリレーがあるので、取り込む前に 1 人 1 件へ畳む。
       // 取り込みは直列にする（同じ座標の置換が競合すると古い版が残りうる）
       const newest = newestByPubkey(

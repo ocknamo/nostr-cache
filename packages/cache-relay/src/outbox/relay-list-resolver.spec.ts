@@ -2,7 +2,7 @@ import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ValidationStatus } from '../storage/storage-adapter.js';
 import { createMockStorage } from '../test/utils/mock-storage.js';
-import { RelayListResolver } from './relay-list-resolver.js';
+import { MAX_PREFETCH_AUTHORS, RelayListResolver } from './relay-list-resolver.js';
 
 const WINDOW = 3600;
 const pk = (n: number) => n.toString(16).padStart(64, '0');
@@ -53,9 +53,10 @@ function setup({
         }
       : {}),
   });
-  const fetch = vi.fn(async (filter: Filter) =>
-    upstream.filter((event) => filter.authors?.includes(event.pubkey))
-  );
+  const fetch = vi.fn(async (filter: Filter) => ({
+    events: upstream.filter((event) => filter.authors?.includes(event.pubkey)),
+    answered: 1,
+  }));
   const ingest = vi.fn(async (event: NostrEvent) => {
     rows.set(event.pubkey, event);
     cachedAt.set(event.id, now);
@@ -64,7 +65,7 @@ function setup({
     { storage, fetch, ingest },
     { freshnessSeconds: WINDOW, now: () => now, batchSize }
   );
-  return { resolver, storage, fetch, ingest };
+  return { resolver, storage, fetch, ingest, rows };
 }
 
 describe('RelayListResolver.resolve', () => {
@@ -127,7 +128,7 @@ describe('RelayListResolver.resolve', () => {
       maxRunning = Math.max(maxRunning, running);
       await new Promise((r) => setTimeout(r, 1));
       running -= 1;
-      return [];
+      return { events: [], answered: 1 };
     });
 
     await resolver.resolve([pk(1), pk(2), pk(3), pk(4), pk(5)]);
@@ -148,14 +149,29 @@ describe('RelayListResolver.resolve', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('asks again on the next call when a fetch failed', async () => {
+  it('asks again on the next call when no index relay answered', async () => {
     const { resolver, fetch } = setup();
-    fetch.mockRejectedValueOnce(new Error('down'));
+    fetch.mockResolvedValueOnce({ events: [], answered: 0 });
 
     await resolver.resolve([pk(1)]);
     await resolver.resolve([pk(1)]);
 
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again after being stopped mid-fetch, and ingests nothing from it', async () => {
+    const { resolver, fetch, ingest } = setup();
+    fetch.mockImplementationOnce(async () => {
+      resolver.stop();
+      return { events: [relayList(pk(1), 1)], answered: 1 };
+    });
+
+    await resolver.resolve([pk(1)]);
+    resolver.start();
+    await resolver.resolve([pk(1)]);
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(ingest).toHaveBeenCalledTimes(0);
   });
 
   it('skips malformed pubkeys and normalizes case', async () => {
@@ -197,6 +213,66 @@ describe('RelayListResolver.prefetchFollows', () => {
 
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(resolve).toHaveBeenCalledWith([pk(1), pk(2)]);
+  });
+
+  it('prefetches the same list again once the window has passed', async () => {
+    let now = 1_000_000;
+    const storage = createMockStorage();
+    const fetch = vi.fn(async () => ({ events: [], answered: 1 }));
+    const resolver = new RelayListResolver(
+      { storage, fetch, ingest: vi.fn() },
+      { freshnessSeconds: WINDOW, now: () => now }
+    );
+    const resolve = vi.spyOn(resolver, 'resolve');
+
+    resolver.prefetchFollows(followList('k3', [pk(1)]));
+    now += (WINDOW + 1) * 1000;
+    resolver.prefetchFollows(followList('k3', [pk(1)]));
+
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it('caps how many authors one follow list prefetches', () => {
+    const { resolver } = setup();
+    const resolve = vi.spyOn(resolver, 'resolve').mockResolvedValue();
+
+    resolver.prefetchFollows(
+      followList(
+        'big',
+        Array.from({ length: MAX_PREFETCH_AUTHORS + 10 }, (_, i) => pk(i + 1))
+      )
+    );
+
+    expect(resolve.mock.calls[0][0]).toHaveLength(MAX_PREFETCH_AUTHORS);
+  });
+
+  it('stops queueing once enough authors are already waiting', async () => {
+    const { resolver, fetch } = setup();
+    fetch.mockImplementation(() => new Promise(() => {}));
+    resolver.prefetchFollows(
+      followList(
+        'first',
+        Array.from({ length: MAX_PREFETCH_AUTHORS }, (_, i) => pk(i + 1))
+      )
+    );
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+    const resolve = vi.spyOn(resolver, 'resolve');
+
+    resolver.prefetchFollows(followList('second', [pk(99_999)]));
+
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('neither prefetches nor remembers a list while stopped', () => {
+    const { resolver } = setup();
+    const resolve = vi.spyOn(resolver, 'resolve').mockResolvedValue();
+
+    resolver.stop();
+    resolver.prefetchFollows(followList('k3', [pk(1)]));
+    resolver.start();
+    resolver.prefetchFollows(followList('k3', [pk(1)]));
+
+    expect(resolve).toHaveBeenCalledTimes(1);
   });
 
   it('ignores other kinds', () => {

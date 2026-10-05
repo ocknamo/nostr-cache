@@ -876,7 +876,7 @@ describe('NostrCacheRelay', () => {
   describe('outbox (NIP-65)', () => {
     const followList: NostrEvent = {
       ...sampleEvent,
-      id: 'k3',
+      id: 'c'.repeat(64),
       kind: 3,
       tags: [['p', 'a'.repeat(64)]],
     };
@@ -885,7 +885,7 @@ describe('NostrCacheRelay', () => {
       vi.restoreAllMocks();
     });
 
-    function messageHandlerOf(): (clientId: string, message: unknown) => Promise<void> {
+    function messageHandlerOf(): (clientId: string, message: unknown) => void {
       const calls = (mockTransport.onMessage as Mock).mock.calls;
       return calls[calls.length - 1][0];
     }
@@ -908,9 +908,9 @@ describe('NostrCacheRelay', () => {
       });
       mockStorage.getEvents.mockResolvedValueOnce([followList]);
 
-      await messageHandlerOf()('client', ['REQ', 'sub', { kinds: [3], authors: ['b'.repeat(64)] }]);
+      messageHandlerOf()('client', ['REQ', 'sub', { kinds: [3], authors: ['b'.repeat(64)] }]);
 
-      expect(prefetch).toHaveBeenCalledWith(followList);
+      await vi.waitFor(() => expect(prefetch).toHaveBeenCalledWith(followList));
     });
 
     it('prefetches for in-process subscriptions too', async () => {
@@ -927,14 +927,55 @@ describe('NostrCacheRelay', () => {
       expect(prefetch).toHaveBeenCalledWith(followList);
     });
 
-    it('does nothing without index relays', async () => {
-      const prefetch = vi.spyOn(RelayListResolver.prototype, 'prefetchFollows');
-      new NostrCacheRelay(mockStorage, mockTransport, { outbox: { indexRelays: [] } });
+    it('builds no resolver without index relays', () => {
+      const plain = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: [] },
+      });
+
+      expect(
+        (plain as unknown as { relayListResolver?: unknown }).relayListResolver
+      ).toBeUndefined();
+    });
+
+    it('prefetches for a follow list another client publishes to a subscriber', async () => {
+      const prefetch = vi
+        .spyOn(RelayListResolver.prototype, 'prefetchFollows')
+        .mockImplementation(() => {});
+      new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+      const handle = messageHandlerOf();
+      mockStorage.getEvents.mockResolvedValueOnce([]);
+      handle('reader', ['REQ', 'sub', { kinds: [3] }]);
+      await vi.waitFor(() =>
+        expect(mockTransport.send).toHaveBeenCalledWith('reader', ['EOSE', 'sub'])
+      );
+      expect(prefetch).not.toHaveBeenCalled();
+
+      // 他のテストが共有モックに残した戻り値に左右されないようにする
+      mockStorage.getCurrentVersion.mockResolvedValueOnce(undefined);
+      mockStorage.saveEvent.mockResolvedValueOnce(true);
+      // transport のハンドラは処理の完了を返さない
+      handle('writer', ['EVENT', followList]);
+
+      await vi.waitFor(() => expect(prefetch).toHaveBeenCalledWith(followList));
+    });
+
+    it('keeps delivering when the prefetch throws', async () => {
+      vi.spyOn(RelayListResolver.prototype, 'prefetchFollows').mockImplementation(() => {
+        throw new Error('boom');
+      });
+      const outboxRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+      const listener = vi.fn();
+      outboxRelay.on('event', listener);
       mockStorage.getEvents.mockResolvedValueOnce([followList]);
 
-      await messageHandlerOf()('client', ['REQ', 'sub', { kinds: [3] }]);
+      await outboxRelay.subscribe('sub', [{ kinds: [3] }]);
 
-      expect(prefetch).not.toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledWith(followList);
     });
 
     it('verifies a published relay list up front under LAZY', async () => {

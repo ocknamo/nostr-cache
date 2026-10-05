@@ -37,6 +37,12 @@ describe('normalizeRelayUrl', () => {
     'wss://100.64.0.1',
     'wss://0x7f000001',
     'wss://[::1]',
+    'wss://localhost./',
+    'wss://foo.local.',
+    'wss://relay.example.com.',
+    'wss://localhost.localdomain',
+    'wss://198.18.0.1',
+    'wss://192.0.0.8',
     'wss://[2001:db8::1]',
   ])('rejects %s', (raw) => {
     expect(normalizeRelayUrl(raw)).toBeUndefined();

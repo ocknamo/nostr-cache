@@ -9,7 +9,11 @@ import { MessageHandler } from './core/message-handler.js';
 import { NostrCacheRelay, NostrRelayOptions } from './core/nostr-cache-relay.js';
 // cachePriority 設定の正規化（npub→hex・検証）。setCachePriority へ渡す前の
 // 事前検証に利用できる
-import { normalizeCachePriority, normalizeFreshnessWindows } from './core/relay-options.js';
+import {
+  DEFAULT_RELAY_LIST_FRESHNESS,
+  normalizeCachePriority,
+  normalizeFreshnessWindows,
+} from './core/relay-options.js';
 import { SubscriptionManager } from './core/subscription-manager.js';
 
 // Event handling
@@ -99,6 +103,7 @@ export {
   getAlwaysRetainedKinds,
   normalizeCachePriority,
   normalizeFreshnessWindows,
+  DEFAULT_RELAY_LIST_FRESHNESS,
   // Transport
   TransportAdapter,
   WebSocketServer,

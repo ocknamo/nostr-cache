@@ -10,7 +10,7 @@ import type { UpstreamPool } from '../upstream/upstream-types.js';
 
 export const DEFAULT_MAX_EVENTS = 500;
 
-/** 秒。リレーリストは滅多に変わらず、変わっても半日遅れなら宛先が外れる人は少ない。 */
+/** 秒。リレーリストは滅多に変わらないので、数時間遅れても宛先が外れる人は少ない。 */
 export const DEFAULT_RELAY_LIST_FRESHNESS = 21_600;
 
 /** transport 経由のクライアントと区別するための、in-process 購読の clientId。 */

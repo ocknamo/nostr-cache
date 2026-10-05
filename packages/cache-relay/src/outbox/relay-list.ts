@@ -23,6 +23,7 @@ const NON_PUBLIC_SUFFIXES = [
   '.internal',
   '.lan',
   '.home.arpa',
+  '.localdomain',
 ];
 
 function isPrivateIpv4(host: string): boolean {
@@ -36,6 +37,8 @@ function isPrivateIpv4(host: string): boolean {
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b < 32) ||
     (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && octets[2] === 0) ||
+    (a === 198 && (b === 18 || b === 19)) ||
     a >= 224
   );
 }
@@ -46,7 +49,8 @@ function isPrivateIpv4(host: string): boolean {
  * 無いに等しく、範囲判定を持つ価値が無いので一律に外す。
  */
 function isPublicHost(hostname: string): boolean {
-  if (hostname === 'localhost' || !hostname.includes('.')) {
+  // 末尾ドットの FQDN は URL がそのまま残すので、下の接尾辞判定をすり抜ける
+  if (hostname === 'localhost' || !hostname.includes('.') || hostname.endsWith('.')) {
     return false;
   }
   if (hostname.startsWith('[')) {

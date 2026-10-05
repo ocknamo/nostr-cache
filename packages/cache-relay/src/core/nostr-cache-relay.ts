@@ -64,7 +64,6 @@ export class NostrCacheRelay {
    * the in-process {@link subscribe} path decide identically.
    */
   private freshnessGate?: FreshnessGate;
-  /** `outbox.indexRelays` を指定したときだけ存在する。 */
   private indexRelayClient?: IndexRelayClient;
   private relayListResolver?: RelayListResolver;
   private emitter = new RelayEventEmitter();
@@ -244,10 +243,17 @@ export class NostrCacheRelay {
     this.emitter.on('event', (event: NostrEvent) => this.observeDelivered(event));
   }
 
-  /** フォローリストは届いた経路（キャッシュ・上流・投稿）を問わず先読みの起点にする。 */
+  /**
+   * フォローリストは届いた経路（キャッシュ・上流・投稿）を問わず先読みの起点にする。
+   * 配信の途中で呼ばれるので、ここで投げると後続のリスナーや送信を巻き込む。
+   */
   private observeDelivered(event: NostrEvent): void {
-    if (event?.kind === 3) {
-      this.relayListResolver?.prefetchFollows(event);
+    try {
+      if (event?.kind === 3) {
+        this.relayListResolver?.prefetchFollows(event);
+      }
+    } catch (error) {
+      logger.debug('Relay list prefetch could not start:', error);
     }
   }
 

@@ -61,8 +61,10 @@ describe('IndexRelayClient', () => {
     a.mockMessage(['EOSE', idA]);
     b.mockMessage(['EOSE', idB]);
 
+    const { events, answered } = await result;
     // 同じ id を重複排除しない（版の選別は取り込み側が持つ）
-    expect((await result).map((event) => event.id).sort()).toEqual(['x', 'x', 'y']);
+    expect(events.map((event) => event.id).sort()).toEqual(['x', 'x', 'y']);
+    expect(answered).toBe(2);
   });
 
   it('gives up on a relay that never answers', async () => {
@@ -76,14 +78,25 @@ describe('IndexRelayClient', () => {
     a.mockMessage(['EVENT', idA, makeEvent('x')]);
     a.mockMessage(['EOSE', idA]);
 
-    expect((await result).map((event) => event.id)).toEqual(['x']);
+    const { events, answered } = await result;
+    expect(events.map((event) => event.id)).toEqual(['x']);
+    expect(answered).toBe(1);
+  });
+
+  it('reports that nobody answered when no relay comes up', async () => {
+    const { client } = createClient(20);
+
+    expect(await client.fetch({ kinds: [10002], authors: ['p'] })).toEqual({
+      events: [],
+      answered: 0,
+    });
   });
 
   it('answers empty without connecting once stopped', async () => {
     const { client, fake } = createClient();
     client.stop();
 
-    expect(await client.fetch({ kinds: [10002] })).toEqual([]);
+    expect(await client.fetch({ kinds: [10002] })).toEqual({ events: [], answered: 0 });
     expect(fake.sockets).toHaveLength(0);
   });
 });
