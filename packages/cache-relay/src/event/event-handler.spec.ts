@@ -581,4 +581,42 @@ describe('EventHandler', () => {
       expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent, { validated: false });
     });
   });
+
+  describe('relay lists (kind 10002)', () => {
+    const relayList: NostrEvent = { ...regularEvent, id: 'rl', kind: 10002 };
+
+    it('verifies up front in LAZY mode, so a forged list is never stored', async () => {
+      const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+      // @ts-ignore - private field access
+      lazyHandler.validator = mockEventValidator;
+      mockEventValidator.validate.mockResolvedValueOnce(false);
+
+      const result = await lazyHandler.handleEvent(relayList);
+
+      expect(result.success).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('stores a verified list as validated in LAZY mode', async () => {
+      const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+      // @ts-ignore - private field access
+      lazyHandler.validator = mockEventValidator;
+      mockEventValidator.validate.mockResolvedValueOnce(true);
+
+      await lazyHandler.handleEvent(relayList);
+
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(relayList, { validated: true });
+    });
+
+    it('leaves NONE unverified', async () => {
+      const noneHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'NONE');
+      // @ts-ignore - private field access
+      noneHandler.validator = mockEventValidator;
+
+      await noneHandler.handleEvent(relayList);
+
+      expect(mockEventValidator.validate).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(relayList, { validated: false });
+    });
+  });
 });

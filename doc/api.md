@@ -210,8 +210,26 @@ interface NostrRelayOptions {
                                     // replaceable な kind（0 / 3 / 10000-19999）のみ指定可、他は生成時に例外。
                                     // getCachedAt 対応ストレージが必要。窓の内側の購読はライブ更新を受け取らない
   upstreamPool?: UpstreamPool;      // テスト・高度用途: 上流プール実装の差し替え（upstreamRelays より優先）
+  outbox?: {                        // アウトボックスモデル（NIP-65）。現状は著者の kind 10002 をキャッシュへ揃える段階まで
+    indexRelays?: string[];         // 10002 を引く先。空・未指定で無効。wss:// の公開ホスト以外は生成時に例外
+  };
 }
 ```
+
+`outbox.indexRelays` を指定すると、フォローリスト（kind 3）がクライアントへ配信されるたびに
+（キャッシュ・上流・in-process のどの経路でも、同じイベントにつき 1 回）、その全員の kind 10002 を
+インデックスリレーから取り込みます。取り込みは通常の上流イベントと同じ経路（検証・版比較・保存）を
+通ります。キャッシュ済みの 10002 は `upstreamFreshness[10002]`（無ければ 6 時間）のあいだ取り直しません。
+**kind 10002 は `LAZY` でも保存前に署名検証します**（読み先の決定に使うため、偽造したリストを
+保存させない）。`NONE` では検証しません。宛先の振り分け（ルーティング）は未実装で、残りの段階は
+[doc/TODO.md](./TODO.md) の「アウトボックスモデル / NIP-65」を参照してください。
+
+/ With `outbox.indexRelays`, every follow list (kind 3) delivered to a client — from cache,
+upstream or in-process, once per event — makes the relay pull the kind 10002 of everyone on it
+from the index relays, through the normal ingest path. A cached 10002 is not re-fetched within
+`upstreamFreshness[10002]` (6 hours if unset). Kind 10002 is signature-checked before it is
+stored even under `LAZY`, since it will decide where an author is read from; `NONE` still skips
+it. Routing itself is not implemented yet.
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /

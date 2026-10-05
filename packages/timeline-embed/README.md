@@ -135,7 +135,14 @@ npm パッケージを入れられない構成のための入口です。
 | `followsFreshness` | `follows-freshness` | `3600` |
 | `storageMaxSize` | `max-events` | `5000` |
 | `cacheStrategy` | （属性なし） | `LRU` |
+| `indexRelays` | （属性なし） | `wss://purplepag.es` / `wss://indexer.coracle.social` / `wss://directory.yabu.me` |
 | `interceptUrl` / `lazyValidateInterval` | （属性なし） | `ws://nostr-cache.invalid` / `5` |
+
+`indexRelays` はアウトボックスモデル（NIP-65）用で、`upstreamRelays` があるときは**既定で有効**です。
+フォローリストを表示すると、フォロー全員のリレーリスト（kind 10002）をこれらのリレーから取得して
+キャッシュします（6 時間は取り直しません）。**閲覧者のブラウザがこれらのリレーにも接続する**ことに
+なるので、避けたい場合は `[]` を渡してください。現状は取得までで、どのリレーから読むか・どこへ
+書くかはまだ変わりません。
 
 エクスポートされるもの:
 

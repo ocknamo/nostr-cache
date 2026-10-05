@@ -4,6 +4,7 @@ import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { EventAddress, StorageAdapter } from '../storage/storage-adapter.js';
 import { applyDeletionRequest } from './deletion.js';
 import {
+  RELAY_LIST_KIND,
   isAddressableKind,
   isDeletionKind,
   isEphemeralKind,
@@ -192,6 +193,8 @@ export class EventHandler {
    * - `LAZY`: defer to the background pass — but deferring only works for
    *   effects that pass can still undo, so ephemeral events are verified now
    *   (they are never persisted, so there is nothing to delete afterwards).
+   *   Relay lists (kind 10002) are verified now too: they pick which relays
+   *   an author is read from, so a forged one must never be stored at all.
    * - Deletion requests (kind 5) are verified in **every** mode, `NONE`
    *   included. They destroy other events on arrival and nothing can bring
    *   those back, so accepting one unverified would let any client wipe any
@@ -207,7 +210,10 @@ export class EventHandler {
     if (this.validateEventsType === 'IMMEDIATELY') {
       return true;
     }
-    return this.validateEventsType === 'LAZY' && this.isEphemeralEvent(event);
+    return (
+      this.validateEventsType === 'LAZY' &&
+      (this.isEphemeralEvent(event) || event.kind === RELAY_LIST_KIND)
+    );
   }
 
   /**

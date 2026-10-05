@@ -6,8 +6,10 @@ import { makeEvent } from '../test-fixtures.ts';
 import {
   DEFAULT_CACHE_STRATEGY,
   DEFAULT_FOLLOWS_FRESHNESS,
+  DEFAULT_INDEX_RELAYS,
   DEFAULT_PROFILE_FRESHNESS,
   DEFAULT_STORAGE_MAX_SIZE,
+  RELAY_LIST_FRESHNESS,
   type RelayHost,
   acquireRelayHost,
   getRelayHostRefCount,
@@ -261,10 +263,10 @@ describe('acquireRelayHost', () => {
       expect(evictionOptions(host).cacheStrategy).toBe(DEFAULT_CACHE_STRATEGY);
     });
 
-    it('keeps profiles and follow lists to the end of the eviction order', async () => {
+    it('keeps profiles, follow lists and relay lists to the end of the eviction order', async () => {
       const host = await acquire();
 
-      expect(evictionOptions(host).cachePriority).toEqual({ pubkeys: [], kinds: [0, 3] });
+      expect(evictionOptions(host).cachePriority).toEqual({ pubkeys: [], kinds: [0, 3, 10002] });
     });
 
     it('accepts an overridden ceiling', async () => {
@@ -398,6 +400,49 @@ describe('acquireRelayHost', () => {
       expect(hasFreshnessGate(host)).toBe(true);
       expect(windowForKind(host, 0)).toBe(DEFAULT_PROFILE_FRESHNESS);
       expect(windowForKind(host, 3)).toBeUndefined();
+    });
+  });
+
+  describe('outbox (NIP-65)', () => {
+    /** The index relays the relay was given, if outbox is on. */
+    function indexRelaysOf(host: RelayHost): string[] | undefined {
+      const client = (host.relay as unknown as { indexRelayClient?: { urls: string[] } })
+        .indexRelayClient;
+      return client?.urls;
+    }
+
+    function windowForKind(host: RelayHost, kind: number): number | undefined {
+      const gate = (host.relay as unknown as { freshnessGate?: { windows: Map<number, number> } })
+        .freshnessGate;
+      return gate?.windows.get(kind);
+    }
+
+    it('is on by default once there are upstream relays', async () => {
+      const host = await acquire({
+        dbName: `test-${crypto.randomUUID()}`,
+        upstreamRelays: ['wss://relay.example'],
+      });
+
+      expect(indexRelaysOf(host)).toEqual(DEFAULT_INDEX_RELAYS);
+      expect(windowForKind(host, 10002)).toBe(RELAY_LIST_FRESHNESS);
+    });
+
+    it('is off for a cache-only relay', async () => {
+      const host = await acquire();
+
+      expect(indexRelaysOf(host)).toBeUndefined();
+      expect(windowForKind(host, 10002)).toBeUndefined();
+    });
+
+    it('can be switched off with an empty list', async () => {
+      const host = await acquire({
+        dbName: `test-${crypto.randomUUID()}`,
+        upstreamRelays: ['wss://relay.example'],
+        indexRelays: [],
+      });
+
+      expect(indexRelaysOf(host)).toBeUndefined();
+      expect(windowForKind(host, 10002)).toBeUndefined();
     });
   });
 });
