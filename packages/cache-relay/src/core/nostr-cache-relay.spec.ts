@@ -978,6 +978,75 @@ describe('NostrCacheRelay', () => {
       expect(listener).toHaveBeenCalledWith(followList);
     });
 
+    describe('write routing', () => {
+      const AUTHOR = sampleEvent.pubkey;
+      const FRIEND = 'f'.repeat(64);
+
+      function setupRouting(lists: Map<string, { read: string[]; write: string[] }>) {
+        const pool = {
+          start: vi.fn().mockResolvedValue(undefined),
+          stop: vi.fn().mockResolvedValue(undefined),
+          publish: vi.fn(),
+          openSubscription: vi.fn(),
+          closeSubscription: vi.fn(),
+          onEvent: vi.fn(),
+          onEose: vi.fn(),
+          getConnectedCount: vi.fn().mockReturnValue(1),
+        };
+        const resolve = vi.spyOn(RelayListResolver.prototype, 'resolve').mockResolvedValue();
+        vi.spyOn(RelayListResolver.prototype, 'lookup').mockResolvedValue(lists);
+        const routed = new NostrCacheRelay(mockStorage, mockTransport, {
+          validateEventsType: 'NONE',
+          upstreamPool: pool,
+          upstreamRelays: ['wss://default.example.com/'],
+          outbox: { indexRelays: ['wss://index.example.com'] },
+        });
+        mockStorage.saveEvent.mockResolvedValue(true);
+        return { routed, pool, resolve };
+      }
+
+      it("forwards to the author's outbox and the recipients' inboxes, besides the defaults", async () => {
+        const { routed, pool, resolve } = setupRouting(
+          new Map([
+            [AUTHOR, { read: [], write: ['wss://mine.example.com', 'wss://default.example.com'] }],
+            [FRIEND, { read: ['wss://inbox.example.com'], write: [] }],
+          ])
+        );
+        const reply = { ...sampleEvent, tags: [['p', FRIEND]] };
+
+        await routed.publishEvent(reply);
+
+        expect(pool.publish).toHaveBeenNthCalledWith(1, reply);
+        await vi.waitFor(() =>
+          expect(pool.publish).toHaveBeenNthCalledWith(2, reply, [
+            'wss://mine.example.com',
+            'wss://inbox.example.com',
+          ])
+        );
+        expect(resolve).toHaveBeenCalledWith([AUTHOR, FRIEND]);
+      });
+
+      it('also announces a relay list on the index relays', async () => {
+        const { routed, pool } = setupRouting(new Map());
+        const relayListEvent = { ...sampleEvent, kind: 10002 };
+
+        await routed.publishEvent(relayListEvent);
+
+        await vi.waitFor(() =>
+          expect(pool.publish).toHaveBeenCalledWith(relayListEvent, ['wss://index.example.com'])
+        );
+      });
+
+      it('adds nothing when nobody has a list', async () => {
+        const { routed, pool } = setupRouting(new Map());
+
+        await routed.publishEvent(sampleEvent);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(pool.publish).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('verifies a published relay list up front under LAZY', async () => {
       const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         validateEventsType: 'LAZY',

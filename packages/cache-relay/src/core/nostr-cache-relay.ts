@@ -15,6 +15,8 @@ import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { IndexRelayClient } from '../outbox/index-relay-client.js';
 import { RelayListResolver } from '../outbox/relay-list-resolver.js';
+import { normalizeRelayUrl } from '../outbox/relay-list.js';
+import { inboxRecipients, writeTargets } from '../outbox/write-targets.js';
 import { EvictionSweeper } from '../storage/eviction-sweeper.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter, ValidationStatus } from '../storage/storage-adapter.js';
@@ -65,6 +67,7 @@ export class NostrCacheRelay {
    */
   private freshnessGate?: FreshnessGate;
   private indexRelayClient?: IndexRelayClient;
+  private indexRelays: string[] = [];
   private relayListResolver?: RelayListResolver;
   private emitter = new RelayEventEmitter();
 
@@ -216,6 +219,8 @@ export class NostrCacheRelay {
         // 鮮度ウィンドウを張り直す（内容が変わらない replaceable でも窓が
         // 再武装するようにするため。詳細は FreshnessGate.markRevalidated）
         onDuplicate: (event) => this.freshnessGate?.markRevalidated(event),
+        // 上流より後で組み立てるので、その時点のものを呼び出しのたびに引く
+        outboxTargets: (event) => this.outboxTargets(event),
       },
       { eoseTimeout: this.options.upstreamEoseTimeout }
     );
@@ -227,6 +232,7 @@ export class NostrCacheRelay {
     if (!indexRelays) {
       return;
     }
+    this.indexRelays = indexRelays;
     this.indexRelayClient = new IndexRelayClient(indexRelays, {
       webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
     });
@@ -241,6 +247,32 @@ export class NostrCacheRelay {
     );
     // in-process 購読への配信は transport を通らないので、ここで拾う
     this.emitter.on('event', (event: NostrEvent) => this.observeDelivered(event));
+  }
+
+  /**
+   * 既定の上流以外に送る先。kind 10002 はインデックスリレーにも載せ、他のクライアントが
+   * 著者の新しいリストを見つけられるようにする。
+   */
+  private async outboxTargets(event: NostrEvent): Promise<string[]> {
+    const resolver = this.relayListResolver;
+    if (!resolver) {
+      return [];
+    }
+    const pubkeys = [event.pubkey, ...inboxRecipients(event)];
+    await resolver.resolve(pubkeys);
+    const lists = await resolver.lookup(pubkeys);
+    const exclude = new Set(
+      (this.options.upstreamRelays ?? []).map((url) => normalizeRelayUrl(url) ?? url)
+    );
+    const targets = writeTargets(event, lists, exclude);
+    if (event.kind === RELAY_LIST_KIND) {
+      for (const url of this.indexRelays) {
+        if (!exclude.has(url) && !targets.includes(url)) {
+          targets.push(url);
+        }
+      }
+    }
+    return targets;
   }
 
   /**

@@ -41,9 +41,9 @@ export class InstrumentedUpstreamPool implements UpstreamPool {
     return this.inner.stop();
   }
 
-  publish(event: NostrEvent): void {
+  publish(event: NostrEvent, relays?: string[]): void {
     this.observer.onUpstreamPublish?.(event.id);
-    this.inner.publish(event);
+    this.inner.publish(event, relays);
   }
 
   openSubscription(upstreamSubId: string, filters: Filter[]): void {

@@ -39,6 +39,11 @@ export interface UpstreamCoordinatorDeps {
    * revalidation and re-arm. Optional and must never throw.
    */
   onDuplicate?: (event: NostrEvent) => void;
+  /**
+   * 既定の上流に加えて送る先（アウトボックス）。既定の上流への送信を待たせないよう、
+   * 解決を待つのはこちらだけ。
+   */
+  outboxTargets?: (event: NostrEvent) => Promise<string[]>;
 }
 
 export interface UpstreamCoordinatorOptions {
@@ -172,6 +177,16 @@ export class UpstreamCoordinator {
   /** Forward a published event upstream (write-through, fire-and-forget). */
   publish(event: NostrEvent): void {
     this.pool.publish(event);
+    this.deps
+      .outboxTargets?.(event)
+      .then((relays) => {
+        if (relays.length > 0) {
+          this.pool.publish(event, relays);
+        }
+      })
+      .catch((error) => {
+        logger.debug('Outbox targets could not be resolved:', error);
+      });
   }
 
   /**

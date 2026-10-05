@@ -15,8 +15,11 @@ export interface UpstreamPool {
 
   stop(): Promise<void>;
 
-  /** fire-and-forget。切断中のリレーへの分は捨てられる（再送キューは無い）。 */
-  publish(event: NostrEvent): void;
+  /**
+   * fire-and-forget。切断中のリレーへの分は捨てられる（再送キューは無い）。
+   * `relays` を渡すと既定の上流ではなくそれらへ送る（未接続なら一時接続する）。
+   */
+  publish(event: NostrEvent, relays?: string[]): void;
 
   openSubscription(upstreamSubId: string, filters: Filter[]): void;
 

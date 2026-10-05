@@ -199,6 +199,29 @@ describe('UpstreamRelayPool', () => {
     expect(socket('wss://b').sent).toContainEqual(['EVENT', event]);
   });
 
+  it('publishes only to the given relays, connecting to ones it does not hold', async () => {
+    const { pool, socket, fake } = await startPool(['wss://a'], { subscribe: false });
+
+    const event = makeEvent('x');
+    pool.publish(event, ['wss://outbox']);
+    await flush();
+    socket('wss://outbox').mockOpen();
+    await flush();
+
+    expect(socket('wss://outbox').sent).toContainEqual(['EVENT', event]);
+    expect(socket('wss://a').sent).not.toContainEqual(['EVENT', event]);
+    expect(fake.sockets.map((s) => s.url)).toEqual(['wss://a', 'wss://outbox']);
+  });
+
+  it('treats an empty target list as nowhere to send', async () => {
+    const { pool, socket } = await startPool(['wss://a'], { subscribe: false });
+
+    pool.publish(makeEvent('x'), []);
+    await flush();
+
+    expect(socket('wss://a').sent).toEqual([]);
+  });
+
   it('closeSubscription sends CLOSE and drops any pending EOSE', async () => {
     const { pool, socket, onEose } = await startPool(['wss://a']);
 
@@ -286,5 +309,33 @@ describe('UpstreamRelayPool', () => {
     await pool.stop();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fake.sockets.length).toBe(beforeStop);
+  });
+
+  it('does not re-arm a relay it only reached for a targeted publish', async () => {
+    // 他人のリストにある落ちたリレーへ繋ぎ直し続けないため
+    vi.useFakeTimers();
+    const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 60_000 });
+    await pool.start();
+    await vi.advanceTimersByTimeAsync(0);
+    fake.forUrl('wss://a')?.mockOpen();
+    pool.publish(makeEvent('x'), ['wss://outbox']);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const outboxSockets = () => fake.sockets.filter((s) => s.url === 'wss://outbox').length;
+    let exhausted = 0;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      exhausted = outboxSockets();
+      fake.forUrl('wss://outbox')?.close();
+      await vi.advanceTimersByTimeAsync(40_000);
+      if (outboxSockets() === exhausted) {
+        break;
+      }
+    }
+
+    // rx-nostr は用の無い一時接続を開き直さないので、見るべきは再武装の予約の有無
+    const recoveryTimers = (pool as unknown as { recoveryTimers: Map<string, unknown> })
+      .recoveryTimers;
+    expect([...recoveryTimers.keys()]).not.toContain('wss://outbox');
+    await pool.stop();
   });
 });
