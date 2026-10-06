@@ -44,10 +44,7 @@ export class RelayListResolver {
    * これが無いと窓の内側でも毎回インデックスリレーへ聞きに行く。
    */
   private readonly checkedAt = new Map<string, number>();
-  /**
-   * どのインデックスリレーも答えなかった人を、次に聞き直してよい時刻 (ms)。覚えておかないと、
-   * 落ちている間は REQ のたびに問い合わせとその待ちが繰り返される。
-   */
+  /** 落ちている間に REQ のたびに問い合わせを待たせないよう、無応答だった人を覚えておく。 */
   private readonly retryAfter = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<void>>();
   /** インデックスリレーへ並べて投げないよう、バッチを 1 本ずつ流す。 */
@@ -66,6 +63,13 @@ export class RelayListResolver {
 
   start(): void {
     this.stopped = false;
+  }
+
+  /** キャッシュを消したら、「取得済み」の記憶も捨てる。残すと窓のあいだ取り直さない。 */
+  forget(): void {
+    this.checkedAt.clear();
+    this.retryAfter.clear();
+    this.prefetchedAt.clear();
   }
 
   stop(): void {

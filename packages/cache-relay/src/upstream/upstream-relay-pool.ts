@@ -68,6 +68,7 @@ export class UpstreamRelayPool implements UpstreamPool {
       onEvent: (upstreamSubId, event, relay) => this.eventCallback?.(upstreamSubId, event, relay),
       onEose: (upstreamSubId, relay) => this.settleRelay(upstreamSubId, relay),
       onGaveUp: (relay) => this.dropFromPending(relay),
+      isOffline: () => this.defaultsAllFailing(),
     });
   }
 
@@ -264,6 +265,16 @@ export class UpstreamRelayPool implements UpstreamPool {
       },
       websocketCtor: (this.options.webSocketFactory ?? (() => globalThis.WebSocket))(),
     });
+  }
+
+  /**
+   * 既定の上流が全部、再試行中か諦めた状態なら自分側の断線とみなす。休止（dormant）は
+   * 使っていないから閉じただけなので数えない。
+   */
+  private defaultsAllFailing(): boolean {
+    const states = Object.values(this.rxNostr?.getAllRelayStatus() ?? {}).map((s) => s.connection);
+    const failing = new Set(['waiting-for-retrying', 'retrying', 'error']);
+    return states.length > 0 && states.every((state) => failing.has(state));
   }
 
   /** Relay urls whose socket is established right now (normalized by rx-nostr). */

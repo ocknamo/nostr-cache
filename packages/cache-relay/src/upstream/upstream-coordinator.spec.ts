@@ -547,6 +547,8 @@ describe('UpstreamCoordinator', () => {
         routed.resolve([{ relay: 'wss://late', filters: [{ kinds: [1] }] }]);
         await vi.advanceTimersByTimeAsync(0);
         pool.emitEose('up1');
+        // EOSE を送ったあとは、宛先を待つ猶予タイマーも張らない
+        expect(vi.getTimerCount()).toBe(0);
         pool.emitEose('up1.0');
         await vi.advanceTimersByTimeAsync(1000);
 

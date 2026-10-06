@@ -429,6 +429,75 @@ describe('UpstreamRelayPool', () => {
       await pool.stop();
     });
 
+    it('does not cool down targets that dropped while we were offline ourselves', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 60_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://far']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 既定の上流も宛先も繋がらない＝自分側の断線
+      for (let attempt = 0; attempt < 20 && fake.forUrl('wss://far'); attempt += 1) {
+        fake.forUrl('wss://a')?.close();
+        fake.forUrl('wss://far')?.close();
+        await vi.advanceTimersByTimeAsync(40_000);
+        if (
+          (pool as unknown as { temporary: { clients: Map<string, unknown> } }).temporary.clients
+            .size === 0
+        ) {
+          break;
+        }
+      }
+
+      expect(pool.canReach('wss://far')).toBe(true);
+      await pool.stop();
+    });
+
+    it('evicts only idle temporary clients when making room', async () => {
+      const { pool, fake } = await startPool(['wss://a'], {
+        subscribe: false,
+        maxTemporaryRelays: 2,
+      });
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://busy']);
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://idle']);
+      await flush();
+      const busy = await openTarget(fake, 'wss://busy');
+      const idle = await openTarget(fake, 'wss://idle');
+      pool.closeSubscription('up2.0');
+
+      pool.openSubscription('up3.0', [{ kinds: [1] }], ['wss://new']);
+      await flush();
+
+      expect(busy.readyState).toBe(1);
+      expect(idle.readyState).toBe(3);
+      expect(fake.forUrl('wss://new')).toBeDefined();
+    });
+
+    it('keeps the slot of a rebuilt client when an old subscription closes', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], {
+        maxTemporaryRelays: 1,
+        temporaryRelayCooldown: 1_000,
+      });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://r']);
+      await vi.advanceTimersByTimeAsync(0);
+      for (let attempt = 0; attempt < 20 && pool.canReach('wss://r'); attempt += 1) {
+        fake.forUrl('wss://r')?.close();
+        await vi.advanceTimersByTimeAsync(40_000);
+      }
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://r']);
+      pool.closeSubscription('up1.0');
+
+      expect(pool.canReach('wss://other')).toBe(false);
+      await pool.stop();
+    });
+
     it('cools down a temporary relay that rejects the connection', async () => {
       const { pool, fake } = await startPool(['wss://a'], { subscribe: false });
       pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://picky']);

@@ -891,6 +891,17 @@ describe('NostrCacheRelay', () => {
       return calls[calls.length - 1][0];
     }
 
+    it('forgets which relay lists it fetched when the cache is cleared', async () => {
+      const forget = vi.spyOn(RelayListResolver.prototype, 'forget');
+      const outboxRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+
+      await outboxRelay.clearCache();
+
+      expect(forget).toHaveBeenCalledOnce();
+    });
+
     it('rejects an index relay it would not connect to', () => {
       expect(
         () =>

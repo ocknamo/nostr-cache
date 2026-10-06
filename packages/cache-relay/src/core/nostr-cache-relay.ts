@@ -198,6 +198,7 @@ export class NostrCacheRelay {
    */
   async clearCache(): Promise<void> {
     await this.storage.clear();
+    this.relayListResolver?.forget();
   }
 
   /**

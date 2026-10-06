@@ -1,8 +1,6 @@
 /**
- * 宛先付きの購読が使う、既定の上流以外への接続。リレーごとに専用の rx-nostr を持つ。
- *
- * 上流プールの rx-nostr に `on.relays` で繋がせないのは、rx-nostr が既定リレー以外を
- * 張り直さない（`error` になった接続は以後の REQ を溜めるだけ）ため。落ちたら捨てて作り直す。
+ * 宛先付きの購読が使う一時接続。リレーごとに専用の rx-nostr を持ち、落ちたら捨てて作り直す。
+ * rx-nostr は既定リレー以外を張り直さないため（doc/cache-relay/upstream.md 第2.1節）。
  */
 
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
@@ -43,6 +41,8 @@ export interface TemporaryRelaysOptions {
   onEose: (upstreamSubId: string, relay: string) => void;
   /** 再試行を使い切った・拒まれた。そのリレーの EOSE はもう来ない。 */
   onGaveUp: (relay: string) => void;
+  /** 自分側が繋がっていないか。そのとき落ちた宛先は相手のせいではないので冷却しない。 */
+  isOffline: () => boolean;
 }
 
 interface Client {
@@ -132,7 +132,9 @@ export class TemporaryRelays {
     const rxNostr = this.options.createClient(key);
     const streams = rxNostr.createConnectionStateObservable().subscribe(({ state }) => {
       if (state === 'error' || state === 'rejected') {
-        this.cooldownUntil.set(key, Date.now() + this.options.cooldown);
+        if (state === 'rejected' || !this.options.isOffline()) {
+          this.cooldownUntil.set(key, Date.now() + this.options.cooldown);
+        }
         this.dispose(key);
         this.options.onGaveUp(key);
       }
@@ -150,7 +152,7 @@ export class TemporaryRelays {
     return client;
   }
 
-  /** 状態の通知を外してから捨てる。dispose が全接続を `terminated` にして戻ってくるため。 */
+  /** 捨てる前に通知を外す。外さないと dispose が流す状態変化まで受け取る。 */
   private dispose(key: string): void {
     const client = this.clients.get(key);
     if (!client) {

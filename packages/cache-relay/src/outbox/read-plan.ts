@@ -55,8 +55,8 @@ export function readLookups(filters: Filter[]): { pubkeys: string[]; eventIds: s
 
 /**
  * 既定の上流に 1 本でも書いている人のための宛先は足さない。残りの人に 2 本ずつ届くまで、
- * 多くの人をまとめて拾えるリレーから順に選ぶ（貪欲な集合被覆）。上限が先に来たとき
- * 宛先ゼロの人が残らないよう、1 本目を要る人の数を 2 本目より優先して数える。
+ * 多くの人をまとめて拾えるリレーから順に選ぶ（貪欲な集合被覆）。上限が先に来ても
+ * 宛先ゼロの人が残りにくいよう、1 本目を要る人の数を 2 本目より優先して数える。
  */
 export function planReads(filters: Filter[], context: ReadPlanContext): ReadPart[] {
   const needs = collectNeeds(filters, context);

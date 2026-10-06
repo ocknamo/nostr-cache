@@ -167,6 +167,16 @@ describe('RelayListResolver.resolve', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('asks again after forget(), as after the cache was cleared', async () => {
+    const { resolver, fetch } = setup();
+
+    await resolver.resolve([pk(1)]);
+    resolver.forget();
+    await resolver.resolve([pk(1)]);
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('stops reading storage for authors already known to be fresh', async () => {
     const fresh = relayList(pk(1), 10);
     const { resolver, storage, fetch } = setup({
