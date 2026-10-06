@@ -417,6 +417,9 @@ describe('UpstreamCoordinator', () => {
   });
 
   describe('outbox routing', () => {
+    /** ルーティングは何段かの Promise を経るので、マイクロタスク数回では足りない。 */
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
     function routedHarness(route: (filters: Filter[]) => Promise<ReadPart[]>) {
       const pool = new MockPool();
       const deliver = vi.fn();
@@ -452,7 +455,7 @@ describe('UpstreamCoordinator', () => {
         { relay: 'wss://a', filters: [{ kinds: [1], authors: ['x'] }] },
         { relay: 'wss://b', filters: [{ kinds: [1], authors: ['y'] }] },
       ]);
-      await flush();
+      await settle();
 
       expect(pool.opened.slice(1)).toEqual([
         { subId: 'up1.0', filters: [{ kinds: [1], authors: ['x'] }], relays: ['wss://a'] },
@@ -466,15 +469,15 @@ describe('UpstreamCoordinator', () => {
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
 
       pool.emitEose('up1');
-      await flush();
+      await settle();
       expect(sendEose).not.toHaveBeenCalled();
 
       routed.resolve([{ relay: 'wss://a', filters: [{ kinds: [1] }] }]);
-      await flush();
+      await settle();
       expect(sendEose).not.toHaveBeenCalled();
 
       pool.emitEose('up1.0');
-      await flush();
+      await settle();
       expect(sendEose).toHaveBeenCalledTimes(1);
     });
 
@@ -507,6 +510,66 @@ describe('UpstreamCoordinator', () => {
       }
     });
 
+    it('still opens the default subscription when routing throws synchronously', async () => {
+      const { pool, coordinator, sendEose } = routedHarness(() => {
+        throw new Error('boom');
+      });
+
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+      pool.emitEose('up1');
+      await settle();
+
+      expect(pool.opened.map((o) => o.subId)).toEqual(['up1']);
+      expect(sendEose).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends EOSE once on timeout, and still opens parts routed after it', async () => {
+      vi.useFakeTimers();
+      try {
+        const routed = deferred<ReadPart[]>();
+        const pool = new MockPool();
+        const sendEose = vi.fn();
+        const coordinator = new UpstreamCoordinator(
+          {
+            pool,
+            ingest: async () => ({ success: true, stored: true }),
+            deliver: vi.fn(),
+            sendEose,
+            route: () => routed.promise,
+          },
+          { eoseTimeout: 100 }
+        );
+        coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+
+        await vi.advanceTimersByTimeAsync(100);
+        expect(sendEose).toHaveBeenCalledTimes(1);
+
+        routed.resolve([{ relay: 'wss://late', filters: [{ kinds: [1] }] }]);
+        await vi.advanceTimersByTimeAsync(0);
+        pool.emitEose('up1');
+        pool.emitEose('up1.0');
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(pool.opened.map((o) => o.subId)).toEqual(['up1', 'up1.0']);
+        expect(sendEose).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('opens no part once stopped mid-routing', async () => {
+      const routed = deferred<ReadPart[]>();
+      const { pool, coordinator } = routedHarness(() => routed.promise);
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+
+      await coordinator.stop();
+      routed.resolve([{ relay: 'wss://a', filters: [{ kinds: [1] }] }]);
+      await settle();
+
+      expect(pool.opened.map((o) => o.subId)).toEqual(['up1']);
+    });
+
     it('does not wait on routing that failed', async () => {
       const { pool, coordinator, sendEose } = routedHarness(async () => {
         throw new Error('index down');
@@ -514,7 +577,7 @@ describe('UpstreamCoordinator', () => {
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
 
       pool.emitEose('up1');
-      await flush();
+      await settle();
 
       expect(sendEose).toHaveBeenCalledTimes(1);
       expect(pool.opened).toHaveLength(1);
@@ -525,13 +588,13 @@ describe('UpstreamCoordinator', () => {
         { relay: 'wss://a', filters: [{ kinds: [1] }] },
       ]);
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], ['seen']);
-      await flush();
+      await settle();
 
       pool.emitEvent('up1.0', makeEvent('seen'));
       pool.emitEvent('up1.0', makeEvent('new'));
       pool.emitEvent('up1', makeEvent('new'));
-      await flush();
-      await flush();
+      await settle();
+      await settle();
 
       expect(deliver.mock.calls.map(([, , event]) => event.id)).toEqual(['new']);
     });
@@ -544,7 +607,7 @@ describe('UpstreamCoordinator', () => {
 
       coordinator.closeForSubscription('client', 'sub');
       routed.resolve([{ relay: 'wss://a', filters: [{ kinds: [1] }] }]);
-      await flush();
+      await settle();
 
       expect(pool.closed).toContain('up1');
       expect(pool.opened.map((o) => o.subId)).toEqual(['up1', 'up2', 'up2.0']);
@@ -555,7 +618,7 @@ describe('UpstreamCoordinator', () => {
         { relay: 'wss://a', filters: [{ kinds: [1] }] },
       ]);
       coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
-      await flush();
+      await settle();
 
       coordinator.closeForSubscription('client', 'sub');
 

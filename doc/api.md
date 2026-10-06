@@ -210,7 +210,7 @@ interface NostrRelayOptions {
                                     // replaceable な kind（0 / 3 / 10000-19999）のみ指定可、他は生成時に例外。
                                     // getCachedAt 対応ストレージが必要。窓の内側の購読はライブ更新を受け取らない
   upstreamPool?: UpstreamPool;      // テスト・高度用途: 上流プール実装の差し替え（upstreamRelays より優先）
-  outbox?: {                        // アウトボックスモデル（NIP-65）。kind 10002 の取得と書き込みの振り分けまで
+  outbox?: {                        // アウトボックスモデル（NIP-65）。kind 10002 の取得と、書き込み・読み込みの振り分け
     indexRelays?: string[];         // 10002 を引く先。空・未指定で無効。wss:// の公開ホスト以外は生成時に例外
   };
 }
@@ -241,10 +241,15 @@ interface NostrRelayOptions {
   イベントがキャッシュにあれば、その著者の read リレー。フィルタは宛先ごとに値を絞って送る
 - replaceable だけを引くフィルタ（kind 0 / 3 / 10000 番台）と `ids` 指定は対象外
 - 1 人 2 本・REQ 1 本につき 8 本まで。多くの人をまとめて拾えるリレーから選ぶ
-- 宛先を引く前に 10002 を最大 1.5 秒待つ。クライアントの `EOSE` は、既定の上流が答えたあと
-  宛先を最大 0.5 秒だけ待って返し、それより遅い分は `EOSE` の後にライブで届く
-- 一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にしない
+- 宛先を決めるために、対象の人の 10002 が未取得ならインデックスリレーへ問い合わせる（最大 1.5 秒
+  待つ。どこも答えなければ 1 分は聞き直さない）
+- クライアントの `EOSE` は、既定の上流の `EOSE` と宛先の決定（最大 1.5 秒）を待ち、そのあと宛先を
+  最大 0.5 秒だけ待って返す。それより遅い分は `EOSE` の後にライブで届く
+- 読み込みの一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にせず、明けたら繋ぎ直す
 - 宛先ごとに `limit` 件ずつ返るので、REQ 全体では `limit` を超えうる
+- `upstreamPool` を差し替える場合、読み込みの振り分けには `openSubscription` の第 3 引数
+  （`relays`: そのリレーにだけ送る）と `canReach` への対応が要る。`relays` を無視するプールでは、
+  絞り込んだ REQ が既定の上流へ余分に飛ぶ
 
 / With `outbox.indexRelays`, every follow list (kind 3) delivered to a client — from cache,
 upstream or in-process, once per event — makes the relay pull the kind 10002 of everyone on it

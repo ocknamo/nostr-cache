@@ -54,8 +54,9 @@ export function readLookups(filters: Filter[]): { pubkeys: string[]; eventIds: s
 }
 
 /**
- * 誰か 1 人でも既定の上流に書いていれば、その人のための宛先は足さない。残りの人に
- * 2 本ずつ届くまで、多くの人をまとめて拾えるリレーから順に選ぶ（貪欲な集合被覆）。
+ * 既定の上流に 1 本でも書いている人のための宛先は足さない。残りの人に 2 本ずつ届くまで、
+ * 多くの人をまとめて拾えるリレーから順に選ぶ（貪欲な集合被覆）。上限が先に来たとき
+ * 宛先ゼロの人が残らないよう、1 本目を要る人の数を 2 本目より優先して数える。
  */
 export function planReads(filters: Filter[], context: ReadPlanContext): ReadPart[] {
   const needs = collectNeeds(filters, context);
@@ -64,7 +65,7 @@ export function planReads(filters: Filter[], context: ReadPlanContext): ReadPart
   const chosen: string[] = [];
 
   while (chosen.length < MAX_READ_RELAYS) {
-    const score = new Map<string, number>();
+    const score = new Map<string, { first: number; total: number }>();
     for (const need of needs) {
       const got = assigned.get(need);
       if ((got?.size ?? 0) >= quota(need)) {
@@ -72,11 +73,18 @@ export function planReads(filters: Filter[], context: ReadPlanContext): ReadPart
       }
       for (const relay of need.candidates) {
         if (!got?.has(relay)) {
-          score.set(relay, (score.get(relay) ?? 0) + 1);
+          const entry = score.get(relay) ?? { first: 0, total: 0 };
+          entry.total += 1;
+          if (!got?.size) {
+            entry.first += 1;
+          }
+          score.set(relay, entry);
         }
       }
     }
-    const best = [...score.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    const best = [...score.entries()].sort(
+      ([ra, a], [rb, b]) => b.first - a.first || b.total - a.total || ra.localeCompare(rb)
+    )[0];
     if (!best) {
       break;
     }

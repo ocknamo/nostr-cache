@@ -33,9 +33,8 @@ export interface UpstreamPool {
   onEvent(callback: (upstreamSubId: string, event: NostrEvent, relayUrl: string) => void): void;
 
   /**
-   * `openSubscription` 時点で接続済みだったリレー全員が EOSE を返したら 1 回だけ発火
-   * （0 台なら即座に）。後から接続したリレーは集約に加えない。落ちているリレーが
-   * 集約 EOSE を永久に止めないため。
+   * 待つ相手が全員 EOSE を返すか諦めたら 1 回だけ発火（0 台なら即座に）。待つのは、既定の
+   * 購読では開いた時点で接続済みのリレー（落ちているリレーに集約を止めさせない）、宛先付きでは宛先。
    */
   onEose(callback: (upstreamSubId: string) => void): void;
 

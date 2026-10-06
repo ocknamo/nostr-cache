@@ -179,7 +179,9 @@ export class UpstreamCoordinator {
     route: (filters: Filter[]) => Promise<ReadPart[]>,
     filters: Filter[]
   ): void {
-    route(filters)
+    // 同期で投げる route でも、既定の購読を開く前に抜けないようにする
+    Promise.resolve()
+      .then(() => route(filters))
       .then((parts) => {
         if (state.closed) {
           return;
@@ -343,7 +345,7 @@ export class UpstreamCoordinator {
     }
     const onlyOutboxLeft =
       !state.pendingEose.has(ROUTING) && !state.pendingEose.has(state.upstreamSubIds[0]);
-    if (onlyOutboxLeft && !state.outboxGraceTimer) {
+    if (onlyOutboxLeft && !state.outboxGraceTimer && !state.eoseSent) {
       state.outboxGraceTimer = setTimeout(() => this.flushEose(state), this.outboxEoseGrace);
     }
   }

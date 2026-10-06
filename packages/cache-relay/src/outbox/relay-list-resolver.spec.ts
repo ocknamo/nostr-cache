@@ -149,14 +149,36 @@ describe('RelayListResolver.resolve', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('asks again on the next call when no index relay answered', async () => {
-    const { resolver, fetch } = setup();
-    fetch.mockResolvedValueOnce({ events: [], answered: 0 });
+  it('waits a minute before asking again for people no index relay answered for', async () => {
+    let now = 1_000_000;
+    const fetch = vi.fn(async () => ({ events: [], answered: 0 }));
+    const resolver = new RelayListResolver(
+      { storage: createMockStorage(), fetch, ingest: vi.fn() },
+      { freshnessSeconds: WINDOW, now: () => now }
+    );
 
     await resolver.resolve([pk(1)]);
+    now += 59_000;
     await resolver.resolve([pk(1)]);
+    expect(fetch).toHaveBeenCalledTimes(1);
 
+    now += 1_001;
+    await resolver.resolve([pk(1)]);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops reading storage for authors already known to be fresh', async () => {
+    const fresh = relayList(pk(1), 10);
+    const { resolver, storage, fetch } = setup({
+      stored: [fresh],
+      cachedAt: new Map([[fresh.id, 1_000_000 - 1000]]),
+    });
+
+    await resolver.resolve([pk(1)]);
+    await resolver.resolve([pk(1)]);
+
+    expect(storage.getCachedAt).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('asks again after being stopped mid-fetch, and ingests nothing from it', async () => {

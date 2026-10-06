@@ -97,6 +97,23 @@ describe('planReads', () => {
     expect(parts).toHaveLength(MAX_READ_RELAYS);
   });
 
+  it('reaches everyone once before adding second relays when the cap bites', () => {
+    // 2 本ずつ共有する 7 組（14 人）と、宛先が 1 本だけの 1 人
+    const lists: Array<[string, RelayList]> = [];
+    for (let group = 0; group < 7; group += 1) {
+      for (const member of [0, 1]) {
+        lists.push([pk(group * 2 + member + 1), writes(`wss://g${group}a`, `wss://g${group}b`)]);
+      }
+    }
+    lists.push([pk(99), writes('wss://lonely')]);
+
+    const parts = plan([{ kinds: [1], authors: lists.map(([author]) => author) }], lists);
+
+    const reached = new Set(parts.flatMap((part) => part.filters[0].authors ?? []));
+    expect(parts).toHaveLength(MAX_READ_RELAYS);
+    expect(reached.size).toBe(lists.length);
+  });
+
   it('skips relays that cannot be reached and people without a list', () => {
     const parts = plan(
       [{ kinds: [1], authors: [pk(1), pk(2)] }],

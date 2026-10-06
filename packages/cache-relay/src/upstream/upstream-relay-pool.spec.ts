@@ -412,7 +412,44 @@ describe('UpstreamRelayPool', () => {
 
       await vi.advanceTimersByTimeAsync(600_000);
       expect(pool.canReach('wss://dead')).toBe(true);
+
+      // 冷却が明けたら、新しい接続で実際に REQ が届く（rx-nostr は既定以外を張り直さないので、
+      // 古い接続を使い回すと永久に答えない宛先になる）
+      const before = fake.sockets.length;
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.sockets.length).toBe(before + 1);
+      const revived = fake.last();
+      revived.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(revived.sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [1] }]);
+      revived.mockMessage(['EOSE', 'up2.0:0']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onEose).toHaveBeenCalledWith('up2.0');
       await pool.stop();
+    });
+
+    it('cools down a temporary relay that rejects the connection', async () => {
+      const { pool, fake } = await startPool(['wss://a'], { subscribe: false });
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://picky']);
+      await flush();
+      fake.forUrl('wss://picky')?.mockOpen();
+      await flush();
+
+      fake.forUrl('wss://picky')?.close(4000);
+      await flush();
+
+      expect(pool.canReach('wss://picky')).toBe(false);
+    });
+
+    it('counts a slot once when a targeted id is reopened', async () => {
+      const { pool } = await startPool(['wss://a'], { subscribe: false, maxTemporaryRelays: 1 });
+
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://one']);
+      pool.openSubscription('up1.0', [{ kinds: [2] }], ['wss://one']);
+      pool.closeSubscription('up1.0');
+
+      expect(pool.canReach('wss://two')).toBe(true);
     });
 
     it('still re-arms a default relay configured with a trailing slash', async () => {

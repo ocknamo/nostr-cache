@@ -14,6 +14,9 @@ import { type RelayList, parseRelayList } from './relay-list.js';
 /** インデックスリレーが 1 REQ を 500 件で黙って打ち切るため、それを下回らせる。 */
 export const DEFAULT_RELAY_LIST_BATCH_SIZE = 300;
 
+/** ms。どのインデックスリレーも答えなかったとき、同じ人を聞き直すまでの間。 */
+const RETRY_AFTER_SILENCE = 60_000;
+
 /** 1 つのフォローリストからも、取得待ち全体でも、これ以上は先読みしない。 */
 export const MAX_PREFETCH_AUTHORS = 2000;
 
@@ -41,6 +44,11 @@ export class RelayListResolver {
    * これが無いと窓の内側でも毎回インデックスリレーへ聞きに行く。
    */
   private readonly checkedAt = new Map<string, number>();
+  /**
+   * どのインデックスリレーも答えなかった人を、次に聞き直してよい時刻 (ms)。覚えておかないと、
+   * 落ちている間は REQ のたびに問い合わせとその待ちが繰り返される。
+   */
+  private readonly retryAfter = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<void>>();
   /** インデックスリレーへ並べて投げないよう、バッチを 1 本ずつ流す。 */
   private queue: Promise<void> = Promise.resolve();
@@ -153,7 +161,10 @@ export class RelayListResolver {
 
   private checkedRecently(pubkey: string): boolean {
     const checked = this.checkedAt.get(pubkey);
-    return checked !== undefined && this.withinWindow(checked);
+    if (checked !== undefined && this.withinWindow(checked)) {
+      return true;
+    }
+    return (this.retryAfter.get(pubkey) ?? 0) > this.now();
   }
 
   private withinWindow(at: number): boolean {
@@ -177,7 +188,12 @@ export class RelayListResolver {
       return pubkeys.filter((pubkey) => {
         const event = current.get(pubkey);
         const cached = event ? cachedAt.get(event.id) : undefined;
-        return cached === undefined || cached > now || now - cached > windowMs;
+        if (cached === undefined || cached > now || now - cached > windowMs) {
+          return true;
+        }
+        // 投入時刻で記録する（今で記録すると窓が倍に延びる）。次からストレージを引かない
+        this.checkedAt.set(pubkey, cached);
+        return false;
       });
     } catch (error) {
       logger.debug('Relay list freshness check failed:', error);
@@ -199,8 +215,8 @@ export class RelayListResolver {
   }
 
   /**
-   * reject しない。どのリレーも答えなかったとき・止められたときは問い合わせ済みにせず、
-   * 次の resolve で取り直す。
+   * reject しない。止められたときは問い合わせ済みにせず次の resolve で取り直し、どのリレーも
+   * 答えなかったときは少し間を置いてから取り直す。
    */
   private async fetchBatch(batch: string[]): Promise<void> {
     try {
@@ -212,7 +228,14 @@ export class RelayListResolver {
         kinds: [RELAY_LIST_KIND],
         authors: batch,
       });
-      if (this.stopped || answered === 0) {
+      if (this.stopped) {
+        return;
+      }
+      if (answered === 0) {
+        const retry = this.now() + RETRY_AFTER_SILENCE;
+        for (const pubkey of batch) {
+          this.retryAfter.set(pubkey, retry);
+        }
         return;
       }
       // 旧版まで返すインデックスリレーがあるので、取り込む前に 1 人 1 件へ畳む。
