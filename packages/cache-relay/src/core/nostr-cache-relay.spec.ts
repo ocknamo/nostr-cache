@@ -1129,21 +1129,6 @@ describe('NostrCacheRelay', () => {
         expect(resolve).toHaveBeenCalledWith([AUTHOR, FRIEND]);
       });
 
-      it('hands the outbox targets to the pool when it can send them', async () => {
-        const { routed, pool, sent } = setupRouting(
-          new Map([[AUTHOR, { read: [], write: ['wss://mine.example.com'] }]])
-        );
-        const publishTo = vi.fn();
-        Object.assign(pool, { publishTo });
-
-        await routed.publishEvent(sampleEvent);
-
-        await vi.waitFor(() =>
-          expect(publishTo).toHaveBeenCalledWith(sampleEvent, ['wss://mine.example.com'])
-        );
-        expect(sent).not.toHaveBeenCalled();
-      });
-
       it('also announces a relay list on the index relays', async () => {
         const { routed, sent } = setupRouting(new Map());
         const relayListEvent = { ...sampleEvent, kind: 10002 };

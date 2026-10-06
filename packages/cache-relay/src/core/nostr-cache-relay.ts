@@ -283,16 +283,8 @@ export class NostrCacheRelay {
     if (!publisher || !isOutboxKind(event.kind)) {
       return;
     }
-    const pool = this.upstreamPool;
     this.outboxTargets(event)
-      .then((relays) => {
-        // プールに任せると、読み込みと同じ冷却を書き込みにも効かせられる
-        if (pool?.publishTo) {
-          pool.publishTo(event, relays);
-        } else {
-          publisher.publish(event, relays);
-        }
-      })
+      .then((relays) => publisher.publish(event, relays))
       .catch((error) => {
         logger.debug('Outbox targets could not be resolved:', error);
       });

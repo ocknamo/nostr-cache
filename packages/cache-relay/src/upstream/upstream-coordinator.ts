@@ -166,8 +166,7 @@ export class UpstreamCoordinator {
 
     this.subs.set(upstreamSubId, state);
     this.byClientSub.set(clientSubKey(clientId, subscriptionId), upstreamSubId);
-    // オフラインなら宛先も届かない。解決と待ちを EOSE に上乗せしない
-    if (this.deps.route && !this.pool.isOffline?.()) {
+    if (this.deps.route) {
       state.pendingEose.add(ROUTING);
       this.openOutboxParts(state, upstreamSubId, this.deps.route, filters);
     }

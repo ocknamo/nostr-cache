@@ -572,19 +572,6 @@ describe('UpstreamCoordinator', () => {
       expect(pool.opened.map((o) => o.subId)).toEqual(['up1']);
     });
 
-    it('skips routing while the pool is offline', async () => {
-      const route = vi.fn(async () => [{ relay: 'wss://a', filters: [{ kinds: [1] }] }]);
-      const { pool, coordinator, sendEose } = routedHarness(route);
-      Object.assign(pool, { isOffline: () => true });
-
-      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
-      pool.emitEose('up1');
-      await settle();
-
-      expect(route).not.toHaveBeenCalled();
-      expect(sendEose).toHaveBeenCalledTimes(1);
-    });
-
     it('does not wait on routing that failed', async () => {
       const { pool, coordinator, sendEose } = routedHarness(async () => {
         throw new Error('index down');

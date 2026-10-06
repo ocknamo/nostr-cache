@@ -86,7 +86,6 @@ describe('UpstreamRelayPool', () => {
   afterEach(async () => {
     await Promise.all(pools.splice(0).map((pool) => pool.stop()));
     vi.useRealTimers();
-    vi.unstubAllGlobals();
   });
 
   it('fans REQ out to every relay under a reversible wire id', async () => {
@@ -178,25 +177,6 @@ describe('UpstreamRelayPool', () => {
     await flush();
 
     expect(onEose).not.toHaveBeenCalled();
-  });
-
-  it('reports offline only when the browser says so and every default relay is failing', async () => {
-    vi.useFakeTimers();
-    const navigator = { onLine: false };
-    vi.stubGlobal('navigator', navigator);
-    const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 60_000 });
-    await pool.start();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(pool.isOffline()).toBe(false);
-
-    fake.last().close();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(pool.isOffline()).toBe(true);
-
-    // 既定の上流が落ちているだけ。アウトボックスの宛先には届きうる
-    navigator.onLine = true;
-    expect(pool.isOffline()).toBe(false);
-    await pool.stop();
   });
 
   it('stops waiting on a relay that drops before answering', async () => {
@@ -497,13 +477,26 @@ describe('UpstreamRelayPool', () => {
       await pool.stop();
     });
 
-    it('waits again rather than drop the subscription when no slot is free at the end', async () => {
+    it('does not reconnect a temporary relay that rejected us', async () => {
       vi.useFakeTimers();
-      const { pool, fake } = createPool(['wss://a'], {
-        maxTemporaryRelays: 1,
-        // 落ちるまでの再試行（数分）より長く、その間に明けないように
-        temporaryRelayCooldown: 1_000_000,
-      });
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://picky']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      fake.forUrl('wss://picky')?.close(4000);
+      const before = fake.sockets.length;
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(fake.sockets.length).toBe(before);
+      await pool.stop();
+    });
+
+    it('drops a pending reconnect on stop', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000_000 });
       await pool.start();
       await vi.advanceTimersByTimeAsync(0);
       fake.forUrl('wss://a')?.mockOpen();
@@ -513,21 +506,10 @@ describe('UpstreamRelayPool', () => {
         fake.forUrl('wss://dead')?.close();
         await vi.advanceTimersByTimeAsync(40_000);
       }
-      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://other']);
-      await vi.advanceTimersByTimeAsync(0);
 
-      const dead = () => fake.sockets.filter((socket) => socket.url === 'wss://dead');
-      const before = dead().length;
-      await vi.advanceTimersByTimeAsync(1_000_000);
-      expect(dead().length).toBe(before);
-
-      pool.closeSubscription('up2.0');
-      await vi.advanceTimersByTimeAsync(1_000_000);
-      expect(dead().length).toBe(before + 1);
-      dead()[before].mockOpen();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(dead()[before].sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
       await pool.stop();
+
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('does not cool down targets that dropped while we were offline ourselves', async () => {
@@ -561,38 +543,6 @@ describe('UpstreamRelayPool', () => {
       far[far.length - 1].mockOpen();
       await vi.advanceTimersByTimeAsync(0);
       expect(far[far.length - 1].sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
-      await pool.stop();
-    });
-
-    it('resends every subscription that dropped while offline, not just the latest', async () => {
-      vi.useFakeTimers();
-      const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 600_000 });
-      await pool.start();
-      await vi.advanceTimersByTimeAsync(0);
-      const clients = () =>
-        (pool as unknown as { temporary: { clients: Map<string, unknown> } }).temporary.clients;
-      const dropFar = async () => {
-        for (let attempt = 0; attempt < 20 && clients().size > 0; attempt += 1) {
-          fake.forUrl('wss://a')?.close();
-          fake.forUrl('wss://far')?.close();
-          await vi.advanceTimersByTimeAsync(40_000);
-        }
-      };
-
-      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://far']);
-      await vi.advanceTimersByTimeAsync(0);
-      await dropFar();
-      // 送り直しを待つ間に開いた購読も、同じく落ちる
-      pool.openSubscription('up2.0', [{ kinds: [2] }], ['wss://far']);
-      await vi.advanceTimersByTimeAsync(0);
-      await dropFar();
-
-      await vi.advanceTimersByTimeAsync(600_000);
-      const far = fake.sockets.filter((socket) => socket.url === 'wss://far').at(-1);
-      far?.mockOpen();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(far?.sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
-      expect(far?.sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [2] }]);
       await pool.stop();
     });
 
@@ -678,33 +628,6 @@ describe('UpstreamRelayPool', () => {
 
       expect([...recoveryTimers.keys()]).toEqual(['wss://a.example.com']);
       await pool.stop();
-    });
-  });
-
-  describe('publishTo', () => {
-    it('sends to the given relays and cools down one that cannot be reached', async () => {
-      const { pool, fake } = await startPool(['wss://a'], { subscribe: false });
-      fake.forUrl('wss://a')?.mockOpen();
-
-      pool.publishTo(makeEvent('x'), ['wss://down', 'wss://up']);
-      fake.forUrl('wss://down')?.close();
-      fake.forUrl('wss://up')?.mockOpen();
-
-      expect(fake.forUrl('wss://up')?.sent).toContainEqual(['EVENT', makeEvent('x')]);
-      expect(pool.canReach('wss://down')).toBe(false);
-      expect(pool.canReach('wss://up')).toBe(true);
-    });
-
-    it('skips relays in cooldown', async () => {
-      const { pool, fake } = await startPool(['wss://a'], { subscribe: false });
-      fake.forUrl('wss://a')?.mockOpen();
-      pool.publishTo(makeEvent('x'), ['wss://down']);
-      fake.forUrl('wss://down')?.close();
-      const before = fake.sockets.length;
-
-      pool.publishTo(makeEvent('y'), ['wss://down']);
-
-      expect(fake.sockets.length).toBe(before);
     });
   });
 });

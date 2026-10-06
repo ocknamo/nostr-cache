@@ -9,7 +9,6 @@ import { DEFAULT_MAX_CONCURRENT_RELAYS, logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { ConnectionStatePacket, EventSigner, LazyFilter, RxNostr } from 'rx-nostr';
 import { createRxForwardReq, createRxNostr } from 'rx-nostr';
-import { OutboxPublisher } from '../outbox/outbox-publisher.js';
 import { TemporaryRelays, fromWireSubId, relayKey } from './temporary-relays.js';
 import type { UpstreamPool, UpstreamPoolOptions } from './upstream-types.js';
 
@@ -42,7 +41,6 @@ export class UpstreamRelayPool implements UpstreamPool {
   /** Pending re-arm per relay rx-nostr has given up on, keyed by relay url. */
   private readonly recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly temporary: TemporaryRelays;
-  private readonly outbox: OutboxPublisher;
   private streams?: { unsubscribe(): void };
   private eventCallback?: (upstreamSubId: string, event: NostrEvent, relayUrl: string) => void;
   private eoseCallback?: (upstreamSubId: string) => void;
@@ -73,21 +71,15 @@ export class UpstreamRelayPool implements UpstreamPool {
       onGaveUp: (relay) => this.dropFromPending(relay),
       isOffline: () => this.defaultsAllFailing(),
     });
-    this.outbox = new OutboxPublisher({
-      webSocketFactory: () => (this.options.webSocketFactory ?? (() => globalThis.WebSocket))(),
-      onUnreachable: (relay) => this.temporary.coolDown(relay),
-    });
   }
 
   async start(): Promise<void> {
     this.stopped = false;
-    this.outbox.start();
     this.connect();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
-    this.outbox.stop();
     for (const timer of this.recoveryTimers.values()) {
       clearTimeout(timer);
     }
@@ -211,21 +203,6 @@ export class UpstreamRelayPool implements UpstreamPool {
 
   canReach(relayUrl: string): boolean {
     return this.temporary.canReach(relayUrl);
-  }
-
-  /** 既定の上流が落ちているだけなら、アウトボックスがむしろ唯一の経路なのでオフラインとしない。 */
-  isOffline(): boolean {
-    return globalThis.navigator?.onLine === false && this.defaultsAllFailing();
-  }
-
-  publishTo(event: NostrEvent, relays: string[]): void {
-    if (this.stopped) {
-      return;
-    }
-    this.outbox.publish(
-      event,
-      relays.filter((relay) => !this.temporary.isCoolingDown(relay))
-    );
   }
 
   /**
