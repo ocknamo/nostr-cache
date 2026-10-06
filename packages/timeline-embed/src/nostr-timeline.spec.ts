@@ -139,6 +139,20 @@ describe('<nostr-timeline> custom element', () => {
     });
   });
 
+  // 上流が無いとアウトボックスは動かないので、設定が届いたことは相乗りの食い違い警告で見る
+  it('hands index-relays to the shared relay', async () => {
+    const element = document.createElement('nostr-timeline');
+    element.setAttribute('index-relays', '');
+    document.body.appendChild(element);
+    await waitFor(() => getRelayHostRefCount() === 1, 'the relay host to be acquired');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await (await acquireRelayHost({ indexRelays: [] })).release();
+    expect(warn).not.toHaveBeenCalled();
+    await (await acquireRelayHost()).release();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('indexRelays'));
+  });
+
   it('reflects attributes into the rendered timeline', async () => {
     const element = document.createElement('nostr-timeline');
     element.setAttribute('kinds', '1');

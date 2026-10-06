@@ -1,5 +1,5 @@
 /**
- * 宛先付きの購読が使う一時接続。リレーごとに専用の rx-nostr を持ち、落ちたら捨てて作り直す。
+ * 宛先付きの購読が使う一時接続。リレーごとに、そのリレーを既定リレーにした rx-nostr を持つ。
  * rx-nostr は既定リレー以外を張り直さないため（doc/cache-relay/upstream.md 第2.1節）。
  */
 
@@ -35,11 +35,13 @@ export interface TemporaryRelaysOptions {
   maxRelays: number;
   /** 落ちたリレーを宛先にしない時間 (ms)。 */
   cooldown: number;
+  /** 自分側の断線で落ちたとき、冷却の代わりに繋ぎ直すまで待つ時間 (ms)。 */
+  offlineRetryDelay: number;
   /** そのリレーだけを既定リレーにした rx-nostr を作る。 */
   createClient: (relay: string) => RxNostr;
   onEvent: (upstreamSubId: string, event: NostrEvent, relay: string) => void;
   onEose: (upstreamSubId: string, relay: string) => void;
-  /** 再試行を使い切った・拒まれた。そのリレーの EOSE はもう来ない。 */
+  /** 再試行を使い切った・拒まれた。繋ぎ直すまで、そのリレーの EOSE は来ない。 */
   onGaveUp: (relay: string) => void;
   /** 自分側が繋がっていないか。そのとき落ちた宛先は相手のせいではないので冷却しない。 */
   isOffline: () => boolean;
@@ -55,6 +57,7 @@ interface Client {
 export class TemporaryRelays {
   private readonly clients = new Map<string, Client>();
   private readonly cooldownUntil = new Map<string, number>();
+  private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: TemporaryRelaysOptions) {}
 
@@ -107,10 +110,11 @@ export class TemporaryRelays {
     }
   }
 
+  /** 繋ぎ直しを待つ接続は数えない。落ちたリレーに枠を握らせないため。 */
   private inUse(): number {
     let count = 0;
-    for (const client of this.clients.values()) {
-      if (client.open > 0) {
+    for (const [key, client] of this.clients) {
+      if (client.open > 0 && !this.retryTimers.has(key)) {
         count += 1;
       }
     }
@@ -132,11 +136,7 @@ export class TemporaryRelays {
     const rxNostr = this.options.createClient(key);
     const streams = rxNostr.createConnectionStateObservable().subscribe(({ state }) => {
       if (state === 'error' || state === 'rejected') {
-        if (state === 'rejected' || !this.options.isOffline()) {
-          this.cooldownUntil.set(key, Date.now() + this.options.cooldown);
-        }
-        this.dispose(key);
-        this.options.onGaveUp(key);
+        this.giveUp(key, state === 'rejected');
       }
     });
     streams.add(
@@ -152,8 +152,46 @@ export class TemporaryRelays {
     return client;
   }
 
+  /**
+   * 開いている購読があれば接続を残し、後で `reconnect()` する。rx-nostr は繋ぎ直すと開いている
+   * REQ を送り直すので、開いたままのタイムラインにもその宛先が戻る。
+   */
+  private giveUp(key: string, rejected: boolean): void {
+    const offline = !rejected && this.options.isOffline();
+    if (!offline) {
+      this.cooldownUntil.set(key, Date.now() + this.options.cooldown);
+    }
+    const client = this.clients.get(key);
+    if (rejected || !client?.open) {
+      this.dispose(key);
+    } else {
+      clearTimeout(this.retryTimers.get(key));
+      this.retryTimers.set(
+        key,
+        setTimeout(
+          () => this.retry(key),
+          offline ? this.options.offlineRetryDelay : this.options.cooldown
+        )
+      );
+    }
+    this.options.onGaveUp(key);
+  }
+
+  private retry(key: string): void {
+    const room = this.inUse() < this.options.maxRelays;
+    this.retryTimers.delete(key);
+    const client = this.clients.get(key);
+    if (client?.open && room) {
+      client.rxNostr.reconnect(key);
+    } else {
+      this.dispose(key);
+    }
+  }
+
   /** 捨てる前に通知を外す。外さないと dispose が流す状態変化まで受け取る。 */
   private dispose(key: string): void {
+    clearTimeout(this.retryTimers.get(key));
+    this.retryTimers.delete(key);
     const client = this.clients.get(key);
     if (!client) {
       return;

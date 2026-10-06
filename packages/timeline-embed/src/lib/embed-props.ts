@@ -20,6 +20,7 @@ import type { RelayHostConfig } from './relay-host.ts';
 import {
   parseFreshness,
   parseImageProxy,
+  parseIndexRelays,
   parseMaxEvents,
   parseOgpProxy,
   parseRelays,
@@ -39,6 +40,7 @@ export interface SharedEmbedProps {
    * 1 ページでリレーを共有し最初に mount した側の設定が採用されるため。
    */
   followsFreshness?: string;
+  indexRelays?: string;
   maxEvents?: string;
   /** Svelte の親が裸の `debug` を渡すと属性ではなくプロパティになるので boolean も受ける。 */
   debug?: string | boolean;
@@ -98,6 +100,7 @@ export function relayConfigFrom(props: SharedEmbedProps): RelayHostConfig {
     // 属性を書いていない 2 つが設定の食い違いとして扱われる。
     profileFreshness: parseFreshness(props.profileFreshness),
     followsFreshness: parseFreshness(props.followsFreshness, 'follows-freshness'),
+    indexRelays: parseIndexRelays(props.indexRelays),
     storageMaxSize: parseMaxEvents(props.maxEvents),
   };
 }

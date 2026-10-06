@@ -148,7 +148,7 @@ export class TimelineController {
    * began — the first one, and every one rx-nostr re-sends after a reconnect.
    * See {@link trimToCoverage}.
    */
-  private answer: UpstreamAnswer = { count: 0 };
+  private answer: UpstreamAnswer = { times: [] };
   /** Abandons a page in flight; replaced per subscription, like the one below. */
   private pagingAbort = new AbortController();
   /**
@@ -179,7 +179,7 @@ export class TimelineController {
           this.patch({ error: undefined });
           // The re-sent REQ is answered from scratch, so what the previous
           // answer reached back to says nothing about this one.
-          this.answer = { count: 0 };
+          this.answer = { times: [] };
           this.profiles.pump();
           this.embeds.pump();
           this.reactions.pump();
@@ -406,7 +406,7 @@ export class TimelineController {
 
     let events = this.state.events;
     const origins = new Map(this.state.origins);
-    const answer: UpstreamAnswer = { count: 0 };
+    const answer: UpstreamAnswer = { times: [] };
     for (const event of page) {
       const merged = insertEvent(events, event, this.options.maxEvents);
       if (merged === events) {
@@ -417,7 +417,7 @@ export class TimelineController {
       if (origin) {
         origins.set(event.id, origin);
       }
-      countUpstream(answer, event, origin);
+      countUpstream(answer, event, origin, requestLimit(asked));
     }
     // A page is answered cache-first the same way the subscription is, so it
     // can arrive with a hole of its own below the events upstream sent. Judged
@@ -550,7 +550,7 @@ export class TimelineController {
     this.validation.clearTimers();
     this.suspended = false;
     this.currentFilters = filters;
-    this.answer = { count: 0 };
+    this.answer = { times: [] };
     this.pagingAbort.abort();
     this.pagingAbort = new AbortController();
     if (this.filterSourceAbort.signal.aborted && !this.stopped) {
@@ -597,7 +597,7 @@ export class TimelineController {
         }
         const events = insertEvent(this.state.events, event, this.options.maxEvents);
         if (events !== this.state.events) {
-          countUpstream(this.answer, event, origin);
+          countUpstream(this.answer, event, origin, requestLimit(this.currentFilters));
         }
         this.patch({ events, origins });
         this.validation.schedule();
@@ -723,12 +723,20 @@ export class TimelineController {
 }
 
 /** Nothing to count without a host to classify against: `origin` is unset. */
-function countUpstream(answer: UpstreamAnswer, event: NostrEvent, origin?: EventOrigin): void {
-  if (origin !== 'upstream') {
+function countUpstream(
+  answer: UpstreamAnswer,
+  event: NostrEvent,
+  origin: EventOrigin | undefined,
+  limit: number | undefined
+): void {
+  if (origin !== 'upstream' || limit === undefined) {
     return;
   }
-  answer.count += 1;
-  answer.oldest = Math.min(answer.oldest ?? event.created_at, event.created_at);
+  answer.times.push(event.created_at);
+  // The floor needs only the newest `limit`; live events would grow this forever.
+  if (answer.times.length > limit * 2) {
+    answer.times.sort((a, b) => b - a).length = limit;
+  }
 }
 
 function message(error: unknown): string {

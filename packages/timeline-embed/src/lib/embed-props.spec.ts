@@ -13,8 +13,13 @@ describe('relayConfigFrom', () => {
       dbName: undefined,
       profileFreshness: undefined,
       followsFreshness: undefined,
+      indexRelays: undefined,
       storageMaxSize: undefined,
     });
+  });
+
+  it('turns the outbox off for an empty index-relays', () => {
+    expect(relayConfigFrom({ indexRelays: '' }).indexRelays).toEqual([]);
   });
 
   it('reads the attributes the host is configured with', () => {
@@ -24,6 +29,7 @@ describe('relayConfigFrom', () => {
         dbName: 'embed-cache',
         profileFreshness: '60',
         followsFreshness: '30',
+        indexRelays: 'wss://index.example',
         maxEvents: '250',
       })
     ).toEqual({
@@ -31,6 +37,7 @@ describe('relayConfigFrom', () => {
       dbName: 'embed-cache',
       profileFreshness: 60,
       followsFreshness: 30,
+      indexRelays: ['wss://index.example'],
       storageMaxSize: 250,
     });
   });

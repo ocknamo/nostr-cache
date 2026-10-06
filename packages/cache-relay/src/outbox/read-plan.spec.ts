@@ -35,6 +35,15 @@ describe('readLookups', () => {
       ])
     ).toEqual({ pubkeys: [pk(1), pk(2), pk(3)], eventIds: [id(1)] });
   });
+
+  it('takes the author out of an address and looks up only event ids by id', () => {
+    expect(
+      readLookups([
+        { kinds: [1], '#q': [`30023:${pk(1)}:post`, id(1)] },
+        { kinds: [7], '#a': [`30023:${pk(2)}:post`, 'not-an-address'] },
+      ])
+    ).toEqual({ pubkeys: [pk(1), pk(2)], eventIds: [id(1)] });
+  });
 });
 
 describe('planReads', () => {
@@ -139,6 +148,15 @@ describe('planReads', () => {
         referenced: [[id(1), pk(1)]],
       })
     ).toEqual([{ relay: 'wss://inbox', filters: [{ kinds: [1, 7], '#e': [id(1)] }] }]);
+  });
+
+  it("reads quotes and replies of an addressable event from its author's read relays", () => {
+    const address = `30023:${pk(1)}:my-article`;
+
+    expect(readLookups([{ kinds: [1], '#q': [address] }]).pubkeys).toEqual([pk(1)]);
+    expect(plan([{ kinds: [1, 7], '#a': [address] }], [[pk(1), reads('wss://inbox')]])).toEqual([
+      { relay: 'wss://inbox', filters: [{ kinds: [1, 7], '#a': [address] }] },
+    ]);
   });
 
   it.each<[string, Filter]>([

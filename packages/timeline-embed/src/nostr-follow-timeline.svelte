@@ -10,6 +10,7 @@
       includeSelf: { attribute: 'include-self' },
       sinceDays: { attribute: 'since-days' },
       followsFreshness: { attribute: 'follows-freshness' },
+      indexRelays: { attribute: 'index-relays' },
       maxEvents: { attribute: 'max-events' },
       infiniteScroll: { attribute: 'infinite-scroll' },
       maxTimelineEvents: { attribute: 'max-timeline-events' },

@@ -5,9 +5,10 @@
  * *not* de-duplicating events across relays).
  *
  * rx-nostr's own behaviour — how many times it retries, how it spaces the
- * attempts, that it re-sends REQs after a reconnect — is deliberately not
- * tested: it is the library's contract, and asserting on it here would only
- * produce failures whenever its defaults change.
+ * attempts — is deliberately not tested: it is the library's contract, and
+ * asserting on it here would only produce failures whenever its defaults
+ * change. The exception is that it re-sends open REQs after a reconnect, which
+ * the temporary relays rely on to get their subscriptions back.
  */
 
 import type { NostrEvent } from '@nostr-cache/shared';
@@ -24,6 +25,25 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
     await Promise.resolve();
   }
+}
+
+/** rx-nostr が一時接続の再試行を使い切り、繋ぎ直し待ちになるまで落とし続ける。 */
+async function dropUntilGivenUp(
+  pool: UpstreamRelayPool,
+  fake: ReturnType<typeof createFakeWebSocketFactory>,
+  url: string,
+  alsoDrop: string[] = []
+): Promise<void> {
+  const { retryTimers } = (pool as unknown as { temporary: { retryTimers: Map<string, unknown> } })
+    .temporary;
+  for (let attempt = 0; attempt < 20 && !retryTimers.has(url); attempt += 1) {
+    for (const other of alsoDrop) {
+      fake.forUrl(other)?.close();
+    }
+    fake.forUrl(url)?.close();
+    await vi.advanceTimersByTimeAsync(40_000);
+  }
+  expect(retryTimers.has(url)).toBe(true);
 }
 
 /** Pools started by a test, torn down afterwards so no timer outlives it. */
@@ -152,6 +172,31 @@ describe('UpstreamRelayPool', () => {
     socket('wss://a').mockMessage(['EOSE', 'up1:0']);
     await flush();
     expect(onEose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an EVENT before the EOSE that followed it in the same task', async () => {
+    const { socket, onEose, onEvent } = await startPool(['wss://a']);
+    const order: string[] = [];
+    onEvent.mockImplementation(() => order.push('event'));
+    onEose.mockImplementation(() => order.push('eose'));
+
+    // Node の ws などは続けて届いたメッセージを同じタスクで流す
+    socket('wss://a').mockMessage(['EVENT', 'up1:0', makeEvent('x')]);
+    socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+    await flush();
+
+    expect(order).toEqual(['event', 'eose']);
+  });
+
+  it('does not count a deferred EOSE toward a subscription reopened under the same id', async () => {
+    const { pool, socket, onEose } = await startPool(['wss://a']);
+
+    socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+    pool.closeSubscription('up1');
+    pool.openSubscription('up1', [{ kinds: [2] }]);
+    await flush();
+
+    expect(onEose).not.toHaveBeenCalled();
   });
 
   it('stops waiting on a relay that drops before answering', async () => {
@@ -385,7 +430,7 @@ describe('UpstreamRelayPool', () => {
       expect(fake.forUrl('wss://two')).toBeUndefined();
     });
 
-    it('cools down a temporary relay that rx-nostr gives up on, without re-arming it', async () => {
+    it('cools down a temporary relay rx-nostr gives up on, then reconnects it with its REQs', async () => {
       vi.useFakeTimers();
       const { pool, fake } = createPool(['wss://a'], {
         reconnectMaxDelay: 60_000,
@@ -399,10 +444,7 @@ describe('UpstreamRelayPool', () => {
       pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
       await vi.advanceTimersByTimeAsync(0);
 
-      for (let attempt = 0; attempt < 20 && pool.canReach('wss://dead'); attempt += 1) {
-        fake.forUrl('wss://dead')?.close();
-        await vi.advanceTimersByTimeAsync(40_000);
-      }
+      await dropUntilGivenUp(pool, fake, 'wss://dead');
 
       expect(pool.canReach('wss://dead')).toBe(false);
       expect(onEose).toHaveBeenCalledWith('up1.0');
@@ -410,23 +452,96 @@ describe('UpstreamRelayPool', () => {
         .recoveryTimers;
       expect([...recoveryTimers.keys()]).not.toContain('wss://dead');
 
+      // 既定の上流のような再武装はせず、冷却が明けてから繋ぎ直す
+      const before = fake.sockets.length;
       await vi.advanceTimersByTimeAsync(600_000);
       expect(pool.canReach('wss://dead')).toBe(true);
-
-      // 冷却が明けたら、新しい接続で実際に REQ が届く（rx-nostr は既定以外を張り直さないので、
-      // 古い接続を使い回すと永久に答えない宛先になる）
-      const before = fake.sockets.length;
-      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://dead']);
-      await vi.advanceTimersByTimeAsync(0);
       expect(fake.sockets.length).toBe(before + 1);
       const revived = fake.last();
       revived.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(revived.sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+
+      // 新しい REQ も同じ接続に乗る
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://dead']);
       await vi.advanceTimersByTimeAsync(0);
       expect(revived.sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [1] }]);
       revived.mockMessage(['EOSE', 'up2.0:0']);
       await vi.advanceTimersByTimeAsync(0);
       expect(onEose).toHaveBeenCalledWith('up2.0');
       await pool.stop();
+    });
+
+    it('resends only the subscriptions still open when the cooldown ends', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      pool.openSubscription('up2.0', [{ kinds: [2] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropUntilGivenUp(pool, fake, 'wss://dead');
+
+      pool.closeSubscription('up1.0');
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      const revived = fake.forUrl('wss://dead');
+      revived?.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(revived?.sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [2] }]);
+      expect(revived?.sent).not.toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+      await pool.stop();
+    });
+
+    it('does not reconnect once every subscription closed during the cooldown', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropUntilGivenUp(pool, fake, 'wss://dead');
+
+      pool.closeSubscription('up1.0');
+      const before = fake.sockets.length;
+      await vi.advanceTimersByTimeAsync(1_000_000);
+
+      expect(fake.sockets.length).toBe(before);
+      await pool.stop();
+    });
+
+    it('does not reconnect a temporary relay that rejected us', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://picky']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      fake.forUrl('wss://picky')?.close(4000);
+      const before = fake.sockets.length;
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(fake.sockets.length).toBe(before);
+      await pool.stop();
+    });
+
+    it('drops a pending reconnect on stop', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropUntilGivenUp(pool, fake, 'wss://dead');
+
+      await pool.stop();
+
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('does not cool down targets that dropped while we were offline ourselves', async () => {
@@ -438,19 +553,22 @@ describe('UpstreamRelayPool', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       // 既定の上流も宛先も繋がらない＝自分側の断線
-      for (let attempt = 0; attempt < 20 && fake.forUrl('wss://far'); attempt += 1) {
-        fake.forUrl('wss://a')?.close();
-        fake.forUrl('wss://far')?.close();
-        await vi.advanceTimersByTimeAsync(40_000);
-        if (
-          (pool as unknown as { temporary: { clients: Map<string, unknown> } }).temporary.clients
-            .size === 0
-        ) {
-          break;
-        }
-      }
+      await dropUntilGivenUp(pool, fake, 'wss://far', ['wss://a']);
 
       expect(pool.canReach('wss://far')).toBe(true);
+      // 冷却しないので、待つ間の購読も同じ接続に乗り、繋ぎ直すときに一緒に送られる
+      pool.openSubscription('up2.0', [{ kinds: [2] }], ['wss://far']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 繋ぎ直しは少し置いてから（既定の上流の再武装と同じ間隔）
+      const before = fake.sockets.filter((socket) => socket.url === 'wss://far').length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      const far = fake.sockets.filter((socket) => socket.url === 'wss://far');
+      expect(far.length).toBe(before + 1);
+      far[far.length - 1].mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(far[far.length - 1].sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+      expect(far[far.length - 1].sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [2] }]);
       await pool.stop();
     });
 
@@ -485,16 +603,38 @@ describe('UpstreamRelayPool', () => {
       fake.forUrl('wss://a')?.mockOpen();
       pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://r']);
       await vi.advanceTimersByTimeAsync(0);
-      for (let attempt = 0; attempt < 20 && pool.canReach('wss://r'); attempt += 1) {
-        fake.forUrl('wss://r')?.close();
-        await vi.advanceTimersByTimeAsync(40_000);
-      }
+      // 拒まれた接続は捨てるので、冷却明けの購読は作り直した接続に乗る
+      fake.forUrl('wss://r')?.close(4000);
       await vi.advanceTimersByTimeAsync(1_000);
 
       pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://r']);
       pool.closeSubscription('up1.0');
 
       expect(pool.canReach('wss://other')).toBe(false);
+      await pool.stop();
+    });
+
+    it('frees the slot of a relay waiting to reconnect, and gives it up if the slot is gone', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], {
+        maxTemporaryRelays: 1,
+        temporaryRelayCooldown: 1_000_000,
+      });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropUntilGivenUp(pool, fake, 'wss://dead');
+
+      expect(pool.canReach('wss://live')).toBe(true);
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://live']);
+      await vi.advanceTimersByTimeAsync(0);
+      const dead = () => fake.sockets.filter((socket) => socket.url === 'wss://dead').length;
+      const before = dead();
+      await vi.advanceTimersByTimeAsync(1_000_000);
+
+      expect(dead()).toBe(before);
       await pool.stop();
     });
 

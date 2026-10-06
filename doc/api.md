@@ -238,16 +238,17 @@ interface NostrRelayOptions {
 届かない人のための REQ を足します（既定の上流に 1 本でも書いている人は足さない）。
 
 - `authors` → その人の write リレー、`#p` だけ → その人の read リレー、`#e` / `#q` → 参照先の
-  イベントがキャッシュにあれば、その著者の read リレー。フィルタは宛先ごとに値を絞って送る
+  イベントがキャッシュにあれば、その著者の read リレー、アドレス形式（`kind:pubkey:d`）の
+  `#q` / `#a` → その pubkey の read リレー。フィルタは宛先ごとに値を絞って送る
 - replaceable だけを引くフィルタ（kind 0 / 3 / 10000 番台）と `ids` 指定は対象外
 - 1 人 2 本・REQ 1 本につき 8 本まで。多くの人をまとめて拾えるリレーから選ぶ
 - 宛先を決めるために、対象の人の 10002 が未取得ならインデックスリレーへ問い合わせる（最大 1.5 秒
   待つ。どこも答えなければ 1 分は聞き直さない）
 - クライアントの `EOSE` は、既定の上流の `EOSE` と宛先の決定（最大 1.5 秒）を待ち、そのあと宛先を
   最大 0.5 秒だけ待って返す。それより遅い分は `EOSE` の後にライブで届く
-- 読み込みの一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にしない（既定の上流も全部
-  失敗中なら自分側の断線とみなして冷却しない）。明けたあとの新しい REQ からまた使い、開いた
-  ままの購読にはその宛先は戻らない
+- 読み込みの一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にせず、明けたら繋ぎ直す
+  （開いたままの購読にもその宛先が戻る）。既定の上流も全部失敗中なら自分側の断線とみなし、
+  冷却せずに `reconnectMaxDelay`（既定 60 秒）のあと繋ぎ直す
 - 宛先ごとに `limit` 件ずつ返るので、REQ 全体では `limit` を超えうる
 - `upstreamPool` を差し替える場合、読み込みの振り分けには `openSubscription` の第 3 引数
   （`relays`: そのリレーにだけ送る）と `canReach` への対応が要る。`relays` を無視するプールでは、
@@ -263,14 +264,16 @@ relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16
 each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
 lists only. Reads keep sending the original filters to the default upstreams and add REQs for
 people the defaults would miss: authors on their write relays, `#p` on the person's read relays,
-`#e` / `#q` on the cached parent author's read relays (2 per person, 8 per REQ; replaceable-only
-and `ids` filters excluded). Missing relay lists are fetched from the index relays first (up to
-1.5 s; people no index relay answered for are not asked again for a minute). The client's EOSE
+`#e` / `#q` on the cached parent author's read relays, address-form `#q` / `#a` on that pubkey's
+read relays (2 per person, 8 per REQ; replaceable-only and `ids` filters excluded). Missing relay
+lists are fetched from the index relays first (up to 1.5 s; people no index relay answered for
+are not asked again for a minute). The client's EOSE
 waits for the default upstreams and that routing, then at most 0.5 s more for the added relays —
 up to about 2 s past the default upstreams; later events arrive after it. At most 16 temporary
-read connections are open at once; a relay that fails is skipped for 10 minutes (not when the
-default upstreams are failing too) and is used again only by new REQs. A replacement
-`upstreamPool` needs `openSubscription`'s third `relays` argument and `canReach` for this.
+read connections are open at once; a relay that fails is skipped for 10 minutes, then
+reconnected so open subscriptions get it back (after `reconnectMaxDelay`, without the cooldown,
+when the default upstreams are failing too). A replacement `upstreamPool` needs
+`openSubscription`'s third `relays` argument and `canReach` for this.
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /

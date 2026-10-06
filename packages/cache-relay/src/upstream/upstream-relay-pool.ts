@@ -60,6 +60,7 @@ export class UpstreamRelayPool implements UpstreamPool {
     this.temporary = new TemporaryRelays({
       maxRelays: options.maxTemporaryRelays ?? DEFAULT_MAX_TEMPORARY_RELAYS,
       cooldown: options.temporaryRelayCooldown ?? DEFAULT_TEMPORARY_RELAY_COOLDOWN,
+      offlineRetryDelay: options.reconnectMaxDelay ?? DEFAULT_RECONNECT_MAX_DELAY,
       createClient: (relay) => {
         const client = this.createClient('lazy');
         client.setDefaultRelays([relay]);
@@ -333,12 +334,25 @@ export class UpstreamRelayPool implements UpstreamPool {
     }
   }
 
+  /**
+   * rx-nostr は EVENT を 1 マイクロタスク遅らせて流し（`filterAsync`。検証を切っている前提）、
+   * EOSE は同期で渡す。同じタスクで続けて届くと EOSE が先に立つので、EVENT を待ってから数える。
+   */
   private settleRelay(upstreamSubId: string, relayUrl: string): void {
     // Unknown id: not ours, already fired, or the subscription was closed.
     const pending = this.pendingEose.get(upstreamSubId);
     if (!pending) {
       return;
     }
+    queueMicrotask(() => {
+      // 待つ間に同じ id で開き直された購読の分としては数えない
+      if (this.pendingEose.get(upstreamSubId) === pending) {
+        this.settlePending(upstreamSubId, pending, relayUrl);
+      }
+    });
+  }
+
+  private settlePending(upstreamSubId: string, pending: Set<string>, relayUrl: string): void {
     pending.delete(relayUrl);
     if (pending.size === 0) {
       this.fireEose(upstreamSubId);

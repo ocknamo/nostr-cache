@@ -75,9 +75,16 @@ rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を�
 `TemporaryRelays` が**リレーごとに別の rx-nostr インスタンス**で持つ（`connectionStrategy: 'lazy'`）。
 同じインスタンスに `on.relays` で繋がせないのは、rx-nostr が既定リレー以外を張り直さず
 （`error` になった接続は以後の REQ を溜めるだけ）、`getAllRelayStatus()` に混ざって既定の購読の
-EOSE 集約まで巻き込むため。一時接続は再武装せず、`error` / `rejected` になったらインスタンスごと
-捨てて `temporaryRelayCooldown`（既定 10 分）のあいだ宛先にせず、明けたら作り直す。同時に開く数は
-`maxTemporaryRelays`（既定 16）まで。
+EOSE 集約まで巻き込むため。一時接続が `error` / `rejected` になったら `temporaryRelayCooldown`
+（既定 10 分）のあいだ宛先にしない。開いている購読があれば接続を残し、明けたら `reconnect()` で
+繋ぎ直す（rx-nostr が開いている REQ を送り直す）。既定の上流も全部失敗中なら自分側の断線と
+みなし、冷却せずに `reconnectMaxDelay` のあと繋ぎ直す。購読が無いもの・`rejected` はインスタンス
+ごと捨てる。同時に開く数は `maxTemporaryRelays`（既定 16）まで。繋ぎ直しを待つ間は枠を数えず、
+繋ぎ直すときに枠が埋まっていれば諦めて捨てる。
+
+rx-nostr は `use()` の EVENT を 1 マイクロタスク遅らせて流し（`filterAsync`）、EOSE は同期で渡す。
+同じタスクで EVENT → EOSE と届くと集約 EOSE が先に立つので、リレーごとの EOSE は手前の EVENT が
+流れ終わってから数える（既定・一時接続とも）。
 
 **既定の上流への再接続は無制限に試み続ける**。rx-nostr の自動リトライ（指数バックオフ・
 `reconnectBaseDelay` 起点・5 回）を使い切ったリレーは `error` 状態で止まるので、

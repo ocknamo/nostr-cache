@@ -1969,6 +1969,20 @@ describe('TimelineController', () => {
       expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
     });
 
+    it('cuts below the limit-th newest, however many came after it', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+
+      fed.deliver([note('cache', 1_700_000_000)]);
+      // More than twice the limit, out of order, as from several relays at once.
+      fed.deliver(
+        [110, 109, 101, 102, 103, 104, 105].map((t) => note(`up-${t}`, 1_700_000_000 + t)),
+        'upstream'
+      );
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['up-110', 'up-109']);
+    });
+
     it('keeps the older block when the answer came back short of the limit', async () => {
       const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
 

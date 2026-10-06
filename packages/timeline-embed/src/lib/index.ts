@@ -175,6 +175,7 @@ export {
   parseFilters,
   parseFlag,
   parseFreshness,
+  parseIndexRelays,
   parseKinds,
   parseLimit,
   parseMaxEvents,

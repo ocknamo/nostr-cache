@@ -10,6 +10,7 @@
       dbName: { attribute: 'db-name' },
       profileFreshness: { attribute: 'profile-freshness' },
       followsFreshness: { attribute: 'follows-freshness' },
+      indexRelays: { attribute: 'index-relays' },
       maxEvents: { attribute: 'max-events' },
       infiniteScroll: { attribute: 'infinite-scroll' },
       maxTimelineEvents: { attribute: 'max-timeline-events' },

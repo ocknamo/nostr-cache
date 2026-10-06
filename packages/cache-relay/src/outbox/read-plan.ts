@@ -13,7 +13,14 @@ export const RELAYS_PER_AUTHOR = 2;
 /** REQ 1 本で足す宛先の上限。 */
 export const MAX_READ_RELAYS = 8;
 
-type RoutedField = 'authors' | '#p' | '#e' | '#q';
+type RoutedField = 'authors' | '#p' | '#e' | '#q' | '#a';
+
+/** `#q` / `#a` のアドレス形式（`kind:pubkey:d`）。著者が値そのものに入っている。 */
+const ADDRESS = /^\d+:([0-9a-f]{64}):/;
+
+function addressAuthor(value: string): string | undefined {
+  return ADDRESS.exec(value)?.[1];
+}
 
 export interface ReadPlanContext {
   lists: ReadonlyMap<string, RelayList>;
@@ -46,7 +53,12 @@ export function readLookups(filters: Filter[]): { pubkeys: string[]; eventIds: s
       }
     } else if (routed) {
       for (const value of filterValues(filter, routed)) {
-        eventIds.add(value);
+        const author = addressAuthor(value);
+        if (author) {
+          pubkeys.add(author);
+        } else if (routed !== '#a') {
+          eventIds.add(value);
+        }
       }
     }
   }
@@ -109,7 +121,7 @@ function routedField(filter: Filter): RoutedField | undefined {
   if (filter.kinds?.length && filter.kinds.every(isReplaceableKind)) {
     return undefined;
   }
-  for (const field of ['authors', '#p', '#e', '#q'] as const) {
+  for (const field of ['authors', '#p', '#e', '#q', '#a'] as const) {
     if (filterValues(filter, field).length > 0) {
       return field;
     }
@@ -151,7 +163,7 @@ function relaysFor(field: RoutedField, value: string, context: ReadPlanContext):
   if (field === '#p') {
     return context.lists.get(value)?.read ?? [];
   }
-  const author = context.referencedAuthors.get(value);
+  const author = addressAuthor(value) ?? context.referencedAuthors.get(value);
   return author ? (context.lists.get(author)?.read ?? []) : [];
 }
 
