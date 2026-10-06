@@ -44,7 +44,7 @@
     "ws": "^8.14.2"
   },
   "peerDependencies": {
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0 || ^4.0.0 || ^5.0.0"
   },
   "peerDependenciesMeta": {
     "vitest": {
@@ -54,8 +54,8 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.5",
-    "@vitest/coverage-v8": "3.2.7",
+    "@vitest/coverage-v8": "5.0.3",
     "typescript": "^6.0.0",
-    "vitest": "3.2.7"
+    "vitest": "5.0.3"
   }
 }
