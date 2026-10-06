@@ -461,7 +461,7 @@ describe('UpstreamRelayPool', () => {
 
     it('does not resend a subscription closed during the cooldown', async () => {
       vi.useFakeTimers();
-      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000 });
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000_000 });
       await pool.start();
       await vi.advanceTimersByTimeAsync(0);
       fake.forUrl('wss://a')?.mockOpen();
@@ -474,9 +474,42 @@ describe('UpstreamRelayPool', () => {
 
       pool.closeSubscription('up1.0');
       const before = fake.sockets.length;
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000_000);
 
       expect(fake.sockets.length).toBe(before);
+      await pool.stop();
+    });
+
+    it('waits again rather than drop the subscription when no slot is free at the end', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], {
+        maxTemporaryRelays: 1,
+        // 落ちるまでの再試行（数分）より長く、その間に明けないように
+        temporaryRelayCooldown: 1_000_000,
+      });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      for (let attempt = 0; attempt < 20 && pool.canReach('wss://dead'); attempt += 1) {
+        fake.forUrl('wss://dead')?.close();
+        await vi.advanceTimersByTimeAsync(40_000);
+      }
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://other']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const dead = () => fake.sockets.filter((socket) => socket.url === 'wss://dead');
+      const before = dead().length;
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      expect(dead().length).toBe(before);
+
+      pool.closeSubscription('up2.0');
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      expect(dead().length).toBe(before + 1);
+      dead()[before].mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dead()[before].sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
       await pool.stop();
     });
 
@@ -511,6 +544,38 @@ describe('UpstreamRelayPool', () => {
       far[far.length - 1].mockOpen();
       await vi.advanceTimersByTimeAsync(0);
       expect(far[far.length - 1].sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+      await pool.stop();
+    });
+
+    it('resends every subscription that dropped while offline, not just the latest', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 600_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const clients = () =>
+        (pool as unknown as { temporary: { clients: Map<string, unknown> } }).temporary.clients;
+      const dropFar = async () => {
+        for (let attempt = 0; attempt < 20 && clients().size > 0; attempt += 1) {
+          fake.forUrl('wss://a')?.close();
+          fake.forUrl('wss://far')?.close();
+          await vi.advanceTimersByTimeAsync(40_000);
+        }
+      };
+
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://far']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropFar();
+      // 送り直しを待つ間に開いた購読も、同じく落ちる
+      pool.openSubscription('up2.0', [{ kinds: [2] }], ['wss://far']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropFar();
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      const far = fake.sockets.filter((socket) => socket.url === 'wss://far').at(-1);
+      far?.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(far?.sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+      expect(far?.sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [2] }]);
       await pool.stop();
     });
 

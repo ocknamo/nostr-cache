@@ -201,26 +201,39 @@ export class TemporaryRelays {
     const live = [...(this.clients.get(key)?.subscriptions ?? [])].filter((sub) => !sub.closed);
     this.dispose(key);
     if (live.length > 0 && !rejected) {
-      this.orphans.set(key, new Set(live));
-      clearTimeout(this.reviveTimers.get(key));
-      this.reviveTimers.set(
-        key,
-        setTimeout(
-          () => this.revive(key),
-          offline ? this.options.offlineRetryDelay : this.options.cooldown
-        )
-      );
+      // 送り直しを待っている分に足す。置き換えると、待っている間に開いた購読で上書きされる
+      const orphans = this.orphans.get(key) ?? new Set();
+      for (const subscription of live) {
+        orphans.add(subscription);
+      }
+      this.orphans.set(key, orphans);
+      this.scheduleRevive(key, offline ? this.options.offlineRetryDelay : this.options.cooldown);
     }
     this.options.onGaveUp(key);
   }
 
+  private scheduleRevive(key: string, delay: number): void {
+    clearTimeout(this.reviveTimers.get(key));
+    this.reviveTimers.set(
+      key,
+      setTimeout(() => this.revive(key), delay)
+    );
+  }
+
+  /** まだ冷却中（タイマーが早く来た）か枠が埋まっていれば、捨てずに待ち直す。 */
   private revive(key: string): void {
     this.reviveTimers.delete(key);
     const orphans = [...(this.orphans.get(key) ?? [])].filter((sub) => !sub.closed);
-    this.orphans.delete(key);
-    if (orphans.length === 0 || !this.canReach(key)) {
+    if (orphans.length === 0) {
+      this.orphans.delete(key);
       return;
     }
+    if (!this.canReach(key)) {
+      const until = this.cooldownUntil.get(key);
+      this.scheduleRevive(key, until === undefined ? this.options.cooldown : until - Date.now());
+      return;
+    }
+    this.orphans.delete(key);
     const client = this.clientFor(key);
     for (const subscription of orphans) {
       this.attach(key, client, subscription);
