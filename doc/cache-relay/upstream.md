@@ -71,7 +71,15 @@ rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を�
 `${upstreamSubId}:0` に固定されるため、共有メッセージストリームで届く EOSE から
 元の `upstreamSubId` を一意に引き直せる。
 
-**再接続は無制限に試み続ける**。rx-nostr の自動リトライ（指数バックオフ・
+以上は既定の上流（`upstreamRelays`）の話。宛先付きの購読（アウトボックス）が使う一時接続は
+`TemporaryRelays` が**リレーごとに別の rx-nostr インスタンス**で持つ（`connectionStrategy: 'lazy'`）。
+同じインスタンスに `on.relays` で繋がせないのは、rx-nostr が既定リレー以外を張り直さず
+（`error` になった接続は以後の REQ を溜めるだけ）、`getAllRelayStatus()` に混ざって既定の購読の
+EOSE 集約まで巻き込むため。一時接続は再武装せず、`error` / `rejected` になったらインスタンスごと
+捨てて `temporaryRelayCooldown`（既定 10 分）のあいだ宛先にせず、明けたら作り直す。同時に開く数は
+`maxTemporaryRelays`（既定 16）まで。
+
+**既定の上流への再接続は無制限に試み続ける**。rx-nostr の自動リトライ（指数バックオフ・
 `reconnectBaseDelay` 起点・5 回）を使い切ったリレーは `error` 状態で止まるので、
 `reconnectMaxDelay`（既定 60 秒）待ってから `rxNostr.reconnect(url)` で再武装する。
 ブラウザのタブと違いリレープロセスは再読み込みできず、一度のネットワーク断で上流を
@@ -133,6 +141,14 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
 全上流 EOSE or upstreamEoseTimeout ──▶ client ◀── ["EOSE", subId]（1 回だけ）
 以降も購読は上流で開いたまま。ライブイベントが透過的に流れ続ける
 ```
+
+アウトボックス（`outbox.indexRelays`）が有効なときは、上の既定の購読に加えて
+`deps.route` が宛先ごとのフィルタを返し、coordinator が `upN.0`, `upN.1`, … を
+`pool.openSubscription(id, filters, [relay])` で開く。重複排除の集合はクライアント購読で
+1 つを共有する。クライアントの EOSE は「既定の購読の EOSE」と「宛先の解決」を待ち、
+その後は宛先の EOSE を最大 `outboxEoseGrace`（既定 500ms）だけ待つ。宛先付きの購読の EOSE
+集約は宛先だけを待つ（一時接続の扱いは第2.1節）。一時接続の上限と、落ちた宛先を冷却期間の
+あいだ外す判定は `pool.canReach()` が持つ。
 
 ### REQ（id カバレッジでスキップされる場合）
 
@@ -378,10 +394,10 @@ REQ のフィルタごとに独立に判定する。
   大量のイベントが流れる購読では、ごく稀に既送イベントの再配信が起こりうる。
 - **再接続時の再送で TTL が延びる**: 再接続で同じイベントが再送されると、`DexieStorage`
   の `put` 冪等性で重複保存は防げるが、`cached_at` がリセットされ TTL が延びる。
-- **再接続は無制限リトライ**: 切断された上流へは、rx-nostr の自動リトライ（指数
+- **既定の上流への再接続は無制限リトライ**: 切断された上流へは、rx-nostr の自動リトライ（指数
   バックオフ・5 回）と `reconnectMaxDelay`（既定 60 秒）ごとの再武装で、`stop()`
   されるまで再接続を試み続ける（第2.1節）。到達不能な URL を誤設定すると再接続が
-  60 秒おきに走り続ける。サーキットブレーカは未実装。
+  60 秒おきに走り続ける。既定の上流にサーキットブレーカは無い（一時接続は冷却で外す）。
 - **接続タイムアウトが無い**: rx-nostr に接続タイムアウトの設定が無いため、
   かつての `upstreamConnectionTimeout` オプションは削除した。開かないソケットは
   WebSocket 自身のタイムアウトで `close` になり、そこから再接続ラダーが動く。

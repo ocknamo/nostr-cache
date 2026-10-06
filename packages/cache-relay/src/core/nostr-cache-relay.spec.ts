@@ -891,6 +891,17 @@ describe('NostrCacheRelay', () => {
       return calls[calls.length - 1][0];
     }
 
+    it('forgets which relay lists it fetched when the cache is cleared', async () => {
+      const forget = vi.spyOn(RelayListResolver.prototype, 'forget');
+      const outboxRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+
+      await outboxRelay.clearCache();
+
+      expect(forget).toHaveBeenCalledOnce();
+    });
+
     it('rejects an index relay it would not connect to', () => {
       expect(
         () =>
@@ -977,6 +988,95 @@ describe('NostrCacheRelay', () => {
       await outboxRelay.subscribe('sub', [{ kinds: [3] }]);
 
       expect(listener).toHaveBeenCalledWith(followList);
+    });
+
+    describe('read routing', () => {
+      const ALICE = 'a'.repeat(64);
+      const BOB = 'b'.repeat(64);
+
+      function setupReads(
+        lists: Map<string, { read: string[]; write: string[] }>,
+        options: { outbox?: boolean } = {}
+      ) {
+        const pool = {
+          start: vi.fn().mockResolvedValue(undefined),
+          stop: vi.fn().mockResolvedValue(undefined),
+          publish: vi.fn(),
+          openSubscription: vi.fn(),
+          closeSubscription: vi.fn(),
+          onEvent: vi.fn(),
+          onEose: vi.fn(),
+          getConnectedCount: vi.fn().mockReturnValue(1),
+          canReach: vi.fn((relay: string) => relay !== 'wss://down.example.com'),
+        };
+        const resolve = vi.spyOn(RelayListResolver.prototype, 'resolve').mockResolvedValue();
+        vi.spyOn(RelayListResolver.prototype, 'lookup').mockResolvedValue(lists);
+        const routed = new NostrCacheRelay(mockStorage, mockTransport, {
+          upstreamPool: pool,
+          upstreamRelays: ['wss://default.example.com'],
+          ...(options.outbox === false
+            ? {}
+            : { outbox: { indexRelays: ['wss://index.example.com'] } }),
+        });
+        return { routed, pool, resolve };
+      }
+
+      it("adds a REQ to each author's write relays besides the default upstream", async () => {
+        const { routed, pool, resolve } = setupReads(
+          new Map([
+            [ALICE, { read: [], write: ['wss://alice.example.com', 'wss://down.example.com'] }],
+            [BOB, { read: [], write: ['wss://default.example.com', 'wss://bob.example.com'] }],
+          ])
+        );
+        mockStorage.getEvents.mockResolvedValueOnce([]);
+        const filter = { kinds: [1], authors: [ALICE, BOB], limit: 20 };
+
+        await routed.subscribe('timeline', [filter]);
+
+        expect(pool.openSubscription).toHaveBeenCalledWith('up1', [filter]);
+        await vi.waitFor(() =>
+          expect(pool.openSubscription).toHaveBeenCalledWith(
+            'up1.0',
+            [{ kinds: [1], authors: [ALICE], limit: 20 }],
+            ['wss://alice.example.com']
+          )
+        );
+        expect(pool.openSubscription).toHaveBeenCalledTimes(2);
+        expect(resolve).toHaveBeenCalledWith([ALICE, BOB]);
+      });
+
+      it("reads replies from the cached parent's author's read relays", async () => {
+        const parent = { ...sampleEvent, id: 'c'.repeat(64), pubkey: ALICE };
+        const { routed, pool } = setupReads(
+          new Map([[ALICE, { read: ['wss://inbox.example.com'], write: [] }]])
+        );
+        mockStorage.getEvents.mockResolvedValueOnce([]).mockResolvedValueOnce([parent]);
+
+        await routed.subscribe('replies', [{ kinds: [1], '#e': [parent.id] }]);
+
+        await vi.waitFor(() =>
+          expect(pool.openSubscription).toHaveBeenCalledWith(
+            'up1.0',
+            [{ kinds: [1], '#e': [parent.id] }],
+            ['wss://inbox.example.com']
+          )
+        );
+        expect(mockStorage.getEvents).toHaveBeenLastCalledWith([{ ids: [parent.id] }]);
+      });
+
+      it('routes nothing without outbox', async () => {
+        const { routed, pool, resolve } = setupReads(
+          new Map([[ALICE, { read: [], write: ['wss://alice.example.com'] }]]),
+          { outbox: false }
+        );
+        mockStorage.getEvents.mockResolvedValueOnce([]);
+
+        await routed.subscribe('timeline', [{ kinds: [1], authors: [ALICE] }]);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(pool.openSubscription).toHaveBeenCalledTimes(1);
+        expect(resolve).not.toHaveBeenCalled();
+      });
     });
 
     describe('write routing', () => {
