@@ -56,7 +56,7 @@ export function readLookups(filters: Filter[]): { pubkeys: string[]; eventIds: s
         const author = addressAuthor(value);
         if (author) {
           pubkeys.add(author);
-        } else {
+        } else if (routed !== '#a') {
           eventIds.add(value);
         }
       }

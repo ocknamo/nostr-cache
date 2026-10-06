@@ -78,11 +78,20 @@ describe('InstrumentedUpstreamPool', () => {
     expect(pool.openSubscription).toHaveBeenNthCalledWith(2, 'part', filters, ['wss://outbox']);
     expect(instrumented.canReach('wss://outbox')).toBe(false);
     expect(instrumented.isOffline()).toBe(true);
-    instrumented.publishTo(event, ['wss://outbox']);
+    instrumented.publishTo?.(event, ['wss://outbox']);
     expect(pool.publishTo).toHaveBeenCalledWith(event, ['wss://outbox']);
     expect(pool.closeSubscription).toHaveBeenCalledWith('sub');
     expect(pool.stop).toHaveBeenCalledOnce();
     expect(instrumented.getConnectedCount()).toBe(2);
+  });
+
+  it('has no publishTo when the inner pool has none, so the relay sends those itself', () => {
+    const { pool } = createMockPool();
+    const { publishTo: _, ...withoutPublishTo } = pool;
+
+    expect(new InstrumentedUpstreamPool(withoutPublishTo, createObserver()).publishTo).toBe(
+      undefined
+    );
   });
 
   it('reports an upstream event and still forwards it to the relay', () => {

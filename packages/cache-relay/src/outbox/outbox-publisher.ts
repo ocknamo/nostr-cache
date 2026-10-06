@@ -17,9 +17,9 @@ export interface OutboxPublisherOptions {
   /** 接続まで、および 1 件の `OK` を待つ上限 (ms)。 */
   timeout?: number;
   maxSockets?: number;
-  /** 最後の `OK` から閉じるまで (ms)。 */
+  /** 最後の `OK`（かその時間切れ）から閉じるまで (ms)。 */
   linger?: number;
-  /** {@link UpstreamPoolOptions.webSocketFactory} と同じ理由で、接続のたびに評価する。 */
+  /** {@link UpstreamPoolOptions.webSocketFactory} と同じ。 */
   webSocketFactory?: () => typeof WebSocket;
   /** 繋がらなかった（開く前に落ちた・時間切れ）。読み込みの宛先からも外すのに使う。 */
   onUnreachable?: (relay: string) => void;
@@ -32,6 +32,7 @@ interface Connection {
   queued: NostrEvent[];
   /** `OK` を待っているイベントと、その時間切れ。 */
   awaiting: Map<string, ReturnType<typeof setTimeout>>;
+  /** 開くまでの時間切れと、閉じるまでの猶予を兼ねる。 */
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -130,16 +131,21 @@ export class OutboxPublisher {
   private settle(relay: string, connection: Connection, eventId: string): void {
     clearTimeout(connection.awaiting.get(eventId));
     connection.awaiting.delete(eventId);
-    if (connection.awaiting.size === 0 && connection.queued.length === 0) {
-      clearTimeout(connection.timer);
-      connection.timer = setTimeout(
-        () => this.close(relay),
-        this.options.linger ?? DEFAULT_OUTBOX_LINGER
-      );
+    if (connection.awaiting.size > 0 || connection.queued.length > 0) {
+      return;
     }
+    clearTimeout(connection.timer);
+    // 枠を待つ送信があるなら、使い回すかもしれない接続より先に空ける
+    if (this.waiting.length > 0) {
+      this.close(relay, connection);
+      return;
+    }
+    connection.timer = setTimeout(
+      () => this.close(relay, connection),
+      this.options.linger ?? DEFAULT_OUTBOX_LINGER
+    );
   }
 
-  /** 開く前に落ちたなら繋がらなかったものとして知らせる。 */
   private drop(relay: string, connection: Connection): void {
     if (this.connections.get(relay) !== connection) {
       return;
@@ -147,12 +153,13 @@ export class OutboxPublisher {
     if (!connection.opened) {
       this.options.onUnreachable?.(relay);
     }
-    this.close(relay);
+    this.close(relay, connection);
   }
 
-  private close(relay: string): void {
+  /** `connection` を渡すと、同じリレーへ張り直した後の接続は閉じない。 */
+  private close(relay: string, expected?: Connection): void {
     const connection = this.connections.get(relay);
-    if (!connection) {
+    if (!connection || (expected && connection !== expected)) {
       return;
     }
     this.connections.delete(relay);

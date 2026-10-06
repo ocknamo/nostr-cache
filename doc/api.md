@@ -233,7 +233,7 @@ interface NostrRelayOptions {
 - ephemeral（20000–29999）と gift wrap（kind 1059）は対象外（使い捨ての鍵で 10002 を引いても無駄なため）
 - 送信は宛先ごとに WebSocket を 1 本使い回し（最後の `OK` から 10 秒で閉じる・同時 32 本まで）、
   上流プールの rx-nostr は使いません。開く前に落ちた・時間切れの宛先は、読み込みと同じく 10 分間
-  宛先にしません。`upstreamPool` を差し替えた場合も、除外に使う既定の上流は `upstreamRelays` に
+  宛先にしません（読み込みで使っている間は除く）。`upstreamPool` を差し替えた場合も、除外に使う既定の上流は `upstreamRelays` に
   渡してください
 
 **読み込み（リードスルー）**は、既定の上流へ元のフィルタをそのまま送ったうえで、既定の上流では
@@ -247,8 +247,9 @@ interface NostrRelayOptions {
 - 宛先を決めるために、対象の人の 10002 が未取得ならインデックスリレーへ問い合わせる（最大 1.5 秒
   待つ。どこも答えなければ 1 分は聞き直さない）
 - クライアントの `EOSE` は、既定の上流の `EOSE` と宛先の決定（最大 1.5 秒）を待ち、そのあと宛先を
-  最大 0.5 秒だけ待って返す。それより遅い分は `EOSE` の後にライブで届く。既定の上流が全部
-  失敗中（オフライン）のあいだは振り分けない
+  最大 0.5 秒だけ待って返す。それより遅い分は `EOSE` の後にライブで届く。ブラウザがオフラインと
+  報告し、既定の上流も全部失敗中のあいだは振り分けない（その間に開いた購読には、復帰しても宛先を
+  足さない）
 - 読み込みの一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にせず、そのとき開いていた購読は
   明けたら作り直した接続へ送り直す。既定の上流も全部失敗中なら自分側の断線とみなして冷却せず、
   `reconnectMaxDelay`（既定 60 秒）のあとに送り直す
@@ -274,7 +275,8 @@ read relays (2 per person, 8 per REQ; replaceable-only and `ids` filters exclude
 1.5 s; people no index relay answered for are not asked again for a minute). The client's EOSE
 waits for the default upstreams and that routing, then at most 0.5 s more for the added relays —
 up to about 2 s past the default upstreams; later events arrive after it. No routing happens while
-every default upstream is failing. At most 16 temporary read connections are open at once; a
+the browser reports itself offline and every default upstream is failing (subscriptions opened
+then gain no added relays after recovery). At most 16 temporary read connections are open at once; a
 relay that fails is skipped for 10 minutes, and the subscriptions open on it are resent once that
 ends (after `reconnectMaxDelay`, without the cooldown, when the default upstreams are failing
 too). A replacement `upstreamPool` needs `openSubscription`'s third `relays` argument and

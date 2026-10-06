@@ -86,8 +86,7 @@ describe('OutboxPublisher', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('waits for a free socket when at the cap', () => {
-    vi.useFakeTimers();
+  it('waits for a free socket when at the cap, freeing an idle one at once', () => {
     const { publisher, fake, socket } = setup({ maxSockets: 1 });
 
     publisher.publish(event('e1'), ['wss://a', 'wss://b']);
@@ -95,9 +94,26 @@ describe('OutboxPublisher', () => {
 
     socket('wss://a').mockOpen();
     socket('wss://a').mockMessage(['OK', 'e1', true, '']);
-    vi.advanceTimersByTime(500);
 
+    expect(socket('wss://a').readyState).toBe(3);
     expect(fake.sockets.map((s) => s.url)).toEqual(['wss://a', 'wss://b']);
+  });
+
+  it('keeps a lingering socket open for an event sent meanwhile', () => {
+    vi.useFakeTimers();
+    const { publisher, socket } = setup();
+    publisher.publish(event('e1'), ['wss://a']);
+    socket('wss://a').mockOpen();
+    socket('wss://a').mockMessage(['OK', 'e1', true, '']);
+
+    vi.advanceTimersByTime(400);
+    publisher.publish(event('e2'), ['wss://a']);
+    vi.advanceTimersByTime(200);
+    expect(socket('wss://a').readyState).toBe(1);
+
+    socket('wss://a').mockMessage(['OK', 'e2', true, '']);
+    vi.advanceTimersByTime(500);
+    expect(socket('wss://a').readyState).toBe(3);
   });
 
   it('skips a relay whose socket cannot be constructed and still sends to the rest', () => {
@@ -119,6 +135,18 @@ describe('OutboxPublisher', () => {
     publisher.publish(event('e1'), ['wss://bad', 'wss://good']);
 
     expect(fake.sockets.map((s) => s.url)).toEqual(['wss://good']);
+  });
+
+  it('forgets the sends still waiting for a socket on stop', () => {
+    const { publisher, fake, socket } = setup({ maxSockets: 1 });
+    publisher.publish(event('e1'), ['wss://a', 'wss://b']);
+
+    publisher.stop();
+    publisher.start();
+    publisher.publish(event('e2'), ['wss://c']);
+    socket('wss://c').close();
+
+    expect(fake.sockets.map((s) => s.url)).toEqual(['wss://a', 'wss://c']);
   });
 
   it('closes what is still open on stop, and connects nowhere afterwards', () => {

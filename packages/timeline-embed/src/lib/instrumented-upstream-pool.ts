@@ -28,10 +28,17 @@ export interface UpstreamObserver {
 }
 
 export class InstrumentedUpstreamPool implements UpstreamPool {
+  /** 中に無ければ無いままにする。有無でリレーが自前で送るかを決めるため。 */
+  readonly publishTo?: (event: NostrEvent, relays: string[]) => void;
+
   constructor(
     private readonly inner: UpstreamPool,
     private readonly observer: UpstreamObserver
-  ) {}
+  ) {
+    if (inner.publishTo) {
+      this.publishTo = (event, relays) => inner.publishTo?.(event, relays);
+    }
+  }
 
   start(): Promise<void> {
     return this.inner.start();
@@ -44,10 +51,6 @@ export class InstrumentedUpstreamPool implements UpstreamPool {
   publish(event: NostrEvent): void {
     this.observer.onUpstreamPublish?.(event.id);
     this.inner.publish(event);
-  }
-
-  publishTo(event: NostrEvent, relays: string[]): void {
-    this.inner.publishTo?.(event, relays);
   }
 
   isOffline(): boolean {

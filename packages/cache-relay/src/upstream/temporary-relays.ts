@@ -65,7 +65,7 @@ interface Client {
 export class TemporaryRelays {
   private readonly clients = new Map<string, Client>();
   private readonly cooldownUntil = new Map<string, number>();
-  /** 落ちたリレーで開いたままだった購読。作り直した接続へ送り直す。 */
+  /** 落ちたリレーで開いたままだった購読。 */
   private readonly orphans = new Map<string, Set<Subscription>>();
   private readonly reviveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -84,10 +84,14 @@ export class TemporaryRelays {
     return false;
   }
 
-  /** 書き込みで繋がらなかったリレーも、読み込みと同じく宛先から外す。 */
+  /**
+   * 書き込みで繋がらなかったリレーも、読み込みと同じく宛先から外す。読み込みで使っている
+   * 間は一時的な失敗とみて外さない（本当に落ちれば読み込み側が外す）。
+   */
   coolDown(relay: string): void {
-    if (!this.options.isOffline()) {
-      this.cooldownUntil.set(relayKey(relay), Date.now() + this.options.cooldown);
+    const key = relayKey(relay);
+    if (!this.options.isOffline() && !this.clients.get(key)?.subscriptions.size) {
+      this.cooldownUntil.set(key, Date.now() + this.options.cooldown);
     }
   }
 

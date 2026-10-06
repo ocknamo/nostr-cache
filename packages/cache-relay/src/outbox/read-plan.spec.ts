@@ -35,6 +35,15 @@ describe('readLookups', () => {
       ])
     ).toEqual({ pubkeys: [pk(1), pk(2), pk(3)], eventIds: [id(1)] });
   });
+
+  it('takes the author out of an address and looks up only event ids by id', () => {
+    expect(
+      readLookups([
+        { kinds: [1], '#q': [`30023:${pk(1)}:post`, id(1)] },
+        { kinds: [7], '#a': [`30023:${pk(2)}:post`, 'not-an-address'] },
+      ])
+    ).toEqual({ pubkeys: [pk(1), pk(2)], eventIds: [id(1)] });
+  });
 });
 
 describe('planReads', () => {

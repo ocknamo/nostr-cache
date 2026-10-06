@@ -60,13 +60,8 @@ export function requestLimit(filters: Filter[]): number | undefined {
 
 /**
  * How far back an upstream answer vouches for the timeline being whole: the
- * `limit`-th newest event. Several relays (the outbox splits a REQ across
- * them) each send their own newest `limit`, so the oldest of all of them only
- * speaks for the quietest relay, while the `limit`-th newest of the union
- * still has every relay's newer events above it.
- *
- * @returns undefined when the answer was short enough to be everything
- *   upstream had — including the empty answer a cache-only relay gives
+ * `limit`-th newest event, as each relay the outbox adds sends its own newest
+ * `limit`. Undefined when the answer could be everything upstream had.
  */
 export function coverageFloor(
   answer: UpstreamAnswer,

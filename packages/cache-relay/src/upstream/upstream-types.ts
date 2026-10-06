@@ -27,7 +27,7 @@ export interface UpstreamPool {
   /** 宛先付きの購読で使えるか（落ちて冷却中でない・一時接続の枠がある）。 */
   canReach?(relayUrl: string): boolean;
 
-  /** 既定の上流が全部、再試行中か諦めた状態か（自分側の断線とみなす）。 */
+  /** 自分側が繋がっていないか。真のあいだは読み込みを振り分けない。 */
   isOffline?(): boolean;
 
   /**
@@ -56,8 +56,8 @@ export interface UpstreamPoolOptions {
   /** 再接続の指数バックオフの初回待ち時間 (ms)。既定 1000 */
   reconnectBaseDelay?: number;
   /**
-   * バックオフを使い切ったあと再武装するまでの待ち時間 (ms)。既定 60000。
-   * これがあるため再接続は数回で諦めず無制限になる。
+   * バックオフを使い切ったあと再武装するまでの待ち時間 (ms)。既定 60000。これがあるため再接続は
+   * 数回で諦めず無制限になる。自分側の断線で落ちた一時接続を送り直すまでの間にも使う。
    */
   reconnectMaxDelay?: number;
   /** 宛先付きの購読で同時に開く一時接続の上限。既定 16 */
@@ -65,9 +65,9 @@ export interface UpstreamPoolOptions {
   /** 一時接続のリレーが落ちたとき、宛先の候補から外しておく時間 (ms)。既定 600000 */
   temporaryRelayCooldown?: number;
   /**
-   * 構築時ではなく `start()` 時に 1 回評価する。ブラウザでエミュレータがグローバルを
-   * 差し替えたあとでも差し替え前の `WebSocket` へ届き、横取り URL を上流に指定した
-   * ときの自己接続ループを防ぐため。既定 `() => globalThis.WebSocket`
+   * 構築時ではなく接続を作るときに評価する。ブラウザでエミュレータがグローバルを差し替えた
+   * あとでも差し替え前の `WebSocket` へ届き、横取り URL を上流に指定したときの自己接続ループを
+   * 防ぐため。既定 `() => globalThis.WebSocket`
    */
   webSocketFactory?: () => typeof WebSocket;
 }

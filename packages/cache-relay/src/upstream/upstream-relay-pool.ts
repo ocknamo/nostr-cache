@@ -213,8 +213,9 @@ export class UpstreamRelayPool implements UpstreamPool {
     return this.temporary.canReach(relayUrl);
   }
 
+  /** 既定の上流が落ちているだけなら、アウトボックスがむしろ唯一の経路なのでオフラインとしない。 */
   isOffline(): boolean {
-    return this.defaultsAllFailing();
+    return globalThis.navigator?.onLine === false && this.defaultsAllFailing();
   }
 
   publishTo(event: NostrEvent, relays: string[]): void {
@@ -366,14 +367,12 @@ export class UpstreamRelayPool implements UpstreamPool {
     if (!pending) {
       return;
     }
-    void Promise.resolve()
-      .then(() => undefined)
-      .then(() => {
-        // 待つ間に同じ id で開き直された購読の分としては数えない
-        if (this.pendingEose.get(upstreamSubId) === pending) {
-          this.settlePending(upstreamSubId, pending, relayUrl);
-        }
-      });
+    void Promise.resolve().then(() => {
+      // 待つ間に同じ id で開き直された購読の分としては数えない
+      if (this.pendingEose.get(upstreamSubId) === pending) {
+        this.settlePending(upstreamSubId, pending, relayUrl);
+      }
+    });
   }
 
   private settlePending(upstreamSubId: string, pending: Set<string>, relayUrl: string): void {

@@ -86,6 +86,7 @@ describe('UpstreamRelayPool', () => {
   afterEach(async () => {
     await Promise.all(pools.splice(0).map((pool) => pool.stop()));
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('fans REQ out to every relay under a reversible wire id', async () => {
@@ -168,8 +169,21 @@ describe('UpstreamRelayPool', () => {
     expect(order).toEqual(['event', 'eose']);
   });
 
-  it('reports the offline state when every default relay is failing', async () => {
+  it('does not count a deferred EOSE toward a subscription reopened under the same id', async () => {
+    const { pool, socket, onEose } = await startPool(['wss://a']);
+
+    socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+    pool.closeSubscription('up1');
+    pool.openSubscription('up1', [{ kinds: [2] }]);
+    await flush();
+
+    expect(onEose).not.toHaveBeenCalled();
+  });
+
+  it('reports offline only when the browser says so and every default relay is failing', async () => {
     vi.useFakeTimers();
+    const navigator = { onLine: false };
+    vi.stubGlobal('navigator', navigator);
     const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 60_000 });
     await pool.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -177,8 +191,11 @@ describe('UpstreamRelayPool', () => {
 
     fake.last().close();
     await vi.advanceTimersByTimeAsync(0);
-
     expect(pool.isOffline()).toBe(true);
+
+    // 既定の上流が落ちているだけ。アウトボックスの宛先には届きうる
+    navigator.onLine = true;
+    expect(pool.isOffline()).toBe(false);
     await pool.stop();
   });
 
