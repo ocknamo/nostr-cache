@@ -74,21 +74,33 @@ describe('requestLimit', () => {
 });
 
 describe('coverageFloor', () => {
-  it('reports the oldest event of an answer that hit the limit', () => {
-    expect(coverageFloor({ count: 50, oldest: 1_700_000_000 }, 50)).toBe(1_700_000_000);
+  const times = (count: number, newest = 1_700_000_000) =>
+    Array.from({ length: count }, (_, i) => newest - i);
+
+  it('reports the oldest event of a single answer that hit the limit', () => {
+    expect(coverageFloor({ times: times(50) }, 50)).toBe(1_700_000_000 - 49);
   });
 
   it('vouches all the way down when the answer came back short', () => {
-    expect(coverageFloor({ count: 49, oldest: 1_700_000_000 }, 50)).toBeUndefined();
+    expect(coverageFloor({ times: times(49) }, 50)).toBeUndefined();
   });
 
   it('vouches all the way down when nothing came from upstream', () => {
     // What a cache-only relay produces on every REQ.
-    expect(coverageFloor({ count: 0 }, 50)).toBeUndefined();
+    expect(coverageFloor({ times: [] }, 50)).toBeUndefined();
   });
 
   it('reports nothing without a limit to have been cut off at', () => {
-    expect(coverageFloor({ count: 500, oldest: 1_700_000_000 }, undefined)).toBeUndefined();
+    expect(coverageFloor({ times: times(500) }, undefined)).toBeUndefined();
+  });
+
+  it('is not dragged down by a quiet relay answering alongside a busy one', () => {
+    // 忙しいリレーの 3 件（直近）と、静かなリレーの 3 件（1 年前）。limit 3 で欠けがないと
+    // 言えるのは直近の 3 件まで
+    const busy = [300, 200, 100];
+    const quiet = [-1_000, -2_000, -3_000];
+
+    expect(coverageFloor({ times: [...quiet, ...busy] }, 3)).toBe(100);
   });
 });
 

@@ -27,6 +27,15 @@ export interface UpstreamPool {
   /** 宛先付きの購読で使えるか（落ちて冷却中でない・一時接続の枠がある）。 */
   canReach?(relayUrl: string): boolean;
 
+  /** 既定の上流が全部、再試行中か諦めた状態か（自分側の断線とみなす）。 */
+  isOffline?(): boolean;
+
+  /**
+   * 既定の上流以外のリレーへ 1 回送る（アウトボックス）。冷却中の宛先は飛ばし、繋がらなかった
+   * 宛先は読み込みの宛先からも外す。無いプールではリレー本体が自前で送る。
+   */
+  publishTo?(event: NostrEvent, relays: string[]): void;
+
   closeSubscription(upstreamSubId: string): void;
 
   /** 届くのは未検証の生イベント。 */

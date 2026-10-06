@@ -14,6 +14,7 @@ import {
   parseFlag,
   parseFreshness,
   parseImageProxy,
+  parseIndexRelays,
   parseKinds,
   parseLimit,
   parseMaxEvents,
@@ -360,6 +361,31 @@ describe('parseFilters', () => {
   });
 });
 
+describe('parseIndexRelays', () => {
+  it('keeps the default when the attribute is absent', () => {
+    expect(parseIndexRelays(undefined)).toBeUndefined();
+    expect(parseIndexRelays(null)).toBeUndefined();
+  });
+
+  it('turns the outbox off when given nothing', () => {
+    expect(parseIndexRelays('')).toEqual([]);
+    expect(parseIndexRelays(' , ')).toEqual([]);
+  });
+
+  it('reads a list the way relays does', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseIndexRelays('wss://a.example, nope ,wss://a.example')).toEqual(['wss://a.example']);
+  });
+
+  it('keeps the default rather than turning the outbox off over a typo', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(parseIndexRelays('wss//purplepag.es')).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('wss//purplepag.es'));
+  });
+});
+
 describe('configFromSearchParams', () => {
   it('accepts the deprecated show-origin as a way to ask for the badges', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -389,6 +415,14 @@ describe('configFromSearchParams', () => {
       showEmbeds: true,
       actions: [],
     });
+  });
+
+  it('reads the index relays, telling an empty value from an absent one', () => {
+    expect(
+      configFromSearchParams(new URLSearchParams('index-relays=wss://i.example')).indexRelays
+    ).toEqual(['wss://i.example']);
+    expect(configFromSearchParams(new URLSearchParams('index-relays=')).indexRelays).toEqual([]);
+    expect(configFromSearchParams(new URLSearchParams('')).indexRelays).toBeUndefined();
   });
 
   it('reads the paging switch and its ceiling out of the query string', () => {
@@ -777,7 +811,7 @@ describe('followConfigFromSearchParams', () => {
   it('reads the same options the custom element takes as attributes', () => {
     const config = followConfigFromSearchParams(
       new URLSearchParams(
-        `pubkey=${NPUB}&relays=wss://a.example&kinds=1&limit=20&max-follows=100&include-self=false&since-days=7&follows-freshness=900&profile-freshness=600&db-name=demo&max-events=1000&debug=true`
+        `pubkey=${NPUB}&relays=wss://a.example&kinds=1&limit=20&max-follows=100&include-self=false&since-days=7&follows-freshness=900&index-relays=&profile-freshness=600&db-name=demo&max-events=1000&debug=true`
       )
     );
 
@@ -792,6 +826,7 @@ describe('followConfigFromSearchParams', () => {
       dbName: 'demo',
       profileFreshness: 600,
       followsFreshness: 900,
+      indexRelays: [],
       maxEvents: 1000,
       infiniteScroll: true,
       maxTimelineEvents: undefined,
@@ -813,6 +848,7 @@ describe('followConfigFromSearchParams', () => {
     expect(config.includeSelf).toBe(true);
     expect(config.sinceSeconds).toBeUndefined();
     expect(config.followsFreshness).toBeUndefined();
+    expect(config.indexRelays).toBeUndefined();
     expect(config.maxEvents).toBeUndefined();
     expect(config.infiniteScroll).toBe(true);
     expect(config.maxTimelineEvents).toBeUndefined();

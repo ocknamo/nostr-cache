@@ -135,19 +135,22 @@ npm パッケージを入れられない構成のための入口です。
 | `followsFreshness` | `follows-freshness` | `3600` |
 | `storageMaxSize` | `max-events` | `5000` |
 | `cacheStrategy` | （属性なし） | `LRU` |
-| `indexRelays` | （属性なし） | `wss://purplepag.es` / `wss://indexer.coracle.social` / `wss://directory.yabu.me` |
+| `indexRelays` | `index-relays`（こちらは**配列**） | `wss://purplepag.es` / `wss://indexer.coracle.social` / `wss://directory.yabu.me` |
 | `interceptUrl` / `lazyValidateInterval` | （属性なし） | `ws://nostr-cache.invalid` / `5` |
 
 `indexRelays` はアウトボックスモデル（NIP-65）用で、`upstreamRelays` があるときは**既定で有効**です。
 フォローリストを表示するとフォロー全員の、そのほか表示する著者・メンション先・返信先の人の
 リレーリスト（kind 10002）を、これらのリレーから取得してキャッシュします（6 時間は取り直しません）。
-**閲覧者のブラウザがこれらのリレーにも接続する**ことになるので、避けたい場合は `[]` を渡してください。
+**閲覧者のブラウザがこれらのリレーにも接続する**ことになるので、避けたい場合は `[]`（属性なら `index-relays=""`、
+iframe なら `&index-relays=`）を渡してください。
 
 このリレーを通して投稿したイベントは、`relays` に加えて**著者の write リレーと、言及した相手の
 read リレー**にも送られます（相手の通知に届くように）。読み込みも、`relays` に書いていない著者の
-投稿はその人の write リレーから、メンションや返信は宛先の人の read リレーから取りに行きます。
-**閲覧者のブラウザは、表示する著者や相手のリレーにも接続する**ことになります（読み込みの一時接続は
-同時 16 本まで。書き込みは宛先ごとに短く繋いで閉じます）。
+投稿はその人の write リレーから、メンションや返信・引用は宛先の人（元の投稿の著者）の read リレーから
+取りに行きます。**閲覧者のブラウザは、表示する著者や相手のリレーにも接続する**ことになります
+（読み込みの一時接続は同時 16 本、書き込みは同時 32 本まで。書き込みの接続は最後の応答から 10 秒で
+閉じます）。繋がらなかったリレーは 10 分間読み書きの宛先から外し、そのとき開いていた購読は
+明けたあとに張り直します。
 
 エクスポートされるもの:
 
@@ -195,6 +198,7 @@ read リレー**にも送られます（相手の通知に届くように）。�
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィール（kind 0）のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `86400`（24 時間） |
 | `follows-freshness` | フォローリスト（kind 3）の同じ設定。**この要素自身は kind 3 を取得しません** — 同じページに `<nostr-follow-timeline>` を置く場合に設定を揃えるためのものです（[下記](#フォロータイムライン)） | `3600`（1 時間） |
+| `index-relays` | アウトボックスモデル用に、著者のリレーリスト（kind 10002）を取得するリレー（カンマ区切り）。**空にするとアウトボックスを無効**にし、`relays` だけを読み書きする。`relays` が空なら常に無効（[上記](#ウィジェットを置かずにページ内リレーだけ使うjs-api)） | `wss://purplepag.es,wss://indexer.coracle.social,wss://directory.yabu.me` |
 | `max-events` | **キャッシュ（IndexedDB）に保存する**イベント数の上限。定期チェックで超過を検知したとき、読み出しが古い順に約 90% まで退避する。`0` で上限なし（[下記](#キャッシュ量の上限)） | `5000` |
 | `infinite-scroll` | `false` で末尾までスクロールしたときの追加読み込みを止める（[下記](#無限スクロール)） | 有効 |
 | `max-timeline-events` | **画面に並べる**イベント数の上限。到達すると追加読み込みを止める。`0` で上限なし。`max-events` とは別物です（[下記](#無限スクロール)） | `500` |
@@ -418,7 +422,7 @@ iframe は**別のページ**（`embed/follow/`）です:
 | `infinite-scroll` | `false` で追加読み込みを止める（[下記](#無限スクロール)） | 有効 |
 | `max-timeline-events` | 画面に並べるイベント数の上限。`0` で上限なし（[下記](#無限スクロール)） | `500` |
 | `follows-freshness` | kind 3 のキャッシュを上流に問い合わせ直さずに使う秒数。`0` で毎回問い合わせる | `3600`（1 時間） |
-| `db-name` / `profile-freshness` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `ogp-proxy` / `image-proxy` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
+| `db-name` / `profile-freshness` / `index-relays` / `max-events` / `debug` / `show-avatars` / `show-media` / `show-embeds` / `ogp-proxy` / `image-proxy` / `actions` / `author-action` / `author-action-label` / `note-action` / `note-action-label` / `material-icons` / `material-icons-font` | `<nostr-timeline>` と同じ | 同じ |
 
 `pubkey` は**既定値で動かしようがない唯一の属性**なので、他の属性のような
 「警告して既定値で続行」はしません。不正なら購読を張らず「pubkey が不正です」を表示します。
@@ -641,6 +645,7 @@ level 3  …
 | `db-name` | IndexedDB のデータベース名 | `nostr-cache-embed` |
 | `profile-freshness` | プロフィールの鮮度ウィンドウ（秒） | `86400` |
 | `follows-freshness` | フォローリストの鮮度ウィンドウ（秒・この要素は取得しないが、同一ページの他ウィジェットと設定を揃えるため） | `3600` |
+| `index-relays` | アウトボックスモデル用のインデックスリレー（`<nostr-timeline>` と同じ） | 同じ |
 | `max-events` | キャッシュに保存するイベント数の上限（[下記](#キャッシュ量の上限)） | `5000` |
 | `debug` | `cache` / `upstream` バッジを表示 | オフ |
 | `show-avatars` | `"false"` でアバターを出さない（著者・リアクター両方） | オン |

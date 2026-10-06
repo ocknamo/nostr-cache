@@ -76,8 +76,14 @@ rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を�
 同じインスタンスに `on.relays` で繋がせないのは、rx-nostr が既定リレー以外を張り直さず
 （`error` になった接続は以後の REQ を溜めるだけ）、`getAllRelayStatus()` に混ざって既定の購読の
 EOSE 集約まで巻き込むため。一時接続は再武装せず、`error` / `rejected` になったらインスタンスごと
-捨てて `temporaryRelayCooldown`（既定 10 分）のあいだ宛先にせず、明けたら作り直す。同時に開く数は
-`maxTemporaryRelays`（既定 16）まで。
+捨てて `temporaryRelayCooldown`（既定 10 分）のあいだ宛先にせず、明けたら作り直す。そのとき
+開いていた購読はフィルタごと覚えておき、作り直した接続へ送り直す（`rejected` は除く）。
+既定の上流が全部失敗中なら自分側の断線とみなし、冷却せずに `reconnectMaxDelay` のあと送り直す。
+同時に開く数は `maxTemporaryRelays`（既定 16）まで。
+
+rx-nostr は `use()` の EVENT を 1 マイクロタスク遅らせて流し（`filterAsync`）、EOSE は同期で渡す。
+同じタスクで EVENT → EOSE と届くと集約 EOSE が先に立つので、リレーごとの EOSE は手前の EVENT が
+流れ終わってから数える（既定・一時接続とも）。
 
 **既定の上流への再接続は無制限に試み続ける**。rx-nostr の自動リトライ（指数バックオフ・
 `reconnectBaseDelay` 起点・5 回）を使い切ったリレーは `error` 状態で止まるので、
@@ -118,8 +124,8 @@ client ── ["EVENT", ev] ──▶ MessageHandler.handleEventMessage
   └─ coordinator.publish(ev) → pool: 接続済み全上流へ ["EVENT", ev]
        │（fire-and-forget。送信できた時点で完了とし上流の OK は待たない。
        │  切断中リレーへは実質ドロップ = 再接続時に再送されない）
-       └─ outbox 有効時: 著者・言及先の 10002 から宛先を引き、OutboxPublisher が
-          宛先ごとの短命な接続で送る（doc/api.md の `outbox`）
+       └─ outbox 有効時: 著者・言及先の 10002 から宛先を引き、pool.publishTo（無ければ
+          リレー本体の OutboxPublisher）が宛先ごとに使い回す接続で送る（doc/api.md の `outbox`）
 ```
 
 ### REQ（リードスルー）
@@ -148,7 +154,8 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
 1 つを共有する。クライアントの EOSE は「既定の購読の EOSE」と「宛先の解決」を待ち、
 その後は宛先の EOSE を最大 `outboxEoseGrace`（既定 500ms）だけ待つ。宛先付きの購読の EOSE
 集約は宛先だけを待つ（一時接続の扱いは第2.1節）。一時接続の上限と、落ちた宛先を冷却期間の
-あいだ外す判定は `pool.canReach()` が持つ。
+あいだ外す判定は `pool.canReach()` が持つ。`pool.isOffline()` が真のあいだは宛先を足さない
+（宛先も届かないので、解決と待ちを EOSE に上乗せしない）。
 
 ### REQ（id カバレッジでスキップされる場合）
 

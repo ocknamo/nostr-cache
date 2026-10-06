@@ -231,27 +231,32 @@ interface NostrRelayOptions {
 - kind 10002 自体はインデックスリレーにも
 - 合計 30 本まで。宛先が未取得なら先に 10002 を取りに行く（最大 3 秒）ので、既定の上流より遅れて届く
 - ephemeral（20000–29999）と gift wrap（kind 1059）は対象外（使い捨ての鍵で 10002 を引いても無駄なため）
-- 送信は宛先ごとの短命な WebSocket で行い、上流プールは使いません。`upstreamPool` を差し替えた
-  場合も、除外に使う既定の上流は `upstreamRelays` に渡してください
+- 送信は宛先ごとに WebSocket を 1 本使い回し（最後の `OK` から 10 秒で閉じる・同時 32 本まで）、
+  上流プールの rx-nostr は使いません。開く前に落ちた・時間切れの宛先は、読み込みと同じく 10 分間
+  宛先にしません。`upstreamPool` を差し替えた場合も、除外に使う既定の上流は `upstreamRelays` に
+  渡してください
 
 **読み込み（リードスルー）**は、既定の上流へ元のフィルタをそのまま送ったうえで、既定の上流では
 届かない人のための REQ を足します（既定の上流に 1 本でも書いている人は足さない）。
 
 - `authors` → その人の write リレー、`#p` だけ → その人の read リレー、`#e` / `#q` → 参照先の
-  イベントがキャッシュにあれば、その著者の read リレー。フィルタは宛先ごとに値を絞って送る
+  イベントがキャッシュにあれば、その著者の read リレー、アドレス形式（`kind:pubkey:d`）の
+  `#q` / `#a` → その pubkey の read リレー。フィルタは宛先ごとに値を絞って送る
 - replaceable だけを引くフィルタ（kind 0 / 3 / 10000 番台）と `ids` 指定は対象外
 - 1 人 2 本・REQ 1 本につき 8 本まで。多くの人をまとめて拾えるリレーから選ぶ
 - 宛先を決めるために、対象の人の 10002 が未取得ならインデックスリレーへ問い合わせる（最大 1.5 秒
   待つ。どこも答えなければ 1 分は聞き直さない）
 - クライアントの `EOSE` は、既定の上流の `EOSE` と宛先の決定（最大 1.5 秒）を待ち、そのあと宛先を
-  最大 0.5 秒だけ待って返す。それより遅い分は `EOSE` の後にライブで届く
-- 読み込みの一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にしない（既定の上流も全部
-  失敗中なら自分側の断線とみなして冷却しない）。明けたあとの新しい REQ からまた使い、開いた
-  ままの購読にはその宛先は戻らない
+  最大 0.5 秒だけ待って返す。それより遅い分は `EOSE` の後にライブで届く。既定の上流が全部
+  失敗中（オフライン）のあいだは振り分けない
+- 読み込みの一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にせず、そのとき開いていた購読は
+  明けたら作り直した接続へ送り直す。既定の上流も全部失敗中なら自分側の断線とみなして冷却せず、
+  `reconnectMaxDelay`（既定 60 秒）のあとに送り直す
 - 宛先ごとに `limit` 件ずつ返るので、REQ 全体では `limit` を超えうる
 - `upstreamPool` を差し替える場合、読み込みの振り分けには `openSubscription` の第 3 引数
   （`relays`: そのリレーにだけ送る）と `canReach` への対応が要る。`relays` を無視するプールでは、
-  絞り込んだ REQ が既定の上流へ余分に飛ぶ
+  絞り込んだ REQ が既定の上流へ余分に飛ぶ。`isOffline`（オフライン中は振り分けない）と
+  `publishTo`（書き込みの宛先を任せ、冷却を読み込みと共有する。無ければリレー本体が送る）は任意
 
 / With `outbox.indexRelays`, every follow list (kind 3) delivered to a client — from cache,
 upstream or in-process, once per event — makes the relay pull the kind 10002 of everyone on it
@@ -261,16 +266,20 @@ stored even under `LAZY`, since it will decide where an author is read from; `NO
 it. Write-through additionally goes, after the default upstreams, to the author's write
 relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
 each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
-lists only. Reads keep sending the original filters to the default upstreams and add REQs for
+lists only, over one reused socket per relay (closed 10 s after the last `OK`, 32 at once; a relay
+that fails before opening is skipped for 10 minutes, as for reads). Reads keep sending the original filters to the default upstreams and add REQs for
 people the defaults would miss: authors on their write relays, `#p` on the person's read relays,
-`#e` / `#q` on the cached parent author's read relays (2 per person, 8 per REQ; replaceable-only
-and `ids` filters excluded). Missing relay lists are fetched from the index relays first (up to
+`#e` / `#q` on the cached parent author's read relays, address-form `#q` / `#a` on that pubkey's
+read relays (2 per person, 8 per REQ; replaceable-only and `ids` filters excluded). Missing relay lists are fetched from the index relays first (up to
 1.5 s; people no index relay answered for are not asked again for a minute). The client's EOSE
 waits for the default upstreams and that routing, then at most 0.5 s more for the added relays —
-up to about 2 s past the default upstreams; later events arrive after it. At most 16 temporary
-read connections are open at once; a relay that fails is skipped for 10 minutes (not when the
-default upstreams are failing too) and is used again only by new REQs. A replacement
-`upstreamPool` needs `openSubscription`'s third `relays` argument and `canReach` for this.
+up to about 2 s past the default upstreams; later events arrive after it. No routing happens while
+every default upstream is failing. At most 16 temporary read connections are open at once; a
+relay that fails is skipped for 10 minutes, and the subscriptions open on it are resent once that
+ends (after `reconnectMaxDelay`, without the cooldown, when the default upstreams are failing
+too). A replacement `upstreamPool` needs `openSubscription`'s third `relays` argument and
+`canReach` for this; `isOffline` and `publishTo` (sharing that cooldown with writes) are
+optional.
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /

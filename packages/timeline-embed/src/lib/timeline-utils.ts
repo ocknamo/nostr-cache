@@ -34,11 +34,9 @@ export function insertEvent(
   return next.length > maxSize ? next.slice(0, maxSize) : next;
 }
 
-/** What an upstream answer has delivered: how many, and how far back. */
+/** What an upstream answer has delivered: the `created_at` of each event. */
 export interface UpstreamAnswer {
-  count: number;
-  /** Undefined until the first event. */
-  oldest?: number;
+  times: number[];
 }
 
 /**
@@ -61,22 +59,23 @@ export function requestLimit(filters: Filter[]): number | undefined {
 }
 
 /**
- * How far back an upstream answer vouches for the timeline being whole: an
- * answer long enough to have been cut off sent nothing below its oldest event,
- * so what the cache has further down can be separated from it by a hole.
+ * How far back an upstream answer vouches for the timeline being whole: the
+ * `limit`-th newest event. Several relays (the outbox splits a REQ across
+ * them) each send their own newest `limit`, so the oldest of all of them only
+ * speaks for the quietest relay, while the `limit`-th newest of the union
+ * still has every relay's newer events above it.
  *
- * @returns that oldest `created_at`, or undefined when the answer was short
- *   enough to be everything upstream had — including the empty answer a
- *   cache-only relay gives
+ * @returns undefined when the answer was short enough to be everything
+ *   upstream had — including the empty answer a cache-only relay gives
  */
 export function coverageFloor(
   answer: UpstreamAnswer,
   limit: number | undefined
 ): number | undefined {
-  if (limit === undefined || answer.oldest === undefined || answer.count < limit) {
+  if (limit === undefined || limit <= 0 || answer.times.length < limit) {
     return undefined;
   }
-  return answer.oldest;
+  return [...answer.times].sort((a, b) => b - a)[limit - 1];
 }
 
 /** Drop everything older than `floor`; the same array back when nothing is. */

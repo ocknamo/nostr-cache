@@ -141,6 +141,15 @@ describe('planReads', () => {
     ).toEqual([{ relay: 'wss://inbox', filters: [{ kinds: [1, 7], '#e': [id(1)] }] }]);
   });
 
+  it("reads quotes and replies of an addressable event from its author's read relays", () => {
+    const address = `30023:${pk(1)}:my-article`;
+
+    expect(readLookups([{ kinds: [1], '#q': [address] }]).pubkeys).toEqual([pk(1)]);
+    expect(plan([{ kinds: [1, 7], '#a': [address] }], [[pk(1), reads('wss://inbox')]])).toEqual([
+      { relay: 'wss://inbox', filters: [{ kinds: [1, 7], '#a': [address] }] },
+    ]);
+  });
+
   it.each<[string, Filter]>([
     ['replaceable kinds only', { kinds: [0, 3, 10002], authors: [pk(1)] }],
     ['ids', { ids: [id(1)], authors: [pk(1)] }],

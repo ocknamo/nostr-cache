@@ -35,6 +35,8 @@ function createMockPool() {
     }),
     getConnectedCount: vi.fn(() => 2),
     canReach: vi.fn(() => false),
+    publishTo: vi.fn(),
+    isOffline: vi.fn(() => true),
   } satisfies UpstreamPool;
 
   return {
@@ -75,6 +77,9 @@ describe('InstrumentedUpstreamPool', () => {
     expect(pool.openSubscription).toHaveBeenNthCalledWith(1, 'sub', filters, undefined);
     expect(pool.openSubscription).toHaveBeenNthCalledWith(2, 'part', filters, ['wss://outbox']);
     expect(instrumented.canReach('wss://outbox')).toBe(false);
+    expect(instrumented.isOffline()).toBe(true);
+    instrumented.publishTo(event, ['wss://outbox']);
+    expect(pool.publishTo).toHaveBeenCalledWith(event, ['wss://outbox']);
     expect(pool.closeSubscription).toHaveBeenCalledWith('sub');
     expect(pool.stop).toHaveBeenCalledOnce();
     expect(instrumented.getConnectedCount()).toBe(2);

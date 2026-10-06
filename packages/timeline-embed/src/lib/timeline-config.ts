@@ -64,6 +64,19 @@ export function parseRelays(value: string | null | undefined): string[] {
   return [...new Set(relays)];
 }
 
+/**
+ * 空でアウトボックスを無効にする。全部不正なら既定に戻す（タイポでアウトボックスを止めない）。
+ *
+ * @returns `undefined` なら `DEFAULT_INDEX_RELAYS` のまま
+ */
+export function parseIndexRelays(value: string | null | undefined): string[] | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const relays = parseRelays(value);
+  return relays.length === 0 && splitList(value).length > 0 ? undefined : relays;
+}
+
 function parseNumberList(value: string | null | undefined): number[] {
   const numbers: number[] = [];
   for (const entry of splitList(value)) {
@@ -465,6 +478,7 @@ export function configFromSearchParams(params: URLSearchParams): {
   dbName: string | undefined;
   profileFreshness: number | undefined;
   followsFreshness: number | undefined;
+  indexRelays: string[] | undefined;
   maxEvents: number | undefined;
   infiniteScroll: boolean;
   maxTimelineEvents: number | undefined;
@@ -491,6 +505,7 @@ export function configFromSearchParams(params: URLSearchParams): {
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
+    indexRelays: parseIndexRelays(params.get('index-relays')),
     maxEvents: parseMaxEvents(params.get('max-events')),
     infiniteScroll: parseEnabled(params.get('infinite-scroll')),
     maxTimelineEvents: parseMaxTimelineEvents(params.get('max-timeline-events')),
@@ -522,6 +537,7 @@ export interface FollowTimelineConfig {
   dbName: string | undefined;
   profileFreshness: number | undefined;
   followsFreshness: number | undefined;
+  indexRelays: string[] | undefined;
   maxEvents: number | undefined;
   infiniteScroll: boolean;
   maxTimelineEvents: number | undefined;
@@ -555,6 +571,7 @@ export function followConfigFromSearchParams(params: URLSearchParams): FollowTim
     dbName: params.get('db-name') ?? undefined,
     profileFreshness: parseFreshness(params.get('profile-freshness')),
     followsFreshness: parseFreshness(params.get('follows-freshness'), 'follows-freshness'),
+    indexRelays: parseIndexRelays(params.get('index-relays')),
     maxEvents: parseMaxEvents(params.get('max-events')),
     infiniteScroll: parseEnabled(params.get('infinite-scroll')),
     maxTimelineEvents: parseMaxTimelineEvents(params.get('max-timeline-events')),

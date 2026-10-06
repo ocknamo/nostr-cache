@@ -9,6 +9,7 @@ import { DEFAULT_MAX_CONCURRENT_RELAYS, logger } from '@nostr-cache/shared';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
 import type { ConnectionStatePacket, EventSigner, LazyFilter, RxNostr } from 'rx-nostr';
 import { createRxForwardReq, createRxNostr } from 'rx-nostr';
+import { OutboxPublisher } from '../outbox/outbox-publisher.js';
 import { TemporaryRelays, fromWireSubId, relayKey } from './temporary-relays.js';
 import type { UpstreamPool, UpstreamPoolOptions } from './upstream-types.js';
 
@@ -41,6 +42,7 @@ export class UpstreamRelayPool implements UpstreamPool {
   /** Pending re-arm per relay rx-nostr has given up on, keyed by relay url. */
   private readonly recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly temporary: TemporaryRelays;
+  private readonly outbox: OutboxPublisher;
   private streams?: { unsubscribe(): void };
   private eventCallback?: (upstreamSubId: string, event: NostrEvent, relayUrl: string) => void;
   private eoseCallback?: (upstreamSubId: string) => void;
@@ -60,6 +62,7 @@ export class UpstreamRelayPool implements UpstreamPool {
     this.temporary = new TemporaryRelays({
       maxRelays: options.maxTemporaryRelays ?? DEFAULT_MAX_TEMPORARY_RELAYS,
       cooldown: options.temporaryRelayCooldown ?? DEFAULT_TEMPORARY_RELAY_COOLDOWN,
+      offlineRetryDelay: options.reconnectMaxDelay ?? DEFAULT_RECONNECT_MAX_DELAY,
       createClient: (relay) => {
         const client = this.createClient('lazy');
         client.setDefaultRelays([relay]);
@@ -70,15 +73,21 @@ export class UpstreamRelayPool implements UpstreamPool {
       onGaveUp: (relay) => this.dropFromPending(relay),
       isOffline: () => this.defaultsAllFailing(),
     });
+    this.outbox = new OutboxPublisher({
+      webSocketFactory: () => (this.options.webSocketFactory ?? (() => globalThis.WebSocket))(),
+      onUnreachable: (relay) => this.temporary.coolDown(relay),
+    });
   }
 
   async start(): Promise<void> {
     this.stopped = false;
+    this.outbox.start();
     this.connect();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.outbox.stop();
     for (const timer of this.recoveryTimers.values()) {
       clearTimeout(timer);
     }
@@ -202,6 +211,20 @@ export class UpstreamRelayPool implements UpstreamPool {
 
   canReach(relayUrl: string): boolean {
     return this.temporary.canReach(relayUrl);
+  }
+
+  isOffline(): boolean {
+    return this.defaultsAllFailing();
+  }
+
+  publishTo(event: NostrEvent, relays: string[]): void {
+    if (this.stopped) {
+      return;
+    }
+    this.outbox.publish(
+      event,
+      relays.filter((relay) => !this.temporary.isCoolingDown(relay))
+    );
   }
 
   /**
@@ -333,12 +356,27 @@ export class UpstreamRelayPool implements UpstreamPool {
     }
   }
 
+  /**
+   * rx-nostr は EVENT を 1 マイクロタスク遅らせて流し（`filterAsync`）、EOSE は同期で渡す。
+   * 同じタスクで続けて届くと EOSE が先に立つので、手前の EVENT が着くまで待ってから数える。
+   */
   private settleRelay(upstreamSubId: string, relayUrl: string): void {
     // Unknown id: not ours, already fired, or the subscription was closed.
     const pending = this.pendingEose.get(upstreamSubId);
     if (!pending) {
       return;
     }
+    void Promise.resolve()
+      .then(() => undefined)
+      .then(() => {
+        // 待つ間に同じ id で開き直された購読の分としては数えない
+        if (this.pendingEose.get(upstreamSubId) === pending) {
+          this.settlePending(upstreamSubId, pending, relayUrl);
+        }
+      });
+  }
+
+  private settlePending(upstreamSubId: string, pending: Set<string>, relayUrl: string): void {
     pending.delete(relayUrl);
     if (pending.size === 0) {
       this.fireEose(upstreamSubId);

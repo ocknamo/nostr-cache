@@ -46,6 +46,14 @@ export class InstrumentedUpstreamPool implements UpstreamPool {
     this.inner.publish(event);
   }
 
+  publishTo(event: NostrEvent, relays: string[]): void {
+    this.inner.publishTo?.(event, relays);
+  }
+
+  isOffline(): boolean {
+    return this.inner.isOffline?.() ?? false;
+  }
+
   openSubscription(upstreamSubId: string, filters: Filter[], relays?: string[]): void {
     this.observer.onUpstreamSubscriptionOpen?.(upstreamSubId, filters);
     this.inner.openSubscription(upstreamSubId, filters, relays);

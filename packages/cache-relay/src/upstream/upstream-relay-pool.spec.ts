@@ -154,6 +154,34 @@ describe('UpstreamRelayPool', () => {
     expect(onEose).toHaveBeenCalledTimes(1);
   });
 
+  it('reports an EVENT before the EOSE that followed it in the same task', async () => {
+    const { socket, onEose, onEvent } = await startPool(['wss://a']);
+    const order: string[] = [];
+    onEvent.mockImplementation(() => order.push('event'));
+    onEose.mockImplementation(() => order.push('eose'));
+
+    // 実ソケットはメッセージごとに別タスクで届くが、続けて届いても順序を崩さない
+    socket('wss://a').mockMessage(['EVENT', 'up1:0', makeEvent('x')]);
+    socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+    await flush();
+
+    expect(order).toEqual(['event', 'eose']);
+  });
+
+  it('reports the offline state when every default relay is failing', async () => {
+    vi.useFakeTimers();
+    const { pool, fake } = createPool(['wss://a'], { reconnectMaxDelay: 60_000 });
+    await pool.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pool.isOffline()).toBe(false);
+
+    fake.last().close();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pool.isOffline()).toBe(true);
+    await pool.stop();
+  });
+
   it('stops waiting on a relay that drops before answering', async () => {
     const { socket, onEose } = await startPool(['wss://a', 'wss://b']);
 
@@ -410,22 +438,45 @@ describe('UpstreamRelayPool', () => {
         .recoveryTimers;
       expect([...recoveryTimers.keys()]).not.toContain('wss://dead');
 
+      // 冷却が明けたら新しい接続を張り、開いたままの購読を送り直す（rx-nostr は既定以外を
+      // 張り直さないので、古い接続を使い回すと永久に答えない宛先になる）
+      const before = fake.sockets.length;
       await vi.advanceTimersByTimeAsync(600_000);
       expect(pool.canReach('wss://dead')).toBe(true);
-
-      // 冷却が明けたら、新しい接続で実際に REQ が届く（rx-nostr は既定以外を張り直さないので、
-      // 古い接続を使い回すと永久に答えない宛先になる）
-      const before = fake.sockets.length;
-      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://dead']);
-      await vi.advanceTimersByTimeAsync(0);
       expect(fake.sockets.length).toBe(before + 1);
       const revived = fake.last();
       revived.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(revived.sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+
+      // 新しい REQ も同じ新しい接続に乗る
+      pool.openSubscription('up2.0', [{ kinds: [1] }], ['wss://dead']);
       await vi.advanceTimersByTimeAsync(0);
       expect(revived.sent).toContainEqual(['REQ', 'up2.0:0', { kinds: [1] }]);
       revived.mockMessage(['EOSE', 'up2.0:0']);
       await vi.advanceTimersByTimeAsync(0);
       expect(onEose).toHaveBeenCalledWith('up2.0');
+      await pool.stop();
+    });
+
+    it('does not resend a subscription closed during the cooldown', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 1_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      for (let attempt = 0; attempt < 20 && pool.canReach('wss://dead'); attempt += 1) {
+        fake.forUrl('wss://dead')?.close();
+        await vi.advanceTimersByTimeAsync(40_000);
+      }
+
+      pool.closeSubscription('up1.0');
+      const before = fake.sockets.length;
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(fake.sockets.length).toBe(before);
       await pool.stop();
     });
 
@@ -451,6 +502,15 @@ describe('UpstreamRelayPool', () => {
       }
 
       expect(pool.canReach('wss://far')).toBe(true);
+
+      // 冷却はしないが、繋ぎ直しは少し置いてから（既定の上流の再武装と同じ間隔）
+      const before = fake.sockets.filter((socket) => socket.url === 'wss://far').length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      const far = fake.sockets.filter((socket) => socket.url === 'wss://far');
+      expect(far.length).toBe(before + 1);
+      far[far.length - 1].mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(far[far.length - 1].sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
       await pool.stop();
     });
 
@@ -536,6 +596,33 @@ describe('UpstreamRelayPool', () => {
 
       expect([...recoveryTimers.keys()]).toEqual(['wss://a.example.com']);
       await pool.stop();
+    });
+  });
+
+  describe('publishTo', () => {
+    it('sends to the given relays and cools down one that cannot be reached', async () => {
+      const { pool, fake } = await startPool(['wss://a'], { subscribe: false });
+      fake.forUrl('wss://a')?.mockOpen();
+
+      pool.publishTo(makeEvent('x'), ['wss://down', 'wss://up']);
+      fake.forUrl('wss://down')?.close();
+      fake.forUrl('wss://up')?.mockOpen();
+
+      expect(fake.forUrl('wss://up')?.sent).toContainEqual(['EVENT', makeEvent('x')]);
+      expect(pool.canReach('wss://down')).toBe(false);
+      expect(pool.canReach('wss://up')).toBe(true);
+    });
+
+    it('skips relays in cooldown', async () => {
+      const { pool, fake } = await startPool(['wss://a'], { subscribe: false });
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.publishTo(makeEvent('x'), ['wss://down']);
+      fake.forUrl('wss://down')?.close();
+      const before = fake.sockets.length;
+
+      pool.publishTo(makeEvent('y'), ['wss://down']);
+
+      expect(fake.sockets.length).toBe(before);
     });
   });
 });
