@@ -331,6 +331,25 @@ describe('UpstreamCoordinator', () => {
     expect(pool.published).toEqual([event]);
   });
 
+  it('publish hands the event on after the default upstreams, surviving a throwing hook', () => {
+    const pool = new MockPool();
+    const onPublish = vi.fn(() => {
+      expect(pool.published).toHaveLength(1);
+      throw new Error('boom');
+    });
+    const coordinator = new UpstreamCoordinator({
+      pool,
+      ingest: vi.fn(),
+      deliver: vi.fn(),
+      sendEose: vi.fn(),
+      onPublish,
+    });
+    const event = makeEvent('x');
+
+    expect(() => coordinator.publish(event)).not.toThrow();
+    expect(onPublish).toHaveBeenCalledWith(event);
+  });
+
   it('markDelivered dedups a subsequent upstream echo of a locally-delivered event', async () => {
     const { pool, coordinator, deliver } = makeHarness();
     coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);

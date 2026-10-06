@@ -108,8 +108,10 @@ client ── ["EVENT", ev] ──▶ MessageHandler.handleEventMessage
   ├─ client ◀── ["OK", id, true]（ローカル保存の成否で即応答。上流は待たない）
   ├─ ローカル購読へブロードキャスト（従来どおり）
   └─ coordinator.publish(ev) → pool: 接続済み全上流へ ["EVENT", ev]
-       （fire-and-forget。送信できた時点で完了とし上流の OK は待たない。
-         切断中リレーへは実質ドロップ = 再接続時に再送されない）
+       │（fire-and-forget。送信できた時点で完了とし上流の OK は待たない。
+       │  切断中リレーへは実質ドロップ = 再接続時に再送されない）
+       └─ outbox 有効時: 著者・言及先の 10002 から宛先を引き、OutboxPublisher が
+          宛先ごとの短命な接続で送る（doc/api.md の `outbox`）
 ```
 
 ### REQ（リードスルー）

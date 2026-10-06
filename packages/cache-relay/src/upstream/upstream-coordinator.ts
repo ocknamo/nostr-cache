@@ -39,6 +39,8 @@ export interface UpstreamCoordinatorDeps {
    * revalidation and re-arm. Optional and must never throw.
    */
   onDuplicate?: (event: NostrEvent) => void;
+  /** Called after the event went to the default upstreams (outbox routing). A throw is logged. */
+  onPublish?: (event: NostrEvent) => void;
 }
 
 export interface UpstreamCoordinatorOptions {
@@ -172,6 +174,11 @@ export class UpstreamCoordinator {
   /** Forward a published event upstream (write-through, fire-and-forget). */
   publish(event: NostrEvent): void {
     this.pool.publish(event);
+    try {
+      this.deps.onPublish?.(event);
+    } catch (error) {
+      logger.debug('onPublish hook failed:', error);
+    }
   }
 
   /**

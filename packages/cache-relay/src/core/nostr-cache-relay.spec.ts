@@ -5,6 +5,8 @@ import { getRandomSecret } from '@nostr-cache/shared';
 import { seckeySigner } from '@rx-nostr/crypto';
 import { type Mock, vi } from 'vitest';
 import { LazyValidator } from '../event/lazy-validator.js';
+import { OutboxPublisher } from '../outbox/outbox-publisher.js';
+import { RelayListResolver } from '../outbox/relay-list-resolver.js';
 import { DEFAULT_STORAGE_SWEEP_DELAY } from '../storage/eviction-sweeper.js';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { createMockStorage } from '../test/utils/mock-storage.js';
@@ -870,6 +872,229 @@ describe('NostrCacheRelay', () => {
 
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockStorage.deleteExpired).not.toHaveBeenCalled();
+    });
+  });
+  describe('outbox (NIP-65)', () => {
+    const followList: NostrEvent = {
+      ...sampleEvent,
+      id: 'c'.repeat(64),
+      kind: 3,
+      tags: [['p', 'a'.repeat(64)]],
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function messageHandlerOf(): (clientId: string, message: unknown) => void {
+      const calls = (mockTransport.onMessage as Mock).mock.calls;
+      return calls[calls.length - 1][0];
+    }
+
+    it('rejects an index relay it would not connect to', () => {
+      expect(
+        () =>
+          new NostrCacheRelay(mockStorage, mockTransport, {
+            outbox: { indexRelays: ['ws://localhost:7777'] },
+          })
+      ).toThrow('ws://localhost:7777');
+    });
+
+    it('prefetches relay lists for a follow list served to a client', async () => {
+      const prefetch = vi
+        .spyOn(RelayListResolver.prototype, 'prefetchFollows')
+        .mockImplementation(() => {});
+      new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+      mockStorage.getEvents.mockResolvedValueOnce([followList]);
+
+      messageHandlerOf()('client', ['REQ', 'sub', { kinds: [3], authors: ['b'.repeat(64)] }]);
+
+      await vi.waitFor(() => expect(prefetch).toHaveBeenCalledWith(followList));
+    });
+
+    it('prefetches for in-process subscriptions too', async () => {
+      const prefetch = vi
+        .spyOn(RelayListResolver.prototype, 'prefetchFollows')
+        .mockImplementation(() => {});
+      const outboxRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+      mockStorage.getEvents.mockResolvedValueOnce([followList]);
+
+      await outboxRelay.subscribe('sub', [{ kinds: [3] }]);
+
+      expect(prefetch).toHaveBeenCalledWith(followList);
+    });
+
+    it('builds no resolver without index relays', () => {
+      const plain = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: [] },
+      });
+
+      expect(
+        (plain as unknown as { relayListResolver?: unknown }).relayListResolver
+      ).toBeUndefined();
+    });
+
+    it('prefetches for a follow list another client publishes to a subscriber', async () => {
+      const prefetch = vi
+        .spyOn(RelayListResolver.prototype, 'prefetchFollows')
+        .mockImplementation(() => {});
+      new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'NONE',
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+      const handle = messageHandlerOf();
+      mockStorage.getEvents.mockResolvedValueOnce([]);
+      handle('reader', ['REQ', 'sub', { kinds: [3] }]);
+      await vi.waitFor(() =>
+        expect(mockTransport.send).toHaveBeenCalledWith('reader', ['EOSE', 'sub'])
+      );
+      expect(prefetch).not.toHaveBeenCalled();
+
+      // 他のテストが共有モックに残した戻り値に左右されないようにする
+      mockStorage.getCurrentVersion.mockResolvedValueOnce(undefined);
+      mockStorage.saveEvent.mockResolvedValueOnce(true);
+      // transport のハンドラは処理の完了を返さない
+      handle('writer', ['EVENT', followList]);
+
+      await vi.waitFor(() => expect(prefetch).toHaveBeenCalledWith(followList));
+    });
+
+    it('keeps delivering when the prefetch throws', async () => {
+      vi.spyOn(RelayListResolver.prototype, 'prefetchFollows').mockImplementation(() => {
+        throw new Error('boom');
+      });
+      const outboxRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        outbox: { indexRelays: ['wss://index.example.com'] },
+      });
+      const listener = vi.fn();
+      outboxRelay.on('event', listener);
+      mockStorage.getEvents.mockResolvedValueOnce([followList]);
+
+      await outboxRelay.subscribe('sub', [{ kinds: [3] }]);
+
+      expect(listener).toHaveBeenCalledWith(followList);
+    });
+
+    describe('write routing', () => {
+      const AUTHOR = sampleEvent.pubkey;
+      const FRIEND = 'f'.repeat(64);
+
+      function setupRouting(lists: Map<string, { read: string[]; write: string[] }>) {
+        const pool = {
+          start: vi.fn().mockResolvedValue(undefined),
+          stop: vi.fn().mockResolvedValue(undefined),
+          publish: vi.fn(),
+          openSubscription: vi.fn(),
+          closeSubscription: vi.fn(),
+          onEvent: vi.fn(),
+          onEose: vi.fn(),
+          getConnectedCount: vi.fn().mockReturnValue(1),
+        };
+        const resolve = vi.spyOn(RelayListResolver.prototype, 'resolve').mockResolvedValue();
+        vi.spyOn(RelayListResolver.prototype, 'lookup').mockResolvedValue(lists);
+        const sent = vi.spyOn(OutboxPublisher.prototype, 'publish').mockImplementation(() => {});
+        const routed = new NostrCacheRelay(mockStorage, mockTransport, {
+          validateEventsType: 'NONE',
+          upstreamPool: pool,
+          upstreamRelays: ['wss://default.example.com/'],
+          outbox: { indexRelays: ['wss://index.example.com'] },
+        });
+        mockStorage.saveEvent.mockResolvedValue(true);
+        return { routed, pool, resolve, sent };
+      }
+
+      it("forwards to the author's outbox and the recipients' inboxes, besides the defaults", async () => {
+        const { routed, pool, resolve, sent } = setupRouting(
+          new Map([
+            [AUTHOR, { read: [], write: ['wss://mine.example.com', 'wss://default.example.com'] }],
+            [FRIEND, { read: ['wss://inbox.example.com'], write: [] }],
+          ])
+        );
+        const reply = { ...sampleEvent, tags: [['p', FRIEND]] };
+
+        await routed.publishEvent(reply);
+
+        expect(pool.publish).toHaveBeenCalledWith(reply);
+        await vi.waitFor(() =>
+          expect(sent).toHaveBeenCalledWith(reply, [
+            'wss://mine.example.com',
+            'wss://inbox.example.com',
+          ])
+        );
+        expect(pool.publish).toHaveBeenCalledTimes(1);
+        expect(resolve).toHaveBeenCalledWith([AUTHOR, FRIEND]);
+      });
+
+      it('also announces a relay list on the index relays', async () => {
+        const { routed, sent } = setupRouting(new Map());
+        const relayListEvent = { ...sampleEvent, kind: 10002 };
+
+        await routed.publishEvent(relayListEvent);
+
+        await vi.waitFor(() =>
+          expect(sent).toHaveBeenCalledWith(relayListEvent, ['wss://index.example.com'])
+        );
+      });
+
+      it('sends nowhere else when nobody has a list', async () => {
+        const { routed, sent } = setupRouting(new Map());
+        const lookup = vi.mocked(RelayListResolver.prototype.lookup);
+
+        await routed.publishEvent(sampleEvent);
+        await vi.waitFor(() => expect(lookup).toHaveBeenCalled());
+        await vi.waitFor(() => expect(sent).toHaveBeenCalled());
+
+        expect(sent).toHaveBeenCalledWith(sampleEvent, []);
+      });
+
+      it.each([
+        ['ephemeral', 24133],
+        ['gift wrap', 1059],
+      ])('leaves %s events to the default upstreams', async (_, kind) => {
+        const { routed, pool, resolve } = setupRouting(
+          new Map([[AUTHOR, { read: [], write: ['wss://mine.example.com'] }]])
+        );
+        const event = { ...sampleEvent, kind };
+
+        await routed.publishEvent(event);
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(pool.publish).toHaveBeenCalledWith(event);
+        expect(resolve).not.toHaveBeenCalled();
+      });
+
+      it('does not wait long for relay lists before sending', async () => {
+        vi.useFakeTimers();
+        try {
+          const { routed, sent } = setupRouting(
+            new Map([[AUTHOR, { read: [], write: ['wss://mine.example.com'] }]])
+          );
+          vi.mocked(RelayListResolver.prototype.resolve).mockImplementation(
+            () => new Promise(() => {})
+          );
+
+          await routed.publishEvent(sampleEvent);
+          await vi.advanceTimersByTimeAsync(3000);
+
+          expect(sent).toHaveBeenCalledWith(sampleEvent, ['wss://mine.example.com']);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
+    it('verifies a published relay list up front under LAZY', async () => {
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      // kind を書き換えたので id も署名も合わない
+      expect(await lazyRelay.publishEvent({ ...sampleEvent, kind: 10002 })).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
     });
   });
 });

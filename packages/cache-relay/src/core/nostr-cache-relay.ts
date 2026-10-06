@@ -10,8 +10,14 @@ import type {
   RelayEventHandler,
 } from '@nostr-cache/shared';
 import { applyDeletionRequest, isDeletionEvent } from '../event/deletion.js';
+import { RELAY_LIST_KIND, isEphemeralKind } from '../event/event-kind.js';
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
+import { IndexRelayClient } from '../outbox/index-relay-client.js';
+import { OutboxPublisher } from '../outbox/outbox-publisher.js';
+import { RelayListResolver } from '../outbox/relay-list-resolver.js';
+import { normalizeRelayUrl } from '../outbox/relay-list.js';
+import { inboxRecipients, writeTargets } from '../outbox/write-targets.js';
 import { EvictionSweeper } from '../storage/eviction-sweeper.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
 import type { StorageAdapter, ValidationStatus } from '../storage/storage-adapter.js';
@@ -25,15 +31,28 @@ import { MessageHandler } from './message-handler.js';
 import { RelayEventEmitter, type RelayEventName } from './relay-event-emitter.js';
 import {
   DEFAULT_MAX_EVENTS,
+  DEFAULT_RELAY_LIST_FRESHNESS,
   LOCAL_CLIENT_ID,
   type NostrRelayOptions,
   normalizeCachePriority,
   normalizeFreshnessWindows,
+  normalizeIndexRelays,
   resolveRelayOptions,
 } from './relay-options.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 export type { NostrRelayOptions } from './relay-options.js';
+
+/** ms */
+const OUTBOX_RESOLVE_WAIT = 3000;
+
+/**
+ * ephemeral（NIP-46 など）と gift wrap（kind 1059）は使い捨ての鍵で署名されるので、
+ * その鍵で 10002 を引いても無駄で、閲覧者と鍵の対応をインデックスリレーに漏らすだけ。
+ */
+function isOutboxKind(kind: number): boolean {
+  return !isEphemeralKind(kind) && kind !== 1059;
+}
 
 export class NostrCacheRelay {
   private options: NostrRelayOptions;
@@ -59,6 +78,10 @@ export class NostrCacheRelay {
    * the in-process {@link subscribe} path decide identically.
    */
   private freshnessGate?: FreshnessGate;
+  private indexRelayClient?: IndexRelayClient;
+  private indexRelays: string[] = [];
+  private outboxPublisher?: OutboxPublisher;
+  private relayListResolver?: RelayListResolver;
   private emitter = new RelayEventEmitter();
 
   constructor(
@@ -125,9 +148,13 @@ export class NostrCacheRelay {
     }
 
     this.setupUpstream();
+    this.setupOutbox(freshnessWindows?.get(RELAY_LIST_KIND));
 
     this.messageHandler.onResponse((clientId, message) => {
       this.transport.send(clientId, message);
+      if (message[0] === 'EVENT') {
+        this.observeDelivered(message[2] as NostrEvent);
+      }
     });
 
     this.setupTransportHandlers();
@@ -205,10 +232,101 @@ export class NostrCacheRelay {
         // 鮮度ウィンドウを張り直す（内容が変わらない replaceable でも窓が
         // 再武装するようにするため。詳細は FreshnessGate.markRevalidated）
         onDuplicate: (event) => this.freshnessGate?.markRevalidated(event),
+        onPublish: (event) => this.forwardToOutbox(event),
       },
       { eoseTimeout: this.options.upstreamEoseTimeout }
     );
     this.messageHandler.setUpstreamCoordinator(this.upstreamCoordinator);
+  }
+
+  private setupOutbox(relayListFreshness: number | undefined): void {
+    const indexRelays = normalizeIndexRelays(this.options.outbox);
+    if (!indexRelays) {
+      return;
+    }
+    this.indexRelays = indexRelays;
+    this.outboxPublisher = new OutboxPublisher({
+      webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
+    });
+    this.indexRelayClient = new IndexRelayClient(indexRelays, {
+      webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
+    });
+    const client = this.indexRelayClient;
+    this.relayListResolver = new RelayListResolver(
+      {
+        storage: this.storage,
+        fetch: (filter) => client.fetch(filter),
+        ingest: (event) => this.messageHandler.ingestUpstreamEvent(event),
+      },
+      { freshnessSeconds: relayListFreshness ?? DEFAULT_RELAY_LIST_FRESHNESS }
+    );
+    // in-process 購読への配信は transport を通らないので、ここで拾う
+    this.emitter.on('event', (event: NostrEvent) => this.observeDelivered(event));
+  }
+
+  private forwardToOutbox(event: NostrEvent): void {
+    const publisher = this.outboxPublisher;
+    if (!publisher || !isOutboxKind(event.kind)) {
+      return;
+    }
+    this.outboxTargets(event)
+      .then((relays) => publisher.publish(event, relays))
+      .catch((error) => {
+        logger.debug('Outbox targets could not be resolved:', error);
+      });
+  }
+
+  /**
+   * 既定の上流以外に送る先。kind 10002 はインデックスリレーにも載せ、他のクライアントが
+   * 著者の新しいリストを見つけられるようにする。
+   */
+  private async outboxTargets(event: NostrEvent): Promise<string[]> {
+    const resolver = this.relayListResolver;
+    if (!resolver) {
+      return [];
+    }
+    const pubkeys = [event.pubkey, ...inboxRecipients(event)];
+    // 先読みの後ろに並ぶと数十秒待ちうるので、届いている分で送る
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        resolver.resolve(pubkeys),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, OUTBOX_RESOLVE_WAIT);
+        }),
+      ]);
+    } catch (error) {
+      logger.debug('Relay list resolution failed; using what is cached:', error);
+    } finally {
+      clearTimeout(timer);
+    }
+    const lists = await resolver.lookup(pubkeys);
+    const exclude = new Set(
+      (this.options.upstreamRelays ?? []).map((url) => normalizeRelayUrl(url) ?? url)
+    );
+    const targets = writeTargets(event, lists, exclude);
+    if (event.kind === RELAY_LIST_KIND) {
+      for (const url of this.indexRelays) {
+        if (!exclude.has(url) && !targets.includes(url)) {
+          targets.push(url);
+        }
+      }
+    }
+    return targets;
+  }
+
+  /**
+   * フォローリストは届いた経路（キャッシュ・上流・投稿）を問わず先読みの起点にする。
+   * 配信の途中で呼ばれるので、ここで投げると後続のリスナーや送信を巻き込む。
+   */
+  private observeDelivered(event: NostrEvent): void {
+    try {
+      if (event?.kind === 3) {
+        this.relayListResolver?.prefetchFollows(event);
+      }
+    } catch (error) {
+      logger.debug('Relay list prefetch could not start:', error);
+    }
   }
 
   private setupTransportHandlers(): void {
@@ -234,6 +352,9 @@ export class NostrCacheRelay {
   async connect(): Promise<void> {
     await this.transport.start();
     this.lazyValidator?.start();
+    this.indexRelayClient?.start();
+    this.outboxPublisher?.start();
+    this.relayListResolver?.start();
     this.expiryReaper?.start();
     this.evictionSweeper?.start();
     // 上流への接続失敗はログのみで connect 自体は成功させる
@@ -251,6 +372,9 @@ export class NostrCacheRelay {
   async disconnect(): Promise<void> {
     await this.transport.stop();
     await this.upstreamCoordinator?.stop();
+    this.relayListResolver?.stop();
+    this.indexRelayClient?.stop();
+    this.outboxPublisher?.stop();
     // 未検証イベントは validated=0 のまま永続化されており、次回 connect で検証が再開される
     this.lazyValidator?.stop();
     this.expiryReaper?.stop();
@@ -259,11 +383,12 @@ export class NostrCacheRelay {
   }
 
   async publishEvent(event: NostrEvent): Promise<boolean> {
-    // NIP-09 deletion requests destroy other events on arrival and no later
-    // pass can undo that, so they are verified in every mode — `NONE` included,
-    // exactly as EventHandler does on the transport path.
+    // Same rule as EventHandler on the transport path: deletion requests in
+    // every mode, relay lists under LAZY too.
     const mustValidateNow =
-      isDeletionEvent(event) || this.options.validateEventsType === 'IMMEDIATELY';
+      isDeletionEvent(event) ||
+      this.options.validateEventsType === 'IMMEDIATELY' ||
+      (this.options.validateEventsType === 'LAZY' && event.kind === RELAY_LIST_KIND);
     if (mustValidateNow && !(await this.validator.validate(event))) {
       return false;
     }

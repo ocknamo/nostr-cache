@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_EVENTS,
   normalizeCachePriority,
   normalizeFreshnessWindows,
+  normalizeIndexRelays,
   resolveRelayOptions,
 } from './relay-options.js';
 
@@ -133,5 +134,24 @@ describe('normalizeFreshnessWindows', () => {
     // 公開オプション型は素の Record のまま通す
     const resolved = resolveRelayOptions({ upstreamFreshness: { 0: 3600 } });
     expect(resolved.upstreamFreshness).toEqual({ 0: 3600 });
+  });
+});
+
+describe('normalizeIndexRelays', () => {
+  it('normalizes and de-duplicates', () => {
+    expect(
+      normalizeIndexRelays({ indexRelays: ['wss://Index.example.com/', 'wss://index.example.com'] })
+    ).toEqual(['wss://index.example.com']);
+  });
+
+  it('is disabled when nothing is given', () => {
+    expect(normalizeIndexRelays()).toBeUndefined();
+    expect(normalizeIndexRelays({ indexRelays: [] })).toBeUndefined();
+  });
+
+  it('throws on a url it would not connect to', () => {
+    expect(() => normalizeIndexRelays({ indexRelays: ['wss://192.168.0.2'] })).toThrow(
+      'wss://192.168.0.2'
+    );
   });
 });

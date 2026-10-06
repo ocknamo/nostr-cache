@@ -210,8 +210,41 @@ interface NostrRelayOptions {
                                     // replaceable な kind（0 / 3 / 10000-19999）のみ指定可、他は生成時に例外。
                                     // getCachedAt 対応ストレージが必要。窓の内側の購読はライブ更新を受け取らない
   upstreamPool?: UpstreamPool;      // テスト・高度用途: 上流プール実装の差し替え（upstreamRelays より優先）
+  outbox?: {                        // アウトボックスモデル（NIP-65）。kind 10002 の取得と書き込みの振り分けまで
+    indexRelays?: string[];         // 10002 を引く先。空・未指定で無効。wss:// の公開ホスト以外は生成時に例外
+  };
 }
 ```
+
+`outbox.indexRelays` を指定すると、フォローリスト（kind 3）がクライアントへ配信されるたびに
+（キャッシュ・上流・in-process のどの経路でも、同じイベントにつき 1 回）、その全員の kind 10002 を
+インデックスリレーから取り込みます。取り込みは通常の上流イベントと同じ経路（検証・版比較・保存）を
+通ります。キャッシュ済みの 10002 は `upstreamFreshness[10002]`（無ければ 6 時間）のあいだ取り直しません。
+**kind 10002 は `LAZY` でも保存前に署名検証します**（読み先の決定に使うため、偽造したリストを
+保存させない）。`NONE` では検証しません。
+
+**書き込み（ライトスルー）**は、既定の上流へ送ったうえで、次の宛先にも送ります（上流に
+`upstreamRelays` と同じリレーは除く）。宛先を引くのは検証済みの 10002 だけです。
+
+- 著者の write リレー
+- kind 1 / 6 / 7 / 16 / 1111 で `p` に挙がった人（最大 20 人）の read リレー（1 人 3 本まで）
+- kind 10002 自体はインデックスリレーにも
+- 合計 30 本まで。宛先が未取得なら先に 10002 を取りに行く（最大 3 秒）ので、既定の上流より遅れて届く
+- ephemeral（20000–29999）と gift wrap（kind 1059）は対象外（使い捨ての鍵で 10002 を引いても無駄なため）
+- 送信は宛先ごとの短命な WebSocket で行い、上流プールは使いません。`upstreamPool` を差し替えた
+  場合も、除外に使う既定の上流は `upstreamRelays` に渡してください
+
+読み込みの振り分けは未実装です（[doc/TODO.md](./TODO.md) の「アウトボックスモデル / NIP-65」）。
+
+/ With `outbox.indexRelays`, every follow list (kind 3) delivered to a client — from cache,
+upstream or in-process, once per event — makes the relay pull the kind 10002 of everyone on it
+from the index relays, through the normal ingest path. A cached 10002 is not re-fetched within
+`upstreamFreshness[10002]` (6 hours if unset). Kind 10002 is signature-checked before it is
+stored even under `LAZY`, since it will decide where an author is read from; `NONE` still skips
+it. Write-through additionally goes, after the default upstreams, to the author's write
+relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
+each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
+lists only. Read routing is not implemented yet.
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /

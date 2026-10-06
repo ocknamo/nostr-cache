@@ -2,12 +2,16 @@
 
 import { normalizePubkey } from '@nostr-cache/shared';
 import { isReplaceableKind } from '../event/event-kind.js';
+import { normalizeRelayUrl } from '../outbox/relay-list.js';
 import type { CachePriority } from '../storage/priority.js';
 import type { CacheStrategy } from '../storage/storage-adapter.js';
 import type { FreshnessWindows } from '../upstream/freshness.js';
 import type { UpstreamPool } from '../upstream/upstream-types.js';
 
 export const DEFAULT_MAX_EVENTS = 500;
+
+/** 秒。リレーリストは滅多に変わらないので、数時間遅れても宛先が外れる人は少ない。 */
+export const DEFAULT_RELAY_LIST_FRESHNESS = 21_600;
 
 /** transport 経由のクライアントと区別するための、in-process 購読の clientId。 */
 export const LOCAL_CLIENT_ID = 'local';
@@ -84,8 +88,16 @@ export interface NostrRelayOptions {
   upstreamFreshness?: Record<number, number>;
 
   /**
+   * アウトボックスモデル（NIP-65）。`indexRelays` は著者の kind 10002 を引く先で、
+   * 空・未指定なら無効。`wss:` の公開ホストでない URL はリレー生成時に例外。
+   * 10002 の鮮度は `upstreamFreshness[10002]`、無ければ {@link DEFAULT_RELAY_LIST_FRESHNESS}。
+   */
+  outbox?: { indexRelays?: string[] };
+
+  /**
    * テスト・高度用途向けに上流プールの実装を差し替える。
-   * 指定時は {@link upstreamRelays} より優先される。
+   * 指定時は {@link upstreamRelays} より優先される（`upstreamRelays` はアウトボックスの宛先から
+   * 既定の上流を除くのに使われるので、併せて渡すとよい）。
    */
   upstreamPool?: UpstreamPool;
 }
@@ -165,4 +177,21 @@ export function normalizeFreshnessWindows(
     windows.set(kind, seconds);
   }
   return windows.size > 0 ? windows : undefined;
+}
+
+/**
+ * 正規化済みのインデックスリレー。無効なら undefined。
+ *
+ * @throws Error 宛先にできない URL。該当の値をメッセージに含める
+ */
+export function normalizeIndexRelays(outbox?: { indexRelays?: string[] }): string[] | undefined {
+  const urls = new Set<string>();
+  for (const raw of outbox?.indexRelays ?? []) {
+    const url = normalizeRelayUrl(raw);
+    if (!url) {
+      throw new Error(`Invalid outbox index relay (expected a public wss:// URL): ${raw}`);
+    }
+    urls.add(url);
+  }
+  return urls.size > 0 ? [...urls] : undefined;
 }

@@ -13,6 +13,7 @@
 import {
   type CachePriority,
   type CacheStrategy,
+  DEFAULT_RELAY_LIST_FRESHNESS,
   DexieStorage,
   NostrCacheRelay,
   UpstreamRelayPool,
@@ -43,6 +44,13 @@ export const DEFAULT_PROFILE_FRESHNESS = 86_400;
  */
 export const DEFAULT_FOLLOWS_FRESHNESS = 3600;
 
+/** 著者の kind 10002 を引く先。アウトボックスモデル（NIP-65）は既定で有効にする。 */
+export const DEFAULT_INDEX_RELAYS = [
+  'wss://purplepag.es',
+  'wss://indexer.coracle.social',
+  'wss://directory.yabu.me',
+];
+
 /**
  * 他の設定と違い既定で有効。IndexedDB は**埋め込み先オリジン**の容量を使うので、
  * 他人のクォータを無制限に使う既定を埋め込み側が選ぶわけにはいかない。
@@ -61,7 +69,7 @@ export const DEFAULT_CACHE_STRATEGY: CacheStrategy = 'LRU';
  * 上流往復が発生し、kind 3 を失ったフォロータイムラインは描画自体が止まる。
  * 属性にしていないのは、好みではなくこのウィジェットの読み方から決まるため。
  */
-const CACHE_PRIORITY: CachePriority = { kinds: [0, 3] };
+const CACHE_PRIORITY: CachePriority = { kinds: [0, 3, 10002] };
 
 export type { CacheStrategy };
 
@@ -78,6 +86,8 @@ export interface RelayHostConfig {
   profileFreshness?: number;
   /** kind 3 の鮮度ウィンドウ（秒）。{@link RelayHostConfig.profileFreshness} と同じ扱い。 */
   followsFreshness?: number;
+  /** 空配列でアウトボックスを無効にする。上流が無いときも無効。 */
+  indexRelays?: string[];
   /** 0 以下で上限なし。縛るのはページ共有の DB であって 1 ウィジェットではない。 */
   storageMaxSize?: number;
   /** JS から呼ぶ場合のみ。上限を選ぶことは退避順序を選ぶことではないので属性は無い。 */
@@ -124,6 +134,8 @@ function resolveConfig(config: RelayHostConfig): ResolvedConfig {
     lazyValidateInterval: config.lazyValidateInterval ?? DEFAULT_LAZY_VALIDATE_INTERVAL,
     profileFreshness: config.profileFreshness ?? DEFAULT_PROFILE_FRESHNESS,
     followsFreshness: config.followsFreshness ?? DEFAULT_FOLLOWS_FRESHNESS,
+    // 公開している既定の配列を、後から書き換えられても巻き込まれないよう複製する
+    indexRelays: [...(config.indexRelays ?? DEFAULT_INDEX_RELAYS)],
     storageMaxSize: config.storageMaxSize ?? DEFAULT_STORAGE_MAX_SIZE,
     cacheStrategy: config.cacheStrategy ?? DEFAULT_CACHE_STRATEGY,
   };
@@ -141,6 +153,9 @@ function freshnessWindows(config: ResolvedConfig): Record<number, number> | unde
   }
   if (config.followsFreshness > 0) {
     windows[3] = config.followsFreshness;
+  }
+  if (outboxEnabled(config)) {
+    windows[10002] = DEFAULT_RELAY_LIST_FRESHNESS;
   }
   return Object.keys(windows).length > 0 ? windows : undefined;
 }
@@ -162,6 +177,11 @@ function warnOnConflict(running: ResolvedConfig, requested: ResolvedConfig): voi
       ', '
     )}. Every widget on a page shares one relay — give them matching attributes, or embed them in iframes to isolate them.`
   );
+}
+
+/** 上流が無ければ 10002 を集めても使い道が無い。 */
+function outboxEnabled(config: ResolvedConfig): boolean {
+  return config.upstreamRelays.length > 0 && config.indexRelays.length > 0;
 }
 
 async function startHost(config: ResolvedConfig): Promise<SharedHost> {
@@ -203,12 +223,15 @@ async function connectHost(
     lazyValidateInterval: config.lazyValidateInterval,
     maxSubscriptions: 20,
     upstreamPool,
+    // プールは上で組み立てて渡すので、ここではアウトボックスの宛先から既定の上流を除くためだけに使う
+    upstreamRelays: config.upstreamRelays,
     // 「いつ上流に聞き直すか」の方針は、それに答えるキャッシュ側に置く。
     upstreamFreshness: freshnessWindows(config),
     // 非正はそのまま渡す。鮮度ウィンドウと違い、リレーはこれを「上限なし」と定義している。
     storageMaxSize: config.storageMaxSize,
     cacheStrategy: config.cacheStrategy,
     cachePriority: CACHE_PRIORITY,
+    outbox: outboxEnabled(config) ? { indexRelays: config.indexRelays } : undefined,
   });
 
   await relay.connect();

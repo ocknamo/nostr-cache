@@ -6,6 +6,8 @@
 /** Kind of a NIP-09 deletion request event. */
 export const DELETION_EVENT_KIND = 5;
 
+export const RELAY_LIST_KIND = 10002;
+
 /**
  * Regular replaceable event: only the newest event per (pubkey, kind) is kept.
  * Covers kind 0 (metadata), kind 3 (follow list, NIP-02) and 10000–19999.
