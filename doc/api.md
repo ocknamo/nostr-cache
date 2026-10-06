@@ -265,14 +265,15 @@ each), and — for kind 10002 itself — to the index relays, 30 relays at most,
 lists only. Reads keep sending the original filters to the default upstreams and add REQs for
 people the defaults would miss: authors on their write relays, `#p` on the person's read relays,
 `#e` / `#q` on the cached parent author's read relays, address-form `#q` / `#a` on that pubkey's
-read relays (2 per person, 8 per REQ; replaceable-only and `ids` filters excluded). Missing relay lists are fetched from the index relays first (up to
-1.5 s; people no index relay answered for are not asked again for a minute). The client's EOSE
+read relays (2 per person, 8 per REQ; replaceable-only and `ids` filters excluded). Missing relay
+lists are fetched from the index relays first (up to 1.5 s; people no index relay answered for
+are not asked again for a minute). The client's EOSE
 waits for the default upstreams and that routing, then at most 0.5 s more for the added relays —
 up to about 2 s past the default upstreams; later events arrive after it. At most 16 temporary
 read connections are open at once; a relay that fails is skipped for 10 minutes, then
 reconnected so open subscriptions get it back (after `reconnectMaxDelay`, without the cooldown,
-when the default upstreams are failing too). A replacement
-`upstreamPool` needs `openSubscription`'s third `relays` argument and `canReach` for this.
+when the default upstreams are failing too). A replacement `upstreamPool` needs
+`openSubscription`'s third `relays` argument and `canReach` for this.
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /

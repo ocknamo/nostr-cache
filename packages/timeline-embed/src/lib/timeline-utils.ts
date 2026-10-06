@@ -34,7 +34,7 @@ export function insertEvent(
   return next.length > maxSize ? next.slice(0, maxSize) : next;
 }
 
-/** What an upstream answer has delivered: the `created_at` of each event. */
+/** What an upstream answer has delivered: the `created_at` of its newest events. */
 export interface UpstreamAnswer {
   times: number[];
 }

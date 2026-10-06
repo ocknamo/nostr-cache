@@ -335,8 +335,8 @@ export class UpstreamRelayPool implements UpstreamPool {
   }
 
   /**
-   * rx-nostr は EVENT を 1 マイクロタスク遅らせて流し（`filterAsync`）、EOSE は同期で渡す。
-   * 同じタスクで続けて届くと EOSE が先に立つので、手前の EVENT が着くまで待ってから数える。
+   * rx-nostr は EVENT を 1 マイクロタスク遅らせて流し（`filterAsync`。検証を切っている前提）、
+   * EOSE は同期で渡す。同じタスクで続けて届くと EOSE が先に立つので、EVENT を待ってから数える。
    */
   private settleRelay(upstreamSubId: string, relayUrl: string): void {
     // Unknown id: not ours, already fired, or the subscription was closed.
@@ -344,7 +344,7 @@ export class UpstreamRelayPool implements UpstreamPool {
     if (!pending) {
       return;
     }
-    void Promise.resolve().then(() => {
+    queueMicrotask(() => {
       // 待つ間に同じ id で開き直された購読の分としては数えない
       if (this.pendingEose.get(upstreamSubId) === pending) {
         this.settlePending(upstreamSubId, pending, relayUrl);

@@ -95,7 +95,7 @@ describe('coverageFloor', () => {
   });
 
   it('is not dragged down by a quiet relay answering alongside a busy one', () => {
-    // 忙しいリレーの 3 件（直近）と、静かなリレーの 3 件（1 年前）。limit 3 で欠けがないと
+    // 忙しいリレーの 3 件（直近）と、静かなリレーの 3 件（ずっと前）。limit 3 で欠けがないと
     // 言えるのは直近の 3 件まで
     const busy = [300, 200, 100];
     const quiet = [-1_000, -2_000, -3_000];

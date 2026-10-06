@@ -1973,7 +1973,7 @@ describe('TimelineController', () => {
       const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
 
       fed.deliver([note('cache', 1_700_000_000)]);
-      // More than the limit, newest first, as from several relays at once.
+      // More than twice the limit, out of order, as from several relays at once.
       fed.deliver(
         [110, 109, 101, 102, 103, 104, 105].map((t) => note(`up-${t}`, 1_700_000_000 + t)),
         'upstream'
