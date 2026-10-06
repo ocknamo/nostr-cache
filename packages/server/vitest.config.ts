@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'node',
     exclude: ['**/node_modules/**', '**/dist/**'],
     include: ['**/*.test.ts', '**/*.spec.ts'],
+    coverage: { include: ['src/**/*.ts'] },
     setupFiles: ['./tests/setup-vitest.ts'],
     globals: true,
     testTimeout: 5000,
