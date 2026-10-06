@@ -14,6 +14,26 @@ import type { UpstreamPool, UpstreamPoolOptions } from './upstream-types.js';
 
 const DEFAULT_RECONNECT_BASE_DELAY = 1000;
 const DEFAULT_RECONNECT_MAX_DELAY = 60000;
+const DEFAULT_MAX_TEMPORARY_RELAYS = 16;
+const DEFAULT_TEMPORARY_RELAY_COOLDOWN = 600_000;
+
+/**
+ * rx-nostr が接続の識別に使う形（`packet.from` もこの形で届く）。rx-nostr は正規化関数を
+ * 公開していないので同じ手順を写している。
+ */
+function normalizeLikeRxNostr(url: string): string {
+  try {
+    const u = new URL(url.trim());
+    u.hash = '';
+    u.pathname = u.pathname.replace(/\/$/, '');
+    u.hostname = u.hostname.replace(/\.$/, '');
+    u.searchParams.sort();
+    const s = u.toString();
+    return u.search ? s : s.replace(/\/$/, '');
+  } catch {
+    return url.trim();
+  }
+}
 
 /**
  * Suffix rx-nostr appends to build a forward-strategy REQ's wire subscription
@@ -54,6 +74,10 @@ export class UpstreamRelayPool implements UpstreamPool {
   private readonly pendingEose = new Map<string, Set<string>>();
   /** Pending re-arm per relay rx-nostr has given up on, keyed by relay url. */
   private readonly recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** 宛先付きの購読ごとの一時接続先。枠の勘定に使う。 */
+  private readonly temporaryTargets = new Map<string, string[]>();
+  /** 落ちた一時接続先と、候補に戻す時刻 (ms)。 */
+  private readonly cooldownUntil = new Map<string, number>();
   private streams?: { unsubscribe(): void };
   private eventCallback?: (upstreamSubId: string, event: NostrEvent, relayUrl: string) => void;
   private eoseCallback?: (upstreamSubId: string) => void;
@@ -89,6 +113,7 @@ export class UpstreamRelayPool implements UpstreamPool {
     }
     this.subscriptions.clear();
     this.pendingEose.clear();
+    this.temporaryTargets.clear();
 
     // Detach before disposing: dispose() drives every relay to `terminated`,
     // which would otherwise come back through handleConnectionState.
@@ -108,7 +133,7 @@ export class UpstreamRelayPool implements UpstreamPool {
       .subscribe({ error: () => {} });
   }
 
-  openSubscription(upstreamSubId: string, filters: Filter[]): void {
+  openSubscription(upstreamSubId: string, filters: Filter[], relays?: string[]): void {
     const rxNostr = this.connect();
     if (!rxNostr) {
       return;
@@ -116,19 +141,29 @@ export class UpstreamRelayPool implements UpstreamPool {
     // Reusing an id replaces the subscription rather than shadowing it.
     this.closeSubscription(upstreamSubId);
 
+    const targets = relays
+      ? [...new Set(relays.map(normalizeLikeRxNostr))].filter((url) => this.canReach(url))
+      : undefined;
     // Snapshot the relays connected right now; only those owe an EOSE. An empty
     // filter list is dropped by rx-nostr, so no REQ goes out and nobody would
-    // ever answer — nothing owes an EOSE in that case either.
-    const connectedUrls = new Set(filters.length > 0 ? this.connectedUrls() : []);
+    // ever answer — nothing owes an EOSE in that case either. A targeted
+    // subscription waits on its targets instead, which are not connected yet.
+    const willSend = filters.length > 0 && (targets === undefined || targets.length > 0);
+    const connectedUrls = new Set(willSend ? (targets ?? this.connectedUrls()) : []);
     this.pendingEose.set(upstreamSubId, connectedUrls);
 
-    if (filters.length > 0) {
+    if (willSend) {
+      if (targets) {
+        this.temporaryTargets.set(upstreamSubId, targets);
+      }
       const req = createRxForwardReq(upstreamSubId);
       // Subscribe before emitting: the request stream is hot, so a filter
       // emitted first would be dropped and no REQ would ever be sent.
-      const events = rxNostr.use(req).subscribe(({ event, from }) => {
-        this.eventCallback?.(upstreamSubId, event as NostrEvent, from);
-      });
+      const events = rxNostr
+        .use(req, targets ? { on: { relays: targets } } : undefined)
+        .subscribe(({ event, from }) => {
+          this.eventCallback?.(upstreamSubId, event as NostrEvent, from);
+        });
       this.subscriptions.set(upstreamSubId, events);
       req.emit(filters as LazyFilter[]);
     }
@@ -148,6 +183,7 @@ export class UpstreamRelayPool implements UpstreamPool {
 
   closeSubscription(upstreamSubId: string): void {
     this.pendingEose.delete(upstreamSubId);
+    this.temporaryTargets.delete(upstreamSubId);
     // Unsubscribing is what sends CLOSE.
     this.subscriptions.get(upstreamSubId)?.unsubscribe();
     this.subscriptions.delete(upstreamSubId);
@@ -163,6 +199,22 @@ export class UpstreamRelayPool implements UpstreamPool {
 
   getConnectedCount(): number {
     return this.connectedUrls().length;
+  }
+
+  canReach(relayUrl: string): boolean {
+    const url = normalizeLikeRxNostr(relayUrl);
+    const until = this.cooldownUntil.get(url);
+    if (until !== undefined) {
+      if (Date.now() < until) {
+        return false;
+      }
+      this.cooldownUntil.delete(url);
+    }
+    const inUse = new Set([...this.temporaryTargets.values()].flat());
+    return (
+      inUse.has(url) ||
+      inUse.size < (this.options.maxTemporaryRelays ?? DEFAULT_MAX_TEMPORARY_RELAYS)
+    );
   }
 
   /**
@@ -224,10 +276,16 @@ export class UpstreamRelayPool implements UpstreamPool {
     return rxNostr;
   }
 
-  /** Relay urls whose socket is established right now (normalized by rx-nostr). */
+  /**
+   * Default relays whose socket is established right now (normalized by
+   * rx-nostr). Temporary connections are left out: they only answer the
+   * targeted subscriptions that opened them, so counting them in would make
+   * every other subscription wait on an EOSE that never comes.
+   */
   private connectedUrls(): string[] {
-    return Object.entries(this.rxNostr?.getAllRelayStatus() ?? {})
-      .filter(([, status]) => status.connection === 'connected')
+    const rxNostr = this.rxNostr;
+    return Object.entries(rxNostr?.getAllRelayStatus() ?? {})
+      .filter(([url, status]) => status.connection === 'connected' && rxNostr?.getDefaultRelay(url))
       .map(([url]) => url);
   }
 
@@ -251,6 +309,19 @@ export class UpstreamRelayPool implements UpstreamPool {
     if (state === 'connected') {
       return;
     }
+    const isDefault = this.rxNostr?.getDefaultRelay(from) !== undefined;
+    // 一時接続は開いた直後に `connecting` を通るので、そこで外すと何も待たなくなる。
+    // 諦めたと分かる状態でだけ外し、しばらく宛先の候補にも戻さない
+    const gaveUp = state === 'error' || state === 'rejected' || state === 'terminated';
+    if (!isDefault && !gaveUp) {
+      return;
+    }
+    if (!isDefault && state !== 'terminated') {
+      this.cooldownUntil.set(
+        from,
+        Date.now() + (this.options.temporaryRelayCooldown ?? DEFAULT_TEMPORARY_RELAY_COOLDOWN)
+      );
+    }
     const toFire: string[] = [];
     for (const [upstreamSubId, pending] of this.pendingEose) {
       if (pending.delete(from) && pending.size === 0) {
@@ -261,7 +332,7 @@ export class UpstreamRelayPool implements UpstreamPool {
       this.fireEose(upstreamSubId);
     }
 
-    if (state === 'error' && !this.recoveryTimers.has(from)) {
+    if (isDefault && state === 'error' && !this.recoveryTimers.has(from)) {
       const delay = this.options.reconnectMaxDelay ?? DEFAULT_RECONNECT_MAX_DELAY;
       logger.debug(`Upstream ${from}: retries exhausted, reconnecting in ${delay}ms`);
       this.recoveryTimers.set(

@@ -134,6 +134,15 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
 以降も購読は上流で開いたまま。ライブイベントが透過的に流れ続ける
 ```
 
+アウトボックス（`outbox.indexRelays`）が有効なときは、上の既定の購読に加えて
+`deps.route` が宛先ごとのフィルタを返し、coordinator が `upN.0`, `upN.1`, … を
+`pool.openSubscription(id, filters, [relay])` で開く。重複排除の集合はクライアント購読で
+1 つを共有する。クライアントの EOSE は「既定の購読の EOSE」と「宛先の解決」を待ち、
+その後は宛先の EOSE を最大 `outboxEoseGrace`（既定 500ms）だけ待つ。宛先付きの購読は
+rx-nostr の一時接続で、EOSE の集約は宛先だけを待ち、既定の購読の集約には一時接続を数えない
+（数えると、その購読の REQ を受けていない一時接続を待ち続ける）。一時接続の上限と、落ちた
+宛先を冷却期間のあいだ外す判定は `pool.canReach()` が持つ。
+
 ### REQ（id カバレッジでスキップされる場合）
 
 ```

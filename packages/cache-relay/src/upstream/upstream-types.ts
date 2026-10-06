@@ -18,7 +18,14 @@ export interface UpstreamPool {
   /** fire-and-forget。切断中のリレーへの分は捨てられる（再送キューは無い）。 */
   publish(event: NostrEvent): void;
 
-  openSubscription(upstreamSubId: string, filters: Filter[]): void;
+  /**
+   * `relays` を渡すと既定の上流ではなくそれらだけに REQ を送り（未接続なら一時接続）、
+   * EOSE もそれらを待つ。届かないと分かっているリレーは除き、残りが無ければ即 EOSE。
+   */
+  openSubscription(upstreamSubId: string, filters: Filter[], relays?: string[]): void;
+
+  /** 宛先付きの購読で使えるか（落ちて冷却中でない・一時接続の枠がある）。 */
+  canReach?(relayUrl: string): boolean;
 
   closeSubscription(upstreamSubId: string): void;
 
@@ -45,6 +52,10 @@ export interface UpstreamPoolOptions {
    * これがあるため再接続は数回で諦めず無制限になる。
    */
   reconnectMaxDelay?: number;
+  /** 宛先付きの購読で同時に開く一時接続の上限。既定 16 */
+  maxTemporaryRelays?: number;
+  /** 一時接続のリレーが落ちたとき、宛先の候補から外しておく時間 (ms)。既定 600000 */
+  temporaryRelayCooldown?: number;
   /**
    * 構築時ではなく `start()` 時に 1 回評価する。ブラウザでエミュレータがグローバルを
    * 差し替えたあとでも差し替え前の `WebSocket` へ届き、横取り URL を上流に指定した

@@ -234,7 +234,17 @@ interface NostrRelayOptions {
 - 送信は宛先ごとの短命な WebSocket で行い、上流プールは使いません。`upstreamPool` を差し替えた
   場合も、除外に使う既定の上流は `upstreamRelays` に渡してください
 
-読み込みの振り分けは未実装です（[doc/TODO.md](./TODO.md) の「アウトボックスモデル / NIP-65」）。
+**読み込み（リードスルー）**は、既定の上流へ元のフィルタをそのまま送ったうえで、既定の上流では
+届かない人のための REQ を足します（既定の上流に 1 本でも書いている人は足さない）。
+
+- `authors` → その人の write リレー、`#p` だけ → その人の read リレー、`#e` / `#q` → 参照先の
+  イベントがキャッシュにあれば、その著者の read リレー。フィルタは宛先ごとに値を絞って送る
+- replaceable だけを引くフィルタ（kind 0 / 3 / 10000 番台）と `ids` 指定は対象外
+- 1 人 2 本・REQ 1 本につき 8 本まで。多くの人をまとめて拾えるリレーから選ぶ
+- 宛先を引く前に 10002 を最大 1.5 秒待つ。クライアントの `EOSE` は、既定の上流が答えたあと
+  宛先を最大 0.5 秒だけ待って返し、それより遅い分は `EOSE` の後にライブで届く
+- 一時接続は同時 16 本まで。落ちたリレーは 10 分間宛先にしない
+- 宛先ごとに `limit` 件ずつ返るので、REQ 全体では `limit` を超えうる
 
 / With `outbox.indexRelays`, every follow list (kind 3) delivered to a client — from cache,
 upstream or in-process, once per event — makes the relay pull the kind 10002 of everyone on it
@@ -244,7 +254,11 @@ stored even under `LAZY`, since it will decide where an author is read from; `NO
 it. Write-through additionally goes, after the default upstreams, to the author's write
 relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
 each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
-lists only. Read routing is not implemented yet.
+lists only. Reads keep sending the original filters to the default upstreams and add REQs for
+people the defaults would miss: authors on their write relays, `#p` on the person's read relays,
+`#e` / `#q` on the cached parent author's read relays (2 per person, 8 per REQ; replaceable-only
+and `ids` filters excluded). The client's EOSE waits at most 0.5 s past the default upstreams
+for those; later events arrive after it.
 
 `upstreamRelays` を指定すると、リレーは上流実リレー群の手前に挟まる透過キャッシュとして
 動作します（リードスルー / ライトスルー）。関連クラス `UpstreamRelayPool` /

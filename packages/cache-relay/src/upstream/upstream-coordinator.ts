@@ -41,11 +41,26 @@ export interface UpstreamCoordinatorDeps {
   onDuplicate?: (event: NostrEvent) => void;
   /** Called after the event went to the default upstreams (outbox routing). A throw is logged. */
   onPublish?: (event: NostrEvent) => void;
+  /**
+   * 既定の上流に加えて REQ を送る先（アウトボックス）。宛先ごとのフィルタを返す。
+   * 解決を待つ間も既定の上流は先に開いておき、クライアントの EOSE だけを待たせる。
+   */
+  route?: (filters: Filter[]) => Promise<ReadPart[]>;
+}
+
+export interface ReadPart {
+  relay: string;
+  filters: Filter[];
 }
 
 export interface UpstreamCoordinatorOptions {
   /** Max time to hold the client's EOSE waiting for upstream. Default 3000ms. */
   eoseTimeout?: number;
+  /**
+   * 既定の上流が答えたあと、アウトボックスの宛先を待つ上限 (ms)。既定 500。
+   * 他人のリストにあるリレーは遅いものが混ざり、全員を待つと毎回 eoseTimeout まで延びる。
+   */
+  outboxEoseGrace?: number;
   /** Max deduped event ids remembered per subscription. Default 10000. */
   maxSentIdsPerSub?: number;
 }
@@ -54,13 +69,21 @@ interface SubState {
   clientId: string;
   subscriptionId: string;
   sentIds: Set<string>;
+  /** Upstream subscriptions of this client subscription: the default one, then outbox parts. */
+  upstreamSubIds: string[];
+  /** What the client's EOSE still waits on: upstream sub ids, and {@link ROUTING} while routing. */
+  pendingEose: Set<string>;
   eoseSent: boolean;
   eoseTimer?: ReturnType<typeof setTimeout>;
+  outboxGraceTimer?: ReturnType<typeof setTimeout>;
   /** Serializes ingest of this subscription's upstream events. */
   ingestChain: Promise<void>;
   /** Set once the subscription is closed so in-flight ingests stop delivering. */
   closed: boolean;
 }
+
+/** Stands in {@link SubState.pendingEose} until the outbox parts are known. */
+const ROUTING = 'routing';
 
 /** Compose the client/sub map key. Matches SubscriptionManager's key shape. */
 function clientSubKey(clientId: string, subscriptionId: string): string {
@@ -70,6 +93,7 @@ function clientSubKey(clientId: string, subscriptionId: string): string {
 export class UpstreamCoordinator {
   private readonly pool: UpstreamPool;
   private readonly eoseTimeout: number;
+  private readonly outboxEoseGrace: number;
   private readonly maxSentIdsPerSub: number;
   private readonly subs = new Map<string, SubState>();
   private readonly byClientSub = new Map<string, string>();
@@ -81,6 +105,7 @@ export class UpstreamCoordinator {
   ) {
     this.pool = deps.pool;
     this.eoseTimeout = options.eoseTimeout ?? DEFAULT_SUBSCRIPTION_TIMEOUT;
+    this.outboxEoseGrace = options.outboxEoseGrace ?? 500;
     this.maxSentIdsPerSub = options.maxSentIdsPerSub ?? 10_000;
     // Wire pool callbacks eagerly (not in start()) so a subscription opened
     // before start() — e.g. an in-process subscribe() before connect() — still
@@ -131,15 +156,48 @@ export class UpstreamCoordinator {
       clientId,
       subscriptionId,
       sentIds: seededIds,
+      upstreamSubIds: [upstreamSubId],
+      pendingEose: new Set([upstreamSubId]),
       eoseSent: false,
       ingestChain: Promise.resolve(),
       closed: false,
     };
-    state.eoseTimer = setTimeout(() => this.flushEose(upstreamSubId), this.eoseTimeout);
+    state.eoseTimer = setTimeout(() => this.flushEose(state), this.eoseTimeout);
 
     this.subs.set(upstreamSubId, state);
     this.byClientSub.set(clientSubKey(clientId, subscriptionId), upstreamSubId);
+    if (this.deps.route) {
+      state.pendingEose.add(ROUTING);
+      this.openOutboxParts(state, upstreamSubId, this.deps.route, filters);
+    }
     this.pool.openSubscription(upstreamSubId, filters);
+  }
+
+  private openOutboxParts(
+    state: SubState,
+    upstreamSubId: string,
+    route: (filters: Filter[]) => Promise<ReadPart[]>,
+    filters: Filter[]
+  ): void {
+    route(filters)
+      .then((parts) => {
+        if (state.closed) {
+          return;
+        }
+        parts.forEach((part, index) => {
+          const partId = `${upstreamSubId}.${index}`;
+          this.subs.set(partId, state);
+          state.upstreamSubIds.push(partId);
+          state.pendingEose.add(partId);
+          this.pool.openSubscription(partId, part.filters, [part.relay]);
+        });
+      })
+      .catch((error) => {
+        logger.debug('Outbox routing failed:', error);
+      })
+      .finally(() => {
+        this.settleEose(state, ROUTING);
+      });
   }
 
   /** Close the upstream subscription for a client CLOSE (or REQ overwrite). */
@@ -151,12 +209,16 @@ export class UpstreamCoordinator {
     }
     this.byClientSub.delete(key);
     const state = this.subs.get(upstreamSubId);
-    if (state) {
-      state.closed = true;
-      this.clearEoseTimer(state);
-      this.subs.delete(upstreamSubId);
+    if (!state) {
+      this.pool.closeSubscription(upstreamSubId);
+      return;
     }
-    this.pool.closeSubscription(upstreamSubId);
+    state.closed = true;
+    this.clearEoseTimer(state);
+    for (const id of state.upstreamSubIds) {
+      this.subs.delete(id);
+      this.pool.closeSubscription(id);
+    }
   }
 
   /** Close every upstream subscription owned by a disconnected client. */
@@ -265,9 +327,25 @@ export class UpstreamCoordinator {
     }
   }
 
-  /** Aggregated upstream EOSE arrived: release the client's EOSE if pending. */
+  /** Aggregated upstream EOSE arrived: release the client's EOSE once nothing else is owed. */
   private handleUpstreamEose(upstreamSubId: string): void {
-    this.flushEose(upstreamSubId);
+    const state = this.subs.get(upstreamSubId);
+    if (state) {
+      this.settleEose(state, upstreamSubId);
+    }
+  }
+
+  private settleEose(state: SubState, part: string): void {
+    state.pendingEose.delete(part);
+    if (state.pendingEose.size === 0) {
+      this.flushEose(state);
+      return;
+    }
+    const onlyOutboxLeft =
+      !state.pendingEose.has(ROUTING) && !state.pendingEose.has(state.upstreamSubIds[0]);
+    if (onlyOutboxLeft && !state.outboxGraceTimer) {
+      state.outboxGraceTimer = setTimeout(() => this.flushEose(state), this.outboxEoseGrace);
+    }
   }
 
   /**
@@ -289,9 +367,8 @@ export class UpstreamCoordinator {
    * `eoseSent` is still set synchronously so the aggregated EOSE and the
    * timeout cannot both fire one.
    */
-  private flushEose(upstreamSubId: string): void {
-    const state = this.subs.get(upstreamSubId);
-    if (!state || state.eoseSent) {
+  private flushEose(state: SubState): void {
+    if (state.closed || state.eoseSent) {
       return;
     }
     state.eoseSent = true;
@@ -320,6 +397,8 @@ export class UpstreamCoordinator {
   }
 
   private clearEoseTimer(state: SubState): void {
+    clearTimeout(state.outboxGraceTimer);
+    state.outboxGraceTimer = undefined;
     if (state.eoseTimer) {
       clearTimeout(state.eoseTimer);
       state.eoseTimer = undefined;

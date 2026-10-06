@@ -15,8 +15,9 @@ import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { IndexRelayClient } from '../outbox/index-relay-client.js';
 import { OutboxPublisher } from '../outbox/outbox-publisher.js';
+import { planReads, readLookups } from '../outbox/read-plan.js';
 import { RelayListResolver } from '../outbox/relay-list-resolver.js';
-import { normalizeRelayUrl } from '../outbox/relay-list.js';
+import { type RelayList, normalizeRelayUrl } from '../outbox/relay-list.js';
 import { inboxRecipients, writeTargets } from '../outbox/write-targets.js';
 import { EvictionSweeper } from '../storage/eviction-sweeper.js';
 import { ExpiryReaper } from '../storage/expiry-reaper.js';
@@ -24,8 +25,9 @@ import type { StorageAdapter, ValidationStatus } from '../storage/storage-adapte
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { FreshnessGate } from '../upstream/freshness.js';
 import { narrowFiltersByIdCoverage } from '../upstream/id-coverage.js';
-import { UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
+import { type ReadPart, UpstreamCoordinator } from '../upstream/upstream-coordinator.js';
 import { UpstreamRelayPool } from '../upstream/upstream-relay-pool.js';
+import type { UpstreamPool } from '../upstream/upstream-types.js';
 import { capEvents } from '../utils/filter-utils.js';
 import { MessageHandler } from './message-handler.js';
 import { RelayEventEmitter, type RelayEventName } from './relay-event-emitter.js';
@@ -45,6 +47,8 @@ export type { NostrRelayOptions } from './relay-options.js';
 
 /** ms */
 const OUTBOX_RESOLVE_WAIT = 3000;
+/** ms。読み込みはクライアントの EOSE を待たせるので、書き込みより短く切る。 */
+const OUTBOX_READ_RESOLVE_WAIT = 1500;
 
 /**
  * ephemeral（NIP-46 など）と gift wrap（kind 1059）は使い捨ての鍵で署名されるので、
@@ -81,6 +85,9 @@ export class NostrCacheRelay {
   private indexRelayClient?: IndexRelayClient;
   private indexRelays: string[] = [];
   private outboxPublisher?: OutboxPublisher;
+  private upstreamPool?: UpstreamPool;
+  /** 正規化済みの既定の上流。アウトボックスの宛先から除く。 */
+  private defaultRelays = new Set<string>();
   private relayListResolver?: RelayListResolver;
   private emitter = new RelayEventEmitter();
 
@@ -147,8 +154,9 @@ export class NostrCacheRelay {
       });
     }
 
-    this.setupUpstream();
+    // 上流の購読・送信が宛先の解決を呼ぶので、先に用意する
     this.setupOutbox(freshnessWindows?.get(RELAY_LIST_KIND));
+    this.setupUpstream();
 
     this.messageHandler.onResponse((clientId, message) => {
       this.transport.send(clientId, message);
@@ -210,6 +218,7 @@ export class NostrCacheRelay {
         // オリジナルを使うことで自己接続ループを防ぐ。
         webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
       });
+    this.upstreamPool = pool;
     this.upstreamCoordinator = new UpstreamCoordinator(
       {
         pool,
@@ -232,7 +241,8 @@ export class NostrCacheRelay {
         // 鮮度ウィンドウを張り直す（内容が変わらない replaceable でも窓が
         // 再武装するようにするため。詳細は FreshnessGate.markRevalidated）
         onDuplicate: (event) => this.freshnessGate?.markRevalidated(event),
-        onPublish: (event) => this.forwardToOutbox(event),
+        onPublish: this.outboxPublisher ? (event) => this.forwardToOutbox(event) : undefined,
+        route: this.relayListResolver ? (filters) => this.routeReads(filters) : undefined,
       },
       { eoseTimeout: this.options.upstreamEoseTimeout }
     );
@@ -245,6 +255,9 @@ export class NostrCacheRelay {
       return;
     }
     this.indexRelays = indexRelays;
+    this.defaultRelays = new Set(
+      (this.options.upstreamRelays ?? []).map((url) => normalizeRelayUrl(url) ?? url)
+    );
     this.outboxPublisher = new OutboxPublisher({
       webSocketFactory: () => this.transport.getOriginalWebSocket?.() ?? globalThis.WebSocket,
     });
@@ -286,13 +299,57 @@ export class NostrCacheRelay {
       return [];
     }
     const pubkeys = [event.pubkey, ...inboxRecipients(event)];
-    // 先読みの後ろに並ぶと数十秒待ちうるので、届いている分で送る
+    const lists = await this.relayListsWithin(resolver, pubkeys, OUTBOX_RESOLVE_WAIT);
+    const targets = writeTargets(event, lists, this.defaultRelays);
+    if (event.kind === RELAY_LIST_KIND) {
+      for (const url of this.indexRelays) {
+        if (!this.defaultRelays.has(url) && !targets.includes(url)) {
+          targets.push(url);
+        }
+      }
+    }
+    return targets;
+  }
+
+  /** 既定の上流では届かない人のために、REQ を足す先。 */
+  private async routeReads(filters: Filter[]): Promise<ReadPart[]> {
+    const resolver = this.relayListResolver;
+    if (!resolver) {
+      return [];
+    }
+    const { pubkeys, eventIds } = readLookups(filters);
+    const referencedAuthors = new Map<string, string>();
+    if (eventIds.length > 0) {
+      for (const event of await this.storage.getEvents([{ ids: eventIds }])) {
+        referencedAuthors.set(event.id, event.pubkey);
+      }
+    }
+    const everyone = [...new Set([...pubkeys, ...referencedAuthors.values()])];
+    if (everyone.length === 0) {
+      return [];
+    }
+    const lists = await this.relayListsWithin(resolver, everyone, OUTBOX_READ_RESOLVE_WAIT);
+    const pool = this.upstreamPool;
+    return planReads(filters, {
+      lists,
+      referencedAuthors,
+      isDefault: (relay) => this.defaultRelays.has(relay),
+      canReach: (relay) => pool?.canReach?.(relay) ?? true,
+    });
+  }
+
+  /** 取得待ちの後ろに並ぶと数十秒かかりうるので、待つのは `waitMs` まで。あとは届いている分で決める。 */
+  private async relayListsWithin(
+    resolver: RelayListResolver,
+    pubkeys: string[],
+    waitMs: number
+  ): Promise<Map<string, RelayList>> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
         resolver.resolve(pubkeys),
         new Promise((resolve) => {
-          timer = setTimeout(resolve, OUTBOX_RESOLVE_WAIT);
+          timer = setTimeout(resolve, waitMs);
         }),
       ]);
     } catch (error) {
@@ -300,19 +357,7 @@ export class NostrCacheRelay {
     } finally {
       clearTimeout(timer);
     }
-    const lists = await resolver.lookup(pubkeys);
-    const exclude = new Set(
-      (this.options.upstreamRelays ?? []).map((url) => normalizeRelayUrl(url) ?? url)
-    );
-    const targets = writeTargets(event, lists, exclude);
-    if (event.kind === RELAY_LIST_KIND) {
-      for (const url of this.indexRelays) {
-        if (!exclude.has(url) && !targets.includes(url)) {
-          targets.push(url);
-        }
-      }
-    }
-    return targets;
+    return resolver.lookup(pubkeys);
   }
 
   /**

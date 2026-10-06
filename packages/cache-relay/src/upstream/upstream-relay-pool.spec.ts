@@ -32,6 +32,8 @@ const pools: UpstreamRelayPool[] = [];
 interface PoolOptions {
   maxRelays?: number;
   reconnectMaxDelay?: number;
+  maxTemporaryRelays?: number;
+  temporaryRelayCooldown?: number;
 }
 
 function createPool(urls: string[], options: PoolOptions) {
@@ -286,5 +288,148 @@ describe('UpstreamRelayPool', () => {
     await pool.stop();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fake.sockets.length).toBe(beforeStop);
+  });
+
+  describe('targeted subscriptions', () => {
+    /** Bring the targeted socket up and return its wire sub id. */
+    async function openTarget(fake: ReturnType<typeof createFakeWebSocketFactory>, url: string) {
+      await flush();
+      const target = fake.forUrl(url);
+      if (!target) {
+        throw new Error(`no socket for ${url}`);
+      }
+      target.mockOpen();
+      await flush();
+      return target;
+    }
+
+    it('sends the REQ only to its targets and waits on them alone for EOSE', async () => {
+      const { pool, fake, socket, onEose } = await startPool(['wss://a'], { subscribe: false });
+
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://outbox/']);
+      const target = await openTarget(fake, 'wss://outbox');
+
+      expect(target.sent).toContainEqual(['REQ', 'up1.0:0', { kinds: [1] }]);
+      expect(socket('wss://a').sent).toEqual([]);
+      expect(onEose).not.toHaveBeenCalled();
+
+      // 末尾スラッシュ付きで渡しても、rx-nostr が正規化した送り元と突き合う
+      target.mockMessage(['EOSE', 'up1.0:0']);
+      await flush();
+      expect(onEose).toHaveBeenCalledWith('up1.0');
+    });
+
+    it('does not make other subscriptions wait on a temporary connection', async () => {
+      const { pool, fake, socket, onEose } = await startPool(['wss://a'], { subscribe: false });
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://outbox']);
+      await openTarget(fake, 'wss://outbox');
+
+      pool.openSubscription('up2', [{ kinds: [1] }]);
+      await flush();
+      socket('wss://a').mockMessage(['EOSE', 'up2:0']);
+      await flush();
+
+      expect(onEose).toHaveBeenCalledWith('up2');
+      expect(pool.getConnectedCount()).toBe(1);
+    });
+
+    it('closes the targeted REQ, freeing its slot', async () => {
+      const { pool, fake } = await startPool(['wss://a'], {
+        subscribe: false,
+        maxTemporaryRelays: 1,
+      });
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://one']);
+      const target = await openTarget(fake, 'wss://one');
+      expect(pool.canReach('wss://two')).toBe(false);
+      expect(pool.canReach('wss://one/')).toBe(true);
+
+      pool.closeSubscription('up1.0');
+      await flush();
+
+      expect(target.sent).toContainEqual(['CLOSE', 'up1.0:0']);
+      expect(pool.canReach('wss://two')).toBe(true);
+    });
+
+    it('lets the temporary socket close once the targeted REQ is closed', async () => {
+      // 書き込みの一時接続（rx-nostr 3.7 の confirmOK の不具合）と違い、REQ のものは閉じる
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], {});
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://outbox']);
+      await vi.advanceTimersByTimeAsync(0);
+      const target = fake.forUrl('wss://outbox');
+      target?.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+
+      pool.closeSubscription('up1.0');
+      await vi.advanceTimersByTimeAsync(11_000);
+
+      expect(target?.readyState).toBe(3);
+      await pool.stop();
+    });
+
+    it('answers at once, sending nothing, when no target can be reached', async () => {
+      const { pool, fake, onEose } = await startPool(['wss://a'], {
+        subscribe: false,
+        maxTemporaryRelays: 1,
+      });
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://one']);
+      await openTarget(fake, 'wss://one');
+
+      pool.openSubscription('up1.1', [{ kinds: [1] }], ['wss://two']);
+      await flush();
+
+      expect(onEose).toHaveBeenCalledWith('up1.1');
+      expect(fake.forUrl('wss://two')).toBeUndefined();
+    });
+
+    it('cools down a temporary relay that rx-nostr gives up on, without re-arming it', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], {
+        reconnectMaxDelay: 60_000,
+        temporaryRelayCooldown: 600_000,
+      });
+      const onEose = vi.fn();
+      pool.onEose(onEose);
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      for (let attempt = 0; attempt < 20 && pool.canReach('wss://dead'); attempt += 1) {
+        fake.forUrl('wss://dead')?.close();
+        await vi.advanceTimersByTimeAsync(40_000);
+      }
+
+      expect(pool.canReach('wss://dead')).toBe(false);
+      expect(onEose).toHaveBeenCalledWith('up1.0');
+      const recoveryTimers = (pool as unknown as { recoveryTimers: Map<string, unknown> })
+        .recoveryTimers;
+      expect([...recoveryTimers.keys()]).not.toContain('wss://dead');
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(pool.canReach('wss://dead')).toBe(true);
+      await pool.stop();
+    });
+
+    it('still re-arms a default relay configured with a trailing slash', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a.example.com/'], { reconnectMaxDelay: 60_000 });
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const recoveryTimers = (pool as unknown as { recoveryTimers: Map<string, unknown> })
+        .recoveryTimers;
+
+      for (let attempt = 0; attempt < 20 && recoveryTimers.size === 0; attempt += 1) {
+        fake.last().close();
+        await vi.advanceTimersByTimeAsync(40_000);
+      }
+
+      expect([...recoveryTimers.keys()]).toEqual(['wss://a.example.com']);
+      await pool.stop();
+    });
   });
 });
