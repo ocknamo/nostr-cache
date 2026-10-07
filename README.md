@@ -74,6 +74,7 @@ npm run test
 | 公開 API（型・オプション・NIP の適用ルール） | [doc/api.md](./doc/api.md) |
 | 既存クライアントに透過キャッシュを挟む手順 | [doc/transparent-cache.md](./doc/transparent-cache.md) |
 | 埋め込みウィジェットの使い方 | [packages/timeline-embed/README.md](./packages/timeline-embed/README.md) |
+| AI エージェント向けの案内（[llms.txt](https://llmstxt.org/) 形式・英語。公開バンドルからリレーだけを使う方法） | [packages/timeline-embed/public/llms.txt](./packages/timeline-embed/public/llms.txt)（公開 URL: <https://ocknamo.github.io/nostr-cache/llms.txt>） |
 | リレーコアの内部設計 | [doc/cache-relay/](./doc/cache-relay/) |
 | 実行可能なサンプル | [examples/](./examples/README.md) |
 

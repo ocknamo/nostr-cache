@@ -11,6 +11,8 @@ const EMBED_DIST = fileURLToPath(new URL('../timeline-embed/dist', import.meta.u
 /** Files the embed bundle contributes to the deployed site. */
 const EMBED_ASSETS: Record<string, { file: string; type: string }> = {
   'nostr-timeline.js': { file: 'nostr-timeline.js', type: 'text/javascript; charset=utf-8' },
+  'llms.txt': { file: 'llms.txt', type: 'text/plain; charset=utf-8' },
+  'relay-api.md': { file: 'relay-api.md', type: 'text/markdown; charset=utf-8' },
   'embed/': { file: 'embed/index.html', type: 'text/html; charset=utf-8' },
   'embed/index.html': { file: 'embed/index.html', type: 'text/html; charset=utf-8' },
   // Shared by both iframe pages: the query-string forwarding and the height

@@ -1,0 +1,17 @@
+# nostr-cache
+
+> An in-browser Nostr relay that caches events in IndexedDB and sits in front of real upstream relays as a transparent read-through / write-through cache. The quickest way to use it is the hosted script `https://ocknamo.github.io/nostr-cache/nostr-timeline.js`: one `<script>` tag, then `NostrTimelineEmbed.acquireRelayHost()` starts a page-local relay that any NIP-01 WebSocket client can connect to at `ws://nostr-cache.invalid`.
+
+The same script also registers timeline widgets (`<nostr-timeline>`, `<nostr-follow-timeline>`, `<nostr-post>`), but the relay can be used on its own with no widget on the page. Prefer the hosted script over the npm packages unless the user needs options it does not expose (custom signature-validation mode, intercepting several URLs at once).
+
+The script is a classic script (IIFE) that defines `globalThis.NostrTimelineEmbed`; it is not an ES module and cannot be `import`ed. The URL is unversioned and always serves the latest build.
+
+## Docs
+
+- [Using the relay from the hosted script](https://ocknamo.github.io/nostr-cache/relay-api.md): Setup, `acquireRelayHost()` options, the returned handle, NIP-01 messages, cache behaviour and pitfalls. Read this before writing code.
+
+## Optional
+
+- [Timeline widget reference (Japanese)](https://raw.githubusercontent.com/ocknamo/nostr-cache/main/packages/timeline-embed/README.md): Attributes and events of the `<nostr-timeline>`, `<nostr-follow-timeline>` and `<nostr-post>` elements, and the iframe embed.
+- [npm library usage (Japanese)](https://raw.githubusercontent.com/ocknamo/nostr-cache/main/doc/transparent-cache.md): Assembling the relay yourself from `@nostr-cache/cache-relay/browser`.
+- [Live demo](https://ocknamo.github.io/nostr-cache/): Shows cache hits versus upstream fetches.
