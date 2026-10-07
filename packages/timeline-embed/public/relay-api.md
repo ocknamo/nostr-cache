@@ -11,13 +11,11 @@ A page-local Nostr relay that runs in the browser, stores events in IndexedDB, a
     const { acquireRelayHost } = globalThis.NostrTimelineEmbed;
     const host = await acquireRelayHost({ upstreamRelays: ['wss://nos.lol'] });
 
-    // Create sockets only after the await above.
     const ws = new WebSocket(host.interceptUrl); // 'ws://nostr-cache.invalid'
     ws.onopen = () => ws.send(JSON.stringify(['REQ', 'sub1', { kinds: [1], limit: 20 }]));
     ws.onmessage = (e) => {
       const [type, subId, event] = JSON.parse(e.data);
-      if (type === 'EVENT') console.log(event.content);
-      if (type === 'EOSE') console.log('cached and upstream backlog done; live events follow');
+      if (type === 'EVENT') console.log(event.content); // may keep arriving after EOSE
     };
   })();
 </script>
@@ -58,6 +56,7 @@ Use only these members. The others (`relay`, `storage`, `metrics`) are internal 
 | Member | Meaning |
 |---|---|
 | `interceptUrl` | The URL to pass to `new WebSocket()`. |
+| `getConnectedUpstreams(): number` | How many of `upstreamRelays` are connected right now. |
 | `clearCache(): Promise<void>` | Deletes every stored event. The relay keeps running and open subscriptions stay open, so events already on screen remain; reload the page to see an empty cache. Throws if the handle is already released. |
 | `release(): Promise<void>` | Gives back this acquisition. When the last one is released, the relay stops and `globalThis.WebSocket` is restored once the promise resolves. Calling it again does nothing. |
 
@@ -74,15 +73,17 @@ The relay also follows NIP-02 (kind 3 is replaceable), NIP-09 (kind 5 deletions 
 
 ## Cache behaviour
 
-- **Read-through:** a REQ returns matching stored events first, and is also forwarded to the upstream relays. New events from upstream are stored and sent to the client. EOSE is sent when all upstreams have sent EOSE, or after 3 seconds. The upstream subscription stays open until CLOSE, so live events keep arriving after EOSE.
-- **Skipping upstream:** the relay sends EOSE without asking upstream when the cache already answers the REQ completely: every requested `ids` was found, or every requested kind 0 / kind 3 was cached within its freshness window. That subscription gets no live updates.
-- **Write-through:** a published EVENT is stored locally and then sent to the upstream relays without waiting for them. `OK` reports only whether the local save succeeded. If every upstream relay is unreachable, the event is not retried and never reaches the network.
+- **Read-through:** a REQ returns matching stored events first, and is also forwarded to the upstream relays. New events from upstream are stored and sent to the client. The upstream subscription stays open until CLOSE, so live events keep arriving after EOSE.
+- **EOSE does not mean upstream is done.** EOSE waits (up to 3 seconds) only for the upstreams that were connected when the REQ arrived. `acquireRelayHost()` resolves before upstreams connect, so a REQ sent right after it usually gets EOSE with cached events only, and upstream's older events arrive after EOSE. For a one-shot fetch, keep reading after EOSE, or wait until `host.getConnectedUpstreams() > 0` before sending the REQ.
+- **Skipping upstream:** each filter that the cache already answers is not sent upstream: a filter whose `ids` were all returned, or a `kinds` + `authors` filter for kind 0 / 3 (and 10002 when the outbox model is on) cached within its freshness window. If no filter is left, EOSE comes at once. Skipped filters get no live updates from upstream.
+- **Write-through:** a published EVENT is stored locally and then sent to the upstream relays that are connected at that moment, without waiting for them. Relays that are disconnected at that moment never get it, and nothing is retried. An older version of a replaceable event also gets `OK true`, although it is neither stored nor sent. `OK true` therefore does not mean the event reached any upstream.
 - **Outbox model (on by default when `upstreamRelays` is set):** the relay also reads from authors' write relays and from mentioned users' read relays, and sends published events to them. The browser therefore connects to relays not listed in `upstreamRelays`. Set `indexRelays: []` to prevent this.
-- **Signatures** are checked in the background (every `lazyValidateInterval` seconds), and events that fail are deleted. An event that was just received may not have been checked yet. Kind 10002 is always checked before it is stored.
+- **Signatures** are checked in the background (every `lazyValidateInterval` seconds), and events that fail are deleted. Until then, an event with a bad signature gets `OK true` and is delivered and forwarded upstream, so a successful publish does not prove the event is valid. Kinds 5, 10002 and ephemeral events are checked before they are accepted.
+- **Errors** such as an invalid filter, or a REQ beyond the limit of 20 open subscriptions per socket, are answered with `NOTICE` only, with no EOSE or CLOSED. A REQ returns at most 500 cached events. The relay answers `CLOSE` with `CLOSED`.
 
 ## Other constraints
 
 - An `https://` page cannot use `ws://` upstream relays (the browser blocks mixed content). Use `wss://`.
-- The script is about 451 KB (145 KB gzipped) and includes the widgets even if only the relay is used.
+- The script includes the widgets even if only the relay is used.
 - The script URL always serves the latest build. Pin a copy yourself if the user needs a fixed version.
 - Events are stored in the IndexedDB of the embedding page's origin, so they count toward that origin's storage quota.
