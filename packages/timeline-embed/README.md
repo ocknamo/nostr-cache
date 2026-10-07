@@ -97,6 +97,10 @@ DOM に置かずにリレーだけを立ち上げられるので、**ページ�
 （タイムライン以外の表示や自作のコンポーネント）を透過キャッシュ経由にできます。
 npm パッケージを入れられない構成のための入口です。
 
+この節の内容は AI エージェント向けに英語版
+[`public/relay-api.md`](./public/relay-api.md)（[`llms.txt`](./public/llms.txt) から参照）にも
+まとめてあります。API を変えたらそちらも更新してください。
+
 ```html
 <script src="https://ocknamo.github.io/nostr-cache/nostr-timeline.js"></script>
 <script>
