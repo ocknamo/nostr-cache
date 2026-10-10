@@ -75,6 +75,14 @@ export class InstrumentedUpstreamPool implements UpstreamPool {
     });
   }
 
+  onResentEose(callback: (upstreamSubId: string) => void): void {
+    this.inner.onResentEose?.(callback);
+  }
+
+  onResend(callback: (relayUrl: string) => void): void {
+    this.inner.onResend?.(callback);
+  }
+
   getConnectedCount(): number {
     return this.inner.getConnectedCount();
   }

@@ -174,6 +174,29 @@ describe('UpstreamRelayPool', () => {
     expect(onEose).toHaveBeenCalledTimes(1);
   });
 
+  it('reports the answer of a relay that connected after the aggregate fired', async () => {
+    const { pool, socket } = await startPool(['wss://a', 'wss://b'], {
+      connect: false,
+      subscribe: false,
+    });
+    const onResend = vi.fn();
+    const onResentEose = vi.fn();
+    pool.onResend(onResend);
+    pool.onResentEose(onResentEose);
+    socket('wss://a').mockOpen();
+    await flush();
+    pool.openSubscription('up1', [{ kinds: [1] }]);
+    socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+    await flush();
+
+    socket('wss://b').mockOpen();
+    await flush();
+    expect(onResend).toHaveBeenCalledTimes(1);
+    socket('wss://b').mockMessage(['EOSE', 'up1:0']);
+    await flush();
+    expect(onResentEose).toHaveBeenCalledWith('up1');
+  });
+
   it('reports an EVENT before the EOSE that followed it in the same task', async () => {
     const { socket, onEose, onEvent } = await startPool(['wss://a']);
     const order: string[] = [];
@@ -335,6 +358,87 @@ describe('UpstreamRelayPool', () => {
     expect(fake.sockets.length).toBe(beforeStop);
   });
 
+  describe('re-sent answers', () => {
+    /** Answer `up1` from every relay, then drop `url` and bring it back. */
+    async function reconnectAfterAnswer(url: string) {
+      vi.useFakeTimers();
+      const started = await startPool(['wss://a', 'wss://b']);
+      const onResend = vi.fn();
+      const onResentEose = vi.fn();
+      started.pool.onResend(onResend);
+      started.pool.onResentEose(onResentEose);
+      started.socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+      started.socket('wss://b').mockMessage(['EOSE', 'up1:0']);
+      await flush();
+
+      started.socket(url).close();
+      await vi.advanceTimersByTimeAsync(2_000);
+      const revived = started.socket(url);
+      revived.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      return { ...started, revived, onResend, onResentEose };
+    }
+
+    it('reports a reconnect before the REQ it re-sends is answered', async () => {
+      const { revived, onResend, onResentEose, onEose } = await reconnectAfterAnswer('wss://a');
+
+      expect(onResend).toHaveBeenCalledTimes(1);
+      expect(revived.sent).toContainEqual(['REQ', 'up1:0', { kinds: [1] }]);
+      expect(onResentEose).not.toHaveBeenCalled();
+
+      revived.mockMessage(['EOSE', 'up1:0']);
+      revived.mockMessage(['EOSE', 'up1:0']);
+      await flush();
+      expect(onResentEose).toHaveBeenCalledTimes(1);
+      expect(onResentEose).toHaveBeenCalledWith('up1');
+      expect(onEose).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports an EVENT of the re-sent answer before its EOSE', async () => {
+      const { revived, onResentEose, onEvent } = await reconnectAfterAnswer('wss://a');
+      const order: string[] = [];
+      onEvent.mockImplementation(() => order.push('event'));
+      onResentEose.mockImplementation(() => order.push('eose'));
+
+      revived.mockMessage(['EVENT', 'up1:0', makeEvent('e1')]);
+      revived.mockMessage(['EOSE', 'up1:0']);
+      await flush();
+      expect(order).toEqual(['event', 'eose']);
+    });
+
+    it('forgets a re-sent answer once its relay drops again or the subscription closes', async () => {
+      const { pool, revived, onResentEose } = await reconnectAfterAnswer('wss://a');
+
+      revived.close();
+      await flush();
+      revived.mockMessage(['EOSE', 'up1:0']);
+      pool.closeSubscription('up1');
+      await flush();
+      expect(onResentEose).not.toHaveBeenCalled();
+    });
+
+    it('leaves a reconnect during the first answer to the aggregated EOSE', async () => {
+      vi.useFakeTimers();
+      const { pool, socket, onEose } = await startPool(['wss://a', 'wss://b']);
+      const onResend = vi.fn();
+      const onResentEose = vi.fn();
+      pool.onResend(onResend);
+      pool.onResentEose(onResentEose);
+
+      socket('wss://a').close();
+      await vi.advanceTimersByTimeAsync(2_000);
+      socket('wss://a').mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      socket('wss://a').mockMessage(['EOSE', 'up1:0']);
+      socket('wss://b').mockMessage(['EOSE', 'up1:0']);
+      await flush();
+
+      expect(onResend).not.toHaveBeenCalled();
+      expect(onResentEose).not.toHaveBeenCalled();
+      expect(onEose).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('targeted subscriptions', () => {
     /** Bring the targeted socket up and return its wire sub id. */
     async function openTarget(fake: ReturnType<typeof createFakeWebSocketFactory>, url: string) {
@@ -469,6 +573,32 @@ describe('UpstreamRelayPool', () => {
       revived.mockMessage(['EOSE', 'up2.0:0']);
       await vi.advanceTimersByTimeAsync(0);
       expect(onEose).toHaveBeenCalledWith('up2.0');
+      await pool.stop();
+    });
+
+    it('reports the re-sent answer of a temporary relay it reconnected', async () => {
+      vi.useFakeTimers();
+      const { pool, fake } = createPool(['wss://a'], { temporaryRelayCooldown: 600_000 });
+      const onResend = vi.fn();
+      const onResentEose = vi.fn();
+      pool.onResend(onResend);
+      pool.onResentEose(onResentEose);
+      await pool.start();
+      await vi.advanceTimersByTimeAsync(0);
+      fake.forUrl('wss://a')?.mockOpen();
+      pool.openSubscription('up1.0', [{ kinds: [1] }], ['wss://dead']);
+      await vi.advanceTimersByTimeAsync(0);
+      await dropUntilGivenUp(pool, fake, 'wss://dead');
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      const revived = fake.last();
+      revived.mockOpen();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onResend).toHaveBeenCalledWith('wss://dead');
+
+      revived.mockMessage(['EOSE', 'up1.0:0']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onResentEose).toHaveBeenCalledWith('up1.0');
       await pool.stop();
     });
 

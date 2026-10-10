@@ -132,11 +132,18 @@ export class ReplyWatcher {
           ? { kinds: [1], '#a': [target.match.address], limit }
           : { kinds: [1], '#e': [target.match.id ?? target.key], limit };
 
+    let ended = false;
     this.options.ctx.connection.subscribe(subId, [filter], {
       onEvent: (event) => this.ingest(watch, event),
       // Deferred a turn: events and EOSE arrive down two different rx-nostr
       // observables, so the frontier read here would be short or empty.
       onEose: () => {
+        // A later one ends an upstream relay's re-sent answer; what it brought
+        // is live, as far as `advance` is concerned.
+        if (ended) {
+          return;
+        }
+        ended = true;
         clearTimeout(watch.advance);
         watch.advance = setTimeout(() => this.advance(watch), 0);
       },

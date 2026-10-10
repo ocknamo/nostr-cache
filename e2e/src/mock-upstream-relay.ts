@@ -81,6 +81,10 @@ export interface MockUpstreamRelay {
   reqCountForKind: (kind: number) => number;
   /** The filters of every REQ this relay answered, in the order they arrived. */
   reqFilters: () => Filter[][];
+  /** Publish more events. Only REQs from here on see them: nothing is sent live. */
+  addEvents: (more: NostrEvent[]) => void;
+  /** Cut every client off without closing the server, as a dropped connection would. */
+  dropConnections: () => void;
   close: () => Promise<void>;
 }
 
@@ -95,13 +99,14 @@ export interface MockUpstreamRelayOptions {
 
 /** Start the mock relay. */
 export async function startMockUpstreamRelay(
-  events: NostrEvent[],
+  initialEvents: NostrEvent[],
   options: MockUpstreamRelayOptions = {}
 ): Promise<MockUpstreamRelay> {
   const tlsServer = options.tls ? createServer(options.tls) : undefined;
   const server = tlsServer
     ? new WebSocketServer({ server: tlsServer })
     : new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const events = [...initialEvents];
   let reqCount = 0;
   const reqCountByKind = new Map<number, number>();
   const reqFilters: Filter[][] = [];
@@ -153,6 +158,14 @@ export async function startMockUpstreamRelay(
     reqCount: () => reqCount,
     reqCountForKind: (kind: number) => reqCountByKind.get(kind) ?? 0,
     reqFilters: () => reqFilters,
+    addEvents: (more) => {
+      events.push(...more);
+    },
+    dropConnections: () => {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+    },
     close: async () => {
       for (const client of server.clients) {
         client.terminate();

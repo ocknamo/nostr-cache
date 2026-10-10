@@ -34,6 +34,9 @@ import type { ValidationStatus } from './validation-status.ts';
 
 export type { ReplyRequestOptions };
 
+/** Long enough for a re-sent answer to reach its EOSE, short enough not to span two absences. */
+const RESENT_ANSWER_WINDOW_MS = 10_000;
+
 export interface FollowsState {
   /**
    * `missing` means no subscription was opened at all; `dropped` means the
@@ -149,6 +152,8 @@ export class TimelineController {
    * See {@link trimToCoverage}.
    */
   private answer: UpstreamAnswer = { times: [] };
+  private answerRestartedAt = Number.NEGATIVE_INFINITY;
+  private offUpstreamResend?: () => void;
   /** Abandons a page in flight; replaced per subscription, like the one below. */
   private pagingAbort = new AbortController();
   /**
@@ -271,6 +276,7 @@ export class TimelineController {
       this.relayHost = undefined;
       return;
     }
+    this.offUpstreamResend = this.relayHost.onUpstreamResend(() => this.restartAnswerForResend());
     try {
       // stop() detaches the socket's handlers, so a connect() in flight would
       // never settle.
@@ -473,6 +479,22 @@ export class TimelineController {
     };
   }
 
+  /** An upstream relay is about to answer the REQ again, newest first, under the same `limit`. */
+  private restartAnswerForResend(): void {
+    // Before the first EOSE the re-sent answer is part of the first one.
+    if (!this.currentSubId || !this.state.eose) {
+      return;
+    }
+    // Relays come back one after another. Restarting for each would drop what an
+    // earlier one sent before its EOSE could judge it.
+    const now = Date.now();
+    if (now - this.answerRestartedAt < RESENT_ANSWER_WINDOW_MS) {
+      return;
+    }
+    this.answerRestartedAt = now;
+    this.answer = { times: [] };
+  }
+
   /** Applies {@link coverageFloor}, forgetting the origins of what it drops. */
   private dropBelowCoverage(
     events: NostrEvent[],
@@ -524,6 +546,8 @@ export class TimelineController {
     this.pagingAbort.abort();
     this.validation.clearTimers();
     this.closeLookups();
+    this.offUpstreamResend?.();
+    this.offUpstreamResend = undefined;
     if (this.currentSubId) {
       this.connection.unsubscribe(this.currentSubId);
       this.currentSubId = null;
@@ -551,6 +575,7 @@ export class TimelineController {
     this.suspended = false;
     this.currentFilters = filters;
     this.answer = { times: [] };
+    this.answerRestartedAt = Number.NEGATIVE_INFINITY;
     this.pagingAbort.abort();
     this.pagingAbort = new AbortController();
     if (this.filterSourceAbort.signal.aborted && !this.stopped) {

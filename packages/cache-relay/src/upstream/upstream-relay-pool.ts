@@ -36,14 +36,20 @@ export class UpstreamRelayPool implements UpstreamPool {
   private stopped = false;
   /** Live subscriptions by upstream sub id; unsubscribing makes rx-nostr send CLOSE. */
   private readonly subscriptions = new Map<string, { unsubscribe(): void }>();
-  /** Relays still owing an EOSE per subscription (empty set → already fired). */
+  /** Relays still owing an EOSE per subscription; absent once it fired. */
   private readonly pendingEose = new Map<string, Set<string>>();
+  /** 集約 EOSE を出し終えたあと、REQ を送り直して答えを待っているリレー。 */
+  private readonly resent = new Map<string, Set<string>>();
+  /** Subscriptions on the default relays, which rx-nostr sends to a relay whenever it connects. */
+  private readonly defaultSubs = new Set<string>();
   /** Pending re-arm per relay rx-nostr has given up on, keyed by relay url. */
   private readonly recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly temporary: TemporaryRelays;
   private streams?: { unsubscribe(): void };
   private eventCallback?: (upstreamSubId: string, event: NostrEvent, relayUrl: string) => void;
   private eoseCallback?: (upstreamSubId: string) => void;
+  private resentEoseCallback?: (upstreamSubId: string) => void;
+  private resendCallback?: (relayUrl: string) => void;
 
   constructor(
     urls: string[],
@@ -69,6 +75,7 @@ export class UpstreamRelayPool implements UpstreamPool {
       onEvent: (upstreamSubId, event, relay) => this.eventCallback?.(upstreamSubId, event, relay),
       onEose: (upstreamSubId, relay) => this.settleRelay(upstreamSubId, relay),
       onGaveUp: (relay) => this.dropFromPending(relay),
+      onConnected: (relay, upstreamSubIds) => this.markResent(relay, upstreamSubIds),
       isOffline: () => this.defaultsAllFailing(),
     });
   }
@@ -90,6 +97,8 @@ export class UpstreamRelayPool implements UpstreamPool {
     }
     this.subscriptions.clear();
     this.pendingEose.clear();
+    this.resent.clear();
+    this.defaultSubs.clear();
     this.temporary.stop();
 
     // Detach before disposing: dispose() drives every relay to `terminated`,
@@ -136,6 +145,7 @@ export class UpstreamRelayPool implements UpstreamPool {
         this.eventCallback?.(upstreamSubId, event as NostrEvent, from);
       });
       this.subscriptions.set(upstreamSubId, events);
+      this.defaultSubs.add(upstreamSubId);
       req.emit(filters as LazyFilter[]);
     }
 
@@ -184,6 +194,8 @@ export class UpstreamRelayPool implements UpstreamPool {
 
   closeSubscription(upstreamSubId: string): void {
     this.pendingEose.delete(upstreamSubId);
+    this.resent.delete(upstreamSubId);
+    this.defaultSubs.delete(upstreamSubId);
     // Unsubscribing is what sends CLOSE.
     this.subscriptions.get(upstreamSubId)?.unsubscribe();
     this.subscriptions.delete(upstreamSubId);
@@ -195,6 +207,14 @@ export class UpstreamRelayPool implements UpstreamPool {
 
   onEose(callback: (upstreamSubId: string) => void): void {
     this.eoseCallback = callback;
+  }
+
+  onResentEose(callback: (upstreamSubId: string) => void): void {
+    this.resentEoseCallback = callback;
+  }
+
+  onResend(callback: (relayUrl: string) => void): void {
+    this.resendCallback = callback;
   }
 
   getConnectedCount(): number {
@@ -303,6 +323,7 @@ export class UpstreamRelayPool implements UpstreamPool {
    */
   private handleConnectionState({ from, state }: ConnectionStatePacket): void {
     if (state === 'connected') {
+      this.markResent(from, this.defaultSubs);
       return;
     }
     this.dropFromPending(from);
@@ -339,9 +360,9 @@ export class UpstreamRelayPool implements UpstreamPool {
    * EOSE は同期で渡す。同じタスクで続けて届くと EOSE が先に立つので、EVENT を待ってから数える。
    */
   private settleRelay(upstreamSubId: string, relayUrl: string): void {
-    // Unknown id: not ours, already fired, or the subscription was closed.
     const pending = this.pendingEose.get(upstreamSubId);
     if (!pending) {
+      this.settleResent(upstreamSubId, relayUrl);
       return;
     }
     queueMicrotask(() => {
@@ -359,8 +380,53 @@ export class UpstreamRelayPool implements UpstreamPool {
     }
   }
 
+  /**
+   * 繋がったリレーへ rx-nostr が送る REQ の答えを待つ。集約 EOSE を待っている購読は除く。
+   * その答えは集約に含まれ、別に EOSE を出すと 2 回になるため。
+   */
+  private markResent(relayUrl: string, upstreamSubIds: Iterable<string>): void {
+    let marked = false;
+    for (const upstreamSubId of upstreamSubIds) {
+      if (this.pendingEose.has(upstreamSubId)) {
+        continue;
+      }
+      let relays = this.resent.get(upstreamSubId);
+      if (!relays) {
+        relays = new Set();
+        this.resent.set(upstreamSubId, relays);
+      }
+      relays.add(relayUrl);
+      marked = true;
+    }
+    if (marked) {
+      this.resendCallback?.(relayUrl);
+    }
+  }
+
+  /** {@link settleRelay} と同じ理由で、手前の EVENT が流れ終わってから発火する。 */
+  private settleResent(upstreamSubId: string, relayUrl: string): void {
+    const relays = this.resent.get(upstreamSubId);
+    if (!relays?.has(relayUrl)) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (this.resent.get(upstreamSubId) !== relays || !relays.delete(relayUrl)) {
+        return;
+      }
+      if (relays.size === 0) {
+        this.resent.delete(upstreamSubId);
+      }
+      this.resentEoseCallback?.(upstreamSubId);
+    });
+  }
+
   /** そのリレーはもう答えないので、待っている購読から外す。 */
   private dropFromPending(relayUrl: string): void {
+    for (const [upstreamSubId, relays] of this.resent) {
+      if (relays.delete(relayUrl) && relays.size === 0) {
+        this.resent.delete(upstreamSubId);
+      }
+    }
     const toFire: string[] = [];
     for (const [upstreamSubId, pending] of this.pendingEose) {
       if (pending.delete(relayUrl) && pending.size === 0) {

@@ -38,6 +38,18 @@ export interface UpstreamPool {
    */
   onEose(callback: (upstreamSubId: string) => void): void;
 
+  /**
+   * 集約 EOSE を出し終えた購読の REQ を、（再）接続したリレーへ送った。その答えより先に発火する。
+   * 留守の間に切れた上流が戻ったときがこれにあたる。
+   */
+  onResend?(callback: (relayUrl: string) => void): void;
+
+  /**
+   * {@link onResend} の REQ への答えが終わった（リレーごとに 1 回）。留守の間の新着が
+   * `limit` を超えたかを、受け手が判定し直せる。
+   */
+  onResentEose?(callback: (upstreamSubId: string) => void): void;
+
   getConnectedCount(): number;
 }
 
