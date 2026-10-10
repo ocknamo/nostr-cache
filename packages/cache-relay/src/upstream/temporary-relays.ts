@@ -43,6 +43,8 @@ export interface TemporaryRelaysOptions {
   onEose: (upstreamSubId: string, relay: string) => void;
   /** 再試行を使い切った・拒まれた。繋ぎ直すまで、そのリレーの EOSE は来ない。 */
   onGaveUp: (relay: string) => void;
+  /** 繋がった。rx-nostr はこの時点で開いている購読の REQ を送る。 */
+  onConnected: (relay: string, upstreamSubIds: Iterable<string>) => void;
   /** 自分側が繋がっていないか。そのとき落ちた宛先は相手のせいではないので冷却しない。 */
   isOffline: () => boolean;
 }
@@ -50,8 +52,8 @@ export interface TemporaryRelaysOptions {
 interface Client {
   rxNostr: RxNostr;
   streams: { unsubscribe(): void };
-  /** このリレーで開いている購読の数。0 のものは枠を数えず、溢れたら捨ててよい。 */
-  open: number;
+  /** このリレーで開いている購読。空のものは枠を数えず、溢れたら捨ててよい。 */
+  open: Set<string>;
 }
 
 export class TemporaryRelays {
@@ -70,7 +72,7 @@ export class TemporaryRelays {
       }
       this.cooldownUntil.delete(key);
     }
-    return (this.clients.get(key)?.open ?? 0) > 0 || this.inUse() < this.options.maxRelays;
+    return (this.clients.get(key)?.open.size ?? 0) > 0 || this.inUse() < this.options.maxRelays;
   }
 
   /** 返した `unsubscribe` が CLOSE を送る。 */
@@ -84,7 +86,7 @@ export class TemporaryRelays {
       return undefined;
     }
     const client = this.clientFor(key);
-    client.open += 1;
+    client.open.add(upstreamSubId);
     const req = createRxForwardReq(upstreamSubId);
     // Subscribe before emitting: the request stream is hot.
     const events = client.rxNostr.use(req).subscribe(({ event }) => {
@@ -99,7 +101,7 @@ export class TemporaryRelays {
         }
         closed = true;
         events.unsubscribe();
-        client.open -= 1;
+        client.open.delete(upstreamSubId);
       },
     };
   }
@@ -114,7 +116,7 @@ export class TemporaryRelays {
   private inUse(): number {
     let count = 0;
     for (const [key, client] of this.clients) {
-      if (client.open > 0 && !this.retryTimers.has(key)) {
+      if (client.open.size > 0 && !this.retryTimers.has(key)) {
         count += 1;
       }
     }
@@ -128,14 +130,17 @@ export class TemporaryRelays {
     }
     if (this.clients.size >= this.options.maxRelays) {
       for (const [idle, client] of this.clients) {
-        if (client.open === 0) {
+        if (client.open.size === 0) {
           this.dispose(idle);
         }
       }
     }
     const rxNostr = this.options.createClient(key);
+    const open = new Set<string>();
     const streams = rxNostr.createConnectionStateObservable().subscribe(({ state }) => {
-      if (state === 'error' || state === 'rejected') {
+      if (state === 'connected') {
+        this.options.onConnected(key, open);
+      } else if (state === 'error' || state === 'rejected') {
         this.giveUp(key, state === 'rejected');
       }
     });
@@ -147,7 +152,7 @@ export class TemporaryRelays {
         }
       })
     );
-    const client: Client = { rxNostr, streams, open: 0 };
+    const client: Client = { rxNostr, streams, open };
     this.clients.set(key, client);
     return client;
   }
@@ -162,7 +167,7 @@ export class TemporaryRelays {
       this.cooldownUntil.set(key, Date.now() + this.options.cooldown);
     }
     const client = this.clients.get(key);
-    if (rejected || !client?.open) {
+    if (rejected || !client?.open.size) {
       this.dispose(key);
     } else {
       clearTimeout(this.retryTimers.get(key));
@@ -181,7 +186,7 @@ export class TemporaryRelays {
     const room = this.inUse() < this.options.maxRelays;
     this.retryTimers.delete(key);
     const client = this.clients.get(key);
-    if (client?.open && room) {
+    if (client?.open.size && room) {
       client.rxNostr.reconnect(key);
     } else {
       this.dispose(key);

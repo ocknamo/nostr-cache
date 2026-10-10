@@ -11,6 +11,7 @@ function makeEvent(id: string, kind = 1): NostrEvent {
 class MockPool implements UpstreamPool {
   eventCb?: (subId: string, event: NostrEvent, relayUrl: string) => void;
   eoseCb?: (subId: string) => void;
+  resentEoseCb?: (subId: string) => void;
   readonly opened: Array<{ subId: string; filters: Filter[]; relays?: string[] }> = [];
   readonly closed: string[] = [];
   readonly published: NostrEvent[] = [];
@@ -39,6 +40,9 @@ class MockPool implements UpstreamPool {
   onEose(cb: (subId: string) => void): void {
     this.eoseCb = cb;
   }
+  onResentEose(cb: (subId: string) => void): void {
+    this.resentEoseCb = cb;
+  }
   getConnectedCount(): number {
     return this.connectedCount;
   }
@@ -47,6 +51,9 @@ class MockPool implements UpstreamPool {
   }
   emitEose(subId: string): void {
     this.eoseCb?.(subId);
+  }
+  emitResentEose(subId: string): void {
+    this.resentEoseCb?.(subId);
   }
   lastSubId(): string {
     return this.opened[this.opened.length - 1].subId;
@@ -202,6 +209,35 @@ describe('UpstreamCoordinator', () => {
       vi.advanceTimersByTime(500);
       await flush();
       expect(sendEose).toHaveBeenCalledWith('client', 'sub');
+    });
+
+    it('sends client EOSE again when a reconnected relay finishes its re-sent answer', async () => {
+      const { pool, coordinator, sendEose, deliver } = makeHarness();
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+      const upstreamSubId = pool.lastSubId();
+      pool.emitEose(upstreamSubId);
+      await flush();
+
+      pool.emitEvent(upstreamSubId, makeEvent('resent'));
+      pool.emitResentEose(upstreamSubId);
+      await flush();
+      expect(sendEose).toHaveBeenCalledTimes(2);
+      expect(deliver.mock.invocationCallOrder[0]).toBeLessThan(
+        sendEose.mock.invocationCallOrder[1]
+      );
+    });
+
+    it('leaves a re-sent answer to the first EOSE while that is still owed', async () => {
+      const { pool, coordinator, sendEose } = makeHarness(undefined, { eoseTimeout: 500 });
+      coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+      pool.emitResentEose(pool.lastSubId());
+      await flush();
+      expect(sendEose).not.toHaveBeenCalled();
+
+      coordinator.closeForSubscription('client', 'sub');
+      pool.emitResentEose(pool.lastSubId());
+      await flush();
+      expect(sendEose).not.toHaveBeenCalled();
     });
 
     it('sends client EOSE only once (aggregate then timeout)', async () => {

@@ -102,6 +102,11 @@ export interface RelayHost {
   metrics: CacheMetrics;
   interceptUrl: string;
   getConnectedUpstreams(): number;
+  /**
+   * 上流リレーが（再）接続して、答え終えた REQ を送り直したときに呼ぶ。ウィジェットとページ内
+   * リレーの接続は切れないので、ウィジェットが上流の断線を知る手段はこれだけ。戻り値で登録を外す。
+   */
+  onUpstreamResend(listener: () => void): () => void;
   /** 保存済みイベントを全消しする。リレーは動いたまま、購読も閉じない。 */
   clearCache(): Promise<void>;
   /** 最後の 1 つを release した時点でリレーが停止する。 */
@@ -234,6 +239,13 @@ async function connectHost(
     outbox: outboxEnabled(config) ? { indexRelays: config.indexRelays } : undefined,
   });
 
+  const resendListeners = new Set<() => void>();
+  upstreamPool?.onResend(() => {
+    for (const listener of resendListeners) {
+      listener();
+    }
+  });
+
   await relay.connect();
 
   return {
@@ -242,6 +254,12 @@ async function connectHost(
     metrics,
     interceptUrl: config.interceptUrl,
     getConnectedUpstreams: () => upstreamPool?.getConnectedCount() ?? 0,
+    onUpstreamResend: (listener) => {
+      // 同じ関数を 2 回登録しても 1 回分にならないよう包む
+      const entry = () => listener();
+      resendListeners.add(entry);
+      return () => resendListeners.delete(entry);
+    },
   };
 }
 

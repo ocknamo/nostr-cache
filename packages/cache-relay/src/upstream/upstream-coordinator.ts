@@ -112,6 +112,7 @@ export class UpstreamCoordinator {
     // receives upstream events and the aggregated EOSE.
     this.pool.onEvent((upstreamSubId, event) => this.handleUpstreamEvent(upstreamSubId, event));
     this.pool.onEose((upstreamSubId) => this.handleUpstreamEose(upstreamSubId));
+    this.pool.onResentEose?.((upstreamSubId) => this.handleResentEose(upstreamSubId));
   }
 
   /** Start connecting to the upstream relays. */
@@ -335,6 +336,23 @@ export class UpstreamCoordinator {
     if (state) {
       this.settleEose(state, upstreamSubId);
     }
+  }
+
+  /**
+   * 再接続したリレーの答えの終わりを、もう一度 EOSE として伝える。そのリレーに直接繋いでいた
+   * クライアントが受け取るのと同じ形で、留守の間の新着が答えに収まったかを判定し直せる。
+   */
+  private handleResentEose(upstreamSubId: string): void {
+    const state = this.subs.get(upstreamSubId);
+    if (!state || state.closed || !state.eoseSent) {
+      return;
+    }
+    // flushEose と同じく、受理済みで配信待ちのイベントに追い越させない
+    void state.ingestChain.then(() => {
+      if (!state.closed) {
+        this.deps.sendEose(state.clientId, state.subscriptionId);
+      }
+    });
   }
 
   private settleEose(state: SubState, part: string): void {

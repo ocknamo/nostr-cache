@@ -1954,6 +1954,10 @@ describe('TimelineController', () => {
           const options = (connection as unknown as { options: RelayConnectionOptions }).options;
           options.onStatusChange?.('connected');
         },
+        /** An upstream relay came back; the relay host reports it, the widget's socket never dropped. */
+        upstreamResend(): void {
+          (controller as unknown as { restartAnswerForResend(): void }).restartAnswerForResend();
+        },
       };
     }
 
@@ -2017,6 +2021,64 @@ describe('TimelineController', () => {
       fed.eose();
 
       // The events read a day ago are what the jump would be rendered under.
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('leaves out what an upstream relay re-sent answer no longer reaches back to', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000), note('read-2', 1_699_999_999)], 'upstream');
+      fed.eose();
+
+      // The tab sat in the background; upstream came back and answered again,
+      // passed through as live events and a second EOSE.
+      fed.upstreamResend();
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('does not count what arrived live before the upstream relay came back', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000)], 'upstream');
+      fed.eose();
+      fed.deliver([note('live-1', 1_700_000_100), note('live-2', 1_700_000_200)], 'upstream');
+
+      // The re-sent answer reached back to what was on screen: only one was new.
+      fed.upstreamResend();
+      fed.deliver([note('new-1', 1_700_000_300)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual([
+        'new-1',
+        'live-2',
+        'live-1',
+        'read-1',
+      ]);
+    });
+
+    it('judges relays coming back one after another as one answer', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000)], 'upstream');
+      fed.eose();
+
+      fed.upstreamResend();
+      fed.deliver([note('new-1', 1_700_086_400)], 'upstream');
+      fed.upstreamResend();
+      fed.deliver([note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('leaves the first answer alone when an upstream relay comes back before its EOSE', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('old-1', 1_700_000_000)]);
+      fed.deliver([note('new-1', 1_700_086_400)], 'upstream');
+      fed.upstreamResend();
+      fed.deliver([note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
       expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
     });
 

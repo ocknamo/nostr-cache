@@ -64,6 +64,9 @@ rx-nostr の EOSE 集約は backward strategy の機能で EOSE 時に購読を�
   クライアントの EOSE が永遠に遅延する事故を防ぐため。
 - 集約中のリレーが落ちたら（`createConnectionStateObservable()` が `connected` 以外を
   報告したら）その集合から除く。空になれば発火する。
+- 集約を発火し終えた購読の REQ を、（再）接続したリレーへ rx-nostr が送ったときは、
+  `onResend` を発火し、そのリレーの `EOSE` で `onResentEose` を 1 回発火する（既定・
+  一時接続とも）。留守の間に切れた上流の答えは、こうして後から届くため。
 - `maxRelays`（既定 `DEFAULT_MAX_CONCURRENT_RELAYS`）を超える URL は警告して無視する。
 
 購読 id は、coordinator が採番した `upstreamSubId`（`up1` 形式）をそのまま
@@ -145,8 +148,11 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
   ├─ ingest（検証・保存・置換・lazy を通常経路と同一に適用）
   └─ 成功時: sentIds 追加 → client へ ["EVENT", subId, ev]（EOSE 前後を問わず配信）
 
-全上流 EOSE or upstreamEoseTimeout ──▶ client ◀── ["EOSE", subId]（1 回だけ）
+全上流 EOSE or upstreamEoseTimeout ──▶ client ◀── ["EOSE", subId]
 以降も購読は上流で開いたまま。ライブイベントが透過的に流れ続ける
+
+上流が（再）接続して REQ を送り直した ── そのリレーの EOSE ──▶ client ◀── ["EOSE", subId]
+（そのリレーに直接繋いでいたクライアントが再接続で受け取るのと同じ形）
 ```
 
 アウトボックス（`outbox.indexRelays`）が有効なときは、上の既定の購読に加えて

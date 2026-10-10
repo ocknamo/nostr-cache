@@ -293,6 +293,40 @@ describe('Embeddable timeline E2E', () => {
     }
   });
 
+  it('leaves out what the upstream re-sent answer no longer reaches after a dropped connection', async () => {
+    // A tab left in the background: the upstream socket dies, and what was
+    // published meanwhile reaches the page only through the REQ rx-nostr
+    // re-sends on reconnecting — cut off at `limit` like any other answer.
+    const author = getRandomSecret();
+    const relay = await startMockUpstreamRelay(
+      await Promise.all([
+        createTestEvent(author, { content: 'read one', created_at: 1_700_000_100 }),
+        createTestEvent(author, { content: 'read two', created_at: 1_700_000_200 }),
+      ])
+    );
+    try {
+      page = await browser.newPage();
+      await page.goto(embedUrl({ relays: relay.url, limit: '2' }));
+      await waitForContents(page, ['read two', 'read one']);
+
+      relay.addEvents(
+        await Promise.all([
+          createTestEvent(author, { content: 'away one', created_at: 1_700_090_100 }),
+          createTestEvent(author, { content: 'away two', created_at: 1_700_090_200 }),
+          createTestEvent(author, { content: 'away three', created_at: 1_700_090_300 }),
+        ])
+      );
+      relay.dropConnections();
+
+      // `away one` is past the limit, so `read two` under `away two` would hide it.
+      await waitForContents(page, ['away three', 'away two']);
+      await page.waitForTimeout(1000);
+      expect(await contentsOf(page)).toEqual(['away three', 'away two']);
+    } finally {
+      await relay.close();
+    }
+  });
+
   it('keeps reading through to the upstream on a warm load', async () => {
     const url = embedUrl({ relays: upstream.url });
     page = await browser.newPage();
