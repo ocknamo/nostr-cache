@@ -152,7 +152,6 @@ export class TimelineController {
    * See {@link trimToCoverage}.
    */
   private answer: UpstreamAnswer = { times: [] };
-  /** When {@link answer} was last restarted for a re-sent REQ; see {@link restartAnswerForResend}. */
   private answerRestartedAt = Number.NEGATIVE_INFINITY;
   private offUpstreamResend?: () => void;
   /** Abandons a page in flight; replaced per subscription, like the one below. */
@@ -480,11 +479,7 @@ export class TimelineController {
     };
   }
 
-  /**
-   * The widget's own socket never drops, so this is the only sign that the page
-   * was away: an upstream relay came back and answers the REQ again, newest
-   * first, under the same `limit`.
-   */
+  /** An upstream relay is about to answer the REQ again, newest first, under the same `limit`. */
   private restartAnswerForResend(): void {
     // Before the first EOSE the re-sent answer is part of the first one.
     if (!this.currentSubId || !this.state.eose) {

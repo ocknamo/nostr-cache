@@ -1528,6 +1528,34 @@ describe('TimelineController', () => {
       expect(replySubscriptions(controller)).toHaveLength(1);
     });
 
+    it('opens no level for replies a reconnected upstream re-sent', async () => {
+      const subscribe = RelayConnection.prototype.subscribe;
+      const handlers = new Map<string, SubscriptionHandlers>();
+      vi.spyOn(RelayConnection.prototype, 'subscribe').mockImplementation(function (
+        this: RelayConnection,
+        subId,
+        filters,
+        given
+      ) {
+        handlers.set(subId, given);
+        return subscribe.call(this, subId, filters, given);
+      });
+      const { controller } = createController();
+      await controller.start([{ ids: [POST_ID] }]);
+      controller.requestReplies(target, { maxDepth: 3 });
+      await waitFor(() => replySubscriptions(controller).length === 1, 'the level 1 REQ');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const level = [...handlers].find(([id]) => id.startsWith('replies-'))?.[1];
+      if (!level) {
+        throw new Error('the level 1 REQ should have gone through subscribe()');
+      }
+      level.onEvent(replyEvent(REPLY_ID, POST_ID));
+      level.onEose?.();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(replySubscriptions(controller)).toHaveLength(1);
+    });
+
     it('opens one thread however many times it is asked', async () => {
       const { controller } = createController();
       await controller.start([{ ids: [POST_ID] }]);
@@ -2069,6 +2097,23 @@ describe('TimelineController', () => {
       fed.eose();
 
       expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('restarts the count for a relay that comes back after the window', async () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000)], 'upstream');
+      fed.eose();
+
+      fed.upstreamResend();
+      fed.deliver([note('live-1', 1_700_000_100)], 'upstream');
+      fed.eose();
+      now.mockReturnValue(1_010_000);
+      fed.upstreamResend();
+      fed.deliver([note('new-1', 1_700_000_200)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'live-1', 'read-1']);
     });
 
     it('leaves the first answer alone when an upstream relay comes back before its EOSE', async () => {

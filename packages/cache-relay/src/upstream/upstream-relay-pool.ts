@@ -36,7 +36,7 @@ export class UpstreamRelayPool implements UpstreamPool {
   private stopped = false;
   /** Live subscriptions by upstream sub id; unsubscribing makes rx-nostr send CLOSE. */
   private readonly subscriptions = new Map<string, { unsubscribe(): void }>();
-  /** Relays still owing an EOSE per subscription (empty set → already fired). */
+  /** Relays still owing an EOSE per subscription; absent once it fired. */
   private readonly pendingEose = new Map<string, Set<string>>();
   /** 集約 EOSE を出し終えたあと、REQ を送り直して答えを待っているリレー。 */
   private readonly resent = new Map<string, Set<string>>();
