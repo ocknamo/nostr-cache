@@ -153,6 +153,9 @@ client ── ["REQ", subId, ...filters] ──▶ handleReqMessage
 
 上流が（再）接続して REQ を送り直した ── そのリレーの EOSE ──▶ client ◀── ["EOSE", subId]
 （そのリレーに直接繋いでいたクライアントが再接続で受け取るのと同じ形）
+
+タイムアウト・猶予のあとに答え終えた上流 ── その EOSE ──▶ client ◀── ["EOSE", subId]
+（ライブとして届いた答えの終わり。クライアントが判定し直せるよう、答え 1 つにつき 1 回）
 ```
 
 アウトボックス（`outbox.indexRelays`）が有効なときは、上の既定の購読に加えて

@@ -55,9 +55,7 @@ export function requestLimit(filters: Filter[]): number | undefined {
 
 /**
  * How far back an upstream answer vouches for the timeline being whole: the
- * `limit`-th newest of the `created_at`s it sent, as each relay the outbox adds
- * sends its own newest `limit`. Undefined when the answer could be everything
- * upstream had.
+ * `limit`-th newest `created_at` it sent. Undefined when it could be all upstream had.
  */
 export function coverageFloor(times: number[], limit: number | undefined): number | undefined {
   if (limit === undefined || limit <= 0 || times.length < limit) {

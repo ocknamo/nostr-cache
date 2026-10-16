@@ -2296,6 +2296,96 @@ describe('TimelineController', () => {
       expect(fetchOnce.mock.calls[0][0][0].until).toBe(1_700_086_399);
     });
 
+    it('still finds the hole when a future-dated event sits on top', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const future = note('future', nowSeconds + 86_400 * 365);
+      fed.deliver([future, note('read-1', nowSeconds - 86_400)], 'upstream');
+      fed.eose();
+
+      // A day of new posts; the re-sent answer is the future one again and the newest of them.
+      fed.upstreamResend();
+      fed.echo([future]);
+      fed.deliver([note('new-1', nowSeconds - 1)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['future', 'new-1']);
+    });
+
+    it('keeps what was on screen when an answer re-sent over its own socket reaches back to it', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      const read = [note('read-1', 1_700_000_000), note('read-2', 1_699_999_999)];
+      fed.deliver(read, 'upstream');
+      fed.eose();
+
+      fed.reconnect();
+      fed.deliver([note('new-1', 1_700_000_100)], 'upstream');
+      fed.echo([read[0]]);
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'read-1', 'read-2']);
+    });
+
+    it('judges the first answer from upstream as the first, whichever EOSE it ends on', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('old-1', 1_700_000_000)]);
+      // No upstream was connected yet: the first EOSE carries the cache alone.
+      fed.eose();
+
+      fed.upstreamResend();
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('judges again on the EOSE a late upstream ends its answer with', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('old-1', 1_700_000_000)]);
+      // The wait for upstream ran out before it answered.
+      fed.eose();
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('forgets what the previous filter vouched for', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('read-1', 1_700_000_000)], 'upstream');
+      fed.eose();
+
+      fed.controller.applyFilter([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('old-1', 1_600_000_000)]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('still lists a late older event under a timeline shorter than a page', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 3 }]);
+      fed.deliver([note('only', 1_700_086_400)], 'upstream');
+      fed.eose();
+
+      fed.deliver([note('late', 1_700_000_000)], 'upstream');
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['only', 'late']);
+    });
+
+    it('still lists a late older event once paging has reached the end', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue([]);
+      await fed.controller.loadOlder();
+      expect(fed.states[fed.states.length - 1].exhausted).toBe(true);
+
+      fed.deliver([note('late', 1_700_000_000)], 'upstream');
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2', 'late']);
+    });
+
     it('keeps the older block when neither filter of a REQ was cut off', async () => {
       // Two filters of ten, twelve events between them: enough to pass the
       // larger limit, and nowhere near enough for either to have been cut off.

@@ -187,6 +187,7 @@ export class TimelineController {
           // rx-nostr re-sends the timeline REQ itself; the lookups parked
           // while the socket was down have to be restarted from here.
           this.patch({ error: undefined });
+          this.answerRestartedAt = Date.now();
           this.restartAnswer();
           this.profiles.pump();
           this.embeds.pump();
@@ -506,7 +507,10 @@ export class TimelineController {
 
   private restartAnswer(): void {
     this.answerCursor = this.sightingCursor();
-    this.restartTop = this.vouched ? this.state.events[0]?.created_at : undefined;
+    // Skips future-dated events: any re-sent answer would look like it reached one.
+    const now = Date.now() / 1000;
+    const newest = this.state.events.find((event) => event.created_at <= now)?.created_at;
+    this.restartTop = this.vouched ? newest : undefined;
   }
 
   private sightingCursor(): number {
@@ -647,11 +651,15 @@ export class TimelineController {
         // The rest of an answer that came after EOSE — a relay slower than the
         // wait, or an outbox one — reaches back past the bottom. Paging reads
         // that stretch in order; inserting it here would move its cursor past the hole.
+        // Only under a full page: a shorter list may never be scrolled, so never paged.
         const oldest = this.state.events[this.state.events.length - 1];
+        const limit = requestLimit(this.currentFilters);
         if (
           this.state.eose &&
           !this.state.exhausted &&
-          oldest &&
+          limit !== undefined &&
+          this.state.events.length >= limit &&
+          oldest !== undefined &&
           event.created_at < oldest.created_at
         ) {
           return;

@@ -356,7 +356,13 @@ export class UpstreamCoordinator {
   }
 
   private settleEose(state: SubState, part: string): void {
-    state.pendingEose.delete(part);
+    const owed = state.pendingEose.delete(part);
+    if (owed && part !== ROUTING && state.eoseSent) {
+      // タイムアウトや猶予のあとに答え終えた上流。ライブとして届いた答えの終わりを伝え、
+      // 再接続時と同じくクライアントが判定し直せるようにする
+      this.handleResentEose(part);
+      return;
+    }
     if (state.pendingEose.size === 0) {
       this.flushEose(state);
       return;
