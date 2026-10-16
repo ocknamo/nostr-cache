@@ -34,11 +34,6 @@ export function insertEvent(
   return next.length > maxSize ? next.slice(0, maxSize) : next;
 }
 
-/** What an upstream answer has delivered: the `created_at` of its newest events. */
-export interface UpstreamAnswer {
-  times: number[];
-}
-
 /**
  * The most events an answer to these filters can hold without one of them
  * having been cut off; undefined when a filter has no limit to be cut off at.
@@ -60,17 +55,13 @@ export function requestLimit(filters: Filter[]): number | undefined {
 
 /**
  * How far back an upstream answer vouches for the timeline being whole: the
- * `limit`-th newest event, as each relay the outbox adds sends its own newest
- * `limit`. Undefined when the answer could be everything upstream had.
+ * `limit`-th newest `created_at` it sent. Undefined when it could be all upstream had.
  */
-export function coverageFloor(
-  answer: UpstreamAnswer,
-  limit: number | undefined
-): number | undefined {
-  if (limit === undefined || limit <= 0 || answer.times.length < limit) {
+export function coverageFloor(times: number[], limit: number | undefined): number | undefined {
+  if (limit === undefined || limit <= 0 || times.length < limit) {
     return undefined;
   }
-  return [...answer.times].sort((a, b) => b - a)[limit - 1];
+  return [...times].sort((a, b) => b - a)[limit - 1];
 }
 
 /** Drop everything older than `floor`; the same array back when nothing is. */

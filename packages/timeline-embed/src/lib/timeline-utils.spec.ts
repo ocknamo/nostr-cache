@@ -78,20 +78,20 @@ describe('coverageFloor', () => {
     Array.from({ length: count }, (_, i) => newest - i);
 
   it('reports the oldest event of a single answer that hit the limit', () => {
-    expect(coverageFloor({ times: times(50) }, 50)).toBe(1_700_000_000 - 49);
+    expect(coverageFloor(times(50), 50)).toBe(1_700_000_000 - 49);
   });
 
   it('vouches all the way down when the answer came back short', () => {
-    expect(coverageFloor({ times: times(49) }, 50)).toBeUndefined();
+    expect(coverageFloor(times(49), 50)).toBeUndefined();
   });
 
   it('vouches all the way down when nothing came from upstream', () => {
     // What a cache-only relay produces on every REQ.
-    expect(coverageFloor({ times: [] }, 50)).toBeUndefined();
+    expect(coverageFloor([], 50)).toBeUndefined();
   });
 
   it('reports nothing without a limit to have been cut off at', () => {
-    expect(coverageFloor({ times: times(500) }, undefined)).toBeUndefined();
+    expect(coverageFloor(times(500), undefined)).toBeUndefined();
   });
 
   it('is not dragged down by a quiet relay answering alongside a busy one', () => {
@@ -100,7 +100,7 @@ describe('coverageFloor', () => {
     const busy = [300, 200, 100];
     const quiet = [-1_000, -2_000, -3_000];
 
-    expect(coverageFloor({ times: [...quiet, ...busy] }, 3)).toBe(100);
+    expect(coverageFloor([...quiet, ...busy], 3)).toBe(100);
   });
 });
 

@@ -546,6 +546,40 @@ describe('UpstreamCoordinator', () => {
       }
     });
 
+    it('tells the client again when an outbox part answers after the grace', async () => {
+      vi.useFakeTimers();
+      try {
+        const pool = new MockPool();
+        const sendEose = vi.fn();
+        const coordinator = new UpstreamCoordinator(
+          {
+            pool,
+            ingest: async () => ({ success: true, stored: true }),
+            deliver: vi.fn(),
+            sendEose,
+            route: async () => [{ relay: 'wss://slow', filters: [{ kinds: [1] }] }],
+          },
+          { eoseTimeout: 3000, outboxEoseGrace: 500 }
+        );
+        coordinator.openForSubscription('client', 'sub', [{ kinds: [1] }], []);
+        await vi.advanceTimersByTimeAsync(0);
+        pool.emitEose('up1');
+        await vi.advanceTimersByTimeAsync(500);
+        expect(sendEose).toHaveBeenCalledTimes(1);
+
+        pool.emitEose('up1.0');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sendEose).toHaveBeenCalledTimes(2);
+
+        // 2 回目の EOSE は答え 1 つにつき 1 回だけ
+        pool.emitEose('up1.0');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sendEose).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('still opens the default subscription when routing throws synchronously', async () => {
       const { pool, coordinator, sendEose } = routedHarness(() => {
         throw new Error('boom');
@@ -559,7 +593,7 @@ describe('UpstreamCoordinator', () => {
       expect(sendEose).toHaveBeenCalledTimes(1);
     });
 
-    it('sends EOSE once on timeout, and still opens parts routed after it', async () => {
+    it('still opens parts routed after the timeout, and tells the client when each finishes', async () => {
       vi.useFakeTimers();
       try {
         const routed = deferred<ReadPart[]>();
@@ -589,7 +623,8 @@ describe('UpstreamCoordinator', () => {
         await vi.advanceTimersByTimeAsync(1000);
 
         expect(pool.opened.map((o) => o.subId)).toEqual(['up1', 'up1.0']);
-        expect(sendEose).toHaveBeenCalledTimes(1);
+        // タイムアウトの 1 回と、遅れて答え終えた上流ごとに 1 回
+        expect(sendEose).toHaveBeenCalledTimes(3);
         expect(vi.getTimerCount()).toBe(0);
       } finally {
         vi.useRealTimers();

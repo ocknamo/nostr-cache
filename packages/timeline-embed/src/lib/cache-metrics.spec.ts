@@ -132,4 +132,48 @@ describe('CacheMetrics', () => {
     // mislabel a genuine cache miss.
     expect(metrics.classifyDelivered('a')).toBe('cache');
   });
+
+  describe('seenUpstreamSince', () => {
+    it('answers for copies recorded after the cursor only', () => {
+      const metrics = new CacheMetrics();
+      metrics.recordUpstreamEvent('before', 'wss://relay.example');
+      const cursor = metrics.sightingCursor();
+      metrics.recordUpstreamEvent('after', 'wss://relay.example');
+
+      expect(metrics.seenUpstreamSince('before', cursor)).toBe(false);
+      expect(metrics.seenUpstreamSince('after', cursor)).toBe(true);
+      expect(metrics.seenUpstreamSince('never', cursor)).toBe(false);
+    });
+
+    it('counts a later copy of an id seen before the cursor', () => {
+      const metrics = new CacheMetrics();
+      metrics.recordUpstreamEvent('a', 'wss://relay.example');
+      const cursor = metrics.sightingCursor();
+      metrics.recordUpstreamEvent('a', 'wss://other.example');
+
+      expect(metrics.seenUpstreamSince('a', cursor)).toBe(true);
+      expect(metrics.snapshot().upstreamEvents).toBe(1);
+    });
+
+    it('has no time window, unlike attribution', () => {
+      const clock = fakeClock();
+      const metrics = new CacheMetrics(clock.now);
+      const cursor = metrics.sightingCursor();
+      metrics.recordUpstreamEvent('a', 'wss://relay.example');
+      clock.advanceBy(UPSTREAM_ATTRIBUTION_WINDOW_MS + 1);
+
+      expect(metrics.classifyDelivered('a')).toBe('cache');
+      expect(metrics.seenUpstreamSince('a', cursor)).toBe(true);
+    });
+
+    it('keeps cursors taken before a reset meaningful', () => {
+      const metrics = new CacheMetrics();
+      metrics.recordUpstreamEvent('a', 'wss://relay.example');
+      const cursor = metrics.sightingCursor();
+      metrics.reset();
+      metrics.recordUpstreamEvent('a', 'wss://relay.example');
+
+      expect(metrics.seenUpstreamSince('a', cursor)).toBe(true);
+    });
+  });
 });

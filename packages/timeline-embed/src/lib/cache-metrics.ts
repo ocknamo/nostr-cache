@@ -40,8 +40,9 @@ export interface MetricsSnapshot {
 export class CacheMetrics {
   /** Upstream sightings awaiting the delivery they explain, by event id. */
   private readonly pendingUpstream = new Map<string, number[]>();
-  /** Every id ever seen upstream, for the distinct-event counter. */
-  private readonly seenUpstreamIds = new Set<string>();
+  /** Every id ever seen upstream, with the {@link sightingCursor} of its latest copy. */
+  private readonly lastSeenUpstream = new Map<string, number>();
+  private sightings = 0;
   private readonly relayByEvent = new Map<string, string>();
   private readonly listeners = new Set<() => void>();
   private cacheHits = 0;
@@ -61,11 +62,27 @@ export class CacheMetrics {
       this.pendingUpstream.set(eventId, [this.now()]);
     }
 
-    if (!this.seenUpstreamIds.has(eventId)) {
-      this.seenUpstreamIds.add(eventId);
+    this.sightings += 1;
+    const known = this.lastSeenUpstream.has(eventId);
+    this.lastSeenUpstream.set(eventId, this.sightings);
+    if (!known) {
       this.relayByEvent.set(eventId, relayUrl);
       this.notify();
     }
+  }
+
+  /** Pass to {@link seenUpstreamSince} to ask about copies recorded from now on. */
+  sightingCursor(): number {
+    return this.sightings;
+  }
+
+  /**
+   * Whether upstream sent a copy after `cursor`, delivered or not. Unlike
+   * {@link classifyDelivered} this sees the copies the relay drops as duplicates
+   * of what it already served from the cache, and has no time window.
+   */
+  seenUpstreamSince(eventId: string, cursor: number): boolean {
+    return (this.lastSeenUpstream.get(eventId) ?? Number.NEGATIVE_INFINITY) > cursor;
   }
 
   /**
@@ -112,7 +129,7 @@ export class CacheMetrics {
   snapshot(): MetricsSnapshot {
     return {
       cacheHits: this.cacheHits,
-      upstreamEvents: this.seenUpstreamIds.size,
+      upstreamEvents: this.lastSeenUpstream.size,
       delivered: this.delivered,
     };
   }
@@ -130,7 +147,7 @@ export class CacheMetrics {
    */
   reset(): void {
     this.pendingUpstream.clear();
-    this.seenUpstreamIds.clear();
+    this.lastSeenUpstream.clear();
     this.relayByEvent.clear();
     this.cacheHits = 0;
     this.delivered = 0;

@@ -215,7 +215,24 @@ describe('RelayConnection', () => {
       await flush();
 
       socket.simulateMessage(['EOSE', wireSubId('sub-1')]);
+      await flush();
       expect(onEose).toHaveBeenCalledTimes(1);
+    });
+
+    it('routes EOSE after the events that came before it in the same task', async () => {
+      const { connection, socket } = await createOpenConnection();
+      const order: string[] = [];
+      connection.subscribe('sub-1', [{}], {
+        onEvent: (event) => order.push(event.id),
+        onEose: () => order.push('EOSE'),
+      });
+      await flush();
+
+      socket.simulateMessage(['EVENT', wireSubId('sub-1'), sampleEvent('a')]);
+      socket.simulateMessage(['EOSE', wireSubId('sub-1')]);
+      await flush();
+
+      expect(order).toEqual([sampleEvent('a').id, 'EOSE']);
     });
 
     it('routes CLOSED, removes the subscription, and passes the reason', async () => {

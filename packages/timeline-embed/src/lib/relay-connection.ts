@@ -362,7 +362,14 @@ export class RelayConnection {
   private handleMessage(packet: MessagePacket): void {
     switch (packet.type) {
       case 'EOSE': {
-        this.subscriptions.get(packet.subId)?.handlers.onEose?.();
+        // rx-nostr passes EOSE on synchronously but EVENT a microtask late, so the
+        // last events before it would land after it — read as live, outside the answer.
+        const entry = this.subscriptions.get(packet.subId);
+        queueMicrotask(() => {
+          if (this.subscriptions.get(packet.subId) === entry) {
+            entry?.handlers.onEose?.();
+          }
+        });
         break;
       }
       case 'CLOSED': {
