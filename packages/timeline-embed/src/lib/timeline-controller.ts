@@ -18,7 +18,6 @@ import { type RelayHost, type RelayHostConfig, acquireRelayHost } from './relay-
 import { type RequestDurations, RequestTimer } from './request-timer.ts';
 import {
   DEFAULT_TIMELINE_CAP,
-  type UpstreamAnswer,
   coverageFloor,
   insertEvent,
   requestLimit,
@@ -147,12 +146,18 @@ export class TimelineController {
   /** What {@link loadOlder} builds its cursor filters from. */
   private currentFilters: Filter[] = [];
   /**
-   * What upstream has delivered since the current answer to the timeline REQ
-   * began — the first one, and every one rx-nostr re-sends after a reconnect.
-   * See {@link trimToCoverage}.
+   * Where in the metrics' sightings the current answer to the timeline REQ
+   * began — the first one, or one re-sent after a reconnect. See {@link trimToCoverage}.
    */
-  private answer: UpstreamAnswer = { times: [] };
+  private answerCursor = 0;
   private answerRestartedAt = Number.NEGATIVE_INFINITY;
+  /** Whether an upstream answer has vouched for everything on screen being whole. */
+  private vouched = false;
+  /**
+   * The newest event on screen when a re-sent answer began. A re-sent answer that
+   * reaches back to it joins what was already vouched for; one that does not left a hole.
+   */
+  private restartTop: number | undefined;
   private offUpstreamResend?: () => void;
   /** Abandons a page in flight; replaced per subscription, like the one below. */
   private pagingAbort = new AbortController();
@@ -182,9 +187,7 @@ export class TimelineController {
           // rx-nostr re-sends the timeline REQ itself; the lookups parked
           // while the socket was down have to be restarted from here.
           this.patch({ error: undefined });
-          // The re-sent REQ is answered from scratch, so what the previous
-          // answer reached back to says nothing about this one.
-          this.answer = { times: [] };
+          this.restartAnswer();
           this.profiles.pump();
           this.embeds.pump();
           this.reactions.pump();
@@ -405,6 +408,7 @@ export class TimelineController {
 
     const abort = this.pagingAbort;
     this.patch({ loadingOlder: true });
+    const pageCursor = this.sightingCursor();
     const page = await this.connection.fetchOnce(filters, { signal: abort.signal });
     if (abort.signal.aborted || this.stopped) {
       return;
@@ -412,7 +416,6 @@ export class TimelineController {
 
     let events = this.state.events;
     const origins = new Map(this.state.origins);
-    const answer: UpstreamAnswer = { times: [] };
     for (const event of page) {
       const merged = insertEvent(events, event, this.options.maxEvents);
       if (merged === events) {
@@ -423,13 +426,12 @@ export class TimelineController {
       if (origin) {
         origins.set(event.id, origin);
       }
-      countUpstream(answer, event, origin, requestLimit(asked));
     }
     // A page is answered cache-first the same way the subscription is, so it
     // can arrive with a hole of its own below the events upstream sent. Judged
-    // against the filters as asked rather than as widened: the `held` events the
-    // widening pays for come back as duplicates, which are not counted here.
-    events = this.dropBelowCoverage(events, origins, answer, asked);
+    // against the widened limit: upstream sends the `held` events back too.
+    const floor = coverageFloor(this.upstreamTimes(page, pageCursor), requestLimit(filters));
+    events = this.dropBelowFloor(events, origins, floor);
 
     const added = events !== this.state.events;
     this.patch({
@@ -455,13 +457,20 @@ export class TimelineController {
    * @returns the patch to publish, empty when nothing was cut
    */
   private trimToCoverage(): Partial<TimelineState> {
+    const times = this.upstreamTimes(this.state.events, this.answerCursor);
+    const limit = requestLimit(this.currentFilters);
+    if (times.length === 0 || limit === undefined) {
+      return {};
+    }
+    const floor = coverageFloor(times, limit);
+    const joined =
+      floor === undefined || (this.restartTop !== undefined && floor <= this.restartTop);
+    this.vouched = true;
+    if (joined) {
+      return {};
+    }
     const origins = new Map(this.state.origins);
-    const events = this.dropBelowCoverage(
-      this.state.events,
-      origins,
-      this.answer,
-      this.currentFilters
-    );
+    const events = this.dropBelowFloor(this.state.events, origins, floor);
     if (events === this.state.events) {
       return {};
     }
@@ -492,17 +501,38 @@ export class TimelineController {
       return;
     }
     this.answerRestartedAt = now;
-    this.answer = { times: [] };
+    this.restartAnswer();
   }
 
-  /** Applies {@link coverageFloor}, forgetting the origins of what it drops. */
-  private dropBelowCoverage(
+  private restartAnswer(): void {
+    this.answerCursor = this.sightingCursor();
+    this.restartTop = this.vouched ? this.state.events[0]?.created_at : undefined;
+  }
+
+  private sightingCursor(): number {
+    return this.relayHost?.metrics.sightingCursor() ?? 0;
+  }
+
+  /**
+   * Counts the copies the relay dropped as duplicates of cached events: without
+   * them an answer overlapping one stray cached event reads as reaching the cache.
+   */
+  private upstreamTimes(events: NostrEvent[], cursor: number): number[] {
+    const metrics = this.relayHost?.metrics;
+    if (!metrics) {
+      return [];
+    }
+    return events
+      .filter((event) => metrics.seenUpstreamSince(event.id, cursor))
+      .map((event) => event.created_at);
+  }
+
+  /** Forgets the origins of what it drops. */
+  private dropBelowFloor(
     events: NostrEvent[],
     origins: Map<string, EventOrigin>,
-    answer: UpstreamAnswer,
-    filters: Filter[]
+    floor: number | undefined
   ): NostrEvent[] {
-    const floor = coverageFloor(answer, requestLimit(filters));
     if (floor === undefined) {
       return events;
     }
@@ -574,8 +604,10 @@ export class TimelineController {
     this.validation.clearTimers();
     this.suspended = false;
     this.currentFilters = filters;
-    this.answer = { times: [] };
+    this.answerCursor = this.sightingCursor();
     this.answerRestartedAt = Number.NEGATIVE_INFINITY;
+    this.vouched = false;
+    this.restartTop = undefined;
     this.pagingAbort.abort();
     this.pagingAbort = new AbortController();
     if (this.filterSourceAbort.signal.aborted && !this.stopped) {
@@ -612,6 +644,18 @@ export class TimelineController {
 
     this.connection.subscribe(subId, filters, {
       onEvent: (event) => {
+        // The rest of an answer that came after EOSE — a relay slower than the
+        // wait, or an outbox one — reaches back past the bottom. Paging reads
+        // that stretch in order; inserting it here would move its cursor past the hole.
+        const oldest = this.state.events[this.state.events.length - 1];
+        if (
+          this.state.eose &&
+          !this.state.exhausted &&
+          oldest &&
+          event.created_at < oldest.created_at
+        ) {
+          return;
+        }
         this.timer.markEvent(subId);
         // Without a host nothing can tell cache from upstream; leave it unset
         // so no badge is rendered rather than guessing.
@@ -621,9 +665,6 @@ export class TimelineController {
           origins.set(event.id, origin);
         }
         const events = insertEvent(this.state.events, event, this.options.maxEvents);
-        if (events !== this.state.events) {
-          countUpstream(this.answer, event, origin, requestLimit(this.currentFilters));
-        }
         this.patch({ events, origins });
         this.validation.schedule();
       },
@@ -744,23 +785,6 @@ export class TimelineController {
   private patch(partial: Partial<TimelineState>): void {
     this.state = { ...this.state, ...partial };
     this.options.onChange(this.state);
-  }
-}
-
-/** Nothing to count without a host to classify against: `origin` is unset. */
-function countUpstream(
-  answer: UpstreamAnswer,
-  event: NostrEvent,
-  origin: EventOrigin | undefined,
-  limit: number | undefined
-): void {
-  if (origin !== 'upstream' || limit === undefined) {
-    return;
-  }
-  answer.times.push(event.created_at);
-  // The floor needs only the newest `limit`; live events would grow this forever.
-  if (answer.times.length > limit * 2) {
-    answer.times.sort((a, b) => b - a).length = limit;
   }
 }
 

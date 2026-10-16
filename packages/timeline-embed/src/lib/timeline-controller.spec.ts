@@ -1973,8 +1973,23 @@ describe('TimelineController', () => {
             opened.onEvent(event);
           }
         },
+        /** Upstream sent these again; the relay drops them, having served them from the cache. */
+        echo(events: NostrEvent[]): void {
+          for (const event of events) {
+            controller.host?.metrics.recordUpstreamEvent(event.id, UPSTREAM);
+          }
+        },
         eose(): void {
           opened.onEose?.();
+        },
+        /** Answer the next page with `page`, of which upstream sends `fromUpstream`. */
+        answerPage(page: NostrEvent[], fromUpstream: NostrEvent[]): void {
+          vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockImplementation(async () => {
+            for (const event of fromUpstream) {
+              controller.host?.metrics.recordUpstreamEvent(event.id, UPSTREAM);
+            }
+            return page;
+          });
         },
         /** What a reconnect looks like from here: rx-nostr re-sends the REQ. */
         reconnect(): void {
@@ -2155,17 +2170,15 @@ describe('TimelineController', () => {
 
       // What the relay answers a page with: the cursor event again (`until` is
       // inclusive, and the widened limit pays for it), the two the page asked
-      // for, and — from the cache alone — the block below the jump.
+      // for, and — from the cache alone — the block below the jump. Upstream
+      // sends the cursor event back too.
       const page = [
         note('new-2', 1_700_086_399),
         note('gap-1', 1_700_086_398),
         note('gap-2', 1_700_086_397),
         note('old-1', 1_700_000_000),
       ];
-      for (const event of [page[1], page[2]]) {
-        fed.controller.host?.metrics.recordUpstreamEvent(event.id, UPSTREAM);
-      }
-      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue(page);
+      fed.answerPage(page, page.slice(0, 3));
       await fed.controller.loadOlder();
 
       expect(contents(fed.states[fed.states.length - 1])).toEqual([
@@ -2181,16 +2194,14 @@ describe('TimelineController', () => {
       fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
       fed.eose();
 
-      // One event under the limit once the duplicate cursor is discounted —
-      // which is why the page is judged against the filters as asked rather
-      // than as widened by what sits on the cursor second.
+      // The cursor event and one more: under the limit as widened to pay for
+      // the cursor, so upstream had nothing further down.
       const page = [
         note('new-2', 1_700_086_399),
         note('gap-1', 1_700_086_398),
         note('old-1', 1_700_000_000),
       ];
-      fed.controller.host?.metrics.recordUpstreamEvent(page[1].id, UPSTREAM);
-      vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue(page);
+      fed.answerPage(page, page.slice(0, 2));
       await fed.controller.loadOlder();
 
       expect(contents(fed.states[fed.states.length - 1])).toEqual([
@@ -2199,6 +2210,90 @@ describe('TimelineController', () => {
         'gap-1',
         'old-1',
       ]);
+    });
+
+    it('cuts below an answer that overlaps the cache by one stray event', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 3 }]);
+
+      // One recent event another view cached, above the block from the last visit.
+      const stray = note('stray', 1_700_086_398);
+      fed.deliver([stray, note('old-1', 1_700_000_000), note('old-2', 1_699_999_999)]);
+      // Upstream's newest three include the stray one, which the relay does not
+      // deliver a second time.
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.echo([stray]);
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2', 'stray']);
+    });
+
+    it('cuts a page that overlaps the cache by one stray event', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      // The cache kept one event of this stretch, and one from long before it.
+      const page = [
+        note('new-2', 1_700_086_399),
+        note('gap-1', 1_700_086_398),
+        note('stray', 1_700_086_397),
+        note('old-1', 1_700_000_000),
+      ];
+      fed.answerPage(page, page.slice(0, 3));
+      await fed.controller.loadOlder();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual([
+        'new-1',
+        'new-2',
+        'gap-1',
+        'stray',
+      ]);
+    });
+
+    it('counts an upstream event the relay took too long to deliver', async () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('old-1', 1_700_000_000)]);
+
+      const slow = [note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)];
+      fed.echo(slow);
+      // Past the window the badge attributes by, so these render as cache hits.
+      now.mockReturnValue(1_006_000);
+      fed.deliver(slow);
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'new-2']);
+    });
+
+    it('keeps what was on screen when a re-sent answer reaches back to it', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      const read = [note('read-1', 1_700_000_000), note('read-2', 1_699_999_999)];
+      fed.deliver(read, 'upstream');
+      fed.eose();
+
+      // The re-sent answer is one new event and the newest one already on screen.
+      fed.upstreamResend();
+      fed.deliver([note('new-1', 1_700_000_100)], 'upstream');
+      fed.echo([read[0]]);
+      fed.eose();
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['new-1', 'read-1', 'read-2']);
+    });
+
+    it('leaves the rest of a late answer to paging rather than moving its cursor', async () => {
+      const fed = await startFed([{ kinds: [1], authors: [AUTHOR], limit: 2 }]);
+      fed.deliver([note('new-1', 1_700_086_400), note('new-2', 1_700_086_399)], 'upstream');
+      fed.eose();
+
+      // A relay slower than the wait for EOSE, reaching back past the bottom.
+      fed.deliver([note('late-1', 1_700_086_398), note('late-2', 1_700_000_000)], 'upstream');
+      // A live event still lands on top.
+      fed.deliver([note('live-1', 1_700_086_500)], 'upstream');
+
+      expect(contents(fed.states[fed.states.length - 1])).toEqual(['live-1', 'new-1', 'new-2']);
+      const fetchOnce = vi.spyOn(RelayConnection.prototype, 'fetchOnce').mockResolvedValue([]);
+      await fed.controller.loadOlder();
+      expect(fetchOnce.mock.calls[0][0][0].until).toBe(1_700_086_399);
     });
 
     it('keeps the older block when neither filter of a REQ was cut off', async () => {
