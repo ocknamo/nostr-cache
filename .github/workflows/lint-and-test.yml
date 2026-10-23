@@ -20,6 +20,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: "22.x"
+        check-latest: true
         cache: 'npm'
     - run: npm ci
     - run: npm run build
@@ -38,6 +39,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: "22.x"
+        check-latest: true
         cache: 'npm'
     # package-lock.json だけで解決できるため npm ci は不要
     - run: npm audit --audit-level=high

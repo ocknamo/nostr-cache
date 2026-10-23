@@ -31,6 +31,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: "22.x"
+        check-latest: true
         cache: 'npm'
     - run: npm ci
     # The Node E2E suite spawns the built server (packages/server/dist), so a
