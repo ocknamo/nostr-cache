@@ -6,3 +6,4 @@
 - 1 つの doc コメントは原則 3 行以内。段落を分けるのは、分けないと誤読される場合だけ
 - 同じ理由を doc コメントと行内コメントの両方に書かない。どちらか一方
 - コードを移動・分割するとき、元のコメントをそのまま運ばない。移動先で必要か毎回判断する
+- コミットメッセージ・PR 説明文・PR コメントに Claude Code の帰属表示（`Co-Authored-By: Claude`、`Claude-Session:`、`Generated with/by Claude Code` など）を付けない
