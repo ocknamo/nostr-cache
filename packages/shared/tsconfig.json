@@ -4,8 +4,10 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "composite": true,
+    // src は同梱しないので、マップ単体でソースを辿れるようにする
+    "inlineSources": true,
     "types": []
   },
   "include": ["src/**/*"],
-  "exclude": ["src/**/*.spec.ts"]
+  "exclude": ["src/**/*.spec.ts", "src/test/**/*"]
 }

@@ -4,9 +4,13 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "composite": true,
+    // src は同梱しないので、マップ単体でソースを辿れるようにする
+    "inlineSources": true,
     "types": ["node"]
   },
   "include": ["src/**/*"],
+  // ./test/storage-conformance として公開するため、src/test の除外から外す
+  "files": ["src/test/storage-conformance.ts"],
   "exclude": ["src/**/*.spec.ts", "src/test/**/*"],
   "references": [ { "path": "../shared" }]
 }

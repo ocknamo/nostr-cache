@@ -2,6 +2,19 @@
   "name": "@nostr-cache/cache-relay",
   "version": "0.1.0",
   "description": "Cache relay for Nostr relay interactions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ocknamo/nostr-cache.git",
+    "directory": "packages/cache-relay"
+  },
+  "homepage": "https://github.com/ocknamo/nostr-cache/tree/main/packages/cache-relay#readme",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -16,13 +29,14 @@
       "default": "./dist/browser.js"
     },
     "./test/storage-conformance": {
-      "types": "./src/test/storage-conformance.ts",
-      "default": "./src/test/storage-conformance.ts"
+      "types": "./dist/test/storage-conformance.d.ts",
+      "default": "./dist/test/storage-conformance.js"
     }
   },
-  "//peerDependencies": "vitest is needed only by the ./test/storage-conformance subpath (a test helper, so it points at source rather than dist). Optional so consumers that never import it are unaffected.",
+  "//peerDependencies": "vitest is needed only by the ./test/storage-conformance subpath. Optional so consumers that never import it are unaffected.",
   "scripts": {
     "build": "node -e \"for(const p of ['dist','tsconfig.tsbuildinfo'])fs.rmSync(p,{recursive:true,force:true})\" && tsc",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
