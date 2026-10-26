@@ -76,13 +76,20 @@ relay.unsubscribe('sub-1');
 
 ### Node.js（サーバとして起動）
 
+Node.js で `DexieStorage` を使う場合は、IndexedDB がないため `fake-indexeddb` を各自インストールしてください。
+
+```bash
+npm install fake-indexeddb
+```
+
 ```typescript
+// Dexie は読み込み時に indexedDB を参照するため、cache-relay より先に import する
+import 'fake-indexeddb/auto';
 import {
   NostrCacheRelay,
   DexieStorage,
   WebSocketServer,
 } from '@nostr-cache/cache-relay';
-import 'fake-indexeddb/auto'; // Node.js で IndexedDB をエミュレート
 
 const relay = new NostrCacheRelay(
   new DexieStorage('NostrRelay'),
