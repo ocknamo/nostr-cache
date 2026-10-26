@@ -2,11 +2,25 @@
   "name": "@nostr-cache/shared",
   "version": "0.1.0",
   "description": "Shared types and utilities for Nostr cache project",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ocknamo/nostr-cache.git",
+    "directory": "packages/shared"
+  },
+  "homepage": "https://github.com/ocknamo/nostr-cache/tree/main/packages/shared#readme",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"for(const p of ['dist','tsconfig.tsbuildinfo'])fs.rmSync(p,{recursive:true,force:true})\" && tsc",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

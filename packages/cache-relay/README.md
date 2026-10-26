@@ -100,7 +100,7 @@ const relay = new NostrCacheRelay(
 await relay.connect();
 ```
 
-> すぐに使えるサーバ実装は [`@nostr-cache/server`](https://github.com/ocknamo/nostr-cache/blob/main/packages/server/README.md) にもあります。
+> すぐに使えるサーバ実装はこのリポジトリの [`packages/server`](https://github.com/ocknamo/nostr-cache/blob/main/packages/server/README.md) にもあります。
 
 ## キャッシュとしての設定
 

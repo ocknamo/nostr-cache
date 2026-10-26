@@ -63,6 +63,16 @@ npm run start:server
 npm run test
 ```
 
+## npm への公開
+
+公開するのは `@nostr-cache/shared` と `@nostr-cache/cache-relay` だけです（他は private）。
+cache-relay は shared に依存するため、shared を先に公開します。`prepublishOnly` でビルドされます。
+
+```bash
+npm publish -w packages/shared
+npm publish -w packages/cache-relay
+```
+
 ## ドキュメント
 
 各トピックの記述は 1 か所にだけ置き、他からはリンクします。
