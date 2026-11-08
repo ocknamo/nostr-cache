@@ -42,5 +42,10 @@
   "devDependencies": {
     "typescript": "^6.0.0",
     "@biomejs/biome": "^1.9.4"
+  },
+  "allowScripts": {
+    "@biomejs/biome": false,
+    "esbuild": false,
+    "fsevents": false
   }
 }
