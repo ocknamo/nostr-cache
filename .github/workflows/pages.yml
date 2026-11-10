@@ -39,6 +39,8 @@ jobs:
           node-version: "22.x"
           check-latest: true
           cache: "npm"
+      - name: Use npm 12
+        run: npm install -g npm@12.2.2
       - run: npm ci
       # `--workspaces` runs in the order the root package.json lists them, not
       # in dependency order, so the two packages whose builds depend on each

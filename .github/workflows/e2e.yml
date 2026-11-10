@@ -33,6 +33,8 @@ jobs:
         node-version: "22.x"
         check-latest: true
         cache: 'npm'
+    - name: Use npm 12
+      run: npm install -g npm@12.2.2
     - run: npm ci
     # The Node E2E suite spawns the built server (packages/server/dist), so a
     # build is required before running the tests.
