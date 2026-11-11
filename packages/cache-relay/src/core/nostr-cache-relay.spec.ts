@@ -1187,6 +1187,16 @@ describe('NostrCacheRelay', () => {
       });
     });
 
+    it.each([0, 3, 30023])('verifies a published kind %i up front under LAZY', async (kind) => {
+      const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
+        validateEventsType: 'LAZY',
+      });
+
+      // kind を書き換えたので id も署名も合わない
+      expect(await lazyRelay.publishEvent({ ...sampleEvent, kind })).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
     it('verifies a published relay list up front under LAZY', async () => {
       const lazyRelay = new NostrCacheRelay(mockStorage, mockTransport, {
         validateEventsType: 'LAZY',

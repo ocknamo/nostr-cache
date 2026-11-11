@@ -608,6 +608,29 @@ describe('EventHandler', () => {
       expect(mockStorage.saveEvent).toHaveBeenCalledWith(relayList, { validated: true });
     });
 
+    it.each([
+      ['kind 0 (profile)', 0],
+      ['kind 3 (follow list)', 3],
+      ['kind 10000 (replaceable range)', 10000],
+      ['kind 30023 (addressable)', 30023],
+    ])(
+      'verifies %s up front in LAZY mode, so a forged one never replaces the stored one',
+      async (_label, kind) => {
+        const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+        // @ts-ignore - private field access
+        lazyHandler.validator = mockEventValidator;
+        mockEventValidator.validate.mockResolvedValueOnce(false);
+        const event: NostrEvent = { ...regularEvent, id: `k${kind}`, kind, tags: [['d', 'x']] };
+
+        const result = await lazyHandler.handleEvent(event);
+
+        expect(result.success).toBe(false);
+        expect(mockStorage.deleteEventsByPubkeyAndKind).not.toHaveBeenCalled();
+        expect(mockStorage.deleteEventsByPubkeyKindAndDTag).not.toHaveBeenCalled();
+        expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+      }
+    );
+
     it('leaves NONE unverified', async () => {
       const noneHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'NONE');
       // @ts-ignore - private field access

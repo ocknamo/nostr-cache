@@ -6,7 +6,7 @@ import {
   WebSocketServerEmulator,
 } from '@nostr-cache/cache-relay/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { makeEvent } from '../test-fixtures.ts';
+import { makeEvent, seedValidated } from '../test-fixtures.ts';
 import {
   DEFAULT_CACHE_STRATEGY,
   DEFAULT_FOLLOWS_FRESHNESS,
@@ -310,7 +310,11 @@ describe('acquireRelayHost', () => {
 
       // The profile goes in first, so every eviction order that ignores the
       // priority rules — LRU, FIFO and LFU alike — would pick it as the victim.
-      await host.relay.publishEvent(makeEvent({ id: '0'.repeat(64), kind: 0, content: '{}' }));
+      // Seeded rather than published: a replaceable event is verified before it
+      // is stored, and this fixture's signature is made up.
+      await seedValidated(host.storage, [
+        makeEvent({ id: '0'.repeat(64), kind: 0, content: '{}' }),
+      ]);
       for (let index = 1; index <= 4; index += 1) {
         await host.relay.publishEvent(
           makeEvent({ id: `${index}`.padStart(64, '0'), created_at: 1_700_000_000 + index })

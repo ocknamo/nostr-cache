@@ -336,7 +336,10 @@ describe('MessageHandler', () => {
           const cb = vi.fn();
           lazyHandler.onResponse(cb);
           // Addressable (kind 30000-39999) without a `d` tag is not persisted;
-          // nothing enters the pending-validation queue for it.
+          // nothing enters the pending-validation queue for it. Addressable
+          // events are verified up front even under LAZY, and rewriting the
+          // kind broke this one's signature, so the check is stubbed through.
+          vi.spyOn(EventValidator.prototype, 'validate').mockResolvedValueOnce(true);
           const addressableNoDTag: NostrEvent = {
             ...sampleEvent,
             id: 'addr-no-d',
