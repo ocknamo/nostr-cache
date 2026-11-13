@@ -64,8 +64,9 @@ deletes older ones. There is no upper bound on `created_at`: under the default
 `IMMEDIATELY` mode signatures are verified so nobody can forge another author's version,
 but with `validateEventsType: 'NONE'` a single unverified event dated far in the future
 blocks every later update of that coordinate (`LAZY` verifies replaceable and
-addressable events before storing them, so another author's coordinate is safe). Finally, when several versions are stored, `REQ`
-responses are not folded down to the newest one (a NIP-01 SHOULD).
+addressable events before storing them, so another author's coordinate is safe). Finally,
+when several versions are stored, `REQ` responses are not folded down to the newest one (a
+NIP-01 SHOULD).
 
 Only the newest version is kept — per (pubkey, kind) for replaceable kinds and per
 (pubkey, kind, `d`) for addressable ones. An incoming event is compared against the stored
@@ -262,8 +263,8 @@ upstream or in-process, once per event — makes the relay pull the kind 10002 o
 from the index relays, through the normal ingest path. A cached 10002 is not re-fetched within
 `upstreamFreshness[10002]` (6 hours if unset). Kind 10002 is signature-checked before it is
 stored even under `LAZY` (as every replaceable event is), since it will decide where an author
-is read from; `NONE` still skips it. Write-through additionally goes, after the default upstreams, to the author's write
-relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
+is read from; `NONE` still skips it. Write-through additionally goes, after the default
+upstreams, to the author's write relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
 each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
 lists only. Reads keep sending the original filters to the default upstreams and add REQs for
 people the defaults would miss: authors on their write relays, `#p` on the person's read relays,

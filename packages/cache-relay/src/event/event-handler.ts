@@ -38,7 +38,7 @@ interface ReplaceOutcome {
   stored: boolean;
   /** Whether it was dropped in favour of a newer stored version. */
   superseded: boolean;
-  /** Whether storage refused it; it must then not be delivered either. */
+  /** Whether storage refused to keep it. */
   refused?: boolean;
 }
 

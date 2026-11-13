@@ -301,6 +301,7 @@ describe('EventHandler', () => {
       const result = await eventHandler.handleEvent(event());
 
       expect(result.success).toBe(false);
+      expect(result.message).toBe('error: failed to save event');
       expect(result.matches).toBeUndefined();
       expect(mockSubscriptionManager.findMatchingSubscriptions).not.toHaveBeenCalled();
     });
