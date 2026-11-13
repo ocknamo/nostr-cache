@@ -47,5 +47,5 @@ export function isCoordinateAddressableKind(kind: number): boolean {
  * these up front.
  */
 export function replacesOnArrival(kind: number): boolean {
-  return isReplaceableKind(kind) || isAddressableKind(kind);
+  return isCoordinateAddressableKind(kind);
 }

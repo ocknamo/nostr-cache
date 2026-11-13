@@ -8,8 +8,11 @@
  */
 
 import 'fake-indexeddb/auto';
+import { getRandomSecret } from '@nostr-cache/shared';
 import { vi } from 'vitest';
 import { NostrCacheRelay } from '../core/nostr-cache-relay.js';
+import { SubscriptionManager } from '../core/subscription-manager.js';
+import { EventHandler } from '../event/event-handler.js';
 import { DexieStorage } from '../storage/dexie-storage.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { createTestEvent } from './utils/base.integration.js';
@@ -122,5 +125,47 @@ describe('Lazy validation persistence integration', () => {
     expect(await storage2.getUnvalidatedEvents(10)).toEqual([]);
 
     storage2.close();
+  });
+
+  describe('a forgery arriving after the genuine event was verified', () => {
+    it.each([
+      ['reusing a verified id (kind 1)', 1, false],
+      ['dated later at a replaceable coordinate (kind 0)', 0, true],
+      ['dated later at an addressable coordinate (kind 30023)', 30023, true],
+    ])('is refused when %s, and the verified event stays', async (_label, kind, newer) => {
+      const secret = getRandomSecret();
+      const tags = kind === 30023 ? [['d', 'x']] : [];
+      const genuine = await createTestEvent(secret, { kind, tags, content: 'genuine' });
+      const storage = new DexieStorage(dbName);
+      const relay = new NostrCacheRelay(storage, createNoopTransport(), {
+        validateEventsType: 'LAZY',
+      });
+      expect(await relay.publishEvent(genuine)).toBe(true);
+      await storage.markValidated([genuine.id]);
+
+      // Same id or a later version, but content and signature that were never the author's.
+      const forged = newer
+        ? { ...genuine, id: 'f'.repeat(64), created_at: genuine.created_at + 60, content: 'forged' }
+        : { ...genuine, content: 'forged' };
+      expect(await relay.publishEvent(forged)).toBe(false);
+
+      const stored = await storage.getEvents([{ authors: [genuine.pubkey] }]);
+      expect(stored.map((e) => e.content)).toEqual(['genuine']);
+      expect((await storage.getValidationStatus([genuine.id])).get(genuine.id)).toBe('validated');
+      storage.close();
+    });
+
+    it('is refused on the transport path too', async () => {
+      const genuine = await createTestEvent(undefined, { content: 'genuine' });
+      const storage = new DexieStorage(dbName);
+      await storage.saveEvent(genuine, { validated: true });
+      const handler = new EventHandler(storage, new SubscriptionManager(), 'LAZY');
+
+      const result = await handler.handleEvent({ ...genuine, content: 'forged' });
+
+      expect(result.success).toBe(false);
+      expect((await storage.getEvents([{ ids: [genuine.id] }]))[0]?.content).toBe('genuine');
+      storage.close();
+    });
   });
 });

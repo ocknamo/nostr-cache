@@ -59,13 +59,19 @@ export interface HandleEventResult {
   matches?: Map<string, Subscription[]>;
 }
 
+/**
+ * Whether storage already holds this id as verified. Re-saving an id keeps its
+ * verified flag (one id, one content), so under LAZY an unchecked forgery reusing
+ * a verified id would replace the genuine event and inherit the flag.
+ */
+export async function reusesVerifiedId(storage: StorageAdapter, id: string): Promise<boolean> {
+  return (await storage.getValidationStatus([id])).get(id) === 'validated';
+}
+
 export class EventHandler {
   private validator: EventValidator;
 
-  /**
-   * Only `IMMEDIATELY` validates synchronously here; `NONE` / `LAZY` skip
-   * (LAZY validation is performed later by the background validator).
-   */
+  /** Which events are verified on arrival under each mode: see {@link mustValidateNow}. */
   constructor(
     private storage: StorageAdapter,
     private subscriptionManager: SubscriptionManager,
@@ -75,7 +81,7 @@ export class EventHandler {
   }
 
   async handleEvent(event: NostrEvent): Promise<HandleEventResult> {
-    const mustValidateNow = this.mustValidateNow(event);
+    const mustValidateNow = await this.mustValidateNow(event);
     if (mustValidateNow) {
       try {
         if (!(await this.validator.validate(event))) {
@@ -193,9 +199,8 @@ export class EventHandler {
    * - `LAZY`: defer to the background pass — but deferring only works for
    *   effects that pass can still undo, so ephemeral events are verified now
    *   (they are never persisted, so there is nothing to delete afterwards).
-   *   Replaceable and addressable events are verified now too: storing one
-   *   deletes the version it replaces, so a forged one would wipe the genuine
-   *   one before the background pass could catch it (see `replacesOnArrival`).
+   *   So are replaceable and addressable events (see `replacesOnArrival`), and
+   *   any event reusing the id of one already verified (see `reusesVerifiedId`).
    * - Deletion requests (kind 5) are verified in **every** mode, `NONE`
    *   included. They destroy other events on arrival and nothing can bring
    *   those back, so accepting one unverified would let any client wipe any
@@ -204,16 +209,20 @@ export class EventHandler {
    *   data"; one signature check per deletion request is a negligible price
    *   for keeping that distinction.
    */
-  private mustValidateNow(event: NostrEvent): boolean {
+  private async mustValidateNow(event: NostrEvent): Promise<boolean> {
     if (isDeletionKind(event.kind)) {
       return true;
     }
     if (this.validateEventsType === 'IMMEDIATELY') {
       return true;
     }
+    if (this.validateEventsType !== 'LAZY') {
+      return false;
+    }
     return (
-      this.validateEventsType === 'LAZY' &&
-      (this.isEphemeralEvent(event) || replacesOnArrival(event.kind))
+      this.isEphemeralEvent(event) ||
+      replacesOnArrival(event.kind) ||
+      (await reusesVerifiedId(this.storage, event.id))
     );
   }
 

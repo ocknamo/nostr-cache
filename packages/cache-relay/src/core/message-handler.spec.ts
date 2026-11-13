@@ -337,9 +337,11 @@ describe('MessageHandler', () => {
           lazyHandler.onResponse(cb);
           // Addressable (kind 30000-39999) without a `d` tag is not persisted;
           // nothing enters the pending-validation queue for it. Addressable
-          // events are verified up front even under LAZY, and rewriting the
-          // kind broke this one's signature, so the check is stubbed through.
-          vi.spyOn(EventValidator.prototype, 'validate').mockResolvedValueOnce(true);
+          // events are verified up front even under LAZY, and this fixture's
+          // id and kind no longer match its signature, so the check is stubbed.
+          const validateSpy = vi
+            .spyOn(EventValidator.prototype, 'validate')
+            .mockResolvedValueOnce(true);
           const addressableNoDTag: NostrEvent = {
             ...sampleEvent,
             id: 'addr-no-d',
@@ -347,7 +349,12 @@ describe('MessageHandler', () => {
             tags: [],
           };
 
-          await lazyHandler.handleMessage('client1', ['EVENT', addressableNoDTag]);
+          try {
+            await lazyHandler.handleMessage('client1', ['EVENT', addressableNoDTag]);
+            expect(validateSpy).toHaveBeenCalledTimes(1);
+          } finally {
+            validateSpy.mockRestore();
+          }
 
           expect(cb).toHaveBeenCalledWith('client1', ['OK', 'addr-no-d', true, '']);
           expect(mockStorage.saveEvent).not.toHaveBeenCalled();
