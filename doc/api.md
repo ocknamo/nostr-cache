@@ -264,8 +264,8 @@ from the index relays, through the normal ingest path. A cached 10002 is not re-
 `upstreamFreshness[10002]` (6 hours if unset). Kind 10002 is signature-checked before it is
 stored even under `LAZY` (as every replaceable event is), since it will decide where an author
 is read from; `NONE` still skips it. Write-through additionally goes, after the default
-upstreams, to the author's write relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
-each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
+upstreams, to the author's write relays, to the read relays of up to 20 people `p`-tagged in
+kinds 1 / 6 / 7 / 16 / 1111 (3 each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
 lists only. Reads keep sending the original filters to the default upstreams and add REQs for
 people the defaults would miss: authors on their write relays, `#p` on the person's read relays,
 `#e` / `#q` on the cached parent author's read relays, address-form `#q` / `#a` on that pubkey's
