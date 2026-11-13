@@ -38,6 +38,8 @@ interface ReplaceOutcome {
   stored: boolean;
   /** Whether it was dropped in favour of a newer stored version. */
   superseded: boolean;
+  /** Whether storage refused it; it must then not be delivered either. */
+  refused?: boolean;
 }
 
 /** Result of handling one event. */
@@ -112,9 +114,15 @@ export class EventHandler {
       }
     } else if (this.isReplaceableEvent(event)) {
       try {
-        const { stored, superseded } = await this.handleReplaceableEvent(event, mustValidateNow);
+        const { stored, superseded, refused } = await this.handleReplaceableEvent(
+          event,
+          mustValidateNow
+        );
         if (superseded) {
           return this.supersededResult();
+        }
+        if (refused) {
+          return this.refusedResult();
         }
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, stored, message: 'success', matches };
@@ -128,9 +136,15 @@ export class EventHandler {
       }
     } else if (this.isAddressableEvent(event)) {
       try {
-        const { stored, superseded } = await this.handleAddressableEvent(event, mustValidateNow);
+        const { stored, superseded, refused } = await this.handleAddressableEvent(
+          event,
+          mustValidateNow
+        );
         if (superseded) {
           return this.supersededResult();
+        }
+        if (refused) {
+          return this.refusedResult();
         }
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, stored, message: 'success', matches };
@@ -263,6 +277,11 @@ export class EventHandler {
     return { success: true, stored: false, superseded: true, message: SUPERSEDED_MESSAGE };
   }
 
+  /** Storage would not keep it, so it is neither stored nor delivered. */
+  private refusedResult(): HandleEventResult {
+    return { success: false, stored: false, message: 'error: failed to save event' };
+  }
+
   /**
    * Whether the version already stored at `event`'s coordinate wins over
    * `event`, per NIP-01 (newer `created_at`, ties broken by the lowest id).
@@ -301,7 +320,7 @@ export class EventHandler {
 
       await this.storage.deleteEventsByPubkeyAndKind(event.pubkey, event.kind);
       const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
-      return { stored, superseded: false };
+      return { stored, superseded: false, refused: !stored };
     } catch (error) {
       logger.info('Error handling replaceable event:', error);
       throw error;
@@ -330,7 +349,7 @@ export class EventHandler {
 
       await this.storage.deleteEventsByPubkeyKindAndDTag(event.pubkey, event.kind, dTagValue);
       const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
-      return { stored, superseded: false };
+      return { stored, superseded: false, refused: !stored };
     } catch (error) {
       logger.info('Error handling addressable event:', error);
       throw error;

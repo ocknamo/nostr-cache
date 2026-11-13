@@ -291,6 +291,53 @@ describe('EventHandler', () => {
     });
   });
 
+  describe('when storage refuses to keep the event', () => {
+    it.each([
+      ['replaceable', () => replaceableEvent],
+      ['addressable', () => addressableEvent],
+    ])('reports a refused %s event as a failure and does not deliver it', async (_l, event) => {
+      mockStorage.saveEvent.mockResolvedValueOnce(false);
+
+      const result = await eventHandler.handleEvent(event());
+
+      expect(result.success).toBe(false);
+      expect(result.matches).toBeUndefined();
+      expect(mockSubscriptionManager.findMatchingSubscriptions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('an id already stored as verified, under LAZY', () => {
+    it('is verified before it can be stored, even for a regular kind', async () => {
+      const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+      // @ts-ignore - private field access
+      lazyHandler.validator = mockEventValidator;
+      mockStorage.getValidationStatus.mockResolvedValueOnce(
+        new Map([[regularEvent.id, 'validated']])
+      );
+      mockEventValidator.validate.mockResolvedValueOnce(false);
+
+      const result = await lazyHandler.handleEvent(regularEvent);
+
+      expect(mockEventValidator.validate).toHaveBeenCalledWith(regularEvent);
+      expect(result.success).toBe(false);
+      expect(mockStorage.saveEvent).not.toHaveBeenCalled();
+    });
+
+    it('is left to the background pass when the id is only pending', async () => {
+      const lazyHandler = new EventHandler(mockStorage, mockSubscriptionManager, 'LAZY');
+      // @ts-ignore - private field access
+      lazyHandler.validator = mockEventValidator;
+      mockStorage.getValidationStatus.mockResolvedValueOnce(
+        new Map([[regularEvent.id, 'pending']])
+      );
+
+      await lazyHandler.handleEvent(regularEvent);
+
+      expect(mockEventValidator.validate).not.toHaveBeenCalled();
+      expect(mockStorage.saveEvent).toHaveBeenCalledWith(regularEvent, { validated: false });
+    });
+  });
+
   describe('handleAddressableEvent', () => {
     it('should delete old events and save new event', async () => {
       await eventHandler['handleAddressableEvent'](addressableEvent, true);
