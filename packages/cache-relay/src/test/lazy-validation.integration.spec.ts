@@ -9,10 +9,13 @@
 
 import 'fake-indexeddb/auto';
 import { getRandomSecret } from '@nostr-cache/shared';
+import type { NostrEvent } from '@nostr-cache/shared';
 import { vi } from 'vitest';
 import { NostrCacheRelay } from '../core/nostr-cache-relay.js';
 import { SubscriptionManager } from '../core/subscription-manager.js';
 import { EventHandler } from '../event/event-handler.js';
+import { EventValidator } from '../event/event-validator.js';
+import { LazyValidator } from '../event/lazy-validator.js';
 import { DexieStorage } from '../storage/dexie-storage.js';
 import type { TransportAdapter } from '../transport/transport-adapter.js';
 import { createTestEvent } from './utils/base.integration.js';
@@ -141,7 +144,7 @@ describe('Lazy validation persistence integration', () => {
         validateEventsType: 'LAZY',
       });
       expect(await relay.publishEvent(genuine)).toBe(true);
-      await storage.markValidated([genuine.id]);
+      await storage.markValidated([genuine]);
 
       // Same id or a later version, but content and signature that were never the author's.
       const forged = newer
@@ -152,6 +155,40 @@ describe('Lazy validation persistence integration', () => {
       const stored = await storage.getEvents([{ authors: [genuine.pubkey] }]);
       expect(stored.map((e) => e.content)).toEqual(['genuine']);
       expect((await storage.getValidationStatus([genuine.id])).get(genuine.id)).toBe('validated');
+      storage.close();
+    });
+
+    // The genuine event is read for validation, then replaced by a forgery
+    // with its id before the pass marks it.
+    it('is never marked validated when it replaces a pending genuine event mid-pass', async () => {
+      const genuine = await createTestEvent(undefined, { content: 'genuine' });
+      const storage = new DexieStorage(dbName);
+      const handler = new EventHandler(storage, new SubscriptionManager(), 'LAZY');
+      expect((await handler.handleEvent(genuine)).success).toBe(true);
+
+      let swapped = false;
+      const validator = new EventValidator();
+      const slow = {
+        validate: async (event: NostrEvent) => {
+          const ok = await validator.validate(event);
+          if (!swapped) {
+            swapped = true;
+            await handler.handleEvent({ ...genuine, content: 'forged' });
+          }
+          return ok;
+        },
+      } as EventValidator;
+      const lazy = new LazyValidator(storage, {}, slow);
+
+      await lazy.processBatch();
+      await lazy.processBatch();
+
+      expect(swapped).toBe(true);
+      const status = (await storage.getValidationStatus([genuine.id])).get(genuine.id);
+      const [stored] = await storage.getEvents([{ ids: [genuine.id] }]);
+      // Losing the genuine copy is a cache miss; marking the forgery would be a lie.
+      expect(stored?.content === 'forged' && status === 'validated').toBe(false);
+      expect(stored === undefined || stored.content === 'genuine').toBe(true);
       storage.close();
     });
 

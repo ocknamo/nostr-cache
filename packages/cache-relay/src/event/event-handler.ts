@@ -60,9 +60,8 @@ export interface HandleEventResult {
 }
 
 /**
- * Whether storage already holds this id as verified. Re-saving an id keeps its
- * verified flag (one id, one content), so under LAZY an unchecked forgery reusing
- * a verified id would replace the genuine event and inherit the flag.
+ * Whether storage already holds this id as verified. Storage refuses to let an
+ * unchecked event replace such a row, so checking first turns that into a clear verdict.
  */
 export async function reusesVerifiedId(storage: StorageAdapter, id: string): Promise<boolean> {
   return (await storage.getValidationStatus([id])).get(id) === 'validated';

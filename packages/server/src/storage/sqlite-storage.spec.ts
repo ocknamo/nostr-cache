@@ -115,7 +115,7 @@ describe('SqliteStorage (SQLite-specific)', () => {
     });
 
     it('should not throw from markValidated', async () => {
-      await expect(storage.markValidated([mockEvent.id])).resolves.toBeUndefined();
+      await expect(storage.markValidated([mockEvent])).resolves.toBeUndefined();
     });
 
     it('should propagate a clear failure instead of reporting an empty cache', async () => {

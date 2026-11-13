@@ -20,6 +20,8 @@ import {
   hasPriorityRules,
   isDeletableAddress,
   matchesAddressIdentifier,
+  sameEvent,
+  sameSignedContent,
   selectCurrentVersion,
 } from '@nostr-cache/cache-relay';
 import type { Filter, NostrEvent } from '@nostr-cache/shared';
@@ -158,32 +160,35 @@ export class SqliteStorage implements StorageAdapter {
     const now = Date.now();
     // Dexie 実装と同じく、既存行の読み取り → 書き込み → タグ再構築を単一の
     // トランザクションで行う。再保存でメタデータはリセット
-    // （access_count=1 / cached_at=now → TTL 数え直し）されるが、validated は
-    // 1→0 にダウングレードしない（同じ id は同じ内容なので一度検証済みなら
-    // 再保存でも検証済みのまま）
+    // （access_count=1 / cached_at=now → TTL 数え直し）される。検証済みの行は、
+    // 未検証の同じ id の別内容（偽造）で上書きせず、同じ内容なら署名ごと保つ
+    let saved = true;
     try {
       this.inTransaction(() => {
-        const existing = this.db
-          .select({ validated: events.validated })
-          .from(events)
-          .where(eq(events.id, event.id))
-          .get();
-        const validated = options?.validated || existing?.validated === 1 ? 1 : 0;
+        const existingRow = this.db.select().from(events).where(eq(events.id, event.id)).get();
+        const existing = existingRow ? rowToEvent(existingRow) : undefined;
+        const keepVerified = existingRow?.validated === 1 && !options?.validated;
+        if (keepVerified && existing && !sameSignedContent(existing, event)) {
+          saved = false;
+          return;
+        }
+        const source = keepVerified && existing ? existing : event;
+        const validated = options?.validated || keepVerified ? 1 : 0;
 
         const row = {
-          id: event.id,
-          pubkey: event.pubkey,
-          createdAt: event.created_at,
-          kind: event.kind,
-          tags: JSON.stringify(event.tags),
-          content: event.content,
-          sig: event.sig,
+          id: source.id,
+          pubkey: source.pubkey,
+          createdAt: source.created_at,
+          kind: source.kind,
+          tags: JSON.stringify(source.tags),
+          content: source.content,
+          sig: source.sig,
           lastAccessedAt: now,
           accessCount: 1,
           cachedAt: now,
           validated,
         };
-        if (existing) {
+        if (existingRow) {
           this.db.update(events).set(row).where(eq(events.id, event.id)).run();
         } else {
           this.db.insert(events).values(row).run();
@@ -196,7 +201,7 @@ export class SqliteStorage implements StorageAdapter {
           this.db.insert(eventTags).values(tagRows).onConflictDoNothing().run();
         }
       });
-      return true;
+      return saved;
     } catch (error) {
       logger.error(
         `Failed to save event: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -237,15 +242,26 @@ export class SqliteStorage implements StorageAdapter {
    * Mark the given events as validated. IDs no longer stored (deleted or
    * evicted meanwhile) are silently ignored.
    */
-  async markValidated(ids: string[]): Promise<void> {
-    if (ids.length === 0) {
+  async markValidated(validated: NostrEvent[]): Promise<void> {
+    if (validated.length === 0) {
       return;
     }
+    const byId = new Map(validated.map((event) => [event.id, event]));
     try {
-      // 複数チャンクでも Dexie の単一 modify と同じく全件原子的に適用する
+      // 複数チャンクでも Dexie の単一 modify と同じく全件原子的に適用する。
+      // 読んだ時から行が差し替わっていれば印を付けない
       this.inTransaction(() => {
-        for (const part of chunk(ids, ID_CHUNK_SIZE)) {
-          this.db.update(events).set({ validated: 1 }).where(inArray(events.id, part)).run();
+        for (const part of chunk([...byId.keys()], ID_CHUNK_SIZE)) {
+          const rows = this.db.select().from(events).where(inArray(events.id, part)).all();
+          const matching = rows
+            .filter((row) => {
+              const checked = byId.get(row.id);
+              return checked !== undefined && sameEvent(rowToEvent(row), checked);
+            })
+            .map((row) => row.id);
+          if (matching.length > 0) {
+            this.db.update(events).set({ validated: 1 }).where(inArray(events.id, matching)).run();
+          }
         }
       });
     } catch (error) {

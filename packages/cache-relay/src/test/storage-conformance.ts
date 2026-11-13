@@ -170,12 +170,49 @@ export function describeStorageAdapterConformance<T extends ConformantStorage>(
         await storage.saveEvent(eventWithId('a'));
         await storage.saveEvent(eventWithId('b'));
 
-        await storage.markValidated(['a', 'b', 'missing-id']);
+        await storage.markValidated([
+          eventWithId('a'),
+          eventWithId('b'),
+          eventWithId('missing-id'),
+        ]);
 
         const statuses = await storage.getValidationStatus(['a', 'b', 'missing-id']);
         expect(statuses.get('a')).toBe('validated');
         expect(statuses.get('b')).toBe('validated');
         expect(statuses.get('missing-id')).toBe('unknown');
+      });
+
+      // Before validation an id proves nothing: a forgery can reuse a genuine one.
+      it('should not mark a row that was replaced after it was read for validation', async () => {
+        const checked = eventWithId('a');
+        await storage.saveEvent(checked);
+        await storage.saveEvent({ ...checked, content: 'forged' });
+
+        await storage.markValidated([checked]);
+
+        expect((await storage.getValidationStatus(['a'])).get('a')).toBe('pending');
+      });
+
+      it('should not let an unverified event with a verified id replace it', async () => {
+        const genuine = eventWithId('a');
+        await storage.saveEvent(genuine, { validated: true });
+
+        expect(await storage.saveEvent({ ...genuine, content: 'forged' })).toBe(false);
+
+        const [stored] = await storage.getEvents([{ ids: ['a'] }]);
+        expect(stored?.content).toBe(genuine.content);
+        expect((await storage.getValidationStatus(['a'])).get('a')).toBe('validated');
+      });
+
+      it('should keep a verified row, signature included, when the same content is saved again', async () => {
+        const genuine = eventWithId('a');
+        await storage.saveEvent(genuine, { validated: true });
+
+        expect(await storage.saveEvent({ ...genuine, sig: 'other-sig' })).toBe(true);
+
+        const [stored] = await storage.getEvents([{ ids: ['a'] }]);
+        expect(stored?.sig).toBe(genuine.sig);
+        expect((await storage.getValidationStatus(['a'])).get('a')).toBe('validated');
       });
 
       it('should return unvalidated events oldest-first and respect the limit', async () => {
