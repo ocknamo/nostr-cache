@@ -53,7 +53,8 @@ NIP-01 message processing, subscription management, and event validation.
   署名検証があるため他人になりすました版は作れませんが、`validateEventsType: 'NONE'`
   （`server` の `relay.validateEvents: false`）では、遠未来の `created_at` を持つ
   未検証イベントが 1 通入ると、その座標の正当な更新が以後すべて `duplicate:` で
-  落ち続けます（`LAZY` は背景検証が不正イベントを削除するまでの一時的な影響）
+  落ち続けます（`LAZY` では置換可能・アドレサブルなイベントを保存前に検証するため、
+  他人の座標には入りません）
 - 複数の版が保存されている状態（`publishEvent()` 経由など）で、`REQ` 応答を最新 1 件に
   畳む処理はありません（NIP-01 の SHOULD）
 
@@ -62,9 +63,10 @@ in-process `publishEvent()` bypasses `EventHandler`, so it neither compares vers
 deletes older ones. There is no upper bound on `created_at`: under the default
 `IMMEDIATELY` mode signatures are verified so nobody can forge another author's version,
 but with `validateEventsType: 'NONE'` a single unverified event dated far in the future
-blocks every later update of that coordinate (under `LAZY` this lasts only until the
-background validator removes it). Finally, when several versions are stored, `REQ`
-responses are not folded down to the newest one (a NIP-01 SHOULD).
+blocks every later update of that coordinate (`LAZY` verifies replaceable and
+addressable events before storing them, so another author's coordinate is safe). Finally,
+when several versions are stored, `REQ` responses are not folded down to the newest one (a
+NIP-01 SHOULD).
 
 Only the newest version is kept — per (pubkey, kind) for replaceable kinds and per
 (pubkey, kind, `d`) for addressable ones. An incoming event is compared against the stored
@@ -197,7 +199,9 @@ interface NostrRelayOptions {
                                     // 'LAZY'=受理・保存後にバックグラウンド検証し不正を削除（in-process / transport 両経路）
                                     //         検証キューはストレージ自体（validated カラム）に永続化され、
                                     //         リロード/クラッシュ後も次回 connect() 時に検証を自動再開する
-                                    //         ※ ephemeral 等の未保存イベントは LAZY でも同期検証して即拒否
+                                    //         ※ LAZY でも保存前に同期検証するもの: ephemeral（保存しない）、
+                                    //           置換可能・アドレサブル（保存で既存版を消す）、
+                                    //           検証済みの行と同じ id のもの（すり替え防止）。kind 5 は全モード
                                     // 検証結果は IMMEDIATELY=検証済み / NONE・LAZY=未検証として保存され、
                                     // getValidationStatus() で参照できる（LAZY は検証後に検証済みへ更新）
   lazyValidateInterval?: number;    // LAZY のバックグラウンド検証間隔 秒 (default: 60)
@@ -220,8 +224,8 @@ interface NostrRelayOptions {
 （キャッシュ・上流・in-process のどの経路でも、同じイベントにつき 1 回）、その全員の kind 10002 を
 インデックスリレーから取り込みます。取り込みは通常の上流イベントと同じ経路（検証・版比較・保存）を
 通ります。キャッシュ済みの 10002 は `upstreamFreshness[10002]`（無ければ 6 時間）のあいだ取り直しません。
-**kind 10002 は `LAZY` でも保存前に署名検証します**（読み先の決定に使うため、偽造したリストを
-保存させない）。`NONE` では検証しません。
+**kind 10002 は（ほかの置換可能イベントと同じく）`LAZY` でも保存前に署名検証します**（読み先の
+決定に使うため、偽造したリストを保存させない）。`NONE` では検証しません。
 
 **書き込み（ライトスルー）**は、既定の上流へ送ったうえで、次の宛先にも送ります（上流に
 `upstreamRelays` と同じリレーは除く）。宛先を引くのは検証済みの 10002 だけです。
@@ -258,11 +262,11 @@ interface NostrRelayOptions {
 upstream or in-process, once per event — makes the relay pull the kind 10002 of everyone on it
 from the index relays, through the normal ingest path. A cached 10002 is not re-fetched within
 `upstreamFreshness[10002]` (6 hours if unset). Kind 10002 is signature-checked before it is
-stored even under `LAZY`, since it will decide where an author is read from; `NONE` still skips
-it. Write-through additionally goes, after the default upstreams, to the author's write
-relays, to the read relays of up to 20 people `p`-tagged in kinds 1 / 6 / 7 / 16 / 1111 (3
-each), and — for kind 10002 itself — to the index relays, 30 relays at most, using validated
-lists only. Reads keep sending the original filters to the default upstreams and add REQs for
+stored even under `LAZY` (as every replaceable event is), since it will decide where an author
+is read from; `NONE` still skips it. Write-through additionally goes, after the default
+upstreams, to the author's write relays, to the read relays of up to 20 people `p`-tagged in
+kinds 1 / 6 / 7 / 16 / 1111 (3 each), and — for kind 10002 itself — to the index relays, 30
+relays at most, using validated lists only. Reads keep sending the original filters to the default upstreams and add REQs for
 people the defaults would miss: authors on their write relays, `#p` on the person's read relays,
 `#e` / `#q` on the cached parent author's read relays, address-form `#q` / `#a` on that pubkey's
 read relays (2 per person, 8 per REQ; replaceable-only and `ids` filters excluded). Missing relay
@@ -331,6 +335,15 @@ Kind 5 always gets the same protection regardless of `cachePriority`.
 > これらの実装が必要です。
 > / These methods were added as **required** members of `StorageAdapter`, so
 > external adapter implementations must add them.
+>
+> **破壊的変更 / Breaking change:** `markValidated` は id ではなくイベントを受け取るように
+> なりました。印を付けるのは、行が渡されたイベントと署名まで一致する場合だけです。あわせて
+> `saveEvent` は、検証済みの行を未検証の別内容で上書きせず `false` を返します。独自実装は両方を
+> 満たす必要があります（満たさないと、検証前に同じ id を使った偽物が検証済みとして残ります）。
+> / `markValidated` now takes the events, not their ids, and must mark a row only when it
+> still holds exactly that event, signature included. `saveEvent` must refuse (return
+> `false`) to overwrite a verified row with different unverified content. A custom adapter
+> needs both, or a forgery reusing a genuine id can end up marked as verified.
 
 ```typescript
 type ValidationStatus = 'validated' | 'pending' | 'unknown';
@@ -351,7 +364,7 @@ interface StorageAdapter {
   deleteEventsByAddress(address: EventAddress, until: number): Promise<number>;
   getCurrentVersion(address: EventAddress): Promise<NostrEvent | undefined>;
   getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
-  markValidated(ids: string[]): Promise<void>;
+  markValidated(validated: NostrEvent[]): Promise<void>;
   getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;
   getCachedAt?(ids: string[]): Promise<Map<string, number>>; // optional
   touchCachedAt?(ids: string[]): Promise<number>;            // optional
@@ -365,9 +378,17 @@ interface EventAddress {
 ```
 
 - `saveEvent` の `options.validated`（省略時 `false`）で検証済みとして保存できます。既存行が
-  検証済みの場合、再保存しても未検証へはダウングレードされません（同一 id = 同一内容のため）。
-  / `options.validated` (default `false`) stores the event as verified. Re-saving never
-  downgrades an already-verified row (same id = same content hash).
+  検証済みで今回が未検証の場合、署名対象の中身が同じなら既存行（署名を含む）を保って
+  メタデータだけ更新し、違えば上書きせず `false` を返します。検証前の id は何も保証しない
+  （偽物が本物の id を名乗れる）ためです。
+  / `options.validated` (default `false`) stores the event as verified. When the stored row
+  is verified and this one is not, the same signed content keeps the stored row (signature
+  included) and refreshes its metadata; different content is refused with `false`. An id
+  proves nothing until it is checked, so a forgery can claim a genuine one.
+- `markValidated` は、行が渡されたイベントと署名まで一致する場合だけ検証済みにします。検証のために
+  読んだあとで行が差し替わっていれば印を付けません。
+  / Marks a row validated only if it still holds exactly the given event, signature
+  included — not if it was replaced after being read for validation.
 - `getUnvalidatedEvents` は未検証イベントを保存時刻の古い順に返します。遅延検証の
   永続キューであり、リロード後の検証再開を支えます。
   / Returns unvalidated events oldest-first — the persistent lazy-validation queue.

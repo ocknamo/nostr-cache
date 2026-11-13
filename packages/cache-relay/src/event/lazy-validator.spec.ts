@@ -34,7 +34,8 @@ describe('LazyValidator', () => {
       getUnvalidatedEvents: vi
         .fn()
         .mockImplementation((limit: number) => Promise.resolve(pending.slice(0, limit))),
-      markValidated: vi.fn().mockImplementation((ids: string[]) => {
+      markValidated: vi.fn().mockImplementation((validated: NostrEvent[]) => {
+        const ids = validated.map((event) => event.id);
         pending = pending.filter((event) => !ids.includes(event.id));
         return Promise.resolve();
       }),
@@ -59,7 +60,7 @@ describe('LazyValidator', () => {
     expect(removed).toBe(1);
     expect(storage.deleteEvent).toHaveBeenCalledTimes(1);
     expect(storage.deleteEvent).toHaveBeenCalledWith('invalid');
-    expect(storage.markValidated).toHaveBeenCalledWith(['valid']);
+    expect(storage.markValidated).toHaveBeenCalledWith([makeEvent('valid')]);
   });
 
   it('should treat a validator that throws as invalid', async () => {

@@ -41,6 +41,7 @@ import {
   getAlwaysRetainedKinds,
   hasPriorityRules,
 } from './storage/priority.js';
+import { sameEvent, sameSignedContent } from './storage/same-event.js';
 // Storage
 import {
   CacheStrategy,
@@ -97,6 +98,8 @@ export {
   ValidationStatus,
   DexieStorage,
   getIndexedTags,
+  sameEvent,
+  sameSignedContent,
   type CachePriority,
   createPriorityMatcher,
   hasPriorityRules,

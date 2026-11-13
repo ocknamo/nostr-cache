@@ -4,11 +4,11 @@ import type { SubscriptionManager } from '../core/subscription-manager.js';
 import type { EventAddress, StorageAdapter } from '../storage/storage-adapter.js';
 import { applyDeletionRequest } from './deletion.js';
 import {
-  RELAY_LIST_KIND,
   isAddressableKind,
   isDeletionKind,
   isEphemeralKind,
   isReplaceableKind,
+  replacesOnArrival,
 } from './event-kind.js';
 import { EventValidator } from './event-validator.js';
 import { addressOf, getDTagValue, supersedes } from './replaceable.js';
@@ -38,6 +38,8 @@ interface ReplaceOutcome {
   stored: boolean;
   /** Whether it was dropped in favour of a newer stored version. */
   superseded: boolean;
+  /** Whether storage refused to keep it. */
+  refused?: boolean;
 }
 
 /** Result of handling one event. */
@@ -59,13 +61,18 @@ export interface HandleEventResult {
   matches?: Map<string, Subscription[]>;
 }
 
+/**
+ * Whether storage already holds this id as verified. Storage refuses to let an
+ * unchecked event replace such a row, so checking first turns that into a clear verdict.
+ */
+export async function reusesVerifiedId(storage: StorageAdapter, id: string): Promise<boolean> {
+  return (await storage.getValidationStatus([id])).get(id) === 'validated';
+}
+
 export class EventHandler {
   private validator: EventValidator;
 
-  /**
-   * Only `IMMEDIATELY` validates synchronously here; `NONE` / `LAZY` skip
-   * (LAZY validation is performed later by the background validator).
-   */
+  /** Which events are verified on arrival under each mode: see {@link mustValidateNow}. */
   constructor(
     private storage: StorageAdapter,
     private subscriptionManager: SubscriptionManager,
@@ -75,7 +82,7 @@ export class EventHandler {
   }
 
   async handleEvent(event: NostrEvent): Promise<HandleEventResult> {
-    const mustValidateNow = this.mustValidateNow(event);
+    const mustValidateNow = await this.mustValidateNow(event);
     if (mustValidateNow) {
       try {
         if (!(await this.validator.validate(event))) {
@@ -107,9 +114,15 @@ export class EventHandler {
       }
     } else if (this.isReplaceableEvent(event)) {
       try {
-        const { stored, superseded } = await this.handleReplaceableEvent(event, mustValidateNow);
+        const { stored, superseded, refused } = await this.handleReplaceableEvent(
+          event,
+          mustValidateNow
+        );
         if (superseded) {
           return this.supersededResult();
+        }
+        if (refused) {
+          return this.refusedResult();
         }
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, stored, message: 'success', matches };
@@ -123,9 +136,15 @@ export class EventHandler {
       }
     } else if (this.isAddressableEvent(event)) {
       try {
-        const { stored, superseded } = await this.handleAddressableEvent(event, mustValidateNow);
+        const { stored, superseded, refused } = await this.handleAddressableEvent(
+          event,
+          mustValidateNow
+        );
         if (superseded) {
           return this.supersededResult();
+        }
+        if (refused) {
+          return this.refusedResult();
         }
         const matches = this.subscriptionManager.findMatchingSubscriptions(event);
         return { success: true, stored, message: 'success', matches };
@@ -193,8 +212,8 @@ export class EventHandler {
    * - `LAZY`: defer to the background pass — but deferring only works for
    *   effects that pass can still undo, so ephemeral events are verified now
    *   (they are never persisted, so there is nothing to delete afterwards).
-   *   Relay lists (kind 10002) are verified now too: they pick which relays
-   *   an author is read from, so a forged one must never be stored at all.
+   *   So are replaceable and addressable events (see `replacesOnArrival`), and
+   *   any event reusing the id of one already verified (see `reusesVerifiedId`).
    * - Deletion requests (kind 5) are verified in **every** mode, `NONE`
    *   included. They destroy other events on arrival and nothing can bring
    *   those back, so accepting one unverified would let any client wipe any
@@ -203,16 +222,20 @@ export class EventHandler {
    *   data"; one signature check per deletion request is a negligible price
    *   for keeping that distinction.
    */
-  private mustValidateNow(event: NostrEvent): boolean {
+  private async mustValidateNow(event: NostrEvent): Promise<boolean> {
     if (isDeletionKind(event.kind)) {
       return true;
     }
     if (this.validateEventsType === 'IMMEDIATELY') {
       return true;
     }
+    if (this.validateEventsType !== 'LAZY') {
+      return false;
+    }
     return (
-      this.validateEventsType === 'LAZY' &&
-      (this.isEphemeralEvent(event) || event.kind === RELAY_LIST_KIND)
+      this.isEphemeralEvent(event) ||
+      replacesOnArrival(event.kind) ||
+      (await reusesVerifiedId(this.storage, event.id))
     );
   }
 
@@ -254,6 +277,11 @@ export class EventHandler {
     return { success: true, stored: false, superseded: true, message: SUPERSEDED_MESSAGE };
   }
 
+  /** Storage would not keep it, so it is neither stored nor delivered. */
+  private refusedResult(): HandleEventResult {
+    return { success: false, stored: false, message: 'error: failed to save event' };
+  }
+
   /**
    * Whether the version already stored at `event`'s coordinate wins over
    * `event`, per NIP-01 (newer `created_at`, ties broken by the lowest id).
@@ -292,7 +320,7 @@ export class EventHandler {
 
       await this.storage.deleteEventsByPubkeyAndKind(event.pubkey, event.kind);
       const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
-      return { stored, superseded: false };
+      return { stored, superseded: false, refused: !stored };
     } catch (error) {
       logger.info('Error handling replaceable event:', error);
       throw error;
@@ -321,7 +349,7 @@ export class EventHandler {
 
       await this.storage.deleteEventsByPubkeyKindAndDTag(event.pubkey, event.kind, dTagValue);
       const stored = await this.storage.saveEvent(event, this.saveOptions(verified));
-      return { stored, superseded: false };
+      return { stored, superseded: false, refused: !stored };
     } catch (error) {
       logger.info('Error handling addressable event:', error);
       throw error;

@@ -38,8 +38,11 @@ export interface StorageAdapter {
    */
   getUnvalidatedEvents(limit: number): Promise<NostrEvent[]>;
 
-  /** 保存されていない id は無視する。 */
-  markValidated(ids: string[]): Promise<void>;
+  /**
+   * Mark rows validated, but only those still holding exactly the event given
+   * (signature included): the row may have been replaced since it was read.
+   */
+  markValidated(validated: NostrEvent[]): Promise<void>;
 
   /** クライアントが高頻度でポーリングしうるため、アクセス追跡はしない。 */
   getValidationStatus(ids: string[]): Promise<Map<string, ValidationStatus>>;

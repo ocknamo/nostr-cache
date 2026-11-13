@@ -10,7 +10,8 @@ import type {
   RelayEventHandler,
 } from '@nostr-cache/shared';
 import { applyDeletionRequest, isDeletionEvent } from '../event/deletion.js';
-import { RELAY_LIST_KIND, isEphemeralKind } from '../event/event-kind.js';
+import { reusesVerifiedId } from '../event/event-handler.js';
+import { RELAY_LIST_KIND, isEphemeralKind, replacesOnArrival } from '../event/event-kind.js';
 import { EventValidator } from '../event/event-validator.js';
 import { LazyValidator } from '../event/lazy-validator.js';
 import { IndexRelayClient } from '../outbox/index-relay-client.js';
@@ -429,12 +430,13 @@ export class NostrCacheRelay {
   }
 
   async publishEvent(event: NostrEvent): Promise<boolean> {
-    // Same rule as EventHandler on the transport path: deletion requests in
-    // every mode, relay lists under LAZY too.
+    // Same rule as EventHandler on the transport path.
+    const lazy = this.options.validateEventsType === 'LAZY';
     const mustValidateNow =
       isDeletionEvent(event) ||
       this.options.validateEventsType === 'IMMEDIATELY' ||
-      (this.options.validateEventsType === 'LAZY' && event.kind === RELAY_LIST_KIND);
+      (lazy && replacesOnArrival(event.kind)) ||
+      (lazy && (await reusesVerifiedId(this.storage, event.id)));
     if (mustValidateNow && !(await this.validator.validate(event))) {
       return false;
     }

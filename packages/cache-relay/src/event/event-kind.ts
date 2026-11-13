@@ -40,3 +40,12 @@ export function isDeletionKind(kind: number): boolean {
 export function isCoordinateAddressableKind(kind: number): boolean {
   return isReplaceableKind(kind) || isAddressableKind(kind);
 }
+
+/**
+ * Whether storing this kind deletes the version stored before it. A later
+ * failed check cannot bring that version back, so LAZY validation verifies
+ * these up front.
+ */
+export function replacesOnArrival(kind: number): boolean {
+  return isCoordinateAddressableKind(kind);
+}

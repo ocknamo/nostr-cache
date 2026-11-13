@@ -9,6 +9,7 @@ import { queryEvents } from './dexie/query.js';
 import { EVENTS_SCHEMA_V1, type NostrEventTable, rowToEvent } from './dexie/schema.js';
 import { getIndexedTags } from './dexie/tag-index.js';
 import { type CachePriority, createPriorityMatcher } from './priority.js';
+import { sameEvent, sameSignedContent } from './same-event.js';
 import type {
   CacheStrategy,
   EventAddress,
@@ -38,21 +39,27 @@ export class DexieStorage extends Dexie implements StorageAdapter {
   async saveEvent(event: NostrEvent, options?: SaveEventOptions): Promise<boolean> {
     try {
       const now = Date.now();
-      // 既存行の取得と put を単一の rw トランザクションで行い、検証状態の
-      // 1 → 0 ダウングレードを防ぐ。同じ id は同じ内容ハッシュなので、一度
-      // 検証済みになったイベントは再保存（上流エコー・再 ingest 等）でも
-      // 検証済みのままにする
+      // 既存行の取得と put を単一の rw トランザクションで行う。検証済みの行は、
+      // 未検証の同じ id の別内容（偽造）で上書きしない。同じ内容の再保存では
+      // 検証済みの行（署名を含む）を保ち、メタデータだけ更新する
+      let saved = true;
       await this.transaction('rw', this.events, async () => {
         const existing = await this.events.get(event.id);
+        const keepVerified = existing?.validated === 1 && !options?.validated;
+        if (keepVerified && !sameSignedContent(existing, event)) {
+          saved = false;
+          return;
+        }
+        const source = keepVerified ? existing : event;
         await this.events.put({
-          id: event.id,
-          pubkey: event.pubkey,
-          created_at: event.created_at,
-          kind: event.kind,
-          tags: event.tags,
-          indexed_tags: getIndexedTags(event.tags),
-          content: event.content,
-          sig: event.sig,
+          id: source.id,
+          pubkey: source.pubkey,
+          created_at: source.created_at,
+          kind: source.kind,
+          tags: source.tags,
+          indexed_tags: getIndexedTags(source.tags),
+          content: source.content,
+          sig: source.sig,
           // 挿入も1回のアクセスとみなす（access_count: 1）。これにより LFU で
           // 挿入直後のイベントが「未読イベントより不利」にならない（既読 >=2 の
           // イベントよりは退避されやすい、標準的な LFU の挙動は残る）。
@@ -61,10 +68,10 @@ export class DexieStorage extends Dexie implements StorageAdapter {
           last_accessed_at: now,
           access_count: 1,
           cached_at: now,
-          validated: options?.validated || existing?.validated === 1 ? 1 : 0,
+          validated: options?.validated || keepVerified ? 1 : 0,
         });
       });
-      return true;
+      return saved;
     } catch (error) {
       logger.error(
         `Failed to save event: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -107,16 +114,18 @@ export class DexieStorage extends Dexie implements StorageAdapter {
     }
   }
 
-  async markValidated(ids: string[]): Promise<void> {
-    if (ids.length === 0) {
+  async markValidated(validated: NostrEvent[]): Promise<void> {
+    if (validated.length === 0) {
       return;
     }
+    const byId = new Map(validated.map((event) => [event.id, event]));
     try {
       await this.events
         .where('id')
-        .anyOf(ids)
-        .modify((event) => {
-          event.validated = 1;
+        .anyOf([...byId.keys()])
+        .modify((row) => {
+          const checked = byId.get(row.id);
+          if (checked && sameEvent(row, checked)) row.validated = 1;
         });
     } catch (error) {
       logger.error(

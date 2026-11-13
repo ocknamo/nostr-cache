@@ -9,7 +9,7 @@
  * are removed from storage; events that pass are marked validated.
  */
 
-import { logger } from '@nostr-cache/shared';
+import { type NostrEvent, logger } from '@nostr-cache/shared';
 import type { StorageAdapter } from '../storage/storage-adapter.js';
 import { EventValidator } from './event-validator.js';
 
@@ -121,20 +121,20 @@ export class LazyValidator {
    */
   async processBatch(): Promise<LazyValidationPassResult> {
     const batch = await this.storage.getUnvalidatedEvents(this.batchSize);
-    const validIds: string[] = [];
+    const valid: NostrEvent[] = [];
     let removed = 0;
 
     for (const event of batch) {
-      let valid = false;
+      let ok = false;
       try {
-        valid = await this.validator.validate(event);
+        ok = await this.validator.validate(event);
       } catch (error) {
         logger.error(`Lazy validation threw for event ${event.id}:`, error);
-        valid = false;
+        ok = false;
       }
 
-      if (valid) {
-        validIds.push(event.id);
+      if (ok) {
+        valid.push(event);
       } else {
         try {
           const deleted = await this.storage.deleteEvent(event.id);
@@ -148,9 +148,11 @@ export class LazyValidator {
       }
     }
 
-    if (validIds.length > 0) {
+    if (valid.length > 0) {
       try {
-        await this.storage.markValidated(validIds);
+        // The events themselves, not their ids: a row replaced while this pass
+        // ran is not the event that was checked.
+        await this.storage.markValidated(valid);
       } catch (error) {
         // 失敗しても pending のまま残るだけで、次のパスで再検証される
         logger.error('Failed to mark events validated:', error);
@@ -158,6 +160,6 @@ export class LazyValidator {
       }
     }
 
-    return { validated: validIds.length, removed };
+    return { validated: valid.length, removed };
   }
 }
